@@ -1,0 +1,809 @@
+{
+  "id": "de180d83-68c5-4842-83bf-d9318bca9271",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.audit_log": {
+      "name": "audit_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_name": {
+          "name": "user_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "timestamp": {
+          "name": "timestamp",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "details": {
+          "name": "details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.diagnoses": {
+      "name": "diagnoses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "diagnoses_patient_id_patients_id_fk": {
+          "name": "diagnoses_patient_id_patients_id_fk",
+          "tableFrom": "diagnoses",
+          "tableTo": "patients",
+          "columnsFrom": [
+            "patient_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.identity_matches": {
+      "name": "identity_matches",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "intakeq_client_id_encrypted": {
+          "name": "intakeq_client_id_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "referral_name": {
+          "name": "referral_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "referral_dob": {
+          "name": "referral_dob",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "candidate_tebra_patient_id_encrypted": {
+          "name": "candidate_tebra_patient_id_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "candidate_name": {
+          "name": "candidate_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "candidate_dob": {
+          "name": "candidate_dob",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "confidence": {
+          "name": "confidence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "match_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.medication_episodes": {
+      "name": "medication_episodes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "medication_class": {
+          "name": "medication_class",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dose": {
+          "name": "dose",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "start_date": {
+          "name": "start_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stop_date": {
+          "name": "stop_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "medication_episodes_patient_id_patients_id_fk": {
+          "name": "medication_episodes_patient_id_patients_id_fk",
+          "tableFrom": "medication_episodes",
+          "tableTo": "patients",
+          "columnsFrom": [
+            "patient_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.patient_trial_screenings": {
+      "name": "patient_trial_screenings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "trial_id": {
+          "name": "trial_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "overall_status": {
+          "name": "overall_status",
+          "type": "verdict",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "patient_trial_screenings_patient_id_patients_id_fk": {
+          "name": "patient_trial_screenings_patient_id_patients_id_fk",
+          "tableFrom": "patient_trial_screenings",
+          "tableTo": "patients",
+          "columnsFrom": [
+            "patient_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "patient_trial_screenings_trial_id_trials_id_fk": {
+          "name": "patient_trial_screenings_trial_id_trials_id_fk",
+          "tableFrom": "patient_trial_screenings",
+          "tableTo": "trials",
+          "columnsFrom": [
+            "trial_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.patients": {
+      "name": "patients",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "date_added": {
+          "name": "date_added",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "intakeq_client_id_encrypted": {
+          "name": "intakeq_client_id_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tebra_patient_id_encrypted": {
+          "name": "tebra_patient_id_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name_intakeq": {
+          "name": "name_intakeq",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name_tebra": {
+          "name": "name_tebra",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dob_intakeq": {
+          "name": "dob_intakeq",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dob_tebra": {
+          "name": "dob_tebra",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city_intakeq": {
+          "name": "city_intakeq",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city_tebra": {
+          "name": "city_tebra",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "zip_intakeq": {
+          "name": "zip_intakeq",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "zip_tebra": {
+          "name": "zip_tebra",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone_intakeq": {
+          "name": "phone_intakeq",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone_tebra": {
+          "name": "phone_tebra",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_intakeq": {
+          "name": "email_intakeq",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_tebra": {
+          "name": "email_tebra",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_provider": {
+          "name": "current_provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rating_scales": {
+          "name": "rating_scales",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'[]'::jsonb"
+        },
+        "referral_type": {
+          "name": "referral_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "availability": {
+          "name": "availability",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_appt_date": {
+          "name": "last_appt_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_appt_date": {
+          "name": "next_appt_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "comm_consent_signed": {
+          "name": "comm_consent_signed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "comm_consent_pref": {
+          "name": "comm_consent_pref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "template_doc_url": {
+          "name": "template_doc_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prescreening_sent_date": {
+          "name": "prescreening_sent_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tebra_chart_url": {
+          "name": "tebra_chart_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_communication": {
+          "name": "last_communication",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "form_notes": {
+          "name": "form_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reviewer_notes": {
+          "name": "reviewer_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "clinician_reviewer_notes": {
+          "name": "clinician_reviewer_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pi_recommendation": {
+          "name": "pi_recommendation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "old_notes": {
+          "name": "old_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "old_recs": {
+          "name": "old_recs",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outside_meds_confirmation": {
+          "name": "outside_meds_confirmation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chart_data_as_of": {
+          "name": "chart_data_as_of",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.screening_criteria_results": {
+      "name": "screening_criteria_results",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "screening_id": {
+          "name": "screening_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criterion_key": {
+          "name": "criterion_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criterion_text": {
+          "name": "criterion_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verdict": {
+          "name": "verdict",
+          "type": "verdict",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evidence_quote": {
+          "name": "evidence_quote",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "evidence_source_doc": {
+          "name": "evidence_source_doc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "evidence_source_date": {
+          "name": "evidence_source_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "screening_criteria_results_screening_id_patient_trial_screenings_id_fk": {
+          "name": "screening_criteria_results_screening_id_patient_trial_screenings_id_fk",
+          "tableFrom": "screening_criteria_results",
+          "tableTo": "patient_trial_screenings",
+          "columnsFrom": [
+            "screening_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.trials": {
+      "name": "trials",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nct_number": {
+          "name": "nct_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "condition": {
+          "name": "condition",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "site": {
+          "name": "site",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "study_drug": {
+          "name": "study_drug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "age_min": {
+          "name": "age_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "age_max": {
+          "name": "age_max",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "diagnosis_codes": {
+          "name": "diagnosis_codes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rating_scales": {
+          "name": "rating_scales",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "medication_classes": {
+          "name": "medication_classes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.match_status": {
+      "name": "match_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "confirmed",
+        "rejected"
+      ]
+    },
+    "public.role": {
+      "name": "role",
+      "schema": "public",
+      "values": [
+        "crc",
+        "pi",
+        "admin"
+      ]
+    },
+    "public.verdict": {
+      "name": "verdict",
+      "schema": "public",
+      "values": [
+        "green",
+        "yellow",
+        "red"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

@@ -1,0 +1,202 @@
+<title>Build Progress</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+  :root {
+    --bg: #f7f8f6;
+    --surface: #ffffff;
+    --surface-2: #f0f2ee;
+    --border: #dde1da;
+    --ink: #1b241f;
+    --ink-dim: #5b655d;
+    --primary: #1f6f5c;
+    --primary-dim: #e4efec;
+    --amber: #b4780a;
+    --amber-dim: #fbf1de;
+    --gray: #8a938a;
+    --gray-dim: #eceee9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121613;
+      --surface: #191f1b;
+      --surface-2: #1f261f;
+      --border: #2b332c;
+      --ink: #eef1ec;
+      --ink-dim: #a2ab9f;
+      --primary: #4fbfa0;
+      --primary-dim: #1c332c;
+      --amber: #e0a640;
+      --amber-dim: #35301d;
+      --gray: #8a938a;
+      --gray-dim: #262c25;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121613;
+    --surface: #191f1b;
+    --surface-2: #1f261f;
+    --border: #2b332c;
+    --ink: #eef1ec;
+    --ink-dim: #a2ab9f;
+    --primary: #4fbfa0;
+    --primary-dim: #1c332c;
+    --amber: #e0a640;
+    --amber-dim: #35301d;
+    --gray: #8a938a;
+    --gray-dim: #262c25;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: Manrope, system-ui, sans-serif;
+    padding: 28px 16px 48px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  .masthead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  h1 { font-size: 1.5rem; font-weight: 800; margin: 0; letter-spacing: -0.01em; }
+  .updated { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: var(--ink-dim); }
+  .subtitle { color: var(--ink-dim); font-size: 0.92rem; margin: 4px 0 24px; }
+
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .stat .n { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; font-size: 1.6rem; font-weight: 600; color: var(--primary); }
+  .stat .l { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-dim); margin-top: 2px; }
+
+  .overall-bar { height: 6px; border-radius: 99px; background: var(--gray-dim); overflow: hidden; margin-bottom: 28px; }
+  .overall-bar > div { height: 100%; background: var(--primary); border-radius: 99px; }
+
+  .phase {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 14px;
+  }
+  .phase-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .phase-name { font-weight: 700; font-size: 1rem; }
+  .phase-meta { font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 99px; }
+  .pill.merged { background: var(--primary-dim); color: var(--primary); }
+  .pill.progress { background: var(--amber-dim); color: var(--amber); }
+  .pill.blocked { background: var(--gray-dim); color: var(--gray); }
+
+  .bar { height: 5px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 10px 0 12px; }
+  .bar > div { height: 100%; border-radius: 99px; background: var(--primary); }
+  .phase.blocked .bar > div { background: var(--gray); }
+
+  .tasks { display: flex; flex-wrap: wrap; gap: 5px; }
+  .task {
+    width: 22px; height: 22px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  .task.done { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .task.wip { background: var(--amber-dim); color: var(--amber); border-color: var(--amber); }
+  .task.todo { background: var(--surface); color: var(--gray); }
+
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 28px; font-size: 0.78rem; color: var(--ink-dim); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+  .note { font-size: 0.82rem; color: var(--ink-dim); margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); line-height: 1.5; }
+</style>
+
+<div class="wrap">
+  <div class="masthead">
+    <h1>Clinsync Build Progress</h1>
+    <span class="updated" id="clock"></span>
+  </div>
+  <p class="subtitle">Live snapshot of every phase's task checklist, refreshed as work lands.</p>
+
+  <div class="summary">
+    <div class="stat"><div class="n" id="s-done">—</div><div class="l">Tasks done</div></div>
+    <div class="stat"><div class="n" id="s-total">—</div><div class="l">Total tasks</div></div>
+    <div class="stat"><div class="n" id="s-phases">—</div><div class="l">Phases active</div></div>
+    <div class="stat"><div class="n" id="s-merged">—</div><div class="l">Merged to master</div></div>
+  </div>
+
+  <div class="overall-bar"><div id="overall-fill" style="width:0%"></div></div>
+
+  <div id="phases"></div>
+
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--primary)"></span> Done &amp; reviewed</span>
+    <span><span class="swatch" style="background:var(--amber)"></span> In review / fix round</span>
+    <span><span class="swatch" style="background:var(--gray-dim);border:1px solid var(--border)"></span> Not started</span>
+  </div>
+
+  <p class="note">
+    Each square is one task from that phase's implementation plan. A phase runs in its own isolated git worktree with a fresh implementer + reviewer per task; nothing here is pushed to a remote until you say so. Phase 1 and the Patient Intake Portal are merged into <code>master</code> (what's live on your dev server); Phases 2, 3, and 5 are still in their own branches. Phases 4 and 6 are queued behind the others by design.
+  </p>
+</div>
+
+<script>
+(function () {
+  const PHASES = [
+    { name: 'Phase 1 — Core Workbook', total: 11, done: 11, status: 'merged' },
+    { name: 'Phase 2 — Scheduling', total: 8, done: 5, status: 'progress' },
+    { name: 'Phase 3 — Billing', total: 13, done: 4, status: 'progress' },
+    { name: 'Patient Intake Portal', total: 6, done: 6, status: 'merged' },
+    { name: 'Phase 5 — Engagement', total: 9, done: 3, status: 'progress' },
+    { name: 'Phase 4 — Reports & Documents', total: 14, done: 0, status: 'blocked' },
+    { name: 'Phase 6 — Practice Settings', total: 6, done: 0, status: 'blocked' },
+  ];
+
+  const el = document.getElementById('phases');
+  let doneSum = 0, totalSum = 0, activeCount = 0, mergedCount = 0;
+
+  PHASES.forEach((p) => {
+    doneSum += p.done; totalSum += p.total;
+    if (p.status !== 'blocked') activeCount++;
+    if (p.status === 'merged') mergedCount++;
+
+    const pct = Math.round((p.done / p.total) * 100);
+    const pillClass = p.status === 'merged' ? 'merged' : p.status === 'progress' ? 'progress' : 'blocked';
+    const pillLabel = p.status === 'merged' ? 'Merged' : p.status === 'progress' ? 'In progress' : 'Queued';
+
+    let squares = '';
+    for (let i = 1; i <= p.total; i++) {
+      const cls = i <= p.done ? 'done' : (i === p.done + 1 && p.status === 'progress' ? 'wip' : 'todo');
+      squares += `<div class="task ${cls}">${i}</div>`;
+    }
+
+    const card = document.createElement('div');
+    card.className = 'phase' + (p.status === 'blocked' ? ' blocked' : '');
+    card.innerHTML = `
+      <div class="phase-head">
+        <span class="phase-name">${p.name}</span>
+        <span class="pill ${pillClass}">${pillLabel}</span>
+      </div>
+      <div class="phase-meta">${p.done} of ${p.total} tasks</div>
+      <div class="bar"><div style="width:${pct}%"></div></div>
+      <div class="tasks">${squares}</div>
+    `;
+    el.appendChild(card);
+  });
+
+  document.getElementById('s-done').textContent = doneSum;
+  document.getElementById('s-total').textContent = totalSum;
+  document.getElementById('s-phases').textContent = activeCount;
+  document.getElementById('s-merged').textContent = mergedCount;
+  document.getElementById('overall-fill').style.width = Math.round((doneSum / totalSum) * 100) + '%';
+
+  document.getElementById('clock').textContent = 'Updated ' + new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+})();
+</script>

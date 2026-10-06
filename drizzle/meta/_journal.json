@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789579634219,
+      "tag": "0000_white_felicia_hardy",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789655525211,
+      "tag": "0001_flowery_skullbuster",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789723038472,
+      "tag": "0002_mysterious_aaron_stack",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789724013074,
+      "tag": "0003_funny_kronos",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789662580468,
+      "tag": "0004_even_war_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790708558118,
+      "tag": "0005_tidy_manta",
+      "breakpoints": true
+    }
+  ]
+}

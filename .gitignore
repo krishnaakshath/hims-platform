@@ -1,0 +1,62 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# local, per-developer Claude Code settings/runtime state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# subagent-driven-development isolated worktrees
+.worktrees/
+
+# Real IntakeQ/Tebra reference screenshots (contain real patient PHI --
+# design reference only, must never be committed or embedded anywhere)
+Clinsync-20260917T042827Z-1-001/
+Clinsync-20260917T042827Z-1-001 - Copy/
+
+.vercel
+.env*
+
+# local subagent-driven-development reports
+.superpowers/
+
+# keep the committed template
+!.env.example

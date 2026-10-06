@@ -1,0 +1,549 @@
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { NextRequest } from 'next/server'
+import { getDb } from '@/db/client'
+import { reviews } from '@/db/schema'
+import type { Role } from '@/lib/auth'
+import { ALL_ROLES } from '@/lib/role-policy'
+import {
+  CHARGES_ROLES,
+  CLINICAL_ROLES,
+  DOCUMENT_READ_ROLES,
+  IDENTITY_VERIFY_ROLES,
+  INSURANCE_CARD_READ_ROLES,
+  PAYER_LOOKUP_ROLES,
+  SCHEDULING_ROLES,
+  TRIAL_CRITERIA_EDIT_ROLES,
+  hasSearchScope,
+} from '@/lib/role-policy'
+import { gateIt } from '../pages/page-gates-harness'
+
+// Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
+// + importActual pattern from tests/api/patients.test.ts:27-29, except the
+// mocked role is driven by this variable instead of a fixed literal so a
+// single describe block can exercise every role. The `requireSession` mock
+// closure below only reads `sessionRole` when the route actually calls it
+// (i.e. inside a test), by which point this `let` has long since initialized
+// -- vi.mock's factory itself runs at module-link time, but the arrow
+// function it returns isn't invoked until later.
+let sessionRole: Role = 'crc'
+
+vi.mock('@/lib/auth', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
+  return { ...actual, requireSession: vi.fn(async () => ({ role: sessionRole, name: `Test ${sessionRole}`, userId: null })) }
+})
+
+// No audit rows from this harness: audit_log is an append-only compliance
+// record on the shared DB, and these are synthetic probe calls.
+vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+
+export { ALL_ROLES }
+// Named for the allowlist it's computed against, not just "denied" -- Tasks
+// 2 and 4 gate different routes against different allowlists (e.g.
+// admin-only billing routes, or admin/crc/frontdesk routes), and a
+// generically-named constant here is exactly the kind of thing a future
+// author copies without checking, silently testing the wrong roles as
+// denied.
+const deniedFor = (allowed: Role[]): Role[] => ALL_ROLES.filter((r) => !allowed.includes(r))
+
+afterEach(() => {
+  sessionRole = 'crc'
+})
+
+import { GET as getWorkbookFull } from '@/app/api/workbook/full/route'
+import { GET as getWorkbookExport } from '@/app/api/workbook/export/route'
+import { POST as postMockPayment } from '@/app/api/mock-payments/route'
+import { GET as listBroadcasts, POST as postBroadcast } from '@/app/api/broadcasts/route'
+import { GET as getBroadcast } from '@/app/api/broadcasts/[id]/route'
+import { GET as listBroadcastRecipients } from '@/app/api/broadcasts/recipients/route'
+import { GET as listReviews, POST as postReview } from '@/app/api/reviews/route'
+import { GET as getReview, PUT as putReview } from '@/app/api/reviews/[id]/route'
+
+describe('GET /api/workbook/full', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await getWorkbookFull()
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  it('returns the xlsx for admin and crc', async () => {
+    for (const role of ['admin', 'crc'] as const) {
+      sessionRole = role
+      const res = await getWorkbookFull()
+      expect(res.status, `role ${role}`).toBe(200)
+    }
+  })
+
+  // Review Focus #2 — the gate must precede the export, not follow it
+  it('does not build the workbook for a denied role', async () => {
+    const excelExport = await import('@/lib/excel-export')
+    const buildWorkbookSpy = vi.spyOn(excelExport, 'buildFullWorkbookXlsx')
+    sessionRole = 'frontdesk'
+    const res = await getWorkbookFull()
+    expect(res.status).toBe(403)
+    expect(buildWorkbookSpy).not.toHaveBeenCalled()
+    buildWorkbookSpy.mockRestore()
+  })
+})
+
+describe('GET /api/workbook/export', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await getWorkbookExport()
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  // Building the real xlsx for every patient across every trial is a
+  // genuinely heavy multi-query operation, and the shared dev DB's data
+  // volume only grows over time -- the global 15000ms default (already once
+  // bumped from vitest's 5000ms, see vitest.config.ts) has been outgrown by
+  // this specific test again. A generous override here, not a second global
+  // bump, since most tests are nowhere near this heavy.
+  it('returns the xlsx for admin and crc', { timeout: 60000 }, async () => {
+    for (const role of ['admin', 'crc'] as const) {
+      sessionRole = role
+      const res = await getWorkbookExport()
+      expect(res.status, `role ${role}`).toBe(200)
+    }
+  })
+
+  it('does not build the workbook for a denied role', async () => {
+    const excelExport = await import('@/lib/excel-export')
+    const buildWorkbookSpy = vi.spyOn(excelExport, 'buildWorkbookXlsx')
+    sessionRole = 'pi'
+    const res = await getWorkbookExport()
+    expect(res.status).toBe(403)
+    expect(buildWorkbookSpy).not.toHaveBeenCalled()
+    buildWorkbookSpy.mockRestore()
+  })
+})
+
+describe('POST /api/mock-payments', () => {
+  // /billing/pay's own page gate is admin/crc/billing, matching
+  // VirtualCardPaymentForm's only POST target -- every other role 403s.
+  it('403s every role outside admin, crc, billing', async () => {
+    for (const role of deniedFor(['admin', 'crc', 'billing'])) {
+      sessionRole = role
+      const res = await postMockPayment(
+        new NextRequest('http://localhost/api/mock-payments', { method: 'POST', body: JSON.stringify({}) })
+      )
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  // An intentionally invalid (empty) body so an allowed role's response
+  // proves it: the gate must let admin/crc/billing through to the route's
+  // own Zod validation, which then 400s on the missing fields -- never
+  // recording a payment. Anything other than 403 here shows the gate didn't
+  // block them; the 400 itself is the route's own concern, not this test's.
+  it('does not 403 admin, crc, or billing', async () => {
+    for (const role of ['admin', 'crc', 'billing'] as const) {
+      sessionRole = role
+      const res = await postMockPayment(
+        new NextRequest('http://localhost/api/mock-payments', { method: 'POST', body: JSON.stringify({}) })
+      )
+      expect(res.status, `role ${role}`).not.toBe(403)
+    }
+  })
+})
+
+// LeftNav.tsx:62 — { href: '/broadcasts', roles: ['admin', 'crc'] }
+describe('GET /api/broadcasts', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await listBroadcasts()
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  it('returns 200 for admin', async () => {
+    sessionRole = 'admin'
+    const res = await listBroadcasts()
+    expect(res.status).toBe(200)
+  })
+})
+
+// LeftNav.tsx:62 — { href: '/broadcasts', roles: ['admin', 'crc'] }. Nothing
+// here sends a real broadcast: an invalid (empty) body proves admin gets past
+// the gate to the route's own Zod validation, which then 400s (route.ts:40) --
+// never reaching the simulated-delivery insert.
+describe('POST /api/broadcasts', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await postBroadcast(
+        new NextRequest('http://localhost/api/broadcasts', { method: 'POST', body: JSON.stringify({}) })
+      )
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  it('does not 403 admin', async () => {
+    sessionRole = 'admin'
+    const res = await postBroadcast(
+      new NextRequest('http://localhost/api/broadcasts', { method: 'POST', body: JSON.stringify({}) })
+    )
+    expect(res.status).toBe(400)
+  })
+})
+
+// LeftNav.tsx:62 — { href: '/broadcasts', roles: ['admin', 'crc'] }
+describe('GET /api/broadcasts/[id]', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await getBroadcast(
+        new NextRequest('http://localhost/api/broadcasts/999999'),
+        { params: Promise.resolve({ id: '999999' }) }
+      )
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  it('reaches the handler for admin (404 -- id 999999 does not exist)', async () => {
+    sessionRole = 'admin'
+    const res = await getBroadcast(
+      new NextRequest('http://localhost/api/broadcasts/999999'),
+      { params: Promise.resolve({ id: '999999' }) }
+    )
+    expect(res.status).toBe(404)
+  })
+})
+
+// LeftNav.tsx:62 — { href: '/broadcasts', roles: ['admin', 'crc'] }
+describe('GET /api/broadcasts/recipients', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await listBroadcastRecipients(new NextRequest('http://localhost/api/broadcasts/recipients'))
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  it('returns 200 for admin', async () => {
+    sessionRole = 'admin'
+    const res = await listBroadcastRecipients(new NextRequest('http://localhost/api/broadcasts/recipients'))
+    expect(res.status).toBe(200)
+  })
+})
+
+// LeftNav.tsx:63 — { href: '/experience-surveys', roles: ['admin', 'crc'] }
+describe('GET /api/reviews', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await listReviews(new NextRequest('http://localhost/api/reviews'))
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  it('returns 200 for admin', async () => {
+    sessionRole = 'admin'
+    const res = await listReviews(new NextRequest('http://localhost/api/reviews'))
+    expect(res.status).toBe(200)
+  })
+})
+
+// LeftNav.tsx:63 — { href: '/experience-surveys', roles: ['admin', 'crc'] }.
+// An invalid (empty) body proves admin gets past the gate to the route's own
+// Zod validation, which then 400s (route.ts:38) -- never recording a survey
+// send.
+describe('POST /api/reviews', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await postReview(
+        new NextRequest('http://localhost/api/reviews', { method: 'POST', body: JSON.stringify({}) })
+      )
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  it('does not 403 admin', async () => {
+    sessionRole = 'admin'
+    const res = await postReview(
+      new NextRequest('http://localhost/api/reviews', { method: 'POST', body: JSON.stringify({}) })
+    )
+    expect(res.status).toBe(400)
+  })
+})
+
+// LeftNav.tsx:63 — { href: '/experience-surveys', roles: ['admin', 'crc'] }
+describe('GET /api/reviews/[id]', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await getReview(
+        new NextRequest('http://localhost/api/reviews/999999'),
+        { params: Promise.resolve({ id: '999999' }) }
+      )
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  it('returns 200 for admin', async () => {
+    // 999999 is used as a definitely-nonexistent sentinel id elsewhere in
+    // this suite (and in tests/lib/queries/reviews.test.ts's own "returns
+    // null for a non-existent id") -- a 200 needs a review that actually
+    // exists, which the seeded data guarantees at least a few of (see
+    // tests/lib/queries/reviews.test.ts's "returns the seeded survey
+    // records", length >= 3).
+    const [row] = await getDb().select({ id: reviews.id }).from(reviews).limit(1)
+    sessionRole = 'admin'
+    const res = await getReview(
+      new NextRequest(`http://localhost/api/reviews/${row.id}`),
+      { params: Promise.resolve({ id: String(row.id) }) }
+    )
+    expect(res.status).toBe(200)
+  })
+})
+
+// LeftNav.tsx:63 — { href: '/experience-surveys', roles: ['admin', 'crc'] }.
+// This is staff recording a survey response on behalf of a patient, not a
+// patient-facing endpoint (spec §7.2) -- nothing here records a real survey
+// response: an invalid (empty) body proves admin gets past the gate to the
+// route's own Zod validation, which then 400s (route.ts:35).
+describe('PUT /api/reviews/[id]', () => {
+  it('403s pi and frontdesk', async () => {
+    for (const role of deniedFor(['admin', 'crc'])) {
+      sessionRole = role
+      const res = await putReview(
+        new NextRequest('http://localhost/api/reviews/999999', { method: 'PUT', body: JSON.stringify({}) }),
+        { params: Promise.resolve({ id: '999999' }) }
+      )
+      expect(res.status, `role ${role}`).toBe(403)
+    }
+  })
+
+  it('does not 403 admin', async () => {
+    sessionRole = 'admin'
+    const res = await putReview(
+      new NextRequest('http://localhost/api/reviews/999999', { method: 'PUT', body: JSON.stringify({}) }),
+      { params: Promise.resolve({ id: '999999' }) }
+    )
+    expect(res.status).toBe(400)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POLICY.md table: every role-gated API route x all 7 roles.
+//
+// Allowed-role calls use ids/bodies that cannot match or write anything
+// (2147483000 / RD-ZZZZ / probe-no-trial, `{}` bodies that fail validation),
+// so an allowed role proves only that the gate let it through (any status
+// but 403). Rows tagged `gap: 'Tn'` are known-open until Task n and run as
+// `it.fails`; RBAC_SHOW_GAPS=1 runs them as normal tests (the red list).
+// ---------------------------------------------------------------------------
+
+import { GET as listPatients } from '@/app/api/patients/route'
+import { GET as getPatient } from '@/app/api/patients/[anonId]/route'
+import { GET as getCcda } from '@/app/api/patients/[anonId]/ccda/route'
+import { GET as getFhirAllergyIntolerance } from '@/app/api/patients/[anonId]/fhir/AllergyIntolerance/route'
+import { GET as getFhirBundle } from '@/app/api/patients/[anonId]/fhir/Bundle/route'
+import { GET as getFhirCondition } from '@/app/api/patients/[anonId]/fhir/Condition/route'
+import { GET as getFhirMedicationDispense } from '@/app/api/patients/[anonId]/fhir/MedicationDispense/route'
+import { GET as getFhirMedicationRequest } from '@/app/api/patients/[anonId]/fhir/MedicationRequest/route'
+import { GET as getFhirObservation } from '@/app/api/patients/[anonId]/fhir/Observation/route'
+import { GET as getFhirPatient } from '@/app/api/patients/[anonId]/fhir/Patient/route'
+import { PUT as putIdentity } from '@/app/api/patients/[anonId]/identity/route'
+import { GET as getPrimaryPayer } from '@/app/api/patients/[anonId]/primary-payer/route'
+import { GET as getInsuranceCardSide } from '@/app/api/patients/[anonId]/insurance-card/[side]/route'
+import { POST as resolveDiscrepancy } from '@/app/api/discrepancies/[id]/resolve/route'
+import { GET as listAdmissionMedications } from '@/app/api/inpatient/admissions/[id]/medications/route'
+import { GET as downloadDocument } from '@/app/api/documents/[id]/download/route'
+import { GET as listTrials } from '@/app/api/trials/route'
+import { PUT as putTrialCriteria } from '@/app/api/trials/[trialId]/criteria/route'
+import { GET as listFormSubmissions, POST as postFormSubmission } from '@/app/api/form-submissions/route'
+import { GET as getFormSubmission, PUT as putFormSubmission } from '@/app/api/form-submissions/[id]/route'
+import { GET as listFormTemplates, POST as postFormTemplate } from '@/app/api/form-templates/route'
+import { GET as getFormTemplate, PUT as putFormTemplate } from '@/app/api/form-templates/[id]/route'
+import { GET as listAppointments, POST as postAppointment } from '@/app/api/appointments/route'
+import { PUT as putAppointment } from '@/app/api/appointments/[id]/route'
+import { GET as listCharges } from '@/app/api/charges/route'
+import { GET as getCharge } from '@/app/api/charges/[id]/route'
+import { GET as listStaff } from '@/app/api/staff/route'
+import { GET as getStaffMember } from '@/app/api/staff/[id]/route'
+import { GET as search } from '@/app/api/search/route'
+
+export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
+
+const BOGUS_ID = '2147483000'
+const BOGUS_PATIENT = 'RD-ZZZZ'
+const url = (path: string) => `http://localhost${path}`
+const get = (path: string) => new NextRequest(url(path))
+const send = (method: 'POST' | 'PUT', path: string, body: unknown = {}) =>
+  new NextRequest(url(path), { method, body: JSON.stringify(body) })
+const ctx = <T extends Record<string, string>>(p: T) => ({ params: Promise.resolve(p) })
+
+// A handler that THROWS after the gate (e.g. drizzle rejecting an empty
+// `.set({})` for an allowed role's `{}` body) still proves the gate let that
+// role through; it is reported as a 500, which a denied role can never pass.
+async function settle(fn: () => Promise<Response>): Promise<Response> {
+  try { return await fn() } catch { return new Response(null, { status: 500 }) }
+}
+
+const fhir = (resource: string, handler: typeof getFhirPatient): ApiGateCase => ({
+  name: `GET /api/patients/[anonId]/fhir/${resource}`,
+  call: () => handler(get(`/api/patients/${BOGUS_PATIENT}/fhir/${resource}`), ctx({ anonId: BOGUS_PATIENT })),
+  allowed: [...CLINICAL_ROLES],
+})
+
+export const API_GATES: ApiGateCase[] = [
+  // POLICY.md: patient JSON APIs -- CLINICAL_ROLES (ruling 1: frontdesk denied)
+  { name: 'GET /api/patients', call: () => listPatients(get('/api/patients')), allowed: [...CLINICAL_ROLES] },
+  {
+    name: 'GET /api/patients/[anonId]',
+    call: () => getPatient(get(`/api/patients/${BOGUS_PATIENT}`), ctx({ anonId: BOGUS_PATIENT })),
+    allowed: [...CLINICAL_ROLES],
+  },
+  // POLICY.md: FHIR/C-CDA -- CLINICAL_ROLES (no frontdesk)
+  {
+    name: 'GET /api/patients/[anonId]/ccda',
+    call: () => getCcda(get(`/api/patients/${BOGUS_PATIENT}/ccda`), ctx({ anonId: BOGUS_PATIENT })),
+    allowed: [...CLINICAL_ROLES],
+    },
+  fhir('AllergyIntolerance', getFhirAllergyIntolerance),
+  fhir('Bundle', getFhirBundle),
+  fhir('Condition', getFhirCondition),
+  fhir('MedicationDispense', getFhirMedicationDispense),
+  fhir('MedicationRequest', getFhirMedicationRequest),
+  fhir('Observation', getFhirObservation),
+  fhir('Patient', getFhirPatient),
+  // POLICY.md: Identity PUT -- admin, crc, frontdesk
+  {
+    name: 'PUT /api/patients/[anonId]/identity',
+    call: () => putIdentity(send('PUT', `/api/patients/${BOGUS_PATIENT}/identity`), ctx({ anonId: BOGUS_PATIENT })),
+    allowed: [...IDENTITY_VERIFY_ROLES],
+    },
+  // Controller ruling (Task 3, option b): billing's eligibility modal reads
+  // only the primary payer id -- admin, crc, billing.
+  {
+    name: 'GET /api/patients/[anonId]/primary-payer',
+    call: () => getPrimaryPayer(get(`/api/patients/${BOGUS_PATIENT}/primary-payer`), ctx({ anonId: BOGUS_PATIENT })),
+    allowed: [...PAYER_LOOKUP_ROLES],
+  },
+  // POLICY.md: insurance-card images -- admin, crc, pi, frontdesk, billing
+  {
+    name: 'GET /api/patients/[anonId]/insurance-card/[side]',
+    call: () => getInsuranceCardSide(get(`/api/patients/${BOGUS_PATIENT}/insurance-card/front`), ctx({ anonId: BOGUS_PATIENT, side: 'front' })),
+    allowed: [...INSURANCE_CARD_READ_ROLES],
+    },
+  {
+    name: 'GET /api/patients/[anonId]/insurance-card/[side] (back)',
+    call: () => getInsuranceCardSide(get(`/api/patients/${BOGUS_PATIENT}/insurance-card/back`), ctx({ anonId: BOGUS_PATIENT, side: 'back' })),
+    allowed: [...INSURANCE_CARD_READ_ROLES],
+    },
+  // POLICY.md: discrepancy resolve -- admin, crc, pi
+  {
+    name: 'POST /api/discrepancies/[id]/resolve',
+    call: () => resolveDiscrepancy(send('POST', `/api/discrepancies/${BOGUS_ID}/resolve`), ctx({ id: BOGUS_ID })),
+    allowed: [...CLINICAL_ROLES],
+    },
+  // Controller ruling 7: MAR read is clinical -- admin, crc, pi (no frontdesk)
+  {
+    name: 'GET /api/inpatient/admissions/[id]/medications',
+    call: () => listAdmissionMedications(get(`/api/inpatient/admissions/${BOGUS_ID}/medications`), ctx({ id: BOGUS_ID })),
+    allowed: [...CLINICAL_ROLES],
+    },
+  // POLICY.md: documents -- DOCUMENT_READ_ROLES, plus labs for lab-order
+  // documents only (ruling 4). The bogus id has no labOrderId, so labs is
+  // listed as allowed here only because the role gate itself admits labs;
+  // the lab-document rule is tested in documents-download.test.ts.
+  {
+    name: 'GET /api/documents/[id]/download',
+    call: () => downloadDocument(get(`/api/documents/${BOGUS_ID}/download`), ctx({ id: BOGUS_ID })),
+    allowed: [...DOCUMENT_READ_ROLES, 'labs'],
+  },
+  // POLICY.md: trials -- crc, pi, admin (ruling 6: GET /api/trials too)
+  { name: 'GET /api/trials', call: () => listTrials(get('/api/trials')), allowed: [...CLINICAL_ROLES] },
+  // POLICY.md: criteria PUT -- pi, admin only
+  {
+    name: 'PUT /api/trials/[trialId]/criteria',
+    call: () => settle(() => putTrialCriteria(send('PUT', '/api/trials/probe-no-trial/criteria'), ctx({ trialId: 'probe-no-trial' }))),
+    allowed: [...TRIAL_CRITERIA_EDIT_ROLES],
+  },
+  // POLICY.md: client forms / form-submissions -- crc, pi, admin
+  { name: 'GET /api/form-submissions', call: () => listFormSubmissions(get('/api/form-submissions')), allowed: [...CLINICAL_ROLES] },
+  { name: 'POST /api/form-submissions', call: () => postFormSubmission(send('POST', '/api/form-submissions')), allowed: [...CLINICAL_ROLES] },
+  {
+    name: 'GET /api/form-submissions/[id]',
+    call: () => getFormSubmission(get(`/api/form-submissions/${BOGUS_ID}`), ctx({ id: BOGUS_ID })),
+    allowed: [...CLINICAL_ROLES],
+  },
+  {
+    name: 'PUT /api/form-submissions/[id]',
+    call: () => putFormSubmission(send('PUT', `/api/form-submissions/${BOGUS_ID}`), ctx({ id: BOGUS_ID })),
+    allowed: [...CLINICAL_ROLES],
+  },
+  // POLICY.md: form templates API -- admin, crc, pi (match the page gate)
+  { name: 'GET /api/form-templates', call: () => listFormTemplates(), allowed: [...CLINICAL_ROLES] },
+  { name: 'POST /api/form-templates', call: () => postFormTemplate(send('POST', '/api/form-templates')), allowed: [...CLINICAL_ROLES] },
+  {
+    name: 'GET /api/form-templates/[id]',
+    call: () => getFormTemplate(get(`/api/form-templates/${BOGUS_ID}`), ctx({ id: BOGUS_ID })),
+    allowed: [...CLINICAL_ROLES],
+  },
+  {
+    name: 'PUT /api/form-templates/[id]',
+    call: () => settle(() => putFormTemplate(send('PUT', `/api/form-templates/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))),
+    allowed: [...CLINICAL_ROLES],
+  },
+  // POLICY.md: appointments + calendar -- SCHEDULING_ROLES. GET without
+  // from/to 400s for an allowed role before any query.
+  { name: 'GET /api/appointments', call: () => listAppointments(get('/api/appointments')), allowed: [...SCHEDULING_ROLES] },
+  { name: 'POST /api/appointments', call: () => postAppointment(send('POST', '/api/appointments')), allowed: [...SCHEDULING_ROLES] },
+  {
+    name: 'PUT /api/appointments/[id]',
+    call: () => putAppointment(send('PUT', `/api/appointments/${BOGUS_ID}`), ctx({ id: BOGUS_ID })),
+    allowed: [...SCHEDULING_ROLES],
+  },
+  // POLICY.md: charges -- admin, crc, billing (POST/PATCH already gated)
+  { name: 'GET /api/charges', call: () => listCharges(), allowed: [...CHARGES_ROLES] },
+  {
+    name: 'GET /api/charges/[id]',
+    call: () => getCharge(get(`/api/charges/${BOGUS_ID}`), ctx({ id: BOGUS_ID })),
+    allowed: [...CHARGES_ROLES],
+  },
+  // Controller ruling (Task 8): staff directory GETs -- CLINICAL_ROLES (frontdesk denied).
+  { name: 'GET /api/staff', call: () => listStaff(), allowed: [...CLINICAL_ROLES] },
+  {
+    name: 'GET /api/staff/[id]',
+    call: () => getStaffMember(get(`/api/staff/${BOGUS_ID}`), ctx({ id: BOGUS_ID })),
+    allowed: [...CLINICAL_ROLES],
+  },
+  // POLICY.md: global search -- only roles with a search scope
+  { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
+]
+
+// Every gap tag was removed by the task that closed it. A row re-tagged
+// later would silently run as `it.fails`; this keeps the table honest.
+it('no API_GATES row still carries a gap tag', () => {
+  expect(API_GATES.filter((r) => r.gap).map((r) => r.name)).toEqual([])
+})
+
+// A gap-tagged row's allowed half always runs as a plain `it` (a wrong 403
+// for an allowed role is visible immediately); only the deny half is the
+// known-open gap and runs under `it.fails`.
+describe.each(API_GATES)('$name', (c) => {
+  it('admits every allowed role', async () => {
+    for (const role of ALL_ROLES.filter((r) => c.allowed.includes(r))) {
+      sessionRole = role
+      const res = await c.call()
+      expect.soft(res.status, `${c.name} must admit ${role}`).not.toBe(403)
+    }
+  })
+
+  // expect.soft so a red run lists every offending role, not just the first.
+  gateIt(c)('403s every role outside the policy with no data in the body', async () => {
+    for (const role of ALL_ROLES.filter((r) => !c.allowed.includes(r))) {
+      sessionRole = role
+      const res = await c.call()
+      expect.soft(res.status, `${c.name} must deny ${role}`).toBe(403)
+      if (res.status === 403) expect.soft(await res.json(), `${c.name} 403 body for ${role}`).toEqual({ error: 'Forbidden' })
+    }
+  })
+})
