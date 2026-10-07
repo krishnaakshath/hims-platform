@@ -11,9 +11,10 @@ describe('providerProfileSchema', () => {
     expect(ok({ registrationCouncil: 'nmc', registrationNumber: '12345' })).toBe(true)
     expect(ok({ registrationCouncil: 'nmc', registrationStateCode: null, registrationNumber: '12345' })).toBe(true)
   })
-  it('rejects an invalid state code and a state without a council', () => {
+  it('rejects an invalid state code; a state alone is left to the route', () => {
     expect(ok({ registrationCouncil: 'smc', registrationStateCode: 'IN-XX' })).toBe(false)
-    expect(ok({ registrationStateCode: 'IN-MH' })).toBe(false)
+    expect(ok({ registrationStateCode: 'IN-MH' })).toBe(true) // context-checked against the stored council by the route
+    expect(ok({ registrationCouncil: 'nmc', registrationStateCode: 'IN-MH' })).toBe(false)
   })
   it('validates and trims the registration number', () => {
     expect(providerProfileSchema.parse({ registrationNumber: ' 12345 ' }).registrationNumber).toBe('12345')

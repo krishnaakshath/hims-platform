@@ -12,6 +12,7 @@ export function UhidPrefixForm({ initialPrefix, isAdmin }: { initialPrefix: stri
   async function save() {
     setSaving(true)
     setError(null)
+    setSavedAt(null)
     const res = await fetch('/api/settings/uhid-prefix', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -29,7 +30,7 @@ export function UhidPrefixForm({ initialPrefix, isAdmin }: { initialPrefix: stri
         <input
           id="uhid-prefix"
           value={prefix}
-          onChange={(e) => setPrefix(e.target.value.toUpperCase())}
+          onChange={(e) => { setPrefix(e.target.value.toUpperCase()); setSavedAt(null); setError(null) }}
           disabled={!isAdmin}
           maxLength={6}
           className="w-full rounded-md border border-border px-3 py-2 text-sm disabled:opacity-60"
@@ -47,7 +48,7 @@ export function UhidPrefixForm({ initialPrefix, isAdmin }: { initialPrefix: stri
             {saving ? 'Saving…' : 'Save'}
           </button>
           {savedAt && <span className="text-xs text-muted-foreground">Saved</span>}
-          {error && <span className="text-xs text-destructive">{error}</span>}
+          {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
         </div>
       )}
     </div>

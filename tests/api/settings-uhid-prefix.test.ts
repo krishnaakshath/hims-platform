@@ -36,6 +36,17 @@ describe('PUT /api/settings/uhid-prefix', () => {
   it('400s extra keys', async () => {
     expect((await PUT(req({ prefix: 'MH', x: 1 }))).status).toBe(400)
   })
+  it('500s a failed write, logging only the pg code and constraint', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.mocked(setUhidPrefix).mockRejectedValueOnce({ code: '23514', constraint: 'uhid_prefix_check', detail: 'secret' })
+    const res = await PUT(req({ prefix: 'MH01' }))
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Could not update UHID prefix' })
+    expect(JSON.stringify(spy.mock.calls)).toContain('23514')
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('secret')
+    expect(logAudit).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
   it('saves a valid prefix and audits', async () => {
     const res = await PUT(req({ prefix: 'MH01' }))
     expect(res.status).toBe(200)

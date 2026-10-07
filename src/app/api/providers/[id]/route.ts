@@ -8,6 +8,8 @@ import { providerProfileSchema } from '@/lib/validation/provider-profile'
 import { formatPaise } from '@/lib/money'
 import { isUniqueViolation, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 
+const feeText = (paise: number | null | undefined) => (paise == null ? 'none' : formatPaise(paise))
+
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
@@ -22,11 +24,21 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
 
   try {
-    if (parsed.data.departmentId != null && !(await getDepartmentById(parsed.data.departmentId))) {
-      return NextResponse.json({ error: 'Unknown department' }, { status: 400 })
+    if (parsed.data.departmentId != null) {
+      const dept = await getDepartmentById(parsed.data.departmentId)
+      if (!dept) return NextResponse.json({ error: 'Unknown department' }, { status: 400 })
+      if (!dept.isActive) return NextResponse.json({ error: 'Department is inactive' }, { status: 400 })
     }
     const existing = await getProviderById(providerId)
     if (!existing) return NextResponse.json({ error: 'Provider not found' }, { status: 404 })
+
+    // A state change without a council in the payload is judged against the stored council.
+    if (parsed.data.registrationCouncil === undefined && parsed.data.registrationStateCode !== undefined) {
+      const stateGivenOk = parsed.data.registrationStateCode !== null
+      if (existing.registrationCouncil !== 'smc' ? stateGivenOk : !stateGivenOk) {
+        return NextResponse.json({ error: 'A state applies only to a State Medical Council, which requires one' }, { status: 400 })
+      }
+    }
 
     const updated = await updateProviderProfile(providerId, parsed.data)
     if (!updated) return NextResponse.json({ error: 'Provider not found' }, { status: 404 })
@@ -34,7 +46,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     await logAudit(session, 'updated provider profile', null)
     const newFee = parsed.data.consultationFeePaise
     if (newFee !== undefined && (newFee ?? null) !== (existing.consultationFeePaise ?? null)) {
-      await logAudit(session, 'changed provider consultation fee', null, `${formatPaise(existing.consultationFeePaise ?? 0)} → ${formatPaise(newFee ?? 0)}`)
+      await logAudit(session, 'changed provider consultation fee', null, `${feeText(existing.consultationFeePaise)} → ${feeText(newFee)}`)
     }
     return NextResponse.json(updated)
   } catch (err) {

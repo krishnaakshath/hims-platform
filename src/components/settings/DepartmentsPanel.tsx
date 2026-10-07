@@ -73,11 +73,11 @@ export function DepartmentsPanel({ departments, isAdmin }: { departments: Depart
             <button onClick={add} disabled={busy || !code || !name.trim()} className="rounded-md bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
               {busy ? 'Adding…' : 'Add department'}
             </button>
-            {error && <span className="text-xs text-destructive">{error}</span>}
+            {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
           </div>
         </div>
       )}
-      {!isAdmin && error && <p className="text-xs text-destructive">{error}</p>}
+      {!isAdmin && error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }

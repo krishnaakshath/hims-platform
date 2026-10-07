@@ -61,6 +61,32 @@ describe('PUT /api/providers/[id]', () => {
     expect(logAudit).toHaveBeenCalledWith(expect.anything(), 'updated provider profile', null)
     expect(JSON.stringify(vi.mocked(logAudit).mock.calls)).not.toContain('12345')
   })
+  it('400s an inactive department', async () => {
+    vi.mocked(getDepartmentById).mockResolvedValue({ id: 3, isActive: false } as never)
+    expect((await PUT(req({ departmentId: 3 }), ctx())).status).toBe(400)
+    expect(updateProviderProfile).not.toHaveBeenCalled()
+  })
+  it('allows clearing the department even if it is inactive, and does not look it up', async () => {
+    expect((await PUT(req({ departmentId: null }), ctx())).status).toBe(200)
+    expect(getDepartmentById).not.toHaveBeenCalled()
+  })
+  it('accepts a state alone when the stored council is SMC, rejects it otherwise', async () => {
+    vi.mocked(getProviderById).mockResolvedValue({ ...row, registrationCouncil: 'smc', registrationStateCode: 'IN-KA' } as never)
+    expect((await PUT(req({ registrationStateCode: 'IN-MH' }), ctx())).status).toBe(200)
+    expect(updateProviderProfile).toHaveBeenCalledWith(7, { registrationStateCode: 'IN-MH' })
+    expect((await PUT(req({ registrationStateCode: null }), ctx())).status).toBe(400)
+    vi.mocked(getProviderById).mockResolvedValue({ ...row, registrationCouncil: 'nmc', registrationStateCode: null } as never)
+    expect((await PUT(req({ registrationStateCode: 'IN-MH' }), ctx())).status).toBe(400)
+    vi.mocked(getProviderById).mockResolvedValue({ ...row, registrationCouncil: null, registrationStateCode: null } as never)
+    expect((await PUT(req({ registrationStateCode: 'IN-MH' }), ctx())).status).toBe(400)
+  })
+  it('audits a cleared fee as none, not ₹0.00', async () => {
+    await PUT(req({ consultationFeePaise: null }), ctx())
+    expect(logAudit).toHaveBeenCalledWith(expect.anything(), 'changed provider consultation fee', null, '₹300.00 → none')
+    vi.mocked(getProviderById).mockResolvedValue({ ...row, consultationFeePaise: null } as never)
+    await PUT(req({ consultationFeePaise: 0 }), ctx())
+    expect(logAudit).toHaveBeenCalledWith(expect.anything(), 'changed provider consultation fee', null, 'none → ₹0.00')
+  })
   it('audits a fee change with old and new amounts', async () => {
     await PUT(req({ consultationFeePaise: 50000 }), ctx())
     expect(logAudit).toHaveBeenCalledWith(expect.anything(), 'changed provider consultation fee', null, '₹300.00 → ₹500.00')

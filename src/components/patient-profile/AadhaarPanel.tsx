@@ -34,6 +34,8 @@ export function AadhaarPanel({ anonId, view, canWrite }: { anonId: string; view:
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const noteMissing = declined && reason === 'other' && note.trim() === ''
+
   function reset() {
     setDeclined(false); setNumber(''); setConsent(false); setReason(''); setNote(''); setError(null)
   }
@@ -108,7 +110,7 @@ export function AadhaarPanel({ anonId, view, canWrite }: { anonId: string; view:
                       </select>
                     )}
                   </Field>
-                  <Field label={reason === 'other' ? 'Note (required)' : 'Note (optional)'}>
+                  <Field label={reason === 'other' ? 'Note (required)' : 'Note (optional)'} error={noteMissing ? 'A note is required when the reason is other' : undefined}>
                     {(p) => <input {...p} autoComplete="off" value={note} onChange={(e) => setNote(e.target.value)} className={INPUT_CLASS} />}
                   </Field>
                 </>
@@ -117,7 +119,7 @@ export function AadhaarPanel({ anonId, view, canWrite }: { anonId: string; view:
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={close} disabled={saving}>Cancel</Button>
-              <Button type="button" onClick={save} disabled={saving || (declined ? !reason : number.length !== 12 || !consent)}>{saving ? 'Saving…' : 'Save'}</Button>
+              <Button type="button" onClick={save} disabled={saving || (declined ? !reason || noteMissing : number.length !== 12 || !consent)}>{saving ? 'Saving…' : 'Save'}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

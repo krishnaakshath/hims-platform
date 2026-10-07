@@ -67,6 +67,17 @@ describe('AadhaarPanel', () => {
     expect(JSON.parse(init.body as string)).toEqual({ status: 'declined', reason: 'emergency' })
   })
 
+  it('disables Save for reason other without a note and shows the field message', async () => {
+    render(<AadhaarPanel anonId="RD-0001" view={{ status: 'not_recorded', masked: null, declineReason: null }} canWrite />)
+    fireEvent.click(screen.getByRole('button', { name: /record aadhaar/i }))
+    fireEvent.click(await screen.findByLabelText(/does not provide/i))
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'other' } })
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
+    expect(screen.getByText('A note is required when the reason is other')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/note/i), { target: { value: 'lost card' } })
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled()
+  })
+
   it('shows an error and does not refresh on failure', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'Invalid Aadhaar update' }), { status: 400 })))
     render(<AadhaarPanel anonId="RD-0001" view={{ status: 'not_recorded', masked: null, declineReason: null }} canWrite />)

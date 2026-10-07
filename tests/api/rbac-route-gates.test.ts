@@ -557,6 +557,7 @@ const SP1_WRITE_GATES: { name: string; call: () => Promise<Response>; allowed: r
   { name: 'POST /api/departments', call: () => postDepartment(send('POST', '/api/departments', NOT_JSON)), allowed: MASTER_DATA_ADMIN_ROLES },
   { name: 'PATCH /api/departments/[id]', call: () => patchDepartment(send('PATCH', `/api/departments/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MASTER_DATA_ADMIN_ROLES },
   { name: 'PUT /api/providers/[id]', call: () => putProvider(send('PUT', `/api/providers/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MASTER_DATA_ADMIN_ROLES },
+  { name: 'PUT /api/settings/uhid-prefix', call: () => putUhidPrefix(send('PUT', '/api/settings/uhid-prefix', NOT_JSON)), allowed: MASTER_DATA_ADMIN_ROLES },
 ]
 describe.each(SP1_WRITE_GATES)('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {

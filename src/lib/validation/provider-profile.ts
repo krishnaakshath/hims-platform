@@ -23,7 +23,8 @@ export const providerProfileSchema = z.object({
   if (v.registrationCouncil === 'smc' && state == null) {
     ctx.addIssue({ code: 'custom', path: ['registrationStateCode'], message: 'A state is required for a State Medical Council' })
   }
-  if (v.registrationCouncil !== 'smc' && state != null) {
+  // A state with no council in the payload is checked by the route against the stored council.
+  if (v.registrationCouncil !== undefined && v.registrationCouncil !== 'smc' && state != null) {
     ctx.addIssue({ code: 'custom', path: ['registrationStateCode'], message: 'A state applies only to a State Medical Council' })
   }
 })
