@@ -316,4 +316,7 @@ export const PAGE_GATES: PageGateCase[] = [
     props: { searchParams: Promise.resolve({ ids: '1' }) },
     allowed: ['admin', 'crc', 'pi'],
   },
+  // SP5: sample label sheet -- LAB_LABEL_ROLES; no nav entry (reached from links).
+  { route: '/lab-labels', load: () => import('@/app/(dashboard)/lab-labels/page'), props: { searchParams: Promise.resolve({ orders: '1' }) }, allowed: ['admin', 'pi', 'labs', 'frontdesk'] },
+  // end SP5
 ]

@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
-import { labOrders, labResults, labTests, patients, providers } from '@/db/schema'
-import { desc, eq, sql } from 'drizzle-orm'
+import { homeCollectionVisits, labOrders, labResults, labTests, patients, providers } from '@/db/schema'
+import { asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import type { LabQuoteStatus } from '@/lib/labs/catalog' // SP5
 import { listImagingForOrders, type ImagingAttachment } from '@/lib/queries/documents'
 import { PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status' // SP5
 
@@ -31,6 +32,14 @@ export interface PatientLabOrderRow {
     resultedAt: Date
     notes: string | null
   } | null
+  // SP5
+  sampleId: string | null
+  requisitionId: number | null
+  quotedPricePaise: number | null
+  quoteStatus: LabQuoteStatus
+  verifiedByName: string | null
+  verifiedAt: Date | null
+  // end SP5
 }
 
 function mapPatientOrderRow(r: {
@@ -58,6 +67,14 @@ function mapPatientOrderRow(r: {
       resultedAt: r.result.resultedAt,
       notes: r.result.notes,
     } : null,
+    // SP5
+    sampleId: r.order.sampleId,
+    requisitionId: r.order.requisitionId,
+    quotedPricePaise: r.order.quotedPricePaise,
+    quoteStatus: r.order.quoteStatus,
+    verifiedByName: r.order.verifiedByName,
+    verifiedAt: r.order.verifiedAt,
+    // end SP5
   }
 }
 
@@ -90,13 +107,26 @@ export interface WorklistRow {
   attachments: ImagingAttachment[]
   orderedByProviderId: number
   orderedByProviderName: string
+  // SP5: stage data for the worklist
+  sampleId: string | null
+  requisitionId: number | null
+  homeCollectionVisitId: number | null
+  visitDate: string | null
+  receivedAt: Date | null
+  verifiedAt: Date | null
+  patientUhid: string | null
+  result: { value: string; unit: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
+  // end SP5
 }
 
 function mapWorklistRow(r: {
   order: typeof labOrders.$inferSelect
   test: typeof labTests.$inferSelect
   patientName: string
+  patientUhid: string | null
   provider: typeof providers.$inferSelect
+  visitDate: string | null
+  result: typeof labResults.$inferSelect | null
 }): Omit<WorklistRow, 'attachments'> {
   return {
     id: r.order.id,
@@ -111,6 +141,18 @@ function mapWorklistRow(r: {
     category: r.test.category,
     orderedByProviderId: r.order.orderedByProviderId,
     orderedByProviderName: r.provider.name,
+    // SP5
+    sampleId: r.order.sampleId,
+    requisitionId: r.order.requisitionId,
+    homeCollectionVisitId: r.order.homeCollectionVisitId,
+    visitDate: r.visitDate,
+    receivedAt: r.order.receivedAt,
+    verifiedAt: r.order.verifiedAt,
+    patientUhid: r.patientUhid,
+    result: r.result
+      ? { value: r.result.value, unit: r.result.unit, flag: r.result.flag, resultedByName: r.result.resultedByName, amendedAt: r.result.amendedAt }
+      : null,
+    // end SP5
   }
 }
 
@@ -131,12 +173,17 @@ export async function listWorklist(): Promise<WorklistRow[]> {
       // every column schema.ts declares and 42703s against the real DB.
       // See src/lib/queries/documents.ts:26-40 for the same pattern.
       patientName: sql<string>`patients.name`,
+      patientUhid: patients.uhid, // SP5 (named column)
       provider: providers,
+      visitDate: homeCollectionVisits.visitDate, // SP5
+      result: labResults, // SP5
     })
     .from(labOrders)
     .innerJoin(labTests, eq(labOrders.labTestId, labTests.id))
     .innerJoin(patients, eq(labOrders.patientId, patients.id))
     .innerJoin(providers, eq(labOrders.orderedByProviderId, providers.id))
+    .leftJoin(homeCollectionVisits, eq(homeCollectionVisits.id, labOrders.homeCollectionVisitId)) // SP5
+    .leftJoin(labResults, eq(labResults.labOrderId, labOrders.id)) // SP5
     .orderBy(desc(labOrders.orderedAt))
 
   const mapped = rows.map(mapWorklistRow)
@@ -180,3 +227,32 @@ export async function listPatientsWithLabOrders(): Promise<LabPatientRosterRow[]
   }
   return [...byPatient.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
+
+// SP5: one printable label per order (sample ID, test, container, patient name + UHID only).
+export interface SampleLabelRow {
+  orderId: number
+  sampleId: string | null
+  testName: string
+  container: string | null
+  patientName: string
+  uhid: string | null
+}
+
+export async function listLabelsForOrders(ids: number[]): Promise<SampleLabelRow[]> {
+  if (ids.length === 0) return []
+  return getDb()
+    .select({
+      orderId: labOrders.id,
+      sampleId: labOrders.sampleId,
+      testName: labTests.name,
+      container: labTests.container,
+      patientName: sql<string>`patients.name`,
+      uhid: patients.uhid,
+    })
+    .from(labOrders)
+    .innerJoin(labTests, eq(labOrders.labTestId, labTests.id))
+    .innerJoin(patients, eq(labOrders.patientId, patients.id))
+    .where(inArray(labOrders.id, ids))
+    .orderBy(asc(labOrders.id))
+}
+// end SP5

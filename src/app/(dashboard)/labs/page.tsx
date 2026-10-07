@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { ClipboardList, Beaker, CheckCircle2, AlertTriangle, Users, ListChecks } from 'lucide-react'
+import { ClipboardList, Beaker, CheckCircle2, Truck, Users, ListChecks } from 'lucide-react'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CountUp } from '@/components/CountUp'
 import { logAudit } from '@/lib/audit'
@@ -8,6 +8,7 @@ import { listLabTests } from '@/lib/queries/lab-tests'
 import { LabWorklist } from '@/components/LabWorklist'
 import { LabsPatientReports } from '@/components/LabsPatientReports'
 import { Tabs } from '@/components/Tabs'
+import { LAB_WORKLIST_ROLES } from '@/lib/role-policy' // SP5
 
 function StatTile({ value, label, icon: Icon, tone }: { value: number; label: string; icon: React.ComponentType<{ className?: string }>; tone: string }) {
   return (
@@ -25,9 +26,9 @@ function StatTile({ value, label, icon: Icon, tone }: { value: number; label: st
 
 export default async function LabsPage() {
   const session = await requireSessionOrRedirect()
-  // Matches GET /api/lab-orders's own role gate. frontdesk removed per
+  // Matches GET /api/lab-orders's own role gate (SP5: LAB_WORKLIST_ROLES). frontdesk removed per
   // explicit product direction (registration/check-in only, no lab access).
-  if (!['admin', 'pi', 'crc', 'labs'].includes(session.role)) redirect('/')
+  if (!LAB_WORKLIST_ROLES.includes(session.role)) redirect('/')
 
   const [orders, labTests, patientRoster] = await Promise.all([listWorklist(), listLabTests(), listPatientsWithLabOrders()])
   await logAudit(session, session.role === 'labs' ? 'viewed labs dashboard' : 'viewed lab worklist', null)
@@ -36,9 +37,11 @@ export default async function LabsPage() {
   // the markup, never the token.
   const lisConfigured = Boolean(process.env.LIS_INTEGRATION_TOKEN?.trim())
 
-  const pending = orders.filter((o) => o.status === 'ordered').length
-  const inProgress = orders.filter((o) => o.status === 'collected').length
-  const resultedToday = orders.filter((o) => o.status === 'resulted' && o.collectedAt && isToday(o.collectedAt)).length
+  // SP5: one tile per bench stage.
+  const awaitingCollection = orders.filter((o) => o.status === 'ordered' || o.status === 'scheduled').length
+  const inTransit = orders.filter((o) => o.status === 'collected').length
+  const atBench = orders.filter((o) => o.status === 'received').length
+  const toVerify = orders.filter((o) => o.status === 'resulted').length
 
   return (
     <div>
@@ -67,10 +70,10 @@ export default async function LabsPage() {
 
       {session.role === 'labs' && (
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile value={pending} label="Awaiting Collection" icon={ClipboardList} tone="bg-warning/10 text-warning" />
-          <StatTile value={inProgress} label="Awaiting Results" icon={Beaker} tone="bg-accent/10 text-accent" />
-          <StatTile value={resultedToday} label="Resulted Today" icon={CheckCircle2} tone="bg-success/10 text-success" />
-          <StatTile value={orders.filter((o) => o.status !== 'cancelled').length} label="Active Orders" icon={AlertTriangle} tone="bg-primary/10 text-primary" />
+          <StatTile value={awaitingCollection} label="Awaiting collection" icon={ClipboardList} tone="bg-warning/10 text-warning" />
+          <StatTile value={inTransit} label="In transit" icon={Truck} tone="bg-primary/10 text-primary" />
+          <StatTile value={atBench} label="At the bench" icon={Beaker} tone="bg-accent/10 text-accent" />
+          <StatTile value={toVerify} label="To verify" icon={CheckCircle2} tone="bg-success/10 text-success" />
         </div>
       )}
 
@@ -86,7 +89,3 @@ export default async function LabsPage() {
   )
 }
 
-function isToday(d: Date): boolean {
-  const now = new Date()
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
-}

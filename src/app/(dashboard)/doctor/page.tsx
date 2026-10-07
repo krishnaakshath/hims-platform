@@ -16,6 +16,7 @@ import { AssignmentScheduleModalTrigger } from '@/components/AssignmentScheduleM
 import { DashboardAppointmentsTable, type DashboardAppointmentRow } from '@/components/DashboardAppointmentsTable'
 import { PatientsTable } from '@/components/PatientsTable'
 import { DoctorScheduleTimeline } from '@/components/DoctorScheduleTimeline'
+import { formatDateTimeIn } from '@/lib/india-time' // SP5
 
 // Enterprise EMR dense layout
 export default async function DoctorPortalPage() {
@@ -51,6 +52,8 @@ export default async function DoctorPortalPage() {
   const labWorklist = await listWorklist()
   const myPatientIds = new Set(myPatients.map((p) => p.id))
   const pendingLabs = labWorklist.filter((l) => myPatientIds.has(l.patientId) && l.status === 'ordered')
+  // SP5: my patients' results entered by the lab and waiting for a pi/admin to verify them.
+  const resultsToVerify = labWorklist.filter((l) => myPatientIds.has(l.patientId) && l.status === 'resulted')
 
   // Client forms
   const completedForms = await listFormSubmissions({ status: 'completed' })
@@ -177,6 +180,38 @@ export default async function DoctorPortalPage() {
               )}
             </div>
           </div>
+
+          {/* SP5: Results to verify */}
+          <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+            <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Activity className="h-4 w-4 text-warning" />
+                <h3 className="text-sm font-semibold text-foreground">Results to verify</h3>
+              </div>
+              <span className="rounded-full bg-warning/20 px-2 py-0.5 text-xs font-bold text-warning-foreground">{resultsToVerify.length}</span>
+            </div>
+            {resultsToVerify.length === 0 ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">No results awaiting verification.</div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {resultsToVerify.slice(0, 5).map((l) => (
+                  <li key={l.id} className="flex items-center justify-between gap-2 p-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">{l.patientName || l.patientId}</p>
+                      <p className="text-xs text-muted-foreground">{l.testName}{l.collectedAt ? ` · Collected ${formatDateTimeIn(l.collectedAt)}` : ''}</p>
+                    </div>
+                    <Link href="/labs" className="rounded bg-primary/10 px-2 py-1 text-[10px] font-bold uppercase text-primary hover:bg-primary/20">Verify</Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {resultsToVerify.length > 5 && (
+              <div className="border-t border-border px-4 py-3 text-center">
+                <Link href="/labs" className="text-xs font-medium text-primary hover:underline">View all {resultsToVerify.length} results to verify</Link>
+              </div>
+            )}
+          </div>
+          {/* end SP5 */}
 
         </div>
 

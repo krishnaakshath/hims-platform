@@ -4,6 +4,12 @@ import { Button } from '@/components/ui/button'
 import { OrderLabTestModal, type LabTestOption } from '@/components/OrderLabTestModal'
 import { ImagingAttachmentStrip, type AttachmentView } from '@/components/ImagingAttachmentStrip'
 import { LAB_STATUS_LABEL, PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status' // SP5
+// SP5: status chip, sample ID, quoted price, verification note; IST formatters (no toLocale*).
+import { displaySampleId } from '@/lib/labs/sample-id'
+import { formatPaise } from '@/lib/money'
+import { formatDateTimeIn, formatIsoDate, istDateOf } from '@/lib/india-time'
+import type { LabQuoteStatus } from '@/lib/labs/catalog'
+// end SP5
 
 export interface PatientLabOrder {
   id: number
@@ -29,7 +35,21 @@ export interface PatientLabOrder {
     resultedAt: Date
     notes: string | null
   } | null
+  // SP5
+  sampleId: string | null
+  requisitionId: number | null
+  quotedPricePaise: number | null
+  quoteStatus: LabQuoteStatus
+  verifiedByName: string | null
+  verifiedAt: Date | null
+  // end SP5
 }
+
+// SP5: the order's lifecycle stage as a chip, and its quoted price.
+function StatusChip({ status }: { status: LabOrderStatus }) {
+  return <span className="inline-flex shrink-0 items-center rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-foreground">{LAB_STATUS_LABEL[status]}</span>
+}
+const priceText = (o: { quotedPricePaise: number | null }) => (o.quotedPricePaise === null ? 'Not priced' : formatPaise(o.quotedPricePaise))
 
 // Pill-with-text-label convention (BedBoard's STATUS_STYLES) -- the label
 // text itself already satisfies "never color alone", no separate dot needed.
@@ -70,7 +90,7 @@ export function LabResultsSection({ patientId, orders, labTests, canOrder }: { p
   const [ordering, setOrdering] = useState(false)
 
   // Only treat an order as "resulted" once its labResults row is actually
-  // present. enterResult() now runs its status UPDATE and result INSERT in
+  // present. The result write (SP5: recordLabResult) runs its status UPDATE and result INSERT in
   // one db.transaction, so new data cannot be half-written, but rows written
   // before that change could be a resulted-status order with no result row.
   // Keep degrading that legacy case to "Pending" instead of crashing the
@@ -111,11 +131,22 @@ export function LabResultsSection({ patientId, orders, labTests, canOrder }: { p
                       {r.referenceRange && ` · Reference: ${r.referenceRange}`}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Resulted {r.resultedAt.toLocaleString()} by {r.resultedByName}
+                      Resulted {formatDateTimeIn(r.resultedAt)} by {r.resultedByName}
+                    </p>
+                    {/* SP5 */}
+                    {o.status === 'resulted' && <p className="mt-0.5 text-xs font-medium text-warning">Preliminary: awaiting verification</p>}
+                    {o.verifiedAt && o.verifiedByName && (
+                      <p className="mt-0.5 text-xs text-muted-foreground">Verified {formatDateTimeIn(o.verifiedAt)} by {o.verifiedByName}</p>
+                    )}
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {o.sampleId ? `Sample ${displaySampleId(o.sampleId)} · ` : ''}{priceText(o)}
                     </p>
                     {r.notes && <p className="mt-1 text-xs text-muted-foreground">{r.notes}</p>}
                   </div>
-                  <FlagPill flag={r.flag} />
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <StatusChip status={o.status} />
+                    <FlagPill flag={r.flag} />
+                  </div>
                 </div>
                 <ImagingAttachmentStrip attachments={o.attachments} />
               </li>
@@ -134,7 +165,10 @@ export function LabResultsSection({ patientId, orders, labTests, canOrder }: { p
                   <span>
                     {o.testName} <span className="text-xs">({o.testCode})</span>
                   </span>
-                  <span className="text-xs">{isPreResult(o.status) ? PENDING_STATUS_LABEL[o.status] : LAB_STATUS_LABEL[o.status]} · {o.orderedAt.toLocaleDateString()}</span>
+                  <span className="text-xs">
+                    {isPreResult(o.status) ? PENDING_STATUS_LABEL[o.status] : LAB_STATUS_LABEL[o.status]} · {formatIsoDate(istDateOf(o.orderedAt))}
+                    {o.sampleId ? ` · ${displaySampleId(o.sampleId)}` : ''} · {priceText(o)}
+                  </span>
                 </div>
                 <ImagingAttachmentStrip attachments={o.attachments} />
               </li>

@@ -192,4 +192,40 @@ describe('PI dashboard (/doctor)', () => {
     expect(screen.getByText(/Taylor Nguyen/)).toBeInTheDocument()
     expect(screen.getByText('Urgent')).toBeInTheDocument()
   })
+
+  // SP5 Task 9: the pi verifies results, so their own patients' resulted orders are listed.
+  it('lists my patients\' resulted orders under "Results to verify", linking to /labs', async () => {
+    vi.resetModules()
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam', userId: null })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/queries/patients', () => ({
+      listPatientsWithStatus: vi.fn(async () => [
+        { id: 'RD-0001', overallStatus: 'green', name: 'Jane Doe', dob: '1990-01-01', currentProvider: 'Dr. R. Kunam', referralType: null, lastCommunication: null, criteriaSummary: null },
+      ]),
+    }))
+    vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 1, name: 'Dr. R. Kunam' }]) }))
+    vi.doMock('@/lib/queries/doctor-assignments', () => ({ listPendingAssignmentsForProvider: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(async () => []) }))
+    const row = (id: number, patientId: string, status: string, testName: string) => ({
+      id, patientId, patientName: patientId === 'RD-0001' ? 'Jane Doe' : 'Someone Else', status, testName, testCode: 'X', orderedAt: new Date('2099-05-01T04:30:00Z'),
+      collectedAt: new Date('2099-05-01T05:00:00Z'), category: 'lab', attachments: [], orderedByProviderId: 1, orderedByProviderName: 'Dr. R. Kunam',
+    })
+    vi.doMock('@/lib/queries/lab-orders', () => ({
+      listWorklist: vi.fn(async () => [
+        row(1, 'RD-0001', 'resulted', 'HbA1c mine'),
+        row(2, 'RD-0002', 'resulted', 'Lipids not mine'),
+        row(3, 'RD-0001', 'verified', 'TSH already verified'),
+      ]),
+    }))
+    vi.doMock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(async () => []) }))
+    vi.doMock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 1, name: 'Dr. R. Kunam' })) }))
+    const { default: Page } = await import('@/app/(dashboard)/doctor/page')
+    const { render, screen } = await import('@testing-library/react')
+    render(await Page())
+    expect(screen.getByRole('heading', { name: 'Results to verify' })).toBeInTheDocument()
+    expect(screen.getByText(/HbA1c mine/)).toBeInTheDocument()
+    expect(screen.queryByText(/Lipids not mine/)).toBeNull()
+    expect(screen.queryByText(/TSH already verified/)).toBeNull()
+    expect(screen.getByRole('link', { name: 'Verify' }).getAttribute('href')).toBe('/labs')
+  })
 })

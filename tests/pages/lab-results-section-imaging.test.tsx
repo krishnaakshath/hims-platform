@@ -22,6 +22,13 @@ function makeOrder(overrides: Partial<PatientLabOrder> = {}): PatientLabOrder {
     referenceRange: null,
     attachments: [],
     result: null,
+    // SP5 fields
+    sampleId: null,
+    requisitionId: null,
+    quotedPricePaise: null,
+    quoteStatus: 'unmapped',
+    verifiedByName: null,
+    verifiedAt: null,
     ...overrides,
   }
 }

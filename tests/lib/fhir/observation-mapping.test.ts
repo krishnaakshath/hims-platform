@@ -74,7 +74,8 @@ describe('observationsToFhir', () => {
       id: 1, status, orderedAt: new Date('2099-01-01T00:00:00Z'), collectedAt: null,
       testId: 1, testName: 'Glucose', testCode: 'GLU', category: 'lab', defaultUnit: null, referenceRange: null, attachments: [],
       result: withResult ? { value: '90', unit: 'mg/dL', referenceRange: null, flag: 'normal', resultedByName: 'X', resultedAt: new Date('2099-01-01T00:00:00Z'), notes: null } : null,
-    } as PatientLabOrderRow)
+      sampleId: null, requisitionId: null, quotedPricePaise: null, quoteStatus: 'unmapped', verifiedByName: null, verifiedAt: null,
+    })
     expect(observationToFhir('RD-X', row('resulted'))?.status).toBe('preliminary')
     expect(observationToFhir('RD-X', row('verified'))?.status).toBe('final')
     expect(observationToFhir('RD-X', row('reported'))?.status).toBe('final')
