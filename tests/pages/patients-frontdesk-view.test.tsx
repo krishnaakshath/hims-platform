@@ -55,6 +55,8 @@ const DETAIL = {
   currentProvider: 'Dr. Test',
   mfaEnabled: false,
   portalConfigured: false,
+  contacts: [],
+  aadhaar: { status: 'not_recorded', last4: null, declineReason: null, consentRecordedAt: null, recordedByName: null },
 }
 
 const DISCHARGED_ADMISSION = {

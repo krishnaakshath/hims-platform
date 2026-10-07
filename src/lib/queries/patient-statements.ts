@@ -2,11 +2,12 @@ import { getDb } from '@/db/client'
 import { patientStatements, patients } from '@/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { getOrSetCache, patientStatementsListCacheKey } from '@/lib/cache'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export async function listPatientStatements() {
   return getOrSetCache(patientStatementsListCacheKey(), 30, async () => {
     const rows = await getDb()
-      .select({ statement: patientStatements, patient: patients })
+      .select({ statement: patientStatements, patient: publicPatientColumns })
       .from(patientStatements)
       .innerJoin(patients, eq(patientStatements.patientId, patients.id))
       // Tiebreak on id so rows sharing a sentDate keep a stable order across

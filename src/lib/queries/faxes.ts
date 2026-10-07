@@ -2,11 +2,12 @@ import { getDb } from '@/db/client'
 import { faxes, patients } from '@/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { getOrSetCache, faxesListCacheKey } from '@/lib/cache'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export async function listFaxes() {
   return getOrSetCache(faxesListCacheKey(), 15, async () => {
     const rows = await getDb()
-      .select({ fax: faxes, patient: patients })
+      .select({ fax: faxes, patient: publicPatientColumns })
       .from(faxes)
       .leftJoin(patients, eq(faxes.patientId, patients.id))
       // Stable order -- see the comment in documents.ts's listDocuments()

@@ -4,9 +4,10 @@ import { patients, allergies, diagnoses, medicationEpisodes, medications } from 
 import { listDispensesForPatient } from '@/lib/queries/medication-dispenses'
 import { listOrdersForPatient, type PatientLabOrderRow } from '@/lib/queries/lab-orders'
 import type { DispenseWithMedicationName } from '@/lib/fhir/medication-dispense'
+import { publicPatientColumns, type PublicPatientRow } from '@/lib/queries/patient-columns'
 
 export interface PatientFhirData {
-  patient: typeof patients.$inferSelect
+  patient: PublicPatientRow
   allergyRows: (typeof allergies.$inferSelect)[]
   diagnosisRows: (typeof diagnoses.$inferSelect)[]
   medicationEpisodeRows: (typeof medicationEpisodes.$inferSelect)[]
@@ -20,7 +21,7 @@ export interface PatientFhirData {
 // doesn't share -- or invalidate -- that cache).
 export async function gatherPatientFhirData(anonId: string): Promise<PatientFhirData | null> {
   const db = getDb()
-  const [patient] = await db.select().from(patients).where(eq(patients.id, anonId))
+  const [patient] = await db.select(publicPatientColumns).from(patients).where(eq(patients.id, anonId))
   if (!patient) return null
 
   const [allergyRows, diagnosisRows, medicationEpisodeRows, dispenses, labOrderRows] = await Promise.all([

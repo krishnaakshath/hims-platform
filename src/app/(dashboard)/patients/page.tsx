@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
-import { PATIENT_DIRECTORY_ROLES } from '@/lib/role-policy'
+import { PATIENT_DIRECTORY_ROLES, REGISTRATION_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { listAllTrials } from '@/lib/queries/trials'
@@ -38,7 +38,7 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
               POST /api/patients now restricts registration to admin/frontdesk
               exclusively (explicit product direction), so crc/pi must not see
               a button that would just 403. */}
-          {['admin', 'frontdesk'].includes(session.role) && <AddPatientButton />}
+          {REGISTRATION_ROLES.includes(session.role) && <AddPatientButton />}
           {/* The export link is scoped to the same allowlist as the route it
               points at (LeftNav.tsx:33 / workbook/export/route.ts) -- /patients
               itself stays open to every role (spec §6.1, §10), but leaving

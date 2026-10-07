@@ -2,6 +2,7 @@ import { getDb } from '@/db/client'
 import { patients, patientTrialScreenings, formSubmissions } from '@/db/schema'
 import { eq, and, gte, lte } from 'drizzle-orm'
 import { getOrSetCache, pipelineDashboardCacheKey, pipelineDashboardTrendCacheKey } from '@/lib/cache'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export interface PipelineDateRange {
   from: Date
@@ -27,7 +28,7 @@ export async function getPipelinePerformance(range: PipelineDateRange): Promise<
     const db = getDb()
 
     const referrals = await db
-      .select()
+      .select(publicPatientColumns)
       .from(patients)
       .where(and(gte(patients.dateAdded, range.from), lte(patients.dateAdded, range.to)))
 
@@ -43,7 +44,7 @@ export async function getPipelinePerformance(range: PipelineDateRange): Promise<
     // is the one real, already-existing signal for "classification activity".
     const screenedPatientIds = new Set((await db.select({ patientId: patientTrialScreenings.patientId }).from(patientTrialScreenings)).map((r) => r.patientId))
     const candidatesInWindow = await db
-      .select()
+      .select(publicPatientColumns)
       .from(patients)
       .where(and(gte(patients.chartDataAsOf, range.from), lte(patients.chartDataAsOf, range.to)))
     const classifiedInWindow = candidatesInWindow.filter((p) => screenedPatientIds.has(p.id))

@@ -95,8 +95,12 @@ export async function invalidateCacheByPrefix(prefix: string): Promise<void> {
   }
 }
 
+export function patientListCachePrefix(): string {
+  return 'patients:list:'
+}
+
 export function patientListCacheKey(trialId: string | null): string {
-  return `patients:list:${trialId ?? 'all'}`
+  return `${patientListCachePrefix()}${trialId ?? 'all'}`
 }
 
 export function patientDetailCacheKey(anonId: string): string {

@@ -46,10 +46,10 @@ export async function searchAll(rawQuery: string, scopes: SearchScopes): Promise
       if (seenPatientIds.has(p.id)) return false
       seenPatientIds.add(p.id)
       const name = p.name.toLowerCase()
-      return name.includes(q) || p.id.toLowerCase().includes(q)
+      return name.includes(q) || p.id.toLowerCase().includes(q) || (p.uhid?.toLowerCase().startsWith(q) ?? false)
     })
     .slice(0, MAX_RESULTS_PER_CATEGORY)
-    .map((p) => ({ id: p.id, label: p.name, detail: p.id, href: `/patients/${p.id}` }))
+    .map((p) => ({ id: p.id, label: p.name, detail: p.uhid ? `${p.id} · ${p.uhid}` : p.id, href: `/patients/${p.id}` }))
 
   const trials: SearchResult[] = allTrials
     .filter((t) => t.name.toLowerCase().includes(q) || t.condition.toLowerCase().includes(q) || t.nctNumber.toLowerCase().includes(q))

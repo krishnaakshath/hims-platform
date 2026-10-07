@@ -2,6 +2,7 @@ import { getDb } from '@/db/client'
 import { formSubmissions, formTemplates, patients } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { listConsentsForSubmission, type SubmissionConsent } from '@/lib/queries/form-submission-consents'
+import { publicPatientColumns, type PublicPatientRow } from '@/lib/queries/patient-columns'
 
 export type IntakePortalState = 'active' | 'expired' | 'completed' | 'not_found'
 
@@ -17,10 +18,10 @@ export interface IntakePortalData {
 }
 
 const AUTOFILL_SOURCE = {
-  name: (p: typeof patients.$inferSelect) => p.name,
-  dob: (p: typeof patients.$inferSelect) => p.dob,
-  email: (p: typeof patients.$inferSelect) => p.email ?? '',
-  phone: (p: typeof patients.$inferSelect) => p.phone ?? '',
+  name: (p: PublicPatientRow) => p.name,
+  dob: (p: PublicPatientRow) => p.dob,
+  email: (p: PublicPatientRow) => p.email ?? '',
+  phone: (p: PublicPatientRow) => p.phone ?? '',
 } as const
 
 // The one place "is this token still usable" is decided -- both
@@ -37,7 +38,7 @@ function isSubmissionTokenValid(row: { status: string; tokenExpiresAt: Date | nu
 // patient field. The token scopes access to exactly this one submission.
 export async function getIntakePortalData(token: string): Promise<IntakePortalData> {
   const [row] = await getDb()
-    .select({ submission: formSubmissions, template: formTemplates, patient: patients })
+    .select({ submission: formSubmissions, template: formTemplates, patient: publicPatientColumns })
     .from(formSubmissions)
     .innerJoin(formTemplates, eq(formSubmissions.templateId, formTemplates.id))
     .innerJoin(patients, eq(formSubmissions.patientId, patients.id))

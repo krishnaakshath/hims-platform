@@ -5,6 +5,7 @@ import { evaluateEligibility } from '@/lib/eligibility'
 import { evaluateCriteria, type Verdict } from '@/lib/rule-engine'
 import { sendMessage } from '@/lib/queries/messages'
 import { brand } from '@/lib/brand'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 /**
  * The single place a screening's criteria rows get (re)computed from live
@@ -19,7 +20,7 @@ import { brand } from '@/lib/brand'
 export async function regenerateScreeningCriteria(patientId: string, screeningId: number, trialId: string): Promise<Verdict | null> {
   const db = getDb()
   const [trial] = await db.select().from(trials).where(eq(trials.id, trialId))
-  const [patient] = await db.select().from(patients).where(eq(patients.id, patientId))
+  const [patient] = await db.select(publicPatientColumns).from(patients).where(eq(patients.id, patientId))
   if (!trial || !patient) return null
 
   const dx = await db.select({ code: diagnoses.code, description: diagnoses.description }).from(diagnoses).where(eq(diagnoses.patientId, patientId))

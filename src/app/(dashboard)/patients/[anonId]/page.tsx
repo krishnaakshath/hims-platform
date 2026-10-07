@@ -12,8 +12,11 @@ import { DiscrepancyList } from '@/components/DiscrepancyList'
 import { Tabs } from '@/components/Tabs'
 import { DeletePatientButton } from '@/components/DeletePatientButton'
 import { InpatientHistoryPanel } from '@/components/InpatientHistoryPanel'
+import { PatientProfilePanel } from '@/components/patient-profile/PatientProfilePanel'
+import { CopyUhidButton } from '@/components/patient-profile/CopyUhidButton'
 import { requireSessionOrRedirect } from '@/lib/auth'
-import { PATIENT_DIRECTORY_ROLES } from '@/lib/role-policy'
+import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES } from '@/lib/role-policy'
+import { toAadhaarView } from '@/lib/patient-identity'
 import { logAudit } from '@/lib/audit'
 import { getPatientDetail } from '@/lib/queries/patients'
 import { listAdmissionsForPatient } from '@/lib/queries/admissions'
@@ -55,6 +58,27 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
   const [admissionHistory, availableRooms] = await Promise.all([listAdmissionsForPatient(anonId), listAvailableRooms()])
 
   const name = patient.name
+
+  // Aadhaar is converted to the viewer's role view HERE, on the server. Only
+  // this view (never the summary, whose last4 is role-gated) is handed to a
+  // client component.
+  const aadhaarView = toAadhaarView(patient.aadhaar, session.role)
+  const profileTab = (
+    <PatientProfilePanel
+      patient={{
+        id: patient.id, uhid: patient.uhid, gender: patient.gender, maritalStatus: patient.maritalStatus, bloodGroup: patient.bloodGroup,
+        occupation: patient.occupation, nationality: patient.nationality, religion: patient.religion, preferredLanguage: patient.preferredLanguage,
+        addressLine1: patient.addressLine1, addressLine2: patient.addressLine2, city: patient.city, district: patient.district,
+        stateCode: patient.stateCode, pinCode: patient.pinCode, phone: patient.phone, email: patient.email,
+        abhaNumber: patient.abhaNumber, abhaAddress: patient.abhaAddress, abhaUnavailableReason: patient.abhaUnavailableReason,
+        isMlc: patient.isMlc, mlcNumber: patient.mlcNumber,
+        contacts: patient.contacts.map((c) => ({ kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, addressText: c.addressText, isPrimary: c.isPrimary })),
+      }}
+      aadhaar={aadhaarView}
+      canEdit={PATIENT_PROFILE_EDIT_ROLES.includes(session.role)}
+      canWriteAadhaar={AADHAAR_WRITE_ROLES.includes(session.role)}
+    />
+  )
 
   const overviewTab = (
     <section className={SECTION}>
@@ -175,7 +199,11 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
           <PatientAvatar name={name} size="lg" />
           <div>
             <h1 className="text-xl font-bold text-foreground">{name}</h1>
-            <p className="font-mono text-xs text-muted-foreground">{patient.id} · DOB {patient.dob}</p>
+            <p className="flex items-center gap-1 font-mono text-xs text-muted-foreground">
+              {patient.uhid && <span>UHID {patient.uhid}</span>}
+              {patient.uhid && <CopyUhidButton uhid={patient.uhid} />}
+              <span>{patient.uhid ? '· ' : ''}Chart ID {patient.id} · DOB {patient.dob}</span>
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -207,6 +235,7 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
       )}
 
       <Tabs tabs={[
+        { id: 'profile', label: 'Profile', content: profileTab },
         ...(isFrontDesk ? [] : [
           { id: 'overview', label: 'Overview', content: overviewTab },
           { id: 'screening', label: 'Screening', content: screeningTab },

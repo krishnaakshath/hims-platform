@@ -1,8 +1,51 @@
 import { getDb } from '@/db/client'
-import { patients, diagnoses, medicationEpisodes, appointments, providers, formSubmissions, formTemplates, formSubmissionConsents } from '@/db/schema'
+import { patients, patientContacts, diagnoses, medicationEpisodes, appointments, providers, formSubmissions, formTemplates, formSubmissionConsents } from '@/db/schema'
 import { eq, desc, asc, gte, lt, and, sql } from 'drizzle-orm'
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { getUnreadCountForPatient } from '@/lib/queries/messages'
+import { getAadhaarStatus } from '@/lib/queries/patient-profile'
+import { stateName } from '@/lib/india/reference'
+import { publicPatientColumns, patientPortalConfiguredSql } from '@/lib/queries/patient-columns'
+
+/**
+ * The patient's own identity details for the portal's "Your details"
+ * section. Aadhaar is a bare status (on file / declined / not recorded) -- the portal never sees last4,
+ * the decline reason or anything else from the Aadhaar record (spec §3).
+ * The ABHA number is masked to its last 4.
+ */
+export interface PortalProfile {
+  uhid: string | null
+  abhaAddress: string | null
+  abhaNumberMasked: string | null
+  addressSummary: string | null
+  emergencyContactName: string | null
+  aadhaarStatus: 'on_file' | 'declined' | 'not_recorded'
+}
+
+type ProfileSource = Pick<typeof patients.$inferSelect, 'uhid' | 'abhaAddress' | 'abhaNumber' | 'city' | 'district' | 'stateCode' | 'pinCode'>
+
+function addressSummary(p: ProfileSource): string | null {
+  const state = p.stateCode ? stateName(p.stateCode) : null
+  if (!p.city || !p.district || !state || !p.pinCode) return null
+  return `${p.city}, ${p.district}, ${state} ${p.pinCode}`
+}
+
+async function getPortalProfile(patient: ProfileSource, patientId: string): Promise<PortalProfile> {
+  const [emergency] = await getDb()
+    .select({ name: patientContacts.name })
+    .from(patientContacts)
+    .where(and(eq(patientContacts.patientId, patientId), eq(patientContacts.kind, 'emergency')))
+    .orderBy(desc(patientContacts.isPrimary), asc(patientContacts.id))
+    .limit(1)
+  return {
+    uhid: patient.uhid,
+    abhaAddress: patient.abhaAddress,
+    abhaNumberMasked: patient.abhaNumber && /^\d{14}$/.test(patient.abhaNumber) ? `XX-XXXX-XXXX-${patient.abhaNumber.slice(-4)}` : null,
+    addressSummary: addressSummary(patient),
+    emergencyContactName: emergency?.name ?? null,
+    aadhaarStatus: await getAadhaarStatus(patientId),
+  }
+}
 
 /**
  * Everything a patient is allowed to see about themselves through the
@@ -14,8 +57,9 @@ import { getUnreadCountForPatient } from '@/lib/queries/messages'
  * their own record.
  */
 export async function getPatientPortalData(patientId: string) {
-  const [patient] = await getDb().select().from(patients).where(eq(patients.id, patientId))
-  if (!patient) return null
+  const [row] = await getDb().select({ patient: publicPatientColumns, portalConfigured: patientPortalConfiguredSql }).from(patients).where(eq(patients.id, patientId))
+  if (!row) return null
+  const { patient, portalConfigured } = row
 
   const dx = await getDb().select({ code: diagnoses.code, description: diagnoses.description, date: diagnoses.date }).from(diagnoses).where(eq(diagnoses.patientId, patientId))
   const meds = await getDb()
@@ -54,13 +98,14 @@ export async function getPatientPortalData(patientId: string) {
     .orderBy(desc(formSubmissions.sentDate))
 
   const unreadMessageCount = await getUnreadCountForPatient(patientId)
+  const profile = await getPortalProfile(patient, patientId)
 
   return {
     id: patient.id,
     name: patient.name,
     dob: patient.dob,
     currentProvider: patient.currentProvider,
-    portalConfigured: !!patient.portalPasswordHash,
+    portalConfigured,
     diagnoses: dx,
     activeMedications: meds.filter((m) => m.status === 'active'),
     pastMedications: meds.filter((m) => m.status === 'inactive'),
@@ -68,6 +113,7 @@ export async function getPatientPortalData(patientId: string) {
     pastAppointments: past,
     forms,
     unreadMessageCount,
+    profile,
   }
 }
 

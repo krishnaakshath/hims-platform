@@ -5,12 +5,16 @@ import { reviews } from '@/db/schema'
 import type { Role } from '@/lib/auth'
 import { ALL_ROLES } from '@/lib/role-policy'
 import {
+  AADHAAR_WRITE_ROLES,
   CHARGES_ROLES,
   CLINICAL_ROLES,
   DOCUMENT_READ_ROLES,
   IDENTITY_VERIFY_ROLES,
   INSURANCE_CARD_READ_ROLES,
+  MASTER_DATA_ADMIN_ROLES,
   PAYER_LOOKUP_ROLES,
+  PATIENT_PROFILE_EDIT_ROLES,
+  REGISTRATION_ROLES,
   SCHEDULING_ROLES,
   TRIAL_CRITERIA_EDIT_ROLES,
   hasSearchScope,
@@ -49,6 +53,7 @@ afterEach(() => {
   sessionRole = 'crc'
 })
 
+import { PUT as putUhidPrefix } from '@/app/api/settings/uhid-prefix/route'
 import { GET as getWorkbookFull } from '@/app/api/workbook/full/route'
 import { GET as getWorkbookExport } from '@/app/api/workbook/export/route'
 import { POST as postMockPayment } from '@/app/api/mock-payments/route'
@@ -339,7 +344,7 @@ describe('PUT /api/reviews/[id]', () => {
 // `it.fails`; RBAC_SHOW_GAPS=1 runs them as normal tests (the red list).
 // ---------------------------------------------------------------------------
 
-import { GET as listPatients } from '@/app/api/patients/route'
+import { GET as listPatients, POST as postPatient } from '@/app/api/patients/route'
 import { GET as getPatient } from '@/app/api/patients/[anonId]/route'
 import { GET as getCcda } from '@/app/api/patients/[anonId]/ccda/route'
 import { GET as getFhirAllergyIntolerance } from '@/app/api/patients/[anonId]/fhir/AllergyIntolerance/route'
@@ -350,6 +355,9 @@ import { GET as getFhirMedicationRequest } from '@/app/api/patients/[anonId]/fhi
 import { GET as getFhirObservation } from '@/app/api/patients/[anonId]/fhir/Observation/route'
 import { GET as getFhirPatient } from '@/app/api/patients/[anonId]/fhir/Patient/route'
 import { PUT as putIdentity } from '@/app/api/patients/[anonId]/identity/route'
+import { PATCH as patchProfile } from '@/app/api/patients/[anonId]/profile/route'
+import { PUT as putContacts } from '@/app/api/patients/[anonId]/contacts/route'
+import { PUT as putAadhaar } from '@/app/api/patients/[anonId]/aadhaar/route'
 import { GET as getPrimaryPayer } from '@/app/api/patients/[anonId]/primary-payer/route'
 import { GET as getInsuranceCardSide } from '@/app/api/patients/[anonId]/insurance-card/[side]/route'
 import { POST as resolveDiscrepancy } from '@/app/api/discrepancies/[id]/resolve/route'
@@ -367,6 +375,9 @@ import { GET as listCharges } from '@/app/api/charges/route'
 import { GET as getCharge } from '@/app/api/charges/[id]/route'
 import { GET as listStaff } from '@/app/api/staff/route'
 import { GET as getStaffMember } from '@/app/api/staff/[id]/route'
+import { GET as listDepartmentsRoute, POST as postDepartment } from '@/app/api/departments/route'
+import { PATCH as patchDepartment } from '@/app/api/departments/[id]/route'
+import { PUT as putProvider } from '@/app/api/providers/[id]/route'
 import { GET as search } from '@/app/api/search/route'
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
@@ -375,8 +386,8 @@ const BOGUS_ID = '2147483000'
 const BOGUS_PATIENT = 'RD-ZZZZ'
 const url = (path: string) => `http://localhost${path}`
 const get = (path: string) => new NextRequest(url(path))
-const send = (method: 'POST' | 'PUT', path: string, body: unknown = {}) =>
-  new NextRequest(url(path), { method, body: JSON.stringify(body) })
+const send = (method: 'POST' | 'PUT' | 'PATCH', path: string, body: unknown = {}) =>
+  new NextRequest(url(path), { method, body: typeof body === 'string' ? body : JSON.stringify(body) })
 const ctx = <T extends Record<string, string>>(p: T) => ({ params: Promise.resolve(p) })
 
 // A handler that THROWS after the gate (e.g. drizzle rejecting an empty
@@ -395,6 +406,8 @@ const fhir = (resource: string, handler: typeof getFhirPatient): ApiGateCase => 
 export const API_GATES: ApiGateCase[] = [
   // POLICY.md: patient JSON APIs -- CLINICAL_ROLES (ruling 1: frontdesk denied)
   { name: 'GET /api/patients', call: () => listPatients(get('/api/patients')), allowed: [...CLINICAL_ROLES] },
+  // REGISTRATION_ROLES -- admin/frontdesk only (route.ts comment: crc removed by product direction)
+  { name: 'POST /api/patients', call: () => settle(() => postPatient(send('POST', '/api/patients'))), allowed: [...REGISTRATION_ROLES] },
   {
     name: 'GET /api/patients/[anonId]',
     call: () => getPatient(get(`/api/patients/${BOGUS_PATIENT}`), ctx({ anonId: BOGUS_PATIENT })),
@@ -419,6 +432,12 @@ export const API_GATES: ApiGateCase[] = [
     call: () => putIdentity(send('PUT', `/api/patients/${BOGUS_PATIENT}/identity`), ctx({ anonId: BOGUS_PATIENT })),
     allowed: [...IDENTITY_VERIFY_ROLES],
     },
+  // SP1 patient master updates: profile + contacts -- PATIENT_PROFILE_EDIT_ROLES;
+  // Aadhaar -- AADHAAR_WRITE_ROLES (crc's only Aadhaar write path). An allowed
+  // role's `{}` body fails validation before any query.
+  { name: 'PATCH /api/patients/[anonId]/profile', call: () => settle(() => patchProfile(send('PATCH', `/api/patients/${BOGUS_PATIENT}/profile`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...PATIENT_PROFILE_EDIT_ROLES] },
+  { name: 'PUT /api/patients/[anonId]/contacts', call: () => settle(() => putContacts(send('PUT', `/api/patients/${BOGUS_PATIENT}/contacts`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...PATIENT_PROFILE_EDIT_ROLES] },
+  { name: 'PUT /api/patients/[anonId]/aadhaar', call: () => settle(() => putAadhaar(send('PUT', `/api/patients/${BOGUS_PATIENT}/aadhaar`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...AADHAAR_WRITE_ROLES] },
   // Controller ruling (Task 3, option b): billing's eligibility modal reads
   // only the primary payer id -- admin, crc, billing.
   {
@@ -515,9 +534,45 @@ export const API_GATES: ApiGateCase[] = [
     call: () => getStaffMember(get(`/api/staff/${BOGUS_ID}`), ctx({ id: BOGUS_ID })),
     allowed: [...CLINICAL_ROLES],
   },
+  // MASTER_DATA_ADMIN_ROLES -- UHID prefix is practice configuration
+  { name: 'PUT /api/settings/uhid-prefix', call: () => settle(() => putUhidPrefix(send('PUT', '/api/settings/uhid-prefix'))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
+  // Departments master: any staff role reads; MASTER_DATA_ADMIN_ROLES writes
+  { name: 'GET /api/departments', call: () => settle(() => listDepartmentsRoute(get('/api/departments'))), allowed: [...ALL_ROLES] },
+  { name: 'POST /api/departments', call: () => settle(() => postDepartment(send('POST', '/api/departments'))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
+  { name: 'PATCH /api/departments/[id]', call: () => settle(() => patchDepartment(send('PATCH', `/api/departments/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
+  // Provider profile (NMC/SMC, fee, department): MASTER_DATA_ADMIN_ROLES
+  { name: 'PUT /api/providers/[id]', call: () => settle(() => putProvider(send('PUT', `/api/providers/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
+
+// Deny-before-parse: for the SP1 write routes a denied role sending a body
+// that is not even JSON must still get the plain 403 -- a 400 here would mean
+// the body was read before the gate.
+const NOT_JSON = '{not json'
+const SP1_WRITE_GATES: { name: string; call: () => Promise<Response>; allowed: readonly Role[] }[] = [
+  { name: 'PATCH /api/patients/[anonId]/profile', call: () => patchProfile(send('PATCH', `/api/patients/${BOGUS_PATIENT}/profile`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PATIENT_PROFILE_EDIT_ROLES },
+  { name: 'PUT /api/patients/[anonId]/contacts', call: () => putContacts(send('PUT', `/api/patients/${BOGUS_PATIENT}/contacts`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PATIENT_PROFILE_EDIT_ROLES },
+  { name: 'PUT /api/patients/[anonId]/aadhaar', call: () => putAadhaar(send('PUT', `/api/patients/${BOGUS_PATIENT}/aadhaar`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: AADHAAR_WRITE_ROLES },
+  { name: 'POST /api/departments', call: () => postDepartment(send('POST', '/api/departments', NOT_JSON)), allowed: MASTER_DATA_ADMIN_ROLES },
+  { name: 'PATCH /api/departments/[id]', call: () => patchDepartment(send('PATCH', `/api/departments/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MASTER_DATA_ADMIN_ROLES },
+  { name: 'PUT /api/providers/[id]', call: () => putProvider(send('PUT', `/api/providers/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MASTER_DATA_ADMIN_ROLES },
+  { name: 'PUT /api/settings/uhid-prefix', call: () => putUhidPrefix(send('PUT', '/api/settings/uhid-prefix', NOT_JSON)), allowed: MASTER_DATA_ADMIN_ROLES },
+]
+describe.each(SP1_WRITE_GATES)('$name (deny before parse)', (c) => {
+  it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
+    for (const role of ALL_ROLES) {
+      sessionRole = role
+      const res = await c.call()
+      if (c.allowed.includes(role)) {
+        expect.soft(res.status, `${c.name} allowed ${role}`).toBe(400)
+      } else {
+        expect.soft(res.status, `${c.name} must deny ${role} before parsing`).toBe(403)
+        expect.soft(await res.json()).toEqual({ error: 'Forbidden' })
+      }
+    }
+  })
+})
 
 // Every gap tag was removed by the task that closed it. A row re-tagged
 // later would silently run as `it.fails`; this keeps the table honest.

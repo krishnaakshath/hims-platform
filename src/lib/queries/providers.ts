@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
 import { providers } from '@/db/schema'
 import { eq } from 'drizzle-orm'
+import type { ProviderProfileInput } from '@/lib/validation/provider-profile'
 import { getOrSetCache, invalidateCache, providersListCacheKey } from '@/lib/cache'
 
 export async function listActiveProviders() {
@@ -14,9 +15,27 @@ export async function listAllProviders() {
   return getDb().select().from(providers)
 }
 
-/** Name-only edit — Provider Profiles is a lightweight roster editor, not a full provider-management form. */
-export async function updateProviderName(id: number, name: string) {
-  const [updated] = await getDb().update(providers).set({ name }).where(eq(providers.id, id)).returning()
+export async function getProviderById(id: number) {
+  const [row] = await getDb().select().from(providers).where(eq(providers.id, id))
+  return row ?? null
+}
+
+/**
+ * Partial profile update. Only keys present in the patch are written; a
+ * non-SMC council clears the state so the row never keeps a stale one.
+ */
+export async function updateProviderProfile(id: number, patch: ProviderProfileInput): Promise<typeof providers.$inferSelect | null> {
+  const set: Partial<typeof providers.$inferInsert> = {}
+  if (patch.name !== undefined) set.name = patch.name
+  if (patch.departmentId !== undefined) set.departmentId = patch.departmentId
+  if (patch.registrationCouncil !== undefined) {
+    set.registrationCouncil = patch.registrationCouncil
+    if (patch.registrationCouncil !== 'smc') set.registrationStateCode = null
+  }
+  if (patch.registrationStateCode !== undefined) set.registrationStateCode = patch.registrationStateCode
+  if (patch.registrationNumber !== undefined) set.registrationNumber = patch.registrationNumber
+  if (patch.consultationFeePaise !== undefined) set.consultationFeePaise = patch.consultationFeePaise
+  const [updated] = await getDb().update(providers).set(set).where(eq(providers.id, id)).returning()
   await invalidateCache(providersListCacheKey())
   return updated ?? null
 }

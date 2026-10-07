@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, afterEach, beforeEach, beforeAll, afterAll } from 'vitest'
 import { NextRequest, NextResponse } from 'next/server'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import * as auth from '@/lib/auth'
 import { getDb } from '@/db/client'
-import { patients } from '@/db/schema'
+import { patients, patientAadhaar, auditLog } from '@/db/schema'
 import { invalidateCache, patientListCacheKey, patientDetailCacheKey } from '@/lib/cache'
 
 const UNAUTHORIZED = () => NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -154,14 +154,27 @@ describe('patient list/detail never expose the encrypted TOTP secret', () => {
   })
 })
 
+// SP1 registration shape (patientRegistrationSchema). Aadhaar is declined so
+// no encryption key is needed; ABHA is recorded as unavailable.
+const registration = (over: Record<string, unknown> = {}) => ({
+  name: 'Test Patient', dob: '1990-01-01', gender: 'female', addressLine1: '12 MG Road', city: 'Mumbai', district: 'Mumbai',
+  stateCode: 'IN-MH', pinCode: '400001',
+  aadhaar: { status: 'declined', reason: 'patient_declined' },
+  abha: { status: 'unavailable', reason: 'not_created' },
+  ...over,
+})
+
 describe('POST /api/patients', () => {
-  // Every successful create leaves a real row in the shared dev DB, so track
-  // and delete it -- same pattern as the other write-path tests that mutate
-  // real seeded state.
+  // Every successful create leaves a real patient (plus its Aadhaar row and
+  // audit entries) in the shared dev DB, so track and delete it -- children
+  // first -- same pattern as the other write-path tests that mutate real
+  // seeded state.
   const createdIds: string[] = []
   afterEach(async () => {
     while (createdIds.length > 0) {
       const id = createdIds.pop()!
+      await getDb().delete(auditLog).where(and(eq(auditLog.patientId, id), eq(auditLog.userName, 'Test frontdesk')))
+      await getDb().delete(patientAadhaar).where(eq(patientAadhaar.patientId, id))
       await getDb().delete(patients).where(eq(patients.id, id))
     }
   })
@@ -172,63 +185,76 @@ describe('POST /api/patients', () => {
 
   it('returns 401 when there is no authenticated session', async () => {
     vi.mocked(auth.requireSession).mockResolvedValueOnce(UNAUTHORIZED())
-    const response = await createPatient(req({ name: 'Test Patient', dob: '1990-01-01' }))
+    const response = await createPatient(req(registration()))
     expect(response.status).toBe(401)
   })
 
   it('rejects a payload missing the required name or DOB', async () => {
-    const response = await createPatient(req({ name: 'Test Patient' }))
+    const body: Record<string, unknown> = registration(); delete body.dob
+    const response = await createPatient(req(body))
     expect(response.status).toBe(400)
   })
 
   it('rejects a payload with an unexpected extra field', async () => {
-    const response = await createPatient(req({ name: 'Test Patient', dob: '1990-01-01', ssn: '123-45-6789' }))
+    const response = await createPatient(req(registration({ ssn: '123-45-6789' })))
     expect(response.status).toBe(400)
   })
 
   it('rejects a pi session -- patient creation is admin/frontdesk exclusively', async () => {
     vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'pi', name: 'Test PI', userId: null })
-    const response = await createPatient(req({ name: 'Test Patient', dob: '1990-01-01' }))
+    const response = await createPatient(req(registration()))
     expect(response.status).toBe(403)
   })
 
   it('rejects a crc session -- registration moved to front desk exclusively (admin kept as override)', async () => {
     vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'crc', name: 'Test CRC', userId: null })
-    const response = await createPatient(req({ name: 'Test Patient', dob: '1990-01-01' }))
+    const response = await createPatient(req(registration()))
     expect(response.status).toBe(403)
   })
 
-  it('inserts the submitted demographics directly into a new patient row', async () => {
-    const response = await createPatient(req({
-      name: 'Test Patient',
-      dob: '1990-01-01',
+  it('inserts the submitted demographics directly into a new patient row and returns only {id, uhid}', async () => {
+    const response = await createPatient(req(registration({
       email: 'test.patient@example.com',
-      phone: '555-0100',
-      city: 'Riverside',
-      zip: '92501',
+      phone: '9876543210',
+      city: 'Pune',
       currentProvider: 'Dr. Kunam',
-    }))
+    })))
     expect(response.status).toBe(201)
     const body = await response.json()
     createdIds.push(body.id)
     expect(body.id).toMatch(/^RD-\d{4}$/)
+    expect(Object.keys(body).sort()).toEqual(['id', 'uhid'])
     // Single-sourced fields, set directly from the request body -- no
     // Tebra/IntakeQ mirroring or mock side effect.
-    expect(body.name).toBe('Test Patient')
-    expect(body.dob).toBe('1990-01-01')
-    expect(body.email).toBe('test.patient@example.com')
-    expect(body.phone).toBe('555-0100')
-    expect(body.city).toBe('Riverside')
-    expect(body.zip).toBe('92501')
-    expect(body.currentProvider).toBe('Dr. Kunam')
+    const [row] = await getDb().select().from(patients).where(eq(patients.id, body.id))
+    expect(row.uhid).toBe(body.uhid)
+    expect(row.name).toBe('Test Patient')
+    expect(row.dob).toBe('1990-01-01')
+    expect(row.email).toBe('test.patient@example.com')
+    expect(row.phone).toBe('+919876543210')
+    expect(row.city).toBe('Pune')
+    expect(row.pinCode).toBe('400001')
+    expect(row.zip).toBeNull()
+    expect(row.currentProvider).toBe('Dr. Kunam')
   })
 })
 
 describe('DELETE /api/patients/[anonId]', () => {
+  // Registration writes audit rows (as 'Test Admin') that the DELETE route
+  // does not remove; delete exactly those, by patient id and userName.
+  const auditedIds: string[] = []
+  afterEach(async () => {
+    while (auditedIds.length > 0) {
+      await getDb().delete(auditLog).where(and(eq(auditLog.patientId, auditedIds.pop()!), eq(auditLog.userName, 'Test Admin')))
+    }
+  })
+
   async function createTestPatient(): Promise<string> {
     vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'admin', name: 'Test Admin', userId: null })
-    const res = await createPatient(new NextRequest('http://localhost/api/patients', { method: 'POST', body: JSON.stringify({ name: 'Delete Route Test', dob: '1993-03-03' }) }))
+    const res = await createPatient(new NextRequest('http://localhost/api/patients', { method: 'POST', body: JSON.stringify(registration({ name: 'Delete Route Test', dob: '1993-03-03' })) }))
+    expect(res.status).toBe(201)
     const body = await res.json()
+    auditedIds.push(body.id)
     return body.id
   }
 

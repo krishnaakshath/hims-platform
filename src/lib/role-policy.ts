@@ -43,6 +43,19 @@ export const CHARGES_ROLES: readonly Role[] = ['admin', 'crc', 'billing']
 // /workbook page itself is CLINICAL_ROLES; pi views it but cannot download.
 export const WORKBOOK_EXPORT_ROLES: readonly Role[] = ['admin', 'crc']
 
+// Practice master-data configuration (UHID prefix, and later tariff/department masters).
+export const MASTER_DATA_ADMIN_ROLES: readonly Role[] = ['admin']
+
+// SP1 patient master. Registration creates a patient (and its UHID); crc
+// edits profiles and writes Aadhaar only through PUT /aadhaar.
+export const REGISTRATION_ROLES: readonly Role[] = ['admin', 'frontdesk']
+export const PATIENT_PROFILE_EDIT_ROLES: readonly Role[] = ['admin', 'crc', 'frontdesk']
+// Aadhaar: who may record/replace/decline it, and who may see the masked
+// last 4 (`XXXX XXXX 1234`). Everyone else, the portal included, sees status
+// only. No role ever reads the plaintext number back, and no role exports it.
+export const AADHAAR_WRITE_ROLES: readonly Role[] = ['admin', 'crc', 'frontdesk']
+export const AADHAAR_MASKED_READ_ROLES: readonly Role[] = ['admin', 'crc']
+
 export type SearchScopes = { patients: boolean; trials: boolean; formTemplates: boolean }
 
 export function searchScopesFor(role: Role): SearchScopes {

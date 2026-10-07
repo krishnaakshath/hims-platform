@@ -31,6 +31,15 @@ describe('PUT /api/patients/[anonId]/identity', () => {
     expect(res.status).toBe(400)
   })
 
+  it('rejects an Aadhaar-shaped idNumber with a fixed message that never echoes it', async () => {
+    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ idType: 'pan', idNumber: '2345 6789 0124' }) })
+    const res = await PUT(req as never, { params: Promise.resolve({ anonId: 'RD-0001' }) })
+    expect(res.status).toBe(400)
+    const text = JSON.stringify(await res.json())
+    expect(text).toContain('Do not enter an Aadhaar number in this field')
+    expect(text).not.toMatch(/2345|6789|0124/)
+  })
+
   // IDENTITY_VERIFY_ROLES = admin, crc, frontdesk. Denied before the body
   // is parsed or any row is read/written -- a valid payload proves the 403
   // comes from the role gate, not validation.

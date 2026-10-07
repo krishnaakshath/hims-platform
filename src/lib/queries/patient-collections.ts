@@ -3,6 +3,7 @@ import { charges, insuranceClaims, mockPayments, patients } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { getOrSetCache, patientCollectionsListCacheKey } from '@/lib/cache'
 import { computeChargeBalances } from '@/lib/billing-calculations'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export async function listPatientCollections() {
   return getOrSetCache(patientCollectionsListCacheKey(), 30, async () => {
@@ -10,7 +11,7 @@ export async function listPatientCollections() {
     const submittedCharges = await db.select().from(charges).where(eq(charges.status, 'submitted'))
     const claims = await db.select().from(insuranceClaims)
     const payments = await db.select().from(mockPayments)
-    const allPatients = await db.select().from(patients)
+    const allPatients = await db.select(publicPatientColumns).from(patients)
     const balances = computeChargeBalances(submittedCharges, claims, payments)
 
     const byPatient = new Map<string, { balanceCents: number; unappliedCents: number }>()

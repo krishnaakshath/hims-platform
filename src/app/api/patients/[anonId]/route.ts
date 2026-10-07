@@ -3,6 +3,7 @@ import { logAudit } from '@/lib/audit'
 import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { getPatientDetail, deletePatient } from '@/lib/queries/patients'
+import { toAadhaarView } from '@/lib/patient-identity'
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
   const session = await requireSession()
@@ -19,7 +20,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   await logAudit(session, 'viewed patient detail', anonId)
 
-  return NextResponse.json(detail)
+  // The detail object carries the Aadhaar SUMMARY (last4 included); only the
+  // role view goes on the wire: masked for admin/crc, status alone otherwise.
+  return NextResponse.json({ ...detail, aadhaar: toAadhaarView(detail.aadhaar, session.role) })
 }
 
 // Admin-only: permanently removes a patient chart (and everything that

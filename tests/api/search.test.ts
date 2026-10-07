@@ -48,7 +48,7 @@ describe('GET /api/search', () => {
     expect(body.formTemplates).toEqual([])
     for (const p of body.patients) {
       expect(Object.keys(p).sort()).toEqual(['detail', 'href', 'id', 'label'])
-      expect(p.detail).toBe(p.id)
+      expect(p.detail.startsWith(p.id)).toBe(true)
       expect(p.href).toBe(`/patients/${p.id}`)
     }
   })

@@ -3,6 +3,7 @@ import { formSubmissions, formTemplates, patients, patientTrialScreenings, audit
 import { eq, desc, or, inArray, sql } from 'drizzle-orm'
 import { getOrSetCache, dashboardCacheKey } from '@/lib/cache'
 import { getAverageExperienceRating } from '@/lib/queries/reviews'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 const ACCOUNT_EVENT_ACTIONS = ['sent intake form', 'completed intake form', 'verified identity', 'ran classification']
 
@@ -62,7 +63,7 @@ export async function getDashboardData() {
       completedReviewCountRows,
     ] = await Promise.all([
       db
-        .select({ submission: formSubmissions, template: formTemplates, patient: patients })
+        .select({ submission: formSubmissions, template: formTemplates, patient: publicPatientColumns })
         .from(formSubmissions)
         .innerJoin(formTemplates, eq(formSubmissions.templateId, formTemplates.id))
         .innerJoin(patients, eq(formSubmissions.patientId, patients.id))
@@ -70,7 +71,7 @@ export async function getDashboardData() {
         .orderBy(desc(formSubmissions.completedDate))
         .limit(5),
       db
-        .select({ submission: formSubmissions, template: formTemplates, patient: patients })
+        .select({ submission: formSubmissions, template: formTemplates, patient: publicPatientColumns })
         .from(formSubmissions)
         .innerJoin(formTemplates, eq(formSubmissions.templateId, formTemplates.id))
         .innerJoin(patients, eq(formSubmissions.patientId, patients.id))

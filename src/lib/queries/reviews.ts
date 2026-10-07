@@ -2,6 +2,7 @@ import { getDb } from '@/db/client'
 import { reviews, patients, formSubmissions, formTemplates } from '@/db/schema'
 import { eq, desc, asc, and, gte, lte, SQL } from 'drizzle-orm'
 import { getOrSetCache, invalidateCacheByPrefix, reviewsListCacheKey } from '@/lib/cache'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export interface ReviewFilters {
   status?: 'sent' | 'completed'
@@ -22,7 +23,7 @@ export async function listReviews(filters: ReviewFilters) {
     const sortFn = filters.sortDir === 'asc' ? asc : desc
 
     const rows = await getDb()
-      .select({ review: reviews, patient: patients, submission: formSubmissions, template: formTemplates })
+      .select({ review: reviews, patient: publicPatientColumns, submission: formSubmissions, template: formTemplates })
       .from(reviews)
       .innerJoin(patients, eq(reviews.patientId, patients.id))
       .innerJoin(formSubmissions, eq(reviews.formSubmissionId, formSubmissions.id))
@@ -41,7 +42,7 @@ export async function listReviews(filters: ReviewFilters) {
 
 export async function getReview(id: number) {
   const [row] = await getDb()
-    .select({ review: reviews, patient: patients, submission: formSubmissions, template: formTemplates })
+    .select({ review: reviews, patient: publicPatientColumns, submission: formSubmissions, template: formTemplates })
     .from(reviews)
     .innerJoin(patients, eq(reviews.patientId, patients.id))
     .innerJoin(formSubmissions, eq(reviews.formSubmissionId, formSubmissions.id))
@@ -63,7 +64,7 @@ export async function getReview(id: number) {
 export async function listSurveyableSubmissions() {
   const db = getDb()
   const completed = await db
-    .select({ submission: formSubmissions, patient: patients, template: formTemplates })
+    .select({ submission: formSubmissions, patient: publicPatientColumns, template: formTemplates })
     .from(formSubmissions)
     .innerJoin(patients, eq(formSubmissions.patientId, patients.id))
     .innerJoin(formTemplates, eq(formSubmissions.templateId, formTemplates.id))
