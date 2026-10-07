@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
 import { appointments, patients, providers } from '@/db/schema'
 import { and, asc, eq, gt, gte, inArray, lt, lte, ne } from 'drizzle-orm'
+import { publicPatientColumns, type PublicPatientRow } from '@/lib/queries/patient-columns'
 
 export type AppointmentStatus = 'scheduled' | 'completed' | 'cancelled' | 'no_show'
 
@@ -18,7 +19,7 @@ export interface AppointmentWithDetails {
   notes: string | null
 }
 
-function mapAppointmentRow(r: { appointment: typeof appointments.$inferSelect; patient: typeof patients.$inferSelect; provider: typeof providers.$inferSelect }): AppointmentWithDetails {
+function mapAppointmentRow(r: { appointment: typeof appointments.$inferSelect; patient: PublicPatientRow; provider: typeof providers.$inferSelect }): AppointmentWithDetails {
   return {
     id: r.appointment.id,
     patientId: r.appointment.patientId,
@@ -48,7 +49,7 @@ export async function listAppointmentsInRange(start: Date, end: Date, providerId
   if (providerIds && providerIds.length > 0) conditions.push(inArray(appointments.providerId, providerIds))
 
   const rows = await getDb()
-    .select({ appointment: appointments, patient: patients, provider: providers })
+    .select({ appointment: appointments, patient: publicPatientColumns, provider: providers })
     .from(appointments)
     .innerJoin(patients, eq(appointments.patientId, patients.id))
     .innerJoin(providers, eq(appointments.providerId, providers.id))
@@ -60,7 +61,7 @@ export async function listAppointmentsInRange(start: Date, end: Date, providerId
 
 export async function listUpcomingAppointments(limit: number): Promise<AppointmentWithDetails[]> {
   const rows = await getDb()
-    .select({ appointment: appointments, patient: patients, provider: providers })
+    .select({ appointment: appointments, patient: publicPatientColumns, provider: providers })
     .from(appointments)
     .innerJoin(patients, eq(appointments.patientId, patients.id))
     .innerJoin(providers, eq(appointments.providerId, providers.id))
@@ -73,7 +74,7 @@ export async function listUpcomingAppointments(limit: number): Promise<Appointme
 
 export async function getAppointment(id: number): Promise<AppointmentWithDetails | null> {
   const [row] = await getDb()
-    .select({ appointment: appointments, patient: patients, provider: providers })
+    .select({ appointment: appointments, patient: publicPatientColumns, provider: providers })
     .from(appointments)
     .innerJoin(patients, eq(appointments.patientId, patients.id))
     .innerJoin(providers, eq(appointments.providerId, providers.id))

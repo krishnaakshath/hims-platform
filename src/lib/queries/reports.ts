@@ -11,6 +11,7 @@ import {
   allEncountersReportCacheKey,
   insuranceCollectionsReportCacheKey,
 } from '@/lib/cache'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 /**
  * CROSS-PHASE DEPENDENCY (see docs/superpowers/plans/2026-09-18-phase4-schema-reconciliation.md):
@@ -40,7 +41,7 @@ function formatTime(d: Date): string {
 export async function listAllAppointmentsReport() {
   return getOrSetCache(allAppointmentsReportCacheKey(), 15, async () => {
     const rows = await getDb()
-      .select({ appointment: appointments, patient: patients, provider: providers })
+      .select({ appointment: appointments, patient: publicPatientColumns, provider: providers })
       .from(appointments)
       .innerJoin(patients, eq(appointments.patientId, patients.id))
       .leftJoin(providers, eq(appointments.providerId, providers.id))
@@ -81,7 +82,7 @@ export async function listUnsignedNotesReport() {
     ).map((r) => r.patientId)
 
     const rows = await getDb()
-      .select({ submission: formSubmissions, template: formTemplates, patient: patients })
+      .select({ submission: formSubmissions, template: formTemplates, patient: publicPatientColumns })
       .from(formSubmissions)
       .innerJoin(formTemplates, eq(formSubmissions.templateId, formTemplates.id))
       .innerJoin(patients, eq(formSubmissions.patientId, patients.id))
@@ -121,7 +122,7 @@ export async function listUnsignedNotesReport() {
 export async function listAllEncountersReport() {
   return getOrSetCache(allEncountersReportCacheKey(), 15, async () => {
     const rows = await getDb()
-      .select({ appointment: appointments, patient: patients, provider: providers })
+      .select({ appointment: appointments, patient: publicPatientColumns, provider: providers })
       .from(appointments)
       .innerJoin(patients, eq(appointments.patientId, patients.id))
       .leftJoin(providers, eq(appointments.providerId, providers.id))
@@ -156,7 +157,7 @@ export async function listAllEncountersReport() {
 export async function listInsuranceCollectionsReport() {
   return getOrSetCache(insuranceCollectionsReportCacheKey(), 15, async () => {
     const rows = await getDb()
-      .select({ claim: insuranceClaims, patient: patients, charge: charges })
+      .select({ claim: insuranceClaims, patient: publicPatientColumns, charge: charges })
       .from(insuranceClaims)
       .innerJoin(patients, eq(insuranceClaims.patientId, patients.id))
       .innerJoin(charges, eq(insuranceClaims.chargeId, charges.id))

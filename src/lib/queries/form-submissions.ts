@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
 import { formSubmissions, formTemplates, formSubmissionScores, patients } from '@/db/schema'
 import { eq, and, gte, lte, desc, SQL } from 'drizzle-orm'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export interface FormSubmissionFilters {
   diagnosisTag?: string
@@ -19,7 +20,7 @@ export async function listFormSubmissions(filters: FormSubmissionFilters) {
   if (filters.patientId) conditions.push(eq(formSubmissions.patientId, filters.patientId))
 
   const rows = await getDb()
-    .select({ submission: formSubmissions, template: formTemplates, patient: patients, score: formSubmissionScores })
+    .select({ submission: formSubmissions, template: formTemplates, patient: publicPatientColumns, score: formSubmissionScores })
     .from(formSubmissions)
     .innerJoin(formTemplates, eq(formSubmissions.templateId, formTemplates.id))
     .innerJoin(patients, eq(formSubmissions.patientId, patients.id))
@@ -48,7 +49,7 @@ export async function listFormSubmissions(filters: FormSubmissionFilters) {
 
 export async function getFormSubmission(id: number) {
   const [row] = await getDb()
-    .select({ submission: formSubmissions, template: formTemplates, patient: patients, score: formSubmissionScores })
+    .select({ submission: formSubmissions, template: formTemplates, patient: publicPatientColumns, score: formSubmissionScores })
     .from(formSubmissions)
     .innerJoin(formTemplates, eq(formSubmissions.templateId, formTemplates.id))
     .innerJoin(patients, eq(formSubmissions.patientId, patients.id))

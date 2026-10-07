@@ -8,6 +8,7 @@ import { getOrSetCache, invalidateCache, chargesListCacheKey, chargeDetailCacheK
 // import the real workflow logic too, instead of hand-maintaining a copy.
 export { type ChargeStatus, isAllowedChargeTransition } from '@/lib/charge-status'
 import type { ChargeStatus } from '@/lib/charge-status'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export interface DiagnosisCodeInput { code: string; description: string }
 export interface ProcedureCodeInput { code: string; description: string; units: number; chargeCents: number }
@@ -25,7 +26,7 @@ export interface CreateChargeInput {
 export async function listCharges() {
   return getOrSetCache(chargesListCacheKey(), 30, async () => {
     const rows = await getDb()
-      .select({ charge: charges, patient: patients })
+      .select({ charge: charges, patient: publicPatientColumns })
       .from(charges)
       .innerJoin(patients, eq(charges.patientId, patients.id))
       // Seed/demo data has many charges sharing the same dateOfService, and
@@ -41,7 +42,7 @@ export async function listCharges() {
 export async function getCharge(id: number) {
   return getOrSetCache(chargeDetailCacheKey(id), 30, async () => {
     const [row] = await getDb()
-      .select({ charge: charges, patient: patients })
+      .select({ charge: charges, patient: publicPatientColumns })
       .from(charges)
       .innerJoin(patients, eq(charges.patientId, patients.id))
       .where(eq(charges.id, id))

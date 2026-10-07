@@ -5,6 +5,7 @@ import { hashPassword, verifyPassword } from '@/lib/password'
 import { getUnreadCountForPatient } from '@/lib/queries/messages'
 import { isAadhaarOnFile } from '@/lib/queries/patient-profile'
 import { stateName } from '@/lib/india/reference'
+import { publicPatientColumns, patientPortalConfiguredSql } from '@/lib/queries/patient-columns'
 
 /**
  * The patient's own identity details for the portal's "Your details"
@@ -56,8 +57,9 @@ async function getPortalProfile(patient: ProfileSource, patientId: string): Prom
  * their own record.
  */
 export async function getPatientPortalData(patientId: string) {
-  const [patient] = await getDb().select().from(patients).where(eq(patients.id, patientId))
-  if (!patient) return null
+  const [row] = await getDb().select({ patient: publicPatientColumns, portalConfigured: patientPortalConfiguredSql }).from(patients).where(eq(patients.id, patientId))
+  if (!row) return null
+  const { patient, portalConfigured } = row
 
   const dx = await getDb().select({ code: diagnoses.code, description: diagnoses.description, date: diagnoses.date }).from(diagnoses).where(eq(diagnoses.patientId, patientId))
   const meds = await getDb()
@@ -103,7 +105,7 @@ export async function getPatientPortalData(patientId: string) {
     name: patient.name,
     dob: patient.dob,
     currentProvider: patient.currentProvider,
-    portalConfigured: !!patient.portalPasswordHash,
+    portalConfigured,
     diagnoses: dx,
     activeMedications: meds.filter((m) => m.status === 'active'),
     pastMedications: meds.filter((m) => m.status === 'inactive'),

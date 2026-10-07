@@ -1,4 +1,4 @@
-import type { patients } from '@/db/schema'
+import type { PublicPatientRow } from '@/lib/queries/patient-columns'
 
 export interface FhirPatient {
   resourceType: 'Patient'
@@ -11,7 +11,7 @@ export interface FhirPatient {
 // No `gender` field: `patients` has no gender/sex column in this app's schema
 // today, and FHIR's `gender` is optional -- omitting it is honest, a
 // fabricated value would not be.
-export function patientToFhir(patient: typeof patients.$inferSelect): FhirPatient {
+export function patientToFhir(patient: PublicPatientRow): FhirPatient {
   return {
     resourceType: 'Patient',
     id: patient.id,

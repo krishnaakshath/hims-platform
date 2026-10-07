@@ -3,6 +3,7 @@ import { broadcasts, patients, patientTrialScreenings, formSubmissions, trials }
 import { eq, desc } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, broadcastsListCacheKey } from '@/lib/cache'
 import type { Verdict } from '@/lib/rule-engine'
+import { publicPatientColumns, type PublicPatientRow } from '@/lib/queries/patient-columns'
 
 export interface BroadcastRecipientFilters {
   trialId?: string
@@ -27,7 +28,7 @@ export async function listBroadcastRecipientCandidates(filters: BroadcastRecipie
   const db = getDb()
 
   const rows = await db
-    .select({ patient: patients, screening: patientTrialScreenings })
+    .select({ patient: publicPatientColumns, screening: patientTrialScreenings })
     .from(patients)
     .leftJoin(patientTrialScreenings, eq(patientTrialScreenings.patientId, patients.id))
     .where(filters.trialId ? eq(patientTrialScreenings.trialId, filters.trialId) : undefined)
@@ -39,7 +40,7 @@ export async function listBroadcastRecipientCandidates(filters: BroadcastRecipie
   // seen per patient below is deterministically that patient's most
   // recently created screening -- "most recent screening wins" is a real
   // product decision now, not an accident of Postgres's row order.
-  const byPatient = new Map<string, { patient: typeof patients.$inferSelect; overallStatus?: Verdict }>()
+  const byPatient = new Map<string, { patient: PublicPatientRow; overallStatus?: Verdict }>()
   for (const r of rows) {
     if (!byPatient.has(r.patient.id)) {
       byPatient.set(r.patient.id, { patient: r.patient, overallStatus: r.screening?.overallStatus as Verdict | undefined })

@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, patientTrialScreenings, screeningCriteriaResults } from '@/db/schema'
 import type { Verdict } from '@/lib/rule-engine'
+import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export type TrialScreeningCriterion = typeof screeningCriteriaResults.$inferSelect
 
@@ -26,7 +27,7 @@ export type TrialScreeningPatient = {
  */
 export async function listScreeningsForTrial(trialId: string): Promise<TrialScreeningPatient[]> {
   const rows = await getDb()
-    .select({ patient: patients, screening: patientTrialScreenings, criterion: screeningCriteriaResults })
+    .select({ patient: publicPatientColumns, screening: patientTrialScreenings, criterion: screeningCriteriaResults })
     .from(patientTrialScreenings)
     .innerJoin(patients, eq(patients.id, patientTrialScreenings.patientId))
     .leftJoin(screeningCriteriaResults, eq(screeningCriteriaResults.screeningId, patientTrialScreenings.id))

@@ -12,6 +12,7 @@ import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
 import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
+import { publicPatientColumns, patientPortalConfiguredSql, type PublicPatientRow } from '@/lib/queries/patient-columns'
 
 export interface CriteriaSummary {
   inclusionMet: number
@@ -20,23 +21,14 @@ export interface CriteriaSummary {
   exclusionTotal: number
 }
 
-// `mfaSecretEncrypted` is the patient's encrypted TOTP secret -- only the
-// portal login/enrollment routes ever need it, and they read it through
-// getPatientMfaState, never through these list/detail queries. Both queries
-// below are serialized to JSON (GET /api/patients, GET /api/patients/[anonId],
-// Server Component props) and written to the Redis cache, so the column is
-// stripped from every row they return rather than riding along in a
-// whole-row spread. `mfaEnabled` (a non-sensitive flag the staff UI shows)
-// stays.
-type PatientRowWithoutMfaSecret = Omit<typeof patients.$inferSelect, 'mfaSecretEncrypted'>
+// Credential columns (portal password hash, encrypted TOTP secret) are never
+// selected here: both queries below are serialized to JSON (GET /api/patients,
+// GET /api/patients/[anonId], Server Component props) and written to the
+// Redis cache, so they read `publicPatientColumns` (patient-columns.ts).
+// `mfaEnabled` (a non-sensitive flag the staff UI shows) stays, and
+// `portalConfigured` is computed in SQL.
 
-function withoutMfaSecret(row: typeof patients.$inferSelect): PatientRowWithoutMfaSecret {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { mfaSecretEncrypted, ...rest } = row
-  return rest
-}
-
-export type PatientWithStatus = PatientRowWithoutMfaSecret & { trialId?: string; overallStatus?: Verdict; criteriaSummary?: CriteriaSummary }
+export type PatientWithStatus = PublicPatientRow & { trialId?: string; overallStatus?: Verdict; criteriaSummary?: CriteriaSummary }
 
 /**
  * Shared by the /api/patients route handler and any Server Component that
@@ -79,7 +71,7 @@ export async function listPatientNameOptions(): Promise<PatientNameOption[]> {
 export async function listPatientsWithStatus(trialId: string | null): Promise<PatientWithStatus[]> {
   return getOrSetCache(patientListCacheKey(trialId), 30, async () => {
     const rows = await getDb()
-      .select({ patient: patients, screening: patientTrialScreenings })
+      .select({ patient: publicPatientColumns, screening: patientTrialScreenings })
       .from(patients)
       .leftJoin(patientTrialScreenings, eq(patientTrialScreenings.patientId, patients.id))
       .where(trialId ? eq(patientTrialScreenings.trialId, trialId) : undefined)
@@ -114,7 +106,7 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Pa
     }
 
     return rows.map((r) => ({
-      ...withoutMfaSecret(r.patient),
+      ...r.patient,
       trialId: r.screening?.trialId,
       overallStatus: r.screening?.overallStatus,
       criteriaSummary: summaryByPatient.get(r.patient.id),
@@ -130,8 +122,9 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Pa
  */
 export async function getPatientDetail(anonId: string) {
   return getOrSetCache(patientDetailCacheKey(anonId), 30, async () => {
-    const [patient] = await getDb().select().from(patients).where(eq(patients.id, anonId))
-    if (!patient) return null
+    const [row] = await getDb().select({ patient: publicPatientColumns, portalConfigured: patientPortalConfiguredSql }).from(patients).where(eq(patients.id, anonId))
+    if (!row) return null
+    const { patient, portalConfigured } = row
 
     const [screening] = await getDb().select().from(patientTrialScreenings).where(eq(patientTrialScreenings.patientId, anonId))
     const criteria = screening ? await getDb().select().from(screeningCriteriaResults).where(eq(screeningCriteriaResults.screeningId, screening.id)) : []
@@ -172,7 +165,7 @@ export async function getPatientDetail(anonId: string) {
     const aadhaar: AadhaarSummary = toAadhaarSummary(aadhaarRow ?? null)
 
     return {
-      ...withoutMfaSecret(patient),
+      ...patient,
       mfaEnabled: patient.mfaEnabled,
       overallStatus: screening?.overallStatus,
       selectionConfirmedAt: screening?.selectionConfirmedAt ?? null,
@@ -183,7 +176,7 @@ export async function getPatientDetail(anonId: string) {
       medications: meds,
       allergies: patientAllergies,
       identityVerification: identity ?? null,
-      portalConfigured: !!patient.portalPasswordHash,
+      portalConfigured,
       discrepancies,
       contacts,
       aadhaar,
