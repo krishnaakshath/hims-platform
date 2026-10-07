@@ -3,7 +3,7 @@ import { requireSession } from '@/lib/auth'
 import { ENCOUNTER_STATUS_ROLES } from '@/lib/role-policy'
 import { ENCOUNTER_TRANSITION_ROLES, encounterStatusRequestSchema } from '@/lib/encounters/status'
 import { transitionEncounter } from '@/lib/queries/encounters'
-import { pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 
 const MAX_INT = 2147483647
 
@@ -42,6 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
     return NextResponse.json({ encounter: result.encounter })
   } catch (err) {
+    if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     console.error(`[encounters] status change failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
     return NextResponse.json({ error: 'Could not update the visit' }, { status: 500 })
   }

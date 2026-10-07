@@ -14,6 +14,7 @@ import { POST } from '@/app/api/front-desk/check-in/route'
 import { checkInVisit } from '@/lib/queries/encounters'
 import { getActiveAdmissionForPatient } from '@/lib/queries/admissions'
 import { logAudit } from '@/lib/audit'
+import { RETRY_MESSAGE } from '@/lib/db-errors'
 
 const valid = { patientId: 'RD-0001', providerId: 1, visitType: 'outpatient', urgency: 'routine', reason: 'Review' }
 const req = (body: unknown) => new Request('http://localhost/api/front-desk/check-in', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) }) as never
@@ -102,5 +103,12 @@ describe('POST /api/front-desk/check-in (encounter)', () => {
     expect(logged).not.toContain('RD-0001')
     expect(logged).not.toContain('Review')
     spy.mockRestore()
+  })
+
+  it.each(['40P01', '40001'])('a %s (deadlock / serialization failure) is a 409 asking to try again', async (code) => {
+    vi.mocked(checkInVisit).mockRejectedValue(Object.assign(new Error('deadlock detected'), { code }))
+    const res = await POST(req(valid))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: RETRY_MESSAGE })
   })
 })

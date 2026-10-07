@@ -7,6 +7,7 @@ vi.mock('@/lib/queries/encounters', () => ({ transitionEncounter: vi.fn() }))
 
 import { POST } from '@/app/api/encounters/[id]/status/route'
 import { transitionEncounter } from '@/lib/queries/encounters'
+import { RETRY_MESSAGE } from '@/lib/db-errors'
 
 const send = (body: unknown) => new NextRequest('http://localhost/api/encounters/3/status', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) })
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) })
@@ -75,13 +76,20 @@ describe('POST /api/encounters/[id]/status', () => {
     expect(transitionEncounter).not.toHaveBeenCalled()
   })
 
+  it.each(['40P01', '40001'])('a %s is a 409 asking to try again', async (code) => {
+    vi.mocked(transitionEncounter).mockRejectedValueOnce(Object.assign(new Error('boom'), { code }))
+    const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: RETRY_MESSAGE })
+  })
+
   it('a thrown error is a generic 500', async () => {
-    vi.mocked(transitionEncounter).mockRejectedValueOnce(Object.assign(new Error('boom'), { code: '40P01' }))
+    vi.mocked(transitionEncounter).mockRejectedValueOnce(Object.assign(new Error('boom'), { code: '23503' }))
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'Could not update the visit' })
-    expect(spy.mock.calls.flat().join(' ')).toContain('40P01')
+    expect(spy.mock.calls.flat().join(' ')).toContain('23503')
     expect(spy.mock.calls.flat().join(' ')).not.toContain('left')
     spy.mockRestore()
   })

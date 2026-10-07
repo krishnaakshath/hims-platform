@@ -8,7 +8,7 @@ import { assignRoomToPatient } from '@/lib/queries/rooms'
 import { getActiveAdmissionForPatient } from '@/lib/queries/admissions'
 import { checkInVisit, type CheckInVisitError } from '@/lib/queries/encounters'
 import { CHECK_IN_ROLES } from '@/lib/role-policy'
-import { pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
 
 const checkInSchema = z.object({
@@ -113,6 +113,7 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ ...result.assignment, encounterId: result.encounter.id, opdToken: result.encounter.opdToken }, { status: 201 })
   } catch (err) {
+    if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     console.error(`[check-in] failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
     return NextResponse.json({ error: 'Could not check in the patient' }, { status: 500 })
   }
