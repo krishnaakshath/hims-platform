@@ -49,7 +49,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (result.error === 'not_owner') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       return NextResponse.json({ error: 'This visit can no longer change to that status.' }, { status: 409 })
     }
-    return NextResponse.json({ encounter: result.encounter })
+    // Explicit projection (M7): no free text (cancel reason) and no internal links ride along.
+    const e = result.encounter
+    return NextResponse.json({
+      encounter: {
+        id: e.id, patientId: e.patientId, encounterType: e.encounterType, visitType: e.visitType, status: e.status,
+        encounterDate: e.encounterDate, opdToken: e.opdToken, departmentId: e.departmentId, providerId: e.providerId,
+        appointmentId: e.appointmentId, admissionId: e.admissionId, checkedInAt: e.checkedInAt,
+        statusChangedAt: e.statusChangedAt, statusChangedByName: e.statusChangedByName, completedAt: e.completedAt,
+      },
+    })
   } catch (err) {
     if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     console.error(`[encounters] status change failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)

@@ -13,7 +13,18 @@ import { RETRY_MESSAGE } from '@/lib/db-errors'
 
 const send = (body: unknown) => new NextRequest('http://localhost/api/encounters/3/status', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) })
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) })
-const ENCOUNTER = { id: 3, status: 'completed' }
+// A full row: the route must answer with an explicit projection (M7), never the row.
+const ENCOUNTER = {
+  id: 3, patientId: 'RD-0001', encounterType: 'opd', visitType: 'new', status: 'completed', encounterDate: '2026-10-07', opdToken: 4,
+  departmentId: 2, providerId: 4, appointmentId: null, admissionId: null, doctorAssignmentId: 11,
+  checkedInByName: 'Desk A', checkedInAt: new Date('2026-10-07T04:00:00Z'), statusChangedAt: new Date('2026-10-07T05:00:00Z'),
+  statusChangedByName: 'Dr K', completedAt: new Date('2026-10-07T05:00:00Z'), cancelReason: 'FREE-TEXT-SECRET',
+}
+const PROJECTED = {
+  id: 3, patientId: 'RD-0001', encounterType: 'opd', visitType: 'new', status: 'completed', encounterDate: '2026-10-07', opdToken: 4,
+  departmentId: 2, providerId: 4, appointmentId: null, admissionId: null,
+  checkedInAt: '2026-10-07T04:00:00.000Z', statusChangedAt: '2026-10-07T05:00:00.000Z', statusChangedByName: 'Dr K', completedAt: '2026-10-07T05:00:00.000Z',
+}
 
 beforeEach(() => {
   role = 'frontdesk'
@@ -29,7 +40,7 @@ describe('POST /api/encounters/[id]/status', () => {
     expect(transitionEncounter).not.toHaveBeenCalled()
     const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ encounter: ENCOUNTER })
+    expect(await res.json()).toEqual({ encounter: PROJECTED })
     expect(transitionEncounter).toHaveBeenCalledWith(3, 'cancelled', expect.objectContaining({ role: 'frontdesk' }), { cancelReason: 'left', actingProviderId: null })
   })
 
@@ -40,6 +51,13 @@ describe('POST /api/encounters/[id]/status', () => {
     const denied = await POST(send({ to: 'cancelled', cancelReason: 'x' }), ctx('3'))
     expect(denied.status).toBe(403)
     expect(await denied.json()).toEqual({ error: 'Forbidden' })
+  })
+
+  it('answers with an explicit projection: no cancel reason, no assignment id, no check-in clerk (M7)', async () => {
+    role = 'admin'
+    const body = await (await POST(send({ to: 'completed' }), ctx('3'))).json()
+    expect(body).toEqual({ encounter: PROJECTED })
+    expect(JSON.stringify(body)).not.toContain('FREE-TEXT-SECRET')
   })
 
   it('a pi acts as their own provider: another doctor\'s visit is 403, an unlinked pi is 403 before any write (I3)', async () => {
