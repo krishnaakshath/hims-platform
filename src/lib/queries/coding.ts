@@ -517,6 +517,7 @@ export async function applyCodingAction(
         break
       }
       case 'reopen': {
+        if (lacksClaim) return fail('not_claimed')
         patch.reopenCount = coding.reopenCount + 1 // exact: the row is locked FOR UPDATE
         break
       }

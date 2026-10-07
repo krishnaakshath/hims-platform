@@ -277,6 +277,8 @@ describe.skipIf(!process.env.DATABASE_URL)('encounter coding (DB)', () => {
   it('reopen requires finalised, counts, and keeps the reason out of the audit', async () => {
     expect(await applyCodingAction(enc.id, { action: 'reopen', reason: 'payer query' }, CODER)).toEqual({ ok: false, error: 'invalid_transition' })
     await finalisedEncounter(enc.id)
+    // Ruling 7: a coder who does not hold the encounter cannot move its status, reopen included.
+    expect(await applyCodingAction(enc.id, { action: 'reopen', reason: 'payer query' }, CODER_B)).toEqual({ ok: false, error: 'not_claimed' })
     expect(await applyCodingAction(enc.id, { action: 'reopen', reason: 'payer query' }, CODER)).toEqual({ ok: true, value: { status: 'in_progress', issues: [] } })
     const [row] = await getDb().select().from(encounterCoding).where(eq(encounterCoding.encounterId, enc.id))
     expect(row).toMatchObject({ status: 'in_progress', reopenCount: 1 })
