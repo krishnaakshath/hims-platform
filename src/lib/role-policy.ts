@@ -56,6 +56,12 @@ export const PATIENT_PROFILE_EDIT_ROLES: readonly Role[] = ['admin', 'crc', 'fro
 export const AADHAAR_WRITE_ROLES: readonly Role[] = ['admin', 'crc', 'frontdesk']
 export const AADHAAR_MASKED_READ_ROLES: readonly Role[] = ['admin', 'crc']
 
+// SP2 tariff master. Manage = every tariff page and write (services, rates,
+// packages, room categories, CSV import). Lookup = the price lookup and the
+// service search only (GET /api/tariff/resolve, GET /api/tariff/services).
+export const TARIFF_MANAGE_ROLES: readonly Role[] = ['admin', 'billing']
+export const TARIFF_LOOKUP_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'frontdesk']
+
 export type SearchScopes = { patients: boolean; trials: boolean; formTemplates: boolean }
 
 export function searchScopesFor(role: Role): SearchScopes {
