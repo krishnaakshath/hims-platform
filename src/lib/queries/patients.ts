@@ -8,7 +8,7 @@ import {
   // SP3
   encounters, followUpOrders,
   // SP4
-  chargeLines,
+  chargeLines, invoices, patientPayments, refunds,
 } from '@/db/schema'
 import { desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
@@ -413,6 +413,20 @@ export async function deletePatient(anonId: string): Promise<boolean> {
   const [patient] = await db.select({ id: patients.id }).from(patients).where(eq(patients.id, anonId))
   if (!patient) return false
 
+  // SP4 billing, first and children-first, so a patient with issued documents is refused
+  // before anything else is deleted (plan ruling 11: tax records are kept). Receipts,
+  // advances and refunds are always issued: the migration-B immutability trigger refuses
+  // their DELETE (SQLSTATE 55000). A charge line on a finalised or cancelled invoice is
+  // still held by its invoice_lines row (FK, 23503), and the invoice guard trigger refuses
+  // an issued invoice's DELETE. Captured/void lines and draft/discarded invoices are
+  // deleted. Lines also reference medication_dispenses, charges, encounters and admissions,
+  // so they must go before those below. (Task 12 adds a friendly pre-check and a 409.)
+  await db.delete(refunds).where(eq(refunds.patientId, anonId))
+  await db.delete(patientPayments).where(eq(patientPayments.patientId, anonId))
+  await db.delete(chargeLines).where(eq(chargeLines.patientId, anonId))
+  await db.delete(invoices).where(eq(invoices.patientId, anonId))
+  // end SP4
+
   const screenings = await db.select({ id: patientTrialScreenings.id, trialId: patientTrialScreenings.trialId }).from(patientTrialScreenings).where(eq(patientTrialScreenings.patientId, anonId))
   const screeningIds = screenings.map((s) => s.id)
   if (screeningIds.length > 0) {
@@ -431,11 +445,6 @@ export async function deletePatient(anonId: string): Promise<boolean> {
     await db.delete(medicationAdministrations).where(inArray(medicationAdministrations.admissionId, patientAdmissionIds))
   }
 
-  // SP4: charge_lines reference this patient and also medication_dispenses, charges,
-  // encounters and admissions (all deleted below, none with an ON DELETE action), so the
-  // patient's lines go before any of them.
-  await db.delete(chargeLines).where(eq(chargeLines.patientId, anonId))
-  // end SP4
   await db.delete(formChartDiscrepancies).where(eq(formChartDiscrepancies.patientId, anonId))
   await db.delete(reviews).where(eq(reviews.patientId, anonId))
   await db.delete(patientTrialScreenings).where(eq(patientTrialScreenings.patientId, anonId))

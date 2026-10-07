@@ -38,6 +38,12 @@ import {
   chargeLines,
   chargeRuleConfigs,
   billingSettings,
+  refunds,
+  patientPayments,
+  creditNotes,
+  invoiceLines,
+  invoices,
+  documentCounters,
   // end SP4
   // SP3
   encounters,
@@ -910,11 +916,22 @@ async function clearExistingData() {
   const db = getDb()
   // Delete in FK-safe order (children before parents) so seed() is safely re-runnable
   // against the live database without unique-constraint violations.
-  // SP4: charge lines reference charges, medication_dispenses, encounters, admissions,
-  // service_catalog and tariff_rates, so they go first. Rule config is cleared; the
-  // billing_settings singleton is kept, but its room-rent service link is released
-  // before service_catalog is deleted below.
-  await db.delete(chargeLines)
+  // SP4: billing documents and charge lines go first (charge lines reference charges,
+  // medication_dispenses, encounters, admissions, service_catalog and tariff_rates).
+  // Issued documents are guarded by the migration-B immutability triggers, so they are
+  // cleared children-first in one transaction that sets the transaction-local purge flag.
+  // Rule config is cleared; the billing_settings singleton is kept, but its room-rent
+  // service link is released before service_catalog is deleted below.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+    await tx.delete(refunds)
+    await tx.delete(patientPayments)
+    await tx.delete(creditNotes)
+    await tx.delete(invoiceLines)
+    await tx.delete(chargeLines)
+    await tx.delete(invoices)
+    await tx.delete(documentCounters)
+  })
   await db.delete(chargeRuleConfigs)
   await db.update(billingSettings).set({ roomRentServiceId: null })
   // end SP4

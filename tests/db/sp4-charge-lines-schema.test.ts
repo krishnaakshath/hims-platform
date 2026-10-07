@@ -15,7 +15,8 @@ describe('SP4 migration A (charge lines)', () => {
   it('migration A is idempotent and declares every column', () => {
     const s = readMigration(MIGRATION)
     expect(idempotencyProblems(s)).toEqual([])
-    for (const t of TABLES) expect(missingColumns(t, s)).toEqual([])
+    // charge_lines.invoice_id (and its FK and index) arrive with migration B (Task 5).
+    for (const t of TABLES) expect(missingColumns(t, s).filter((c) => !(t === chargeLines && c === 'invoice_id'))).toEqual([])
     for (const c of ['requires_preauth', 'max_quantity', 'gstin', 'state_code']) expect(s).toContain(c)
   })
 
@@ -26,7 +27,7 @@ describe('SP4 migration A (charge lines)', () => {
   })
 
   it('every FK, unique, check and index name of the new tables is in the SQL and fits 63 chars', () => {
-    const s = readMigration(MIGRATION)
+    const s = readMigration(MIGRATION) + readMigration('2026-10-08-sp4-b-invoices-ledger.sql')
     for (const t of [...TABLES, serviceCatalog]) {
       const c = getTableConfig(t)
       const names = [
@@ -45,7 +46,9 @@ describe('SP4 migration A (charge lines)', () => {
     for (const t of TABLES) {
       for (const fk of getTableConfig(t).foreignKeys) {
         expect(fk.onDelete ?? 'no action', fk.getName()).toBe('no action')
-        const block = s.slice(s.indexOf(`ADD CONSTRAINT ${fk.getName()}`))
+        const at = s.indexOf(`ADD CONSTRAINT ${fk.getName()}`)
+        if (fk.getName() === 'charge_lines_invoice_id_invoices_id_fk') { expect(at).toBe(-1); continue } // migration B
+        const block = s.slice(at)
         expect(block.slice(0, block.indexOf(';')), fk.getName()).not.toMatch(/ON DELETE/)
       }
     }

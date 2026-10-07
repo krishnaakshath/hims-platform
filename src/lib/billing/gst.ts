@@ -98,3 +98,18 @@ export function documentTitle(lineRatesBp: readonly number[], hospitalGstin: str
   if (!hospitalGstin) return 'Bill'
   return lineRatesBp.some((r) => r > 0) ? 'Tax Invoice' : 'Bill of Supply'
 }
+
+/**
+ * Frozen at finalisation into `invoices.snapshot` so a reprint never changes when the
+ * hospital, patient or payer master is later edited. PHI: patient id, name, UHID and postal
+ * address only (no Aadhaar, ABHA, phone, email or DOB).
+ */
+export interface InvoiceSnapshot {
+  hospital: { legalName: string; gstin: string | null; stateCode: string; gstStateCode: string; address: string | null }
+  patient: {
+    id: string; name: string; uhid: string | null; addressLine1: string | null; addressLine2: string | null
+    city: string | null; district: string | null; stateCode: string | null; pinCode: string | null
+  }
+  payer: { id: number; name: string; gstin: string | null; stateCode: string | null } | null
+  context: { encounterId: number | null; admissionId: number | null; label: string }
+}

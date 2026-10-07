@@ -1,7 +1,8 @@
-import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
+import type { InvoiceSnapshot } from '../lib/billing/gst'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
 export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs'])
@@ -984,6 +985,8 @@ export const chargeLines = pgTable('charge_lines', {
   createdByName: text('created_by_name').notNull(),
   createdByUserId: integer('created_by_user_id').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  // Migration B: the draft or issued invoice this line is on (null = unbilled).
+  invoiceId: integer('invoice_id').references(() => invoices.id),
 }, (t) => [
   index('charge_lines_patient_idx').on(t.patientId),
   index('charge_lines_encounter_idx').on(t.encounterId),
@@ -998,11 +1001,164 @@ export const chargeLines = pgTable('charge_lines', {
   check('charge_lines_context_required', sql`${t.source} = 'pharmacy' OR ${t.encounterId} IS NOT NULL OR ${t.admissionId} IS NOT NULL`),
   check('charge_lines_manual_reason', sql`${t.priceSource} <> 'manual' OR ${t.priceOverrideReason} IS NOT NULL`),
   check('charge_lines_void_reason', sql`${t.status} <> 'void' OR ${t.voidReason} IS NOT NULL`),
+  index('charge_lines_invoice_idx').on(t.invoiceId),
+])
+
+// Migration B: scripts/migrations/2026-10-08-sp4-b-invoices-ledger.sql (documents and ledger).
+// MIGRATION-ONLY IMMUTABILITY: issued documents are guarded by triggers that drizzle cannot
+// express and that exist only in migration B (like SP2's tariff_rates_no_overlap):
+//   - invoices_issued_guard (sp4_invoice_guard): a finalised or cancelled invoice cannot be
+//     deleted, a cancelled one cannot be updated, and a finalised one can only become
+//     cancelled (status, cancelled_at, cancelled_by_name; every other column unchanged);
+//   - invoice_lines_immutable, credit_notes_immutable, patient_payments_immutable,
+//     refunds_immutable (sp4_reject_issued_change): no UPDATE or DELETE at all.
+// Each raises SQLSTATE 55000 unless the transaction ran
+// `select set_config('hims.allow_document_purge', 'on', true)` (seed clear and test
+// fixtures only; never app code). After `db:push` on a fresh DB, apply migration B.
+export const documentSeriesEnum = pgEnum('document_series', ['invoice', 'receipt', 'credit_note', 'refund'])
+export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'finalised', 'cancelled', 'discarded'])
+export const paymentModeEnum = pgEnum('payment_mode', ['cash', 'upi', 'card', 'cheque', 'neft', 'other'])
+export const patientPaymentKindEnum = pgEnum('patient_payment_kind', ['advance', 'receipt'])
+
+// Gapless numbering: one row per series per financial year (YYYY-YY), incremented with
+// UPDATE … RETURNING inside the finalising transaction (Task 10).
+export const documentCounters = pgTable('document_counters', {
+  series: documentSeriesEnum('series').notNull(),
+  financialYear: text('financial_year').notNull(),
+  lastValue: integer('last_value').default(0).notNull(),
+}, (t) => [
+  primaryKey({ name: 'document_counters_pk', columns: [t.series, t.financialYear] }),
+  check('document_counters_fy_format', sql`${t.financialYear} ~ '^[0-9]{4}-[0-9]{2}$'`),
+  check('document_counters_value_range', sql`${t.lastValue} BETWEEN 0 AND 999999`),
+])
+
+export const invoices = pgTable('invoices', {
+  id: serial('id').primaryKey(),
+  invoiceNumber: text('invoice_number').unique(),  // drawn at finalisation; drafts have none
+  status: invoiceStatusEnum('status').default('draft').notNull(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  encounterId: integer('encounter_id').references(() => encounters.id),
+  admissionId: integer('admission_id').references(() => admissions.id),
+  payerId: integer('payer_id').references(() => payers.id),
+  financialYear: text('financial_year'),
+  invoiceDate: date('invoice_date'),               // Asia/Kolkata business date
+  documentTitle: text('document_title'),
+  supplyType: text('supply_type', { enum: ['intra', 'inter'] }),
+  placeOfSupplyStateCode: text('place_of_supply_state_code'),
+  snapshot: jsonb('snapshot').$type<InvoiceSnapshot>(),
+  taxablePaise: bigint('taxable_paise', { mode: 'number' }),
+  cgstPaise: bigint('cgst_paise', { mode: 'number' }),
+  sgstPaise: bigint('sgst_paise', { mode: 'number' }),
+  igstPaise: bigint('igst_paise', { mode: 'number' }),
+  totalPaise: bigint('total_paise', { mode: 'number' }),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  finalisedAt: timestamp('finalised_at'),
+  finalisedByName: text('finalised_by_name'),
+  cancelledAt: timestamp('cancelled_at'),
+  cancelledByName: text('cancelled_by_name'),
+  discardedAt: timestamp('discarded_at'),
+  discardedByName: text('discarded_by_name'),
+}, (t) => [
+  check('invoices_number_when_issued', sql`(${t.status} IN ('finalised', 'cancelled')) = (${t.invoiceNumber} IS NOT NULL)`),
+  check('invoices_totals_when_issued', sql`${t.status} NOT IN ('finalised', 'cancelled') OR (${t.totalPaise} IS NOT NULL AND ${t.snapshot} IS NOT NULL AND ${t.invoiceDate} IS NOT NULL)`),
+  index('invoices_patient_idx').on(t.patientId),
+])
+
+// Written only at finalisation, so every row belongs to an issued invoice and is immutable.
+export const invoiceLines = pgTable('invoice_lines', {
+  id: serial('id').primaryKey(),
+  invoiceId: integer('invoice_id').notNull().references(() => invoices.id),
+  chargeLineId: integer('charge_line_id').notNull().references(() => chargeLines.id),
+  lineNo: integer('line_no').notNull(),
+  itemCode: text('item_code').notNull(),
+  itemName: text('item_name').notNull(),
+  hsnSac: text('hsn_sac').notNull(),
+  serviceDate: date('service_date').notNull(),
+  quantity: integer('quantity').notNull(),
+  unitPricePaise: integer('unit_price_paise').notNull(),
+  priceSource: text('price_source', { enum: PRICE_SOURCES }).notNull(),
+  taxablePaise: bigint('taxable_paise', { mode: 'number' }).notNull(),
+  gstRateBp: integer('gst_rate_bp').notNull(),
+  cgstRateBp: integer('cgst_rate_bp').notNull(),
+  sgstRateBp: integer('sgst_rate_bp').notNull(),
+  igstRateBp: integer('igst_rate_bp').notNull(),
+  cgstPaise: bigint('cgst_paise', { mode: 'number' }).notNull(),
+  sgstPaise: bigint('sgst_paise', { mode: 'number' }).notNull(),
+  igstPaise: bigint('igst_paise', { mode: 'number' }).notNull(),
+  totalPaise: bigint('total_paise', { mode: 'number' }).notNull(),
+}, (t) => [
+  uniqueIndex('invoice_lines_invoice_line_no_unique').on(t.invoiceId, t.lineNo),
+])
+
+// Full-value credit note: the only way to cancel a finalised invoice (one per invoice).
+export const creditNotes = pgTable('credit_notes', {
+  id: serial('id').primaryKey(),
+  creditNoteNumber: text('credit_note_number').notNull().unique(),
+  invoiceId: integer('invoice_id').notNull().unique().references(() => invoices.id),
+  financialYear: text('financial_year').notNull(),
+  issueDate: date('issue_date').notNull(),
+  reason: text('reason').notNull(),
+  taxablePaise: bigint('taxable_paise', { mode: 'number' }).notNull(),
+  cgstPaise: bigint('cgst_paise', { mode: 'number' }).notNull(),
+  sgstPaise: bigint('sgst_paise', { mode: 'number' }).notNull(),
+  igstPaise: bigint('igst_paise', { mode: 'number' }).notNull(),
+  totalPaise: bigint('total_paise', { mode: 'number' }).notNull(),
+  issuedByName: text('issued_by_name').notNull(),
+  issuedAt: timestamp('issued_at').defaultNow().notNull(),
+})
+
+// Advances and receipts (record-keeping only; no gateway). Both use the RCT series.
+export const patientPayments = pgTable('patient_payments', {
+  id: serial('id').primaryKey(),
+  receiptNumber: text('receipt_number').notNull().unique(),
+  kind: patientPaymentKindEnum('kind').notNull(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  admissionId: integer('admission_id').references(() => admissions.id),
+  encounterId: integer('encounter_id').references(() => encounters.id),
+  invoiceId: integer('invoice_id').references(() => invoices.id),
+  mode: paymentModeEnum('mode').notNull(),
+  reference: text('reference'),                   // never written to the audit log
+  amountPaise: bigint('amount_paise', { mode: 'number' }).notNull(),
+  financialYear: text('financial_year').notNull(),
+  receiptDate: date('receipt_date').notNull(),
+  receivedByName: text('received_by_name').notNull(),
+  receivedByUserId: integer('received_by_user_id').references(() => users.id),
+  receivedAt: timestamp('received_at').defaultNow().notNull(),
+}, (t) => [
+  check('patient_payments_amount_positive', sql`${t.amountPaise} > 0`),
+  check('patient_payments_reference_required', sql`${t.mode} = 'cash' OR ${t.reference} IS NOT NULL`),
+  index('patient_payments_patient_idx').on(t.patientId),
+])
+
+export const refunds = pgTable('refunds', {
+  id: serial('id').primaryKey(),
+  refundNumber: text('refund_number').notNull().unique(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  admissionId: integer('admission_id').references(() => admissions.id),
+  againstPaymentId: integer('against_payment_id').references(() => patientPayments.id),
+  mode: paymentModeEnum('mode').notNull(),
+  reference: text('reference'),                   // never written to the audit log
+  amountPaise: bigint('amount_paise', { mode: 'number' }).notNull(),
+  reason: text('reason').notNull(),
+  financialYear: text('financial_year').notNull(),
+  refundDate: date('refund_date').notNull(),
+  issuedByName: text('issued_by_name').notNull(),
+  issuedAt: timestamp('issued_at').defaultNow().notNull(),
+}, (t) => [
+  check('refunds_amount_positive', sql`${t.amountPaise} > 0`),
+  check('refunds_reference_required', sql`${t.mode} = 'cash' OR ${t.reference} IS NOT NULL`),
+  index('refunds_patient_idx').on(t.patientId),
 ])
 
 export type BillingSettingsRow = typeof billingSettings.$inferSelect
 export type ChargeRuleConfigRow = typeof chargeRuleConfigs.$inferSelect
 export type ChargeLineRow = typeof chargeLines.$inferSelect
+export type InvoiceRow = typeof invoices.$inferSelect
+export type InvoiceLineRow = typeof invoiceLines.$inferSelect
+export type CreditNoteRow = typeof creditNotes.$inferSelect
+export type PatientPaymentRow = typeof patientPayments.$inferSelect
+export type RefundRow = typeof refunds.$inferSelect
 // end SP4
 
 export const noteTypeEnum = pgEnum('note_type', ['progress', 'nursing', 'intake'])
