@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { getSessionById, getSessionByToken, markPatientJoined } from '@/lib/queries/telemedicine-sessions'
 import { createSignal, listSignalsSince } from '@/lib/queries/telemedicine-signals'
@@ -24,7 +25,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const session = await resolveLiveSession(token)
   if (!session) return NextResponse.json({ error: 'This link is no longer valid.' }, { status: 404 })
 
-  const parsed = signalSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = signalSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid signal payload', details: parsed.error.flatten() }, { status: 400 })
 
   const created = await createSignal(session.id, 'patient', parsed.data.signalType, parsed.data.payload)

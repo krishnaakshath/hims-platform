@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { eq } from 'drizzle-orm'
 import { requireSession } from '@/lib/auth'
@@ -34,7 +35,9 @@ export async function PUT(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
 
-  const parsed = methodSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = methodSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
   const { method, phone, email, password } = parsed.data
 
