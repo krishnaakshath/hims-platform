@@ -59,6 +59,9 @@ describe('/cash-desk', () => {
     expect(screen.getAllByText('₹3,53,75,000.00').length).toBeGreaterThan(0)
     expect(screen.getByText('Legacy')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /₹123.45|Charge #3/ })).toBeNull()
+    // frontdesk cannot open /billing/invoices (CHARGE_CAPTURE_ROLES), so the invoice number is plain text
+    expect(screen.getByText('INV/26-27/000001')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'INV/26-27/000001' })).toBeNull()
     expect(vi.mocked(CashDeskPanel).mock.calls[0][0]).toMatchObject({ patientId: 'RD-1', admissionId: 12, canRefund: false })
     expect(logAudit).toHaveBeenCalledWith(expect.anything(), 'billing: viewed patient ledger', 'RD-1')
   })
@@ -68,6 +71,7 @@ describe('/cash-desk', () => {
     render(await CashDeskPage({ searchParams: Promise.resolve({ patientId: 'RD-1' }) }))
     expect(vi.mocked(CashDeskPanel).mock.calls[0][0]).toMatchObject({ canRefund: true })
     expect(screen.getByRole('link', { name: 'Charge #3' })).toHaveAttribute('href', '/billing/charges/3')
+    expect(screen.getByRole('link', { name: 'INV/26-27/000001' })).toHaveAttribute('href', '/billing/invoices/7')
   })
 
   it('an unknown patient is a 404; a denied role is redirected before any read', async () => {

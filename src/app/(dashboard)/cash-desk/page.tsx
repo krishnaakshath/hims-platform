@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { Banknote } from 'lucide-react'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
-import { BILLING_AUTHORITY_ROLES, CASH_DESK_ROLES, CHARGES_ROLES } from '@/lib/role-policy'
+import { BILLING_AUTHORITY_ROLES, CASH_DESK_ROLES, CHARGE_CAPTURE_ROLES, CHARGES_ROLES } from '@/lib/role-policy'
 import { formatPaise } from '@/lib/format'
 import { formatIsoDate } from '@/lib/india-time'
 import { findPatientForCashDesk, getPatientLedger, listPayableInvoices } from '@/lib/queries/patient-ledger'
@@ -77,7 +77,7 @@ export default async function CashDeskPage({ searchParams }: { searchParams: Pro
           <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
             <section>
               <h2 className="mb-2 text-lg font-semibold">Account</h2>
-              <LedgerTable rows={ledger.ledger.rows} />
+              <LedgerTable rows={ledger.ledger.rows} invoiceLinks={CHARGE_CAPTURE_ROLES.includes(session.role)} />
               <p className="mt-2 text-right text-sm text-muted-foreground">Balance: <Balance paise={ledger.ledger.summary.balancePaise} /></p>
 
               {ledger.legacyCharges.length > 0 && (

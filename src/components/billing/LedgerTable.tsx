@@ -18,10 +18,11 @@ export function Balance({ paise }: { paise: number }) {
 }
 
 /** SP4: the running patient ledger (IST times). Positive balance = the patient owes. */
-export function LedgerTable({ rows }: { rows: (LedgerEntry & { balancePaise: number })[] }) {
+/** `invoiceLinks`: link invoice numbers to /billing/invoices (only for roles that page admits). */
+export function LedgerTable({ rows, invoiceLinks = false }: { rows: (LedgerEntry & { balancePaise: number })[]; invoiceLinks?: boolean }) {
   if (rows.length === 0) return <p className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No bills or payments yet.</p>
   const docHref = (r: LedgerEntry) =>
-    r.kind === 'advance' || r.kind === 'receipt' ? `/print/receipts/${r.id}` : r.kind === 'invoice' ? `/billing/invoices/${r.id}` : null
+    r.kind === 'advance' || r.kind === 'receipt' ? `/print/receipts/${r.id}` : r.kind === 'invoice' && invoiceLinks ? `/billing/invoices/${r.id}` : null
   return (
     <div className="overflow-x-auto rounded-md border border-border">
       <table className="w-full text-sm">
