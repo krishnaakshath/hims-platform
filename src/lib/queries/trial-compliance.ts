@@ -1,6 +1,6 @@
 import { getDb } from '@/db/client'
 import { adverseEvents, drugAccountabilityEntries, regulatoryDocuments, patients } from '@/db/schema'
-import { eq, desc } from 'drizzle-orm'
+import { and, eq, desc, isNull } from 'drizzle-orm'
 
 export interface AdverseEventRow {
   id: number
@@ -60,10 +60,21 @@ export async function createAdverseEvent(input: {
   return created
 }
 
-export async function markAdverseEventNotified(id: number, which: 'sponsor' | 'irb'): Promise<void> {
-  await getDb().update(adverseEvents)
+/**
+ * Records a sponsor/IRB notification time, once. Scoped to `trialId` when
+ * given (the route always passes it), so an id from another trial is
+ * 'not_found'; a notification already recorded is left untouched.
+ */
+export async function markAdverseEventNotified(id: number, which: 'sponsor' | 'irb', trialId?: string): Promise<'notified' | 'not_found' | 'already_notified'> {
+  const scope = trialId === undefined ? eq(adverseEvents.id, id) : and(eq(adverseEvents.id, id), eq(adverseEvents.trialId, trialId))
+  const column = which === 'sponsor' ? adverseEvents.sponsorNotifiedAt : adverseEvents.irbNotifiedAt
+  const updated = await getDb().update(adverseEvents)
     .set(which === 'sponsor' ? { sponsorNotifiedAt: new Date() } : { irbNotifiedAt: new Date() })
-    .where(eq(adverseEvents.id, id))
+    .where(and(scope, isNull(column)))
+    .returning({ id: adverseEvents.id })
+  if (updated.length > 0) return 'notified'
+  const [existing] = await getDb().select({ id: adverseEvents.id }).from(adverseEvents).where(scope)
+  return existing ? 'already_notified' : 'not_found'
 }
 
 export interface DrugAccountabilityRow {
