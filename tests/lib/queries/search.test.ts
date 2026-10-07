@@ -4,7 +4,7 @@ import * as trialsQ from '@/lib/queries/trials'
 import * as formsQ from '@/lib/queries/form-templates'
 import * as patientsQ from '@/lib/queries/patients'
 
-const ALL = { patients: true, trials: true, formTemplates: true }
+const ALL = { patients: true, trials: true, formTemplates: true, services: false }
 
 describe('searchAll', () => {
   it('returns empty results for a blank query', async () => {
@@ -39,7 +39,7 @@ describe('searchAll', () => {
   it('with only the patients scope never loads trials or templates', async () => {
     const trialsSpy = vi.spyOn(trialsQ, 'listAllTrials')
     const formsSpy = vi.spyOn(formsQ, 'listFormTemplates')
-    const results = await searchAll('depressive', { patients: true, trials: false, formTemplates: false })
+    const results = await searchAll('depressive', { patients: true, trials: false, formTemplates: false, services: false })
     expect(trialsSpy).not.toHaveBeenCalled()
     expect(formsSpy).not.toHaveBeenCalled()
     expect(results.trials).toEqual([])
@@ -50,7 +50,7 @@ describe('searchAll', () => {
 
   it('with no patients scope never loads patients and returns []', async () => {
     const patientsSpy = vi.spyOn(patientsQ, 'listPatientsWithStatus')
-    const results = await searchAll('RD-0001', { patients: false, trials: true, formTemplates: true })
+    const results = await searchAll('RD-0001', { patients: false, trials: true, formTemplates: true, services: false })
     expect(patientsSpy).not.toHaveBeenCalled()
     expect(results.patients).toEqual([])
     patientsSpy.mockRestore()
@@ -66,7 +66,7 @@ describe('searchAll', () => {
       row('RD-DUP1', 'Dupe Probe', 'trial-b'),
       row('RD-DUP2', 'Dupe Probe Two', 'trial-a'),
     ])
-    const results = await searchAll('dupe probe', { patients: true, trials: false, formTemplates: false })
+    const results = await searchAll('dupe probe', { patients: true, trials: false, formTemplates: false, services: false })
     expect(results.patients.map((p) => p.id)).toEqual(['RD-DUP1', 'RD-DUP2'])
     patientsSpy.mockRestore()
   })

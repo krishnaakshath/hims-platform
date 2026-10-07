@@ -28,7 +28,19 @@ describe('GET /api/search', () => {
     expect((await search('RD-0001')).status).toBe(401)
   })
 
-  for (const role of ['pharmacy', 'billing', 'labs'] as const) {
+  // Wave B P1-24: billing now searches the tariff catalogue (never patients).
+  it('gives billing the service catalogue only, without reading patients', async () => {
+    sessionRole = 'billing'
+    const res = await search('RD-0001')
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.patients).toEqual([])
+    expect(body.trials).toEqual([])
+    expect(body.formTemplates).toEqual([])
+    expect(Array.isArray(body.services)).toBe(true)
+  })
+
+  for (const role of ['pharmacy', 'labs'] as const) {
     it(`403s ${role} without touching the database`, async () => {
       sessionRole = role
       const res = await search('RD-0001')
