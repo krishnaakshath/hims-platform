@@ -29,6 +29,7 @@ import {
   patientAadhaar,
   appSettings,
   providers,
+  departments,
   appointments,
   rooms,
   documents,
@@ -794,8 +795,23 @@ async function seedBilling() {
   ])
 }
 
+const DEPARTMENT_SEED: { code: string; name: string; kind: 'clinical' | 'diagnostic' | 'support' | 'administrative' }[] = [
+  { code: 'GEN_MED', name: 'General Medicine', kind: 'clinical' },
+  { code: 'GEN_SURG', name: 'General Surgery', kind: 'clinical' },
+  { code: 'PAED', name: 'Paediatrics', kind: 'clinical' },
+  { code: 'OBG', name: 'Obstetrics & Gynaecology', kind: 'clinical' },
+  { code: 'ORTHO', name: 'Orthopaedics', kind: 'clinical' },
+  { code: 'CARDIO', name: 'Cardiology', kind: 'clinical' },
+  { code: 'EMERG', name: 'Emergency', kind: 'clinical' },
+  { code: 'LAB', name: 'Laboratory', kind: 'diagnostic' },
+  { code: 'RADIO', name: 'Radiology', kind: 'diagnostic' },
+  { code: 'PHARM', name: 'Pharmacy', kind: 'support' },
+  { code: 'ADMIN', name: 'Administration', kind: 'administrative' },
+]
+
 async function seedProvidersAndAppointments() {
   const db = getDb()
+  await db.insert(departments).values(DEPARTMENT_SEED).onConflictDoNothing()
   const insertedProviders = await db.insert(providers).values(PROVIDER_ROSTER).returning()
   const [kunam, bosch, sundaram, farr, whitfield] = insertedProviders
 
@@ -921,6 +937,7 @@ async function clearExistingData() {
   await db.delete(staffCredentials)
   await db.delete(staffMembers)
   await db.delete(providers)
+  await db.delete(departments)
   await db.delete(users)
   await db.delete(trials)
 }

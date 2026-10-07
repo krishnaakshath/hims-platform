@@ -375,6 +375,8 @@ import { GET as listCharges } from '@/app/api/charges/route'
 import { GET as getCharge } from '@/app/api/charges/[id]/route'
 import { GET as listStaff } from '@/app/api/staff/route'
 import { GET as getStaffMember } from '@/app/api/staff/[id]/route'
+import { GET as listDepartmentsRoute, POST as postDepartment } from '@/app/api/departments/route'
+import { PATCH as patchDepartment } from '@/app/api/departments/[id]/route'
 import { GET as search } from '@/app/api/search/route'
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
@@ -533,6 +535,10 @@ export const API_GATES: ApiGateCase[] = [
   },
   // MASTER_DATA_ADMIN_ROLES -- UHID prefix is practice configuration
   { name: 'PUT /api/settings/uhid-prefix', call: () => settle(() => putUhidPrefix(send('PUT', '/api/settings/uhid-prefix'))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
+  // Departments master: any staff role reads; MASTER_DATA_ADMIN_ROLES writes
+  { name: 'GET /api/departments', call: () => settle(() => listDepartmentsRoute(get('/api/departments'))), allowed: [...ALL_ROLES] },
+  { name: 'POST /api/departments', call: () => settle(() => postDepartment(send('POST', '/api/departments'))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
+  { name: 'PATCH /api/departments/[id]', call: () => settle(() => patchDepartment(send('PATCH', `/api/departments/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
@@ -545,6 +551,8 @@ const SP1_WRITE_GATES: { name: string; call: () => Promise<Response>; allowed: r
   { name: 'PATCH /api/patients/[anonId]/profile', call: () => patchProfile(send('PATCH', `/api/patients/${BOGUS_PATIENT}/profile`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PATIENT_PROFILE_EDIT_ROLES },
   { name: 'PUT /api/patients/[anonId]/contacts', call: () => putContacts(send('PUT', `/api/patients/${BOGUS_PATIENT}/contacts`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PATIENT_PROFILE_EDIT_ROLES },
   { name: 'PUT /api/patients/[anonId]/aadhaar', call: () => putAadhaar(send('PUT', `/api/patients/${BOGUS_PATIENT}/aadhaar`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: AADHAAR_WRITE_ROLES },
+  { name: 'POST /api/departments', call: () => postDepartment(send('POST', '/api/departments', NOT_JSON)), allowed: MASTER_DATA_ADMIN_ROLES },
+  { name: 'PATCH /api/departments/[id]', call: () => patchDepartment(send('PATCH', `/api/departments/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MASTER_DATA_ADMIN_ROLES },
 ]
 describe.each(SP1_WRITE_GATES)('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {

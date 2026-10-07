@@ -1,4 +1,4 @@
-import { Building2, SlidersHorizontal, UserCircle2, Users, IdCard, Monitor } from 'lucide-react'
+import { Building, Building2, SlidersHorizontal, UserCircle2, Users, IdCard, Monitor } from 'lucide-react'
 import { eq } from 'drizzle-orm'
 import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
@@ -7,12 +7,14 @@ import { users } from '@/db/schema'
 import { getSettingsSummary, getAdminMfaState } from '@/lib/queries/settings'
 import { listAllProviders } from '@/lib/queries/providers'
 import { listAllUsers } from '@/lib/queries/users'
+import { listDepartments } from '@/lib/queries/departments'
 import { ROLE_CAPABILITIES } from '@/lib/role-capabilities'
 import { AutoClassifyToggle } from '@/components/AutoClassifyToggle'
 import { QueueDisplayPinForm } from '@/components/QueueDisplayPinForm'
 import { PracticeInfoForm } from '@/components/PracticeInfoForm'
 import { UhidPrefixForm } from '@/components/settings/UhidPrefixForm'
 import { ProviderProfilesPanel } from '@/components/settings/ProviderProfilesPanel'
+import { DepartmentsPanel } from '@/components/settings/DepartmentsPanel'
 import { StaffManagementPanel } from '@/components/settings/StaffManagementPanel'
 import { StaffMfaSelfResetForm } from '@/components/settings/StaffMfaSelfResetForm'
 import { MfaMethodPicker } from '@/components/settings/MfaMethodPicker'
@@ -32,6 +34,7 @@ export default async function SettingsPage() {
   const settings = await getSettingsSummary()
   const providers = await listAllProviders()
   const staff = await listAllUsers()
+  const departments = await listDepartments()
   const isAdmin = session.role === 'admin'
   const capabilities = ROLE_CAPABILITIES[session.role]
   const currentUserEmail = session.role === 'admin' ? (process.env.ADMIN_EMAIL ?? '') : (staff.find((s) => s.name === session.name && s.role === session.role)?.email ?? '')
@@ -81,6 +84,13 @@ export default async function SettingsPage() {
     </section>
   )
 
+  const departmentsTab = (
+    <section className={SECTION}>
+      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Departments</h2>
+      <DepartmentsPanel departments={departments} isAdmin={isAdmin} />
+    </section>
+  )
+
   const staffTab = (
     <section className={SECTION}>
       <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Staff accounts</h2>
@@ -127,6 +137,7 @@ export default async function SettingsPage() {
         { id: 'classification', label: <><SlidersHorizontal className="h-4 w-4" aria-hidden="true" />Classification</>, content: classificationTab },
         { id: 'queue-display', label: <><Monitor className="h-4 w-4" aria-hidden="true" />Queue Display</>, content: queueDisplayTab },
         { id: 'providers', label: <><Users className="h-4 w-4" aria-hidden="true" />Providers</>, content: providersTab },
+        { id: 'departments', label: <><Building className="h-4 w-4" aria-hidden="true" />Departments</>, content: departmentsTab },
         { id: 'staff', label: <><IdCard className="h-4 w-4" aria-hidden="true" />Staff</>, content: staffTab },
         { id: 'account', label: <><UserCircle2 className="h-4 w-4" aria-hidden="true" />Account</>, content: accountTab },
       ]} />
