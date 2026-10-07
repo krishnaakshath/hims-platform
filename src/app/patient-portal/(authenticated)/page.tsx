@@ -36,6 +36,15 @@ function SummaryTile({ icon: Icon, value, label, color, href }: { icon: React.Co
   return href ? <Link href={href} className={`${className} hover:-translate-y-0.5`}>{content}</Link> : <div className={className}>{content}</div>
 }
 
+function Detail({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="break-words text-sm font-medium text-foreground">{value ?? <span className="font-normal text-muted-foreground">Not on file</span>}</dd>
+    </div>
+  )
+}
+
 export default async function PatientPortalOverviewPage() {
   const session = await requirePatientSessionOrRedirect()
   const data = await getPatientPortalData(session.patientId)
@@ -116,6 +125,18 @@ export default async function PatientPortalOverviewPage() {
           )}
         </section>
       </div>
+
+      <section className={SECTION} aria-labelledby="your-details-heading">
+        <h2 id="your-details-heading" className={HEADING}>Your details</h2>
+        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Detail label="Patient ID (UHID)" value={data.profile.uhid} />
+          <Detail label="ABHA address" value={data.profile.abhaAddress} />
+          <Detail label="ABHA number" value={data.profile.abhaNumberMasked} />
+          <Detail label="Address" value={data.profile.addressSummary} />
+          <Detail label="Emergency contact" value={data.profile.emergencyContactName} />
+          <Detail label="Aadhaar" value={data.profile.aadhaarOnFile ? 'On file' : 'Not on file'} />
+        </dl>
+      </section>
     </div>
   )
 }

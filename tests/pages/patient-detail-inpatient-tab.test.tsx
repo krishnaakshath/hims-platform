@@ -19,6 +19,8 @@ const basePatient = {
   currentProvider: null,
   mfaEnabled: false,
   portalConfigured: false,
+  contacts: [],
+  aadhaar: { status: 'not_recorded', last4: null, declineReason: null, consentRecordedAt: null, recordedByName: null },
 }
 
 describe('Patient Detail page — Inpatient History tab', () => {

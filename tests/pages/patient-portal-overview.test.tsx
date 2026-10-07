@@ -14,6 +14,10 @@ vi.mock('@/lib/queries/patient-portal', () => ({
     upcomingAppointments: [{ visitReason: 'Follow-up', providerName: 'Dr. R. Kunam', startsAt: new Date().toISOString() }],
     forms: [{ status: 'sent', templateName: 'Intake Form' }],
     unreadMessageCount: 2,
+    profile: {
+      uhid: 'UH-000042', abhaAddress: 'asha.rao@abdm', abhaNumberMasked: 'XX-XXXX-XXXX-1234',
+      addressSummary: 'Pune, Pune, Maharashtra 411001', emergencyContactName: 'Ravi Rao', aadhaarOnFile: true,
+    },
   })),
 }))
 
@@ -57,5 +61,29 @@ describe('Patient dashboard (patient-portal overview)', () => {
     expect(shown).not.toMatch(/\n|\s{2}/)
     expect(shown).toHaveLength(140)
     expect(shown.endsWith('…')).toBe(true)
+  })
+
+  it('shows Your details with UHID and Aadhaar on-file status but no digits', async () => {
+    const jsx = await PatientPortalOverviewPage()
+    const { container } = render(jsx)
+    const section = container.querySelector('section[aria-labelledby="your-details-heading"]') as HTMLElement
+    expect(section).not.toBeNull()
+    expect(section.textContent).toMatch(/Your details/)
+    expect(section.textContent).toMatch(/UH-000042/)
+    expect(section.textContent).toMatch(/asha\.rao@abdm/)
+    expect(section.textContent).toMatch(/XX-XXXX-XXXX-1234/)
+    expect(section.textContent).toMatch(/Pune, Pune, Maharashtra 411001/)
+    expect(section.textContent).toMatch(/Ravi Rao/)
+    expect(section.textContent).toMatch(/Aadhaar\s*On file/)
+    // Only the UHID/ABHA/PIN identifiers carry digits; no 12-digit or 4-digit-group Aadhaar-looking value.
+    expect(section.textContent).not.toMatch(/\b\d{4}\s?\d{4}\s?\d{4}\b/)
+  })
+
+  it('says Not on file for Aadhaar when none is recorded', async () => {
+    const base = await vi.mocked(getPatientPortalData)('RD-0001')
+    vi.mocked(getPatientPortalData).mockResolvedValueOnce({ ...base!, profile: { ...base!.profile, aadhaarOnFile: false } })
+    const jsx = await PatientPortalOverviewPage()
+    const { container } = render(jsx)
+    expect(container.querySelector('section[aria-labelledby="your-details-heading"]')!.textContent).toMatch(/Aadhaar\s*Not on file/)
   })
 })
