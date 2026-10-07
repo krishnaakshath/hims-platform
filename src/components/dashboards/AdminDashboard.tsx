@@ -11,11 +11,12 @@ import { PatientAvatar } from '@/components/PatientAvatar'
 import type { ExpiringCredential } from '@/lib/queries/staff-credentials'
 
 export interface DashboardData {
-  latestForms: { id: number; status: string; sentDate: Date | null; completedDate: Date | null; templateName: string; patientName: string }[]
-  pendingForms: { id: number; status: string; sentDate: Date | null; completedDate: Date | null; templateName: string; patientName: string }[]
+  latestForms: { id: number; status: string; sentDate: string | null; completedDate: string | null; templateName: string; patientName: string }[]
+  pendingForms: { id: number; status: string; sentDate: string | null; completedDate: string | null; templateName: string; patientName: string }[]
   pendingFormsTotal: number
   pendingClassification: { id: string; name: string }[]
-  recentEvents: { id: number; action: string; userName: string; timestamp: Date }[]
+  // Dates are ISO strings: getDashboardData is cached (see datesToIso).
+  recentEvents: { id: number; action: string; userName: string; timestamp: string }[]
   patientsByMonth: { month: string; count: number }[]
   screeningBreakdown: { green: number; yellow: number; red: number }
   peakHourRange: string | null

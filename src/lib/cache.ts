@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis'
+import type { HasDate } from '@/lib/cache-shape'
 
 // Vercel's Upstash Redis integration provisions KV_REST_API_URL / KV_REST_API_TOKEN
 // (not UPSTASH_REDIS_REST_URL/TOKEN, which is what Redis.fromEnv() looks for) —
@@ -48,7 +49,17 @@ function errKind(e: unknown): string {
  * hits the database), and a failed write-back is logged and ignored. Loader
  * errors still propagate.
  */
-export async function getOrSetCache<T>(key: string, ttlSeconds: number, loader: () => Promise<T>): Promise<T> {
+export async function getOrSetCache<T>(
+  key: string,
+  ttlSeconds: number,
+  loader: () => Promise<T>,
+  // Compile-time guard (Wave H P2-03): a cached value round-trips through
+  // JSON, so a Date in it comes back from a cache HIT as a string while a
+  // MISS returns a real Date -- a latent `.getTime()` crash. Loaders must
+  // normalise with datesToIso(); a value type containing Date makes this
+  // call fail to type-check.
+  ..._noDates: true extends HasDate<T> ? [cachedValueMustNotContainDate: never] : []
+): Promise<T> {
   if (!isCacheConfigured()) return loader()
   try {
     const cached = await getRedis().get<T>(key)

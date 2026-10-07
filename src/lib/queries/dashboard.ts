@@ -2,6 +2,7 @@ import { getDb } from '@/db/client'
 import { formSubmissions, formTemplates, patients, patientTrialScreenings, auditLog, appointments, reviews } from '@/db/schema'
 import { eq, desc, or, inArray, sql } from 'drizzle-orm'
 import { getOrSetCache, dashboardCacheKey } from '@/lib/cache'
+import { isoDates } from '@/lib/cache-shape'
 import { getAverageExperienceRating } from '@/lib/queries/reviews'
 import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
@@ -43,7 +44,7 @@ export function computePatientsByMonth(dateAddedList: Date[]): { month: string; 
 }
 
 export async function getDashboardData() {
-  return getOrSetCache(dashboardCacheKey(), 15, async () => {
+  return getOrSetCache(dashboardCacheKey(), 15, isoDates(async () => {
     const db = getDb()
 
     // Every query below is independent of the others -- run them concurrently
@@ -151,5 +152,5 @@ export async function getDashboardData() {
       // screened for two trials would be counted twice.
       totalPatients: patientRows.length,
     }
-  })
+  }))
 }

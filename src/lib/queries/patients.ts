@@ -10,6 +10,7 @@ import {
 } from '@/db/schema'
 import { desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey } from '@/lib/cache'
+import { isoDates, type DatesToIso } from '@/lib/cache-shape'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
@@ -32,7 +33,8 @@ export interface CriteriaSummary {
 // `mfaEnabled` (a non-sensitive flag the staff UI shows) stays, and
 // `portalConfigured` is computed in SQL.
 
-export type PatientWithStatus = PublicPatientRow & { trialId?: string; overallStatus?: Verdict; criteriaSummary?: CriteriaSummary }
+// Dates are ISO strings: this list is cached (getOrSetCache + datesToIso).
+export type PatientWithStatus = DatesToIso<PublicPatientRow> & { trialId?: string; overallStatus?: Verdict; criteriaSummary?: CriteriaSummary }
 
 /**
  * Shared by the /api/patients route handler and any Server Component that
@@ -73,7 +75,7 @@ export async function listPatientNameOptions(): Promise<PatientNameOption[]> {
 }
 
 export async function listPatientsWithStatus(trialId: string | null): Promise<PatientWithStatus[]> {
-  return getOrSetCache(patientListCacheKey(trialId), 30, async () => {
+  return getOrSetCache(patientListCacheKey(trialId), 30, isoDates(async () => {
     const rows = await getDb()
       .select({ patient: publicPatientColumns, screening: patientTrialScreenings })
       .from(patients)
@@ -115,7 +117,7 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Pa
       overallStatus: r.screening?.overallStatus,
       criteriaSummary: summaryByPatient.get(r.patient.id),
     }))
-  })
+  }))
 }
 
 /**
@@ -125,7 +127,7 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Pa
  * the app's own API route.
  */
 export async function getPatientDetail(anonId: string) {
-  return getOrSetCache(patientDetailCacheKey(anonId), 30, async () => {
+  return getOrSetCache(patientDetailCacheKey(anonId), 30, isoDates(async () => {
     const [row] = await getDb().select({ patient: publicPatientColumns, portalConfigured: patientPortalConfiguredSql }).from(patients).where(eq(patients.id, anonId))
     if (!row) return null
     const { patient, portalConfigured } = row
@@ -185,7 +187,7 @@ export async function getPatientDetail(anonId: string) {
       contacts,
       aadhaar,
     }
-  })
+  }))
 }
 
 export interface PharmacyEpisode {

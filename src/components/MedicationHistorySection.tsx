@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { AddPrescriptionModal } from '@/components/AddPrescriptionModal'
 import type { medicationEpisodes } from '@/db/schema'
 import type { MedicationWithInventory } from '@/lib/queries/medications'
+import type { DatesToIso } from '@/lib/cache-shape'
 
 export interface PrescriberInfo { name: string; credentials: string | null; specialty: string }
 
@@ -25,7 +26,8 @@ function formatDate(value: string | Date | null): string {
   return new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-type Episode = typeof medicationEpisodes.$inferSelect
+// ISO-string dates: episodes come from the cached patient detail (datesToIso).
+type Episode = DatesToIso<typeof medicationEpisodes.$inferSelect>
 
 function MedicationRow({
   episode, prescriberById, canPrescribe, patientId,

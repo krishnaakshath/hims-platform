@@ -2,10 +2,12 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MedicationHistorySection, type PrescriberInfo } from '@/components/MedicationHistorySection'
 import type { medicationEpisodes } from '@/db/schema'
+import type { DatesToIso } from '@/lib/cache-shape'
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 
-type Episode = typeof medicationEpisodes.$inferSelect
+// The component receives cached (datesToIso) episodes: timestamps are ISO strings.
+type Episode = DatesToIso<typeof medicationEpisodes.$inferSelect>
 
 // Base fixture carrying every column so each test only overrides what it
 // cares about -- matches the DB row shape (`typeof medicationEpisodes.$inferSelect`)
@@ -75,7 +77,7 @@ describe('MedicationHistorySection', () => {
         {...baseProps}
         episodes={[episode({
           id: 1, dose: '50mg', frequencyPerDay: 2, durationDays: 30, startDate: '2026-03-12',
-          prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1,
+          prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1,
         })]}
         prescriberById={{ 1: kunam }}
         canPrescribe={false}
@@ -90,7 +92,7 @@ describe('MedicationHistorySection', () => {
         {...baseProps}
         episodes={[episode({
           id: 1, dose: '50mg', frequencyPerDay: 2, durationDays: 30, instructions: 'Take with food',
-          prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1,
+          prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1,
         })]}
         prescriberById={{ 1: kunam }}
         canPrescribe={false}
@@ -105,7 +107,7 @@ describe('MedicationHistorySection', () => {
         {...baseProps}
         episodes={[episode({
           id: 1, dose: '50mg', frequencyPerDay: 2, durationDays: 30,
-          prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1,
+          prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1,
         })]}
         prescriberById={{ 1: kunam }}
         canPrescribe={false}
@@ -119,7 +121,7 @@ describe('MedicationHistorySection', () => {
       <MedicationHistorySection
         {...baseProps}
         episodes={[episode({
-          id: 1, prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1, enteredByName: 'Front Desk Staffer',
+          id: 1, prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1, enteredByName: 'Front Desk Staffer',
         })]}
         prescriberById={{ 1: kunam }}
         canPrescribe={false}
@@ -131,7 +133,7 @@ describe('MedicationHistorySection', () => {
       <MedicationHistorySection
         {...baseProps}
         episodes={[episode({
-          id: 1, prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1, enteredByName: 'Dr. Rajiv Kunam',
+          id: 1, prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1, enteredByName: 'Dr. Rajiv Kunam',
         })]}
         prescriberById={{ 1: kunam }}
         canPrescribe={false}
@@ -146,7 +148,7 @@ describe('MedicationHistorySection', () => {
       <MedicationHistorySection
         {...baseProps}
         episodes={[episode({
-          id: 42, prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1,
+          id: 42, prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1,
         })]}
         prescriberById={{ 1: kunam }}
         canPrescribe={false}
@@ -159,7 +161,7 @@ describe('MedicationHistorySection', () => {
     const { unmount } = render(
       <MedicationHistorySection
         {...baseProps}
-        episodes={[episode({ id: 1, prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1 })]}
+        episodes={[episode({ id: 1, prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1 })]}
         prescriberById={{ 1: kunam }}
         canPrescribe={false}
       />
@@ -172,7 +174,7 @@ describe('MedicationHistorySection', () => {
     // `unknown` deliberately -- the static Episode type says `Date | null`,
     // but the real runtime value on this path is a string, which is exactly
     // what this test exists to exercise.
-    const stringPrescribedAtEpisode = episode({ id: 1, prescribedByProviderId: 1, prescribedAt: new Date('2026-09-29T17:04:00Z') })
+    const stringPrescribedAtEpisode = episode({ id: 1, prescribedByProviderId: 1, prescribedAt: '2026-09-29T17:04:00Z' })
     const asStringShape = { ...stringPrescribedAtEpisode, prescribedAt: '2026-09-29T17:04:00.000Z' } as unknown as Episode
 
     expect(() =>
@@ -222,8 +224,8 @@ describe('MedicationHistorySection', () => {
       <MedicationHistorySection
         {...baseProps}
         episodes={[
-          episode({ id: 1, name: 'Sertraline', prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1 }),
-          episode({ id: 2, name: 'Fluoxetine', prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1 }),
+          episode({ id: 1, name: 'Sertraline', prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1 }),
+          episode({ id: 2, name: 'Fluoxetine', prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1 }),
         ]}
         prescriberById={{ 1: kunam }}
         canPrescribe={false}
@@ -236,8 +238,8 @@ describe('MedicationHistorySection', () => {
       <MedicationHistorySection
         {...baseProps}
         episodes={[
-          episode({ id: 1, name: 'Sertraline', prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 1 }),
-          episode({ id: 2, name: 'Gabapentin', prescribedAt: new Date('2026-09-29T17:04:00Z'), prescribedByProviderId: 2 }),
+          episode({ id: 1, name: 'Sertraline', prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 1 }),
+          episode({ id: 2, name: 'Gabapentin', prescribedAt: '2026-09-29T17:04:00Z', prescribedByProviderId: 2 }),
         ]}
         prescriberById={{ 1: kunam, 2: chen }}
         canPrescribe={false}

@@ -3,11 +3,12 @@ import { providers } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import type { ProviderProfileInput } from '@/lib/validation/provider-profile'
 import { getOrSetCache, invalidateCache, providersListCacheKey } from '@/lib/cache'
+import { isoDates } from '@/lib/cache-shape'
 
 export async function listActiveProviders() {
-  return getOrSetCache(providersListCacheKey(), 60, async () => {
+  return getOrSetCache(providersListCacheKey(), 60, isoDates(async () => {
     return getDb().select().from(providers).where(eq(providers.isActive, true))
-  })
+  }))
 }
 
 /** Full roster (active and inactive) for the Settings > Provider Profiles panel. */

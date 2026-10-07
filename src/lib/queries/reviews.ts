@@ -2,6 +2,7 @@ import { getDb } from '@/db/client'
 import { reviews, patients, formSubmissions, formTemplates } from '@/db/schema'
 import { eq, desc, asc, and, gte, lte, SQL } from 'drizzle-orm'
 import { getOrSetCache, invalidateCacheByPrefix, reviewsListCacheKey } from '@/lib/cache'
+import { isoDates } from '@/lib/cache-shape'
 import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export interface ReviewFilters {
@@ -13,7 +14,7 @@ export interface ReviewFilters {
 }
 
 export async function listReviews(filters: ReviewFilters) {
-  return getOrSetCache(reviewsListCacheKey(JSON.stringify(filters)), 30, async () => {
+  return getOrSetCache(reviewsListCacheKey(JSON.stringify(filters)), 30, isoDates(async () => {
     const conditions: SQL[] = []
     if (filters.status) conditions.push(eq(reviews.status, filters.status))
     if (filters.dateFrom) conditions.push(gte(reviews.sentAt, new Date(filters.dateFrom)))
@@ -37,7 +38,7 @@ export async function listReviews(filters: ReviewFilters) {
       templateName: r.template.name,
       diagnosisTag: r.template.diagnosisTag,
     }))
-  })
+  }))
 }
 
 export async function getReview(id: number) {

@@ -110,7 +110,8 @@ export interface AadhaarView {
 // What a viewer may see. Only AADHAAR_MASKED_READ_ROLES get detail: masked
 // (`XXXX XXXX 1234`) when on file, the decline reason code when declined.
 // Every other role (and any unknown role, allowlist) gets the status alone.
-export function toAadhaarView(summary: AadhaarSummary, role: Role): AadhaarView {
+// Takes only the fields it reads, so a cached summary (ISO-string consentRecordedAt) fits too.
+export function toAadhaarView(summary: Pick<AadhaarSummary, 'status' | 'last4' | 'declineReason'>, role: Role): AadhaarView {
   if (!AADHAAR_MASKED_READ_ROLES.includes(role)) return { status: summary.status, masked: null, declineReason: null }
   const masked = summary.status === 'on_file' && summary.last4 !== null && /^\d{4}$/.test(summary.last4)
     ? maskAadhaarLast4(summary.last4)

@@ -2,10 +2,11 @@ import { getDb } from '@/db/client'
 import { insuranceClaims, charges, patients } from '@/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { getOrSetCache, insuranceClaimsListCacheKey } from '@/lib/cache'
+import { isoDates } from '@/lib/cache-shape'
 import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 export async function listInsuranceClaims() {
-  return getOrSetCache(insuranceClaimsListCacheKey(), 30, async () => {
+  return getOrSetCache(insuranceClaimsListCacheKey(), 30, isoDates(async () => {
     const rows = await getDb()
       .select({ claim: insuranceClaims, charge: charges, patient: publicPatientColumns })
       .from(insuranceClaims)
@@ -19,5 +20,5 @@ export async function listInsuranceClaims() {
       patientName: r.patient.name,
       dateOfService: r.charge.dateOfService,
     }))
-  })
+  }))
 }
