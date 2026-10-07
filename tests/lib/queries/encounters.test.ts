@@ -177,6 +177,71 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     ])
   })
 
+  // I1 lock order: follow-up order -> appointment -> token -> encounter, everywhere.
+  // Another clerk's unbook/reschedule holds the ORDER lock first (as unbookFollowUp
+  // and bookFollowUp do) and only then touches the appointment. Check-in must
+  // queue behind the order lock instead of holding the appointment lock, or the
+  // two transactions deadlock (40P01).
+  async function racingOrderWriter(orderId: number, apptId: number, write: (tx: Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]) => Promise<void>) {
+    let markHeld!: () => void
+    const held = new Promise<void>((r) => { markHeld = r })
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    const writer = getDb().transaction(async (tx) => {
+      await tx.select({ id: followUpOrders.id }).from(followUpOrders).where(eq(followUpOrders.id, orderId)).for('update')
+      markHeld()
+      await gate
+      // Now the appointment: with the old order (appointment first) this waits on check-in -> deadlock.
+      await tx.select({ id: appointments.id }).from(appointments).where(eq(appointments.id, apptId)).for('update')
+      await write(tx)
+    })
+    await held
+    return { writer, release }
+  }
+
+  it('check-in racing an unbook of the same follow-up waits for it and does not deadlock', async () => {
+    const appt = await makeAppointment()
+    const order = await makeOrder(appt.id)
+    const { writer, release } = await racingOrderWriter(order.id, appt.id, async (tx) => {
+      await tx.update(appointments).set({ status: 'cancelled' }).where(eq(appointments.id, appt.id))
+      await tx.update(followUpOrders).set({ status: 'planned', appointmentId: null }).where(eq(followUpOrders.id, order.id))
+    })
+    const checkIn = checkInVisit(input({ appointmentId: appt.id }), SESSION, NOW)
+    await new Promise((r) => setTimeout(r, 300)) // check-in is now blocked on the order lock
+    release()
+    await expect(writer).resolves.toBeUndefined()
+    expect(await checkIn).toEqual({ ok: false, error: 'appointment_not_scheduled' })
+    expect(await encountersOfPatient()).toEqual([])
+    const [o] = await getDb().select().from(followUpOrders).where(eq(followUpOrders.id, order.id))
+    expect(o).toMatchObject({ status: 'planned', appointmentId: null, completedEncounterId: null })
+  })
+
+  it('check-in racing a reschedule of the same follow-up waits for it and does not deadlock', async () => {
+    const appt = await makeAppointment()
+    const order = await makeOrder(appt.id)
+    const { writer, release } = await racingOrderWriter(order.id, appt.id, async (tx) => {
+      await tx.update(appointments).set({ startsAt: new Date('2099-03-04T04:00:00Z'), endsAt: new Date('2099-03-04T04:15:00Z') }).where(eq(appointments.id, appt.id))
+    })
+    const checkIn = checkInVisit(input({ appointmentId: appt.id }), SESSION, NOW)
+    await new Promise((r) => setTimeout(r, 300))
+    release()
+    await expect(writer).resolves.toBeUndefined()
+    expect(await checkIn).toEqual({ ok: false, error: 'appointment_not_today' })
+    expect((await getDb().select().from(followUpOrders).where(eq(followUpOrders.id, order.id)))[0].status).toBe('scheduled')
+  })
+
+  it('check-in queued behind a writer that leaves the booking intact still completes the follow-up', async () => {
+    const appt = await makeAppointment()
+    const order = await makeOrder(appt.id)
+    const { writer, release } = await racingOrderWriter(order.id, appt.id, async () => {})
+    const checkIn = checkInVisit(input({ appointmentId: appt.id }), SESSION, NOW)
+    await new Promise((r) => setTimeout(r, 300))
+    release()
+    await writer
+    const r = await checkIn
+    expect(r.ok && r.completedFollowUpOrderId).toBe(order.id)
+  })
+
   it('check-in against a plain booked appointment is a new visit with no order completed', async () => {
     const appt = await makeAppointment()
     const r = await checkInVisit(input({ appointmentId: appt.id }), SESSION, NOW)

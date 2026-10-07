@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { admissions, appointments, departments, doctorAssignments, encounters, followUpOrders, providers, type EncounterRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
@@ -57,8 +57,8 @@ export type CheckInVisitResult =
   | { ok: false; error: CheckInVisitError }
 
 /**
- * The whole front-desk check-in as ONE transaction: appointment validation
- * (row-locked), OPD token, the doctor assignment (its lobby ticket is the
+ * The whole front-desk check-in as ONE transaction: the linked follow-up order
+ * and the appointment (row-locked, in that order), OPD token, the doctor assignment (its lobby ticket is the
  * token), the optional admission, the encounter, completing a booked
  * follow-up, and the audit rows. Any failure rolls all of it back.
  * `now` is the check-in instant; the business date is its IST date.
@@ -67,7 +67,21 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
   return getDb().transaction(async (tx): Promise<CheckInVisitResult> => {
     const encounterDate = istDateOf(now)
 
+    // Global lock order (I1): follow-up order -> appointment -> OPD token -> encounter.
+    // bookFollowUp / unbookFollowUp / cancelFollowUpOrder lock the order first and
+    // then the appointment, so check-in must too, or the two deadlock (40P01).
+    // A writer that unbooked meanwhile set appointment_id to null: Postgres
+    // re-checks the predicate after the wait, so that order is simply not returned.
+    let order: { id: number } | undefined
     if (input.appointmentId !== null) {
+      const linked = await tx
+        .select({ id: followUpOrders.id, status: followUpOrders.status })
+        .from(followUpOrders)
+        .where(eq(followUpOrders.appointmentId, input.appointmentId))
+        .orderBy(asc(followUpOrders.id))
+        .for('update')
+      order = linked.find((o) => o.status === 'scheduled')
+
       // The row lock serialises two check-ins against one appointment: the
       // second waits, then sees the first one's encounter below.
       const [appt] = await tx.select().from(appointments).where(eq(appointments.id, input.appointmentId)).for('update')
@@ -109,15 +123,6 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
     }
 
     const [provider] = await tx.select({ departmentId: providers.departmentId }).from(providers).where(eq(providers.id, input.providerId))
-
-    let order: { id: number } | undefined
-    if (input.appointmentId !== null) {
-      ;[order] = await tx
-        .select({ id: followUpOrders.id })
-        .from(followUpOrders)
-        .where(and(eq(followUpOrders.appointmentId, input.appointmentId), eq(followUpOrders.status, 'scheduled')))
-        .for('update')
-    }
 
     const [encounter] = await tx.insert(encounters).values({
       patientId: input.patientId,
