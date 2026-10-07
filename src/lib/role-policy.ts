@@ -62,6 +62,22 @@ export const AADHAAR_MASKED_READ_ROLES: readonly Role[] = ['admin', 'crc']
 export const TARIFF_MANAGE_ROLES: readonly Role[] = ['admin', 'billing']
 export const TARIFF_LOOKUP_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'frontdesk']
 
+// SP3 follow-up and encounters. View = see follow-ups on the patient page.
+// Plan = create/change/cancel the clinical plan. Booking = book, reschedule,
+// unbook and log contact attempts. Worklist = the front-desk recall page.
+// Clinical notes = may receive planNotes. Check-in and discharge are the
+// existing gates, now named. Encounter status = the route gate; per-transition
+// roles live in src/lib/encounters/status.ts.
+export const FOLLOW_UP_VIEW_ROLES: readonly Role[] = ['admin', 'pi', 'crc', 'frontdesk']
+export const FOLLOW_UP_PLAN_ROLES: readonly Role[] = ['admin', 'pi']
+export const FOLLOW_UP_BOOKING_ROLES: readonly Role[] = ['admin', 'frontdesk']
+export const FOLLOW_UP_WORKLIST_ROLES: readonly Role[] = ['admin', 'crc', 'frontdesk']
+export const FOLLOW_UP_CLINICAL_NOTES_ROLES: readonly Role[] = ['admin', 'crc', 'pi']
+export const CHECK_IN_ROLES: readonly Role[] = ['frontdesk', 'admin', 'crc']
+export const ENCOUNTER_STATUS_ROLES: readonly Role[] = ['admin', 'pi', 'frontdesk', 'crc']
+export const DISCHARGE_ROLES: readonly Role[] = ['admin', 'pi']
+// end SP3
+
 export type SearchScopes = { patients: boolean; trials: boolean; formTemplates: boolean }
 
 export function searchScopesFor(role: Role): SearchScopes {
