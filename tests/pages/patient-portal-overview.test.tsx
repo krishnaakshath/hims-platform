@@ -134,7 +134,7 @@ describe('Patient dashboard next-visit time zone', () => {
       const base = await vi.mocked(getPatientPortalData)('RD-0001')
       vi.mocked(getPatientPortalData).mockResolvedValueOnce({
         ...base!,
-        upcomingAppointments: [{ ...base!.upcomingAppointments[0], startsAt: '2026-10-21T19:00:00.000Z' }],
+        upcomingAppointments: [{ ...base!.upcomingAppointments[0], startsAt: new Date('2026-10-21T19:00:00.000Z') }],
       })
       const jsx = await PatientPortalOverviewPage()
       const { container } = render(jsx)
