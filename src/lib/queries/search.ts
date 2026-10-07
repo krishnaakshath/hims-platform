@@ -3,27 +3,13 @@ import { listAllTrials } from '@/lib/queries/trials'
 import { listFormTemplates } from '@/lib/queries/form-templates'
 import { listServices } from '@/lib/queries/tariff'
 import type { SearchScopes } from '@/lib/role-policy'
+import { phoneQueryDigits } from '@/lib/patient-directory'
 
 import { EMPTY_SEARCH_RESULTS, type SearchResult, type SearchResults } from '@/lib/queries/search-types'
 
 export { EMPTY_SEARCH_RESULTS, type SearchResult, type SearchResults }
 
 const MAX_RESULTS_PER_CATEGORY = 8
-// A query is treated as a phone number only when it is phone-shaped and
-// carries at least this many digits -- so 'RD-0001' or '0002' never
-// phone-matches every number containing "0001".
-const MIN_PHONE_DIGITS = 5
-const PHONE_SHAPED = /^[+\d\s\-().]+$/
-
-function phoneDigits(raw: string): string | null {
-  if (!PHONE_SHAPED.test(raw)) return null
-  let d = raw.replace(/\D/g, '')
-  // +91 / 91 / 0 prefixes: compare on the national number.
-  if (d.length > 10 && d.startsWith('91')) d = d.slice(2)
-  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1)
-  return d.length >= MIN_PHONE_DIGITS ? d : null
-}
-
 // The global search bar in TopBanner -- one query fanned out across every
 // entity a staff member might be looking for by name. Patients, trials and
 // form templates run against each entity's own already-cached list query and
@@ -44,7 +30,7 @@ export async function searchAll(rawQuery: string, scopes: SearchScopes): Promise
     scopes.services ? listServices({ q: rawQuery.trim().slice(0, 100), limit: MAX_RESULTS_PER_CATEGORY }) : Promise.resolve([]),
   ])
 
-  const qPhone = phoneDigits(q)
+  const qPhone = phoneQueryDigits(q)
   // listPatientsWithStatus is a patient x screening join (one row per
   // screening), so keep only each patient's first row.
   const seenPatientIds = new Set<string>()
