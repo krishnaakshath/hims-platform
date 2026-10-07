@@ -53,10 +53,16 @@ function createIPv4PreferringStream(): net.Socket {
   return socket
 }
 
+// A database on this machine (local Postgres for development/CI) has no TLS;
+// every hosted database (Neon etc.) does.
+function isLocalDatabaseUrl(url: string | undefined): boolean {
+  return /^postgres(ql)?:\/\/[^@/]*@(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\//.test(url ?? '')
+}
+
 function createDb() {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL!,
-    ssl: { rejectUnauthorized: false },
+    ssl: isLocalDatabaseUrl(process.env.DATABASE_URL) ? false : { rejectUnauthorized: false },
     stream: createIPv4PreferringStream,
     // Fail fast instead of hanging forever when the pool is exhausted or
     // Neon is unreachable, and recycle idle clients before Neon resets them.
