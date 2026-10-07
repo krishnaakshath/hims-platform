@@ -41,6 +41,8 @@ export const draftInvoiceSchema = z.object({
   lineIds: z.array(positiveInt).min(1).max(500).refine((ids) => new Set(ids).size === ids.length, 'Each line can be listed only once'),
 }).strict()
 export const cancelInvoiceSchema = z.object({ reason: reason(5) }).strict()
+/** Finalise and discard take no fields; anything sent is refused. */
+export const emptyBodySchema = z.object({}).strict()
 
 export const PAYMENT_MODES = ['cash', 'upi', 'card', 'cheque', 'neft', 'other'] as const
 export type PaymentMode = (typeof PAYMENT_MODES)[number]
