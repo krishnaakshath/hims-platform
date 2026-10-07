@@ -1,4 +1,5 @@
 'use client'
+import { fetchJson } from '@/lib/client-fetch'
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Upload, Check } from 'lucide-react'
@@ -43,11 +44,10 @@ export function InsuranceCardUpload({ anonId, side, hasImage, canWrite }: { anon
     const formData = new FormData()
     formData.set('side', side)
     formData.set('file', file)
-    const res = await fetch(`/api/patients/${anonId}/insurance-card`, { method: 'POST', body: formData })
+    const res = await fetchJson(`/api/patients/${anonId}/insurance-card`, { method: 'POST', body: formData })
     setUploading(false)
     if (res.ok) { router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not upload this card image.')
+    setError(res.error)
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -72,7 +72,7 @@ export function InsuranceCardUpload({ anonId, side, hasImage, canWrite }: { anon
         className="sr-only"
         aria-label={`Upload ${side} of primary insurance card`}
       />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }

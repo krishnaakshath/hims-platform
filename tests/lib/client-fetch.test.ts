@@ -48,7 +48,7 @@ describe('passThrough option', () => {
     expect(await readError(jsonResponse(401, { error: 'Invalid code' }), { passThrough: [401] })).toBe('Invalid code')
     expect(await readError(jsonResponse(401, { error: 'Invalid code' }))).toBe(CLIENT_ERROR_MESSAGES.unauthorized)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { error: 'Invalid code' })))
-    expect(await sendJson('/api/x', 'POST', {}, { passThrough: [401] })).toEqual({ ok: false, status: 401, error: 'Invalid code' })
+    expect(await sendJson('/api/x', 'POST', {}, { passThrough: [401] })).toMatchObject({ ok: false, status: 401, error: 'Invalid code' })
   })
 })
 
@@ -73,7 +73,7 @@ describe('sendJson / fetchJson', () => {
 
   it('returns the readable error on a failed response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(500, { error: 'boom stack' })))
-    expect(await sendJson('/api/x', 'PATCH', {})).toEqual({ ok: false, status: 500, error: CLIENT_ERROR_MESSAGES.server })
+    expect(await sendJson('/api/x', 'PATCH', {})).toEqual({ ok: false, status: 500, error: CLIENT_ERROR_MESSAGES.server, body: { error: 'boom stack' } })
   })
 
   it('returns the network message when fetch rejects', async () => {

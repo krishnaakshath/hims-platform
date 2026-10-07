@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -28,29 +29,19 @@ function AssignmentScheduleModal({ assignment, onClose }: { assignment: DoctorAs
   async function submitSchedule() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/front-desk/assignments/${assignment.id}/schedule`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ startsAt: `${date}T${startTime}:00`, endsAt: `${date}T${endTime}:00` }),
-    })
+    const res = await sendJson(`/api/front-desk/assignments/${assignment.id}/schedule`, 'POST', { startsAt: `${date}T${startTime}:00`, endsAt: `${date}T${endTime}:00` })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not schedule this visit.')
+    setError(res.error)
   }
 
   async function submitDecline() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/front-desk/assignments/${assignment.id}/decline`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: declineReason }),
-    })
+    const res = await sendJson(`/api/front-desk/assignments/${assignment.id}/decline`, 'POST', { reason: declineReason })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not decline this assignment.')
+    setError(res.error)
   }
 
   return (
@@ -77,7 +68,7 @@ function AssignmentScheduleModal({ assignment, onClose }: { assignment: DoctorAs
           </div>
         )}
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           {mode === 'schedule'

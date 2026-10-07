@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -61,26 +62,19 @@ export function AddClientModal({ onClose }: { onClose: () => void }) {
     }
     setSubmitting(true)
     try {
-      const res = await fetch('/api/patients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (res.status === 201) {
-        const created = await res.json()
+      const res = await sendJson<{ id: string }>('/api/patients', 'POST', payload)
+      if (res.ok) {
         onClose()
         // Navigate straight to the new patient's page so the front desk sees it.
-        router.push(`/patients/${created.id}`)
+        router.push(`/patients/${res.data.id}`)
         return
       }
-      const body = await res.json().catch(() => null)
       if (res.status === 400) {
-        setErrors(serverFieldErrors(body))
+        setErrors(serverFieldErrors(res.body))
         setError('Please correct the highlighted fields.')
-      } else if (res.status === 409 && typeof body?.error === 'string') {
-        setError(body.error)
       } else {
-        setError('Could not add this patient. Please try again.')
+        // 409 duplicate: the route's own message; anything else: the fixed one.
+        setError(res.error)
       }
     } catch {
       setError('Could not add this patient. Please try again.')

@@ -20,7 +20,8 @@ export const CLIENT_ERROR_MESSAGES = {
 
 export type FetchResult<T = unknown> =
   | { ok: true; status: number; data: T }
-  | { ok: false; status: number; error: string }
+  // `body` is the parsed error body, for a form that maps field-level details.
+  | { ok: false; status: number; error: string; body?: unknown }
 
 const PASS_THROUGH = new Set([400, 404, 409, 422])
 const MAX_MESSAGE_LENGTH = 200
@@ -80,7 +81,7 @@ export async function fetchJson<T = unknown>(url: string, init?: RequestInit, op
   }
   const data = await parseBody(res)
   if (res.ok) return { ok: true, status: res.status, data: data as T }
-  return { ok: false, status: res.status, error: authoredMessage(res.status, data, options) ?? messageForStatus(res.status) }
+  return { ok: false, status: res.status, error: authoredMessage(res.status, data, options) ?? messageForStatus(res.status), body: data }
 }
 
 /** A JSON mutation (body omitted when undefined). See fetchJson. */

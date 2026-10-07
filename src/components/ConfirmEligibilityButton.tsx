@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 
 export function ConfirmEligibilityButton({ anonId }: { anonId: string }) {
@@ -8,11 +9,10 @@ export function ConfirmEligibilityButton({ anonId }: { anonId: string }) {
   async function run() {
     setRunning(true)
     setError(null)
-    const res = await fetch(`/api/patients/${anonId}/screening/confirm`, { method: 'POST' })
+    const res = await sendJson(`/api/patients/${anonId}/screening/confirm`, 'POST')
     if (!res.ok) {
       setRunning(false)
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not confirm eligibility.')
+      setError(res.error)
       return
     }
     // A full reload rather than router.refresh() -- this page's data comes
@@ -31,7 +31,7 @@ export function ConfirmEligibilityButton({ anonId }: { anonId: string }) {
       >
         {running ? 'Confirming…' : 'Confirm Eligibility & Notify Patient'}
       </button>
-      {error && <span className="text-xs text-destructive">{error}</span>}
+      {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
     </div>
   )
 }

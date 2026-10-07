@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -51,14 +52,9 @@ export function AadhaarPanel({ anonId, view, canWrite }: { anonId: string; view:
       ? { status: 'declined', reason, ...(note.trim() ? { note: note.trim() } : {}) }
       : { status: 'provided', number, consent }
     try {
-      const res = await fetch(`/api/patients/${anonId}/aadhaar`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      const res = await sendJson(`/api/patients/${anonId}/aadhaar`, 'PUT', body)
       if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null
-        setError(data?.error ?? 'Could not save Aadhaar. Please try again.')
+        setError(res.error)
         return
       }
       close()

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { CLIENT_ERROR_MESSAGES } from '@/lib/client-fetch'
 import { AppointmentStatusSelect } from '@/components/AppointmentStatusSelect'
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
@@ -25,7 +26,7 @@ describe('AppointmentStatusSelect', () => {
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'completed' } })
 
-    await waitFor(() => expect(screen.getByText('Could not reach the server.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(CLIENT_ERROR_MESSAGES.network)).toBeInTheDocument())
     expect(screen.getByRole('combobox')).not.toBeDisabled()
   })
 })

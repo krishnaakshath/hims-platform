@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Send } from 'lucide-react'
@@ -20,27 +21,23 @@ export function MessageComposer({ patientId, viewerRole }: { patientId: string; 
   const [error, setError] = useState<string | null>(null)
 
   async function send() {
-    if (!body.trim()) return
+    // Enter and the button both call send(): ignore a second call while one is in flight.
+    if (!body.trim() || sending) return
     setSending(true)
     setError(null)
-    const res = await fetch(`/api/messages/${patientId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body, actingAs: viewerRole }),
-    })
+    const res = await sendJson(`/api/messages/${patientId}`, 'POST', { body, actingAs: viewerRole })
     setSending(false)
     if (res.ok) {
       setBody('')
       router.refresh()
     } else {
-      const data = await res.json()
-      setError(data.error ?? 'Could not send this message.')
+      setError(res.error)
     }
   }
 
   return (
     <div>
-      {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="mb-2 text-xs text-destructive">{error}</p>}
       <div className="flex items-end gap-2">
         <textarea
           value={body}

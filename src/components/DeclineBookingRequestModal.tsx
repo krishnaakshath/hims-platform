@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -17,15 +18,10 @@ export function DeclineBookingRequestModal({ request, onClose }: {
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/booking-requests/${request.id}/decline`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason }),
-    })
+    const res = await sendJson(`/api/booking-requests/${request.id}/decline`, 'PATCH', { reason })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not decline this booking request.')
+    setError(res.error)
   }
 
   const canSubmit = Boolean(reason) && !submitting
@@ -39,7 +35,7 @@ export function DeclineBookingRequestModal({ request, onClose }: {
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">{request.requesterName} · {request.reason}</p>
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for declining" aria-label="Reason" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
