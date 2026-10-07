@@ -81,7 +81,7 @@ export default async function CodingReportPage({ searchParams }: { searchParams:
               </thead>
               <tbody className="divide-y divide-border">
                 {report.perCoder.map((c) => (
-                  <tr key={c.name}>
+                  <tr key={c.userId ?? `name:${c.name}`}>
                     <td className={`${td} font-medium`}>{c.name}</td>
                     <td className={td}>{c.claimed}</td>
                     <td className={td}>{c.coded}</td>

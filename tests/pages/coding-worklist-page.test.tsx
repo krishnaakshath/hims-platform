@@ -129,7 +129,7 @@ describe('/coding worklist', () => {
 const PRODUCTIVITY: CodingProductivity = {
   from: '2026-10-01',
   to: '2026-10-08',
-  perCoder: [{ name: 'Asha Coder', claimed: 4, coded: 3, finalised: 2, queriesRaised: 1, reopened: 0, medianHoursToFinalise: 5.5 }],
+  perCoder: [{ userId: 7, name: 'Asha Coder', claimed: 4, coded: 3, finalised: 2, queriesRaised: 1, reopened: 0, medianHoursToFinalise: 5.5 }],
   backlog: {
     byStatus: { uncoded: 3, in_progress: 2, queried: 1, coded: 0, finalised: 0 },
     byAge: { '0-2': 2, '3-7': 2, '8-30': 1, '31+': 1 },

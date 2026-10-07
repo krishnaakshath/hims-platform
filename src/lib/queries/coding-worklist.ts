@@ -8,9 +8,11 @@
 //   new work (the SP3 recall lesson).
 // - Coder minimum PHI (ruling 4): patient id, name and UHID only. No dob, contact, address,
 //   ABHA or insurance column is read.
-// - Dates are IST calendar days of `encounters.completed_at` (a UTC timestamp). Instant bounds go
-//   through drizzle column comparisons (startOfIstDay), never raw Date params in sql``.
-import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm'
+// - Dates are IST calendar days of the visit's completion instant (a UTC timestamp):
+//   `completed_at`, or for a completed row that lacks it (legacy data) its status-change time and
+//   then its check-in time, so no completed visit is ever missing from the worklist or backlog.
+//   Instant bounds are passed as ISO strings cast to timestamp, never raw Date params in sql``.
+import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
   codingQueries, departments, diagnoses, encounterCoding, encounterCodingEvents, encounterProcedures, encounters, patients,
@@ -49,6 +51,12 @@ export interface CodingWorklistRow {
 
 const CODED_ENCOUNTER_TYPES = ['opd', 'ipd'] as const
 
+/** The visit's completion instant; legacy completed rows without `completed_at` fall back. */
+const completedAtSql = sql<Date>`coalesce(${encounters.completedAt}, ${encounters.statusChangedAt}, ${encounters.checkedInAt})`
+  .mapWith(encounters.completedAt)
+/** An instant as a timestamp literal (UTC wall time; the stored columns are UTC `timestamp`). */
+const instant = (d: Date) => sql`${d.toISOString()}::timestamp`
+
 /** The encounter's coding status; no coding row reads `uncoded`. */
 const codingStatusSql = sql<EncounterCodingStatus>`coalesce(${encounterCoding.status}, 'uncoded')`
 
@@ -59,11 +67,10 @@ const zeroCounts = (): Record<EncounterCodingStatus, number> =>
 function baseConditions(f: CodingWorklistFilters, session: Session): SQL[] {
   const c: (SQL | undefined)[] = [
     eq(encounters.status, 'completed'),
-    isNotNull(encounters.completedAt),
     f.encounterType ? eq(encounters.encounterType, f.encounterType) : inArray(encounters.encounterType, [...CODED_ENCOUNTER_TYPES]),
     f.departmentId !== null ? eq(encounters.departmentId, f.departmentId) : undefined,
-    f.fromDate ? gte(encounters.completedAt, startOfIstDay(f.fromDate)) : undefined,
-    f.toDate ? lt(encounters.completedAt, startOfIstDay(addIsoDays(f.toDate, 1))) : undefined,
+    f.fromDate ? sql`${completedAtSql} >= ${instant(startOfIstDay(f.fromDate))}` : undefined,
+    f.toDate ? sql`${completedAtSql} < ${instant(startOfIstDay(addIsoDays(f.toDate, 1)))}` : undefined,
   ]
   if (f.assignee === 'mine') c.push(session.userId === null ? sql`false` : eq(encounterCoding.assignedToUserId, session.userId))
   if (f.assignee === 'unassigned') c.push(isNull(encounterCoding.assignedToUserId))
@@ -108,7 +115,7 @@ export async function listCodingWorklist(
       encounterId: encounters.id,
       encounterType: encounters.encounterType,
       encounterDate: encounters.encounterDate,
-      completedAt: encounters.completedAt,
+      completedAt: completedAtSql,
       patientId: encounters.patientId,
       patientName: patients.name,
       uhid: patients.uhid,
@@ -127,13 +134,13 @@ export async function listCodingWorklist(
     .leftJoin(departments, eq(departments.id, encounters.departmentId))
     .leftJoin(encounterCoding, eq(encounterCoding.encounterId, encounters.id))
     .where(and(...base, statusCondition(filters.status)))
-    .orderBy(asc(encounters.completedAt), asc(encounters.id))
+    .orderBy(asc(completedAtSql), asc(encounters.id))
     .limit(WORKLIST_PAGE_SIZE)
     .offset((filters.page - 1) * WORKLIST_PAGE_SIZE)
 
   const today = todayIsoIn(DEFAULT_TIMEZONE, now)
   const rows = raw.map((r): CodingWorklistRow => {
-    const completedAt = r.completedAt! // isNotNull in the WHERE
+    const completedAt = r.completedAt
     const completedIstDate = istDateOf(completedAt)
     return {
       ...r,
@@ -156,6 +163,9 @@ export interface CodingProductivity {
   from: string
   to: string
   perCoder: {
+    /** The acting user account; null for a session without one (the env-configured admin). */
+    userId: number | null
+    /** The account's most recent display name in the range. */
     name: string
     claimed: number
     coded: number
@@ -174,57 +184,62 @@ export interface CodingProductivity {
 
 const COUNTED_ACTIONS = ['claim', 'mark_coded', 'finalise', 'raise_query', 'reopen'] as const
 
-/** IST calendar date of a UTC `timestamp` column, in SQL. */
-const istDateSql = (col: typeof encounters.completedAt) =>
-  sql`((${col} AT TIME ZONE 'UTC') AT TIME ZONE ${DEFAULT_TIMEZONE})::date`
+/** IST calendar date of a UTC `timestamp` expression, in SQL. */
+const istDateSql = (expr: SQL) =>
+  sql`((${expr} AT TIME ZONE 'UTC') AT TIME ZONE ${DEFAULT_TIMEZONE})::date`
 
 const countWhere = (action: (typeof COUNTED_ACTIONS)[number]) =>
   sql<number>`(count(*) filter (where ${encounterCodingEvents.action} = ${action}))::int`
 
 /**
  * Per-actor event counts within the IST date range (inclusive) and the backlog of every completed,
- * not-yet-finalised OPD/IPD visit as of `now`. Three grouped queries; no row lists.
+ * not-yet-finalised OPD/IPD visit as of `now`. Actors are grouped by user account (a display name
+ * is neither unique nor stable); only events without an account fall back to the name. Grouped
+ * queries only; no row lists.
  */
 export async function getCodingProductivity(range: { from: string; to: string }, now: Date = new Date()): Promise<CodingProductivity> {
   const [from, to] = range.from <= range.to ? [range.from, range.to] : [range.to, range.from]
   const db = getDb()
 
-  const hoursToFinalise = sql`extract(epoch from (${encounterCodingEvents.at} - ${encounters.completedAt})) / 3600.0`
+  const hoursToFinalise = sql`extract(epoch from (${encounterCodingEvents.at} - ${completedAtSql})) / 3600.0`
+  const nameKey = sql`case when ${encounterCodingEvents.byUserId} is null then ${encounterCodingEvents.byName} end`
   const perCoderRaw = await db
     .select({
-      name: encounterCodingEvents.byName,
+      userId: encounterCodingEvents.byUserId,
+      name: sql<string>`(array_agg(${encounterCodingEvents.byName} order by ${encounterCodingEvents.at} desc, ${encounterCodingEvents.id} desc))[1]`,
       claimed: countWhere('claim'),
       coded: countWhere('mark_coded'),
       finalised: countWhere('finalise'),
       queriesRaised: countWhere('raise_query'),
       reopened: countWhere('reopen'),
       median: sql<number | string | null>`percentile_cont(0.5) within group (order by ${hoursToFinalise})
-        filter (where ${encounterCodingEvents.action} = 'finalise' and ${encounters.completedAt} is not null)`,
+        filter (where ${encounterCodingEvents.action} = 'finalise')`,
     })
     .from(encounterCodingEvents)
     .innerJoin(encounters, eq(encounters.id, encounterCodingEvents.encounterId))
     .where(and(
       inArray(encounterCodingEvents.action, [...COUNTED_ACTIONS]),
-      gte(encounterCodingEvents.at, startOfIstDay(from)),
-      lt(encounterCodingEvents.at, startOfIstDay(addIsoDays(to, 1))),
+      sql`${encounterCodingEvents.at} >= ${instant(startOfIstDay(from))}`,
+      sql`${encounterCodingEvents.at} < ${instant(startOfIstDay(addIsoDays(to, 1)))}`,
     ))
-    .groupBy(encounterCodingEvents.byName)
-    .orderBy(asc(encounterCodingEvents.byName))
+    .groupBy(encounterCodingEvents.byUserId, nameKey)
 
-  const perCoder = perCoderRaw.map(({ median, ...r }) => ({
-    ...r,
-    claimed: Number(r.claimed),
-    coded: Number(r.coded),
-    finalised: Number(r.finalised),
-    queriesRaised: Number(r.queriesRaised),
-    reopened: Number(r.reopened),
-    medianHoursToFinalise: median === null ? null : Math.round(Number(median) * 100) / 100,
-  }))
+  const perCoder = perCoderRaw
+    .map(({ median, ...r }) => ({
+      ...r,
+      claimed: Number(r.claimed),
+      coded: Number(r.coded),
+      finalised: Number(r.finalised),
+      queriesRaised: Number(r.queriesRaised),
+      reopened: Number(r.reopened),
+      medianHoursToFinalise: median === null ? null : Math.round(Number(median) * 100) / 100,
+    }))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : (a.userId ?? 0) - (b.userId ?? 0)))
 
   // Backlog, grouped by (status, age bucket) in SQL. GROUP BY 1, 2 refers to the output columns,
   // so the parameterised expressions are not repeated.
   const today = todayIsoIn(DEFAULT_TIMEZONE, now)
-  const ageDays = sql`(${today}::date - ${istDateSql(encounters.completedAt)})`
+  const ageDays = sql`(${today}::date - ${istDateSql(completedAtSql)})`
   const bucketSql = sql<BacklogAgeBucket>`case
     when ${ageDays} >= 31 then '31+' when ${ageDays} >= 8 then '8-30' when ${ageDays} >= 3 then '3-7' else '0-2' end`
   const backlogRaw = await db
@@ -232,13 +247,12 @@ export async function getCodingProductivity(range: { from: string; to: string },
       status: codingStatusSql,
       bucket: bucketSql,
       n: sql<number>`count(*)::int`,
-      oldest: sql<string | null>`min(${istDateSql(encounters.completedAt)})::text`,
+      oldest: sql<string | null>`min(${istDateSql(completedAtSql)})::text`,
     })
     .from(encounters)
     .leftJoin(encounterCoding, eq(encounterCoding.encounterId, encounters.id))
     .where(and(
       eq(encounters.status, 'completed'),
-      isNotNull(encounters.completedAt),
       inArray(encounters.encounterType, [...CODED_ENCOUNTER_TYPES]),
       sql`${codingStatusSql} <> 'finalised'`,
     ))

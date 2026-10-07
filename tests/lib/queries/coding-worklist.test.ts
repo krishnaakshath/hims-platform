@@ -47,9 +47,9 @@ describe.skipIf(!process.env.DATABASE_URL)('coding worklist and productivity (DB
       finalisedAt: status === 'finalised' ? NOW : null, finalisedByName: status === 'finalised' ? PROBE : null,
     })
   }
-  async function event(encounterId: number, action: CodingEventAction, byName: string, at: string) {
+  async function event(encounterId: number, action: CodingEventAction, byName: string, at: string, byUserId: number | null = null) {
     await getDb().insert(encounterCodingEvents).values({
-      encounterId, action, fromStatus: 'in_progress', toStatus: 'in_progress', byName, at: new Date(at),
+      encounterId, action, fromStatus: 'in_progress', toStatus: 'in_progress', byName, byUserId, at: new Date(at),
     })
   }
 
@@ -210,28 +210,28 @@ describe.skipIf(!process.env.DATABASE_URL)('coding worklist and productivity (DB
     await enc('2099-03-09T05:00:00Z') // backlog, 1 day old on NOW
     const A = `${PROBE} Coder A`
     const B = `${PROBE} Coder B`
-    await event(e1, 'claim', A, '2099-03-02T05:00:00Z')
-    await event(e1, 'mark_coded', A, '2099-03-02T06:00:00Z')
-    await event(e1, 'finalise', A, '2099-03-02T10:30:00Z') // 6 h after completion
-    await event(e2, 'claim', A, '2099-03-03T00:30:00Z')
-    await event(e2, 'raise_query', A, '2099-03-03T00:40:00Z')
-    await event(e2, 'mark_coded', A, '2099-03-03T01:00:00Z')
-    await event(e2, 'finalise', A, '2099-03-03T02:00:00Z') // 2 h
-    await event(e2, 'reopen', A, '2099-03-03T03:00:00Z')
-    await event(e3, 'claim', B, '2099-03-05T06:00:00Z')
-    await event(e3, 'mark_coded', B, '2099-04-15T06:00:00Z') // outside the range
+    await event(e1, 'claim', A, '2099-03-02T05:00:00Z', coderAId)
+    await event(e1, 'mark_coded', A, '2099-03-02T06:00:00Z', coderAId)
+    await event(e1, 'finalise', A, '2099-03-02T10:30:00Z', coderAId) // 6 h after completion
+    await event(e2, 'claim', A, '2099-03-03T00:30:00Z', coderAId)
+    await event(e2, 'raise_query', A, '2099-03-03T00:40:00Z', coderAId)
+    await event(e2, 'mark_coded', A, '2099-03-03T01:00:00Z', coderAId)
+    await event(e2, 'finalise', A, '2099-03-03T02:00:00Z', coderAId) // 2 h
+    await event(e2, 'reopen', A, '2099-03-03T03:00:00Z', coderAId)
+    await event(e3, 'claim', B, '2099-03-05T06:00:00Z', coderBId)
+    await event(e3, 'mark_coded', B, '2099-04-15T06:00:00Z', coderBId) // outside the range
 
     const p = await getCodingProductivity({ from: '2099-03-01', to: '2099-03-31' }, NOW)
     expect(p.from).toBe('2099-03-01')
     expect(p.to).toBe('2099-03-31')
     const mine = p.perCoder.filter((c) => c.name.startsWith(PROBE))
     expect(mine).toEqual([
-      { name: A, claimed: 2, coded: 2, finalised: 2, queriesRaised: 1, reopened: 1, medianHoursToFinalise: 4 },
-      { name: B, claimed: 1, coded: 0, finalised: 0, queriesRaised: 0, reopened: 0, medianHoursToFinalise: null },
+      { userId: coderAId, name: A, claimed: 2, coded: 2, finalised: 2, queriesRaised: 1, reopened: 1, medianHoursToFinalise: 4 },
+      { userId: coderBId, name: B, claimed: 1, coded: 0, finalised: 0, queriesRaised: 0, reopened: 0, medianHoursToFinalise: null },
     ])
     // The range edge is an IST day: e2's events (from 06:00 IST on 2099-03-03) fall outside a range ending 2099-03-02.
     const early = await getCodingProductivity({ from: '2099-03-01', to: '2099-03-02' }, NOW)
-    expect(early.perCoder.find((c) => c.name === A)).toEqual({ name: A, claimed: 1, coded: 1, finalised: 1, queriesRaised: 0, reopened: 0, medianHoursToFinalise: 6 })
+    expect(early.perCoder.find((c) => c.name === A)).toEqual({ userId: coderAId, name: A, claimed: 1, coded: 1, finalised: 1, queriesRaised: 0, reopened: 0, medianHoursToFinalise: 6 })
 
     // Backlog: every non-finalised completed encounter; real rows are years older than NOW.
     expect(p.backlog.byStatus.finalised).toBe(0)
@@ -239,5 +239,43 @@ describe.skipIf(!process.env.DATABASE_URL)('coding worklist and productivity (DB
     expect(p.backlog.byAge['0-2']).toBe(1)
     expect(p.backlog.byAge['3-7']).toBe(1)
     expect(p.backlog.oldestCompletedDate! <= '2099-03-05').toBe(true)
+  })
+
+  it('productivity groups by user account, not by display name', async () => {
+    const e1 = await enc('2099-03-02T04:30:00Z')
+    const e2 = await enc('2099-03-03T04:30:00Z')
+    const SAME = `${PROBE} Same Name`
+    // Two different coders sharing one display name stay two rows.
+    await event(e1, 'claim', SAME, '2099-03-02T05:00:00Z', coderAId)
+    await event(e2, 'claim', SAME, '2099-03-03T05:00:00Z', coderBId)
+    // One coder renamed mid-period stays one row, under the latest name.
+    await event(e1, 'mark_coded', `${PROBE} Renamed A`, '2099-03-04T05:00:00Z', coderAId)
+
+    const p = await getCodingProductivity({ from: '2099-03-01', to: '2099-03-31' }, NOW)
+    const mine = p.perCoder.filter((c) => c.name.startsWith(PROBE))
+    expect(mine).toHaveLength(2)
+    expect(mine.find((c) => c.userId === coderAId)).toMatchObject({ name: `${PROBE} Renamed A`, claimed: 1, coded: 1 })
+    expect(mine.find((c) => c.userId === coderBId)).toMatchObject({ name: SAME, claimed: 1, coded: 0 })
+  })
+
+  it('a completed visit with no completed_at is still listed, dated by its status change', async () => {
+    const db = getDb()
+    const [e] = await db.insert(encounters).values({
+      patientId: PATIENT, encounterType: 'opd', status: 'completed', encounterDate: '2099-03-04',
+      providerId, departmentId: deptId, checkedInByName: PROBE, completedAt: null,
+      checkedInAt: new Date('2099-03-04T04:00:00Z'), statusChangedAt: new Date('2099-03-04T19:00:00Z'), // 2099-03-05 00:30 IST
+    }).returning({ id: encounters.id })
+    encounterIds.push(e.id)
+
+    const { rows, total } = await listCodingWorklist(F, CODER_A, NOW)
+    expect(rows.map((r) => r.encounterId)).toEqual([e.id])
+    expect(total).toBe(1)
+    expect(rows[0].completedAt).toEqual(new Date('2099-03-04T19:00:00Z'))
+    expect(rows[0].completedIstDate).toBe('2099-03-05')
+    expect((await listCodingWorklist({ ...F, fromDate: '2099-03-05', toDate: '2099-03-05' }, CODER_A, NOW)).total).toBe(1)
+    expect((await listCodingWorklist({ ...F, fromDate: '2099-03-04', toDate: '2099-03-04' }, CODER_A, NOW)).total).toBe(0)
+
+    const p = await getCodingProductivity({ from: '2099-03-01', to: '2099-03-31' }, NOW)
+    expect(p.backlog.byAge['3-7']).toBeGreaterThanOrEqual(1)
   })
 })
