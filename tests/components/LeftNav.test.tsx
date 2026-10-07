@@ -103,6 +103,11 @@ describe('LeftNav', () => {
     expect(NAV_BILLING_ITEMS[0]).toMatchObject({ href: '/billing', label: 'Billing Home' })
   })
 
+  it.each(['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs'] as const)('shows My Account to %s', (role) => {
+    render(<LeftNav role={role} />)
+    expect(screen.getByRole('link', { name: /my account/i })).toHaveAttribute('href', '/account')
+  })
+
   it('shows the decline pill on Assignments for frontdesk', () => {
     render(<LeftNav role="frontdesk" badges={{ '/front-desk/assignments': 2 }} />)
     expect(within(screen.getByRole('link', { name: /assignments/i })).getByText('2')).toBeInTheDocument()

@@ -1,6 +1,7 @@
 'use client'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { LogOut } from 'lucide-react'
+import { LogOut, UserCircle2 } from 'lucide-react'
 import { NotificationPanel } from '@/components/NotificationPanel'
 import { GlobalSearch } from '@/components/GlobalSearch'
 import { PatientAvatar } from '@/components/PatientAvatar'
@@ -26,6 +27,15 @@ export function TopBanner({ userName, role }: { userName: string; role: Role }) 
             <PatientAvatar name={userName} size="sm" />
             <span className="text-sm font-medium text-sidebar-foreground">{userName}</span>
           </div>
+          {/* Wave B P1-01: every role's own account page (MFA, capabilities). */}
+          <Link
+            href="/account"
+            title="My account and sign-in security"
+            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          >
+            <UserCircle2 className="h-4 w-4" aria-hidden="true" />
+            My account
+          </Link>
           <button
             onClick={signOut}
             title="Sign out of your account"

@@ -35,4 +35,10 @@ describe('TopBanner', () => {
     render(<TopBanner userName="Jamie Ruiz" role={role} />)
     expect(screen.getByRole('textbox')).toBeInTheDocument()
   })
+
+  // Wave B P1-01: every role reaches its own account page from the top bar.
+  it.each(['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs'] as const)('links %s to My account', (role) => {
+    render(<TopBanner userName="Jamie Ruiz" role={role} />)
+    expect(screen.getByRole('link', { name: /my account/i })).toHaveAttribute('href', '/account')
+  })
 })

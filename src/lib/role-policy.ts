@@ -78,6 +78,13 @@ export const ENCOUNTER_STATUS_ROLES: readonly Role[] = ['admin', 'pi', 'frontdes
 export const DISCHARGE_ROLES: readonly Role[] = ['admin', 'pi']
 // end SP3
 
+// Wave B: account self-service and reachability.
+// Account = /account (own MFA method, MFA self-reset, "what you can do"):
+// every staff role. A named allowlist (not "no gate") so an unknown/future
+// role is still denied by default.
+export const ACCOUNT_ROLES: readonly Role[] = ALL_ROLES
+// end Wave B
+
 export type SearchScopes = { patients: boolean; trials: boolean; formTemplates: boolean }
 
 export function searchScopesFor(role: Role): SearchScopes {
