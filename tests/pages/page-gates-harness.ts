@@ -216,6 +216,13 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/front-desk/check-in', load: () => import('@/app/(dashboard)/front-desk/check-in/page'), allowed: ['frontdesk', 'admin', 'crc'] },
   // LeftNav.tsx:40 — { href: '/front-desk/assignments', roles: ['frontdesk', 'admin', 'crc'] }
   { route: '/front-desk/assignments', load: () => import('@/app/(dashboard)/front-desk/assignments/page'), allowed: ['frontdesk', 'admin', 'crc'] },
+  // LeftNav.tsx — { href: '/front-desk/follow-ups', roles: ['frontdesk', 'admin', 'crc'] }
+  {
+    route: '/front-desk/follow-ups',
+    load: () => import('@/app/(dashboard)/front-desk/follow-ups/page'),
+    props: { searchParams: Promise.resolve({}) },
+    allowed: ['frontdesk', 'admin', 'crc'],
+  },
   // LeftNav.tsx:41 — { href: '/inpatient/beds', roles: ['frontdesk', 'admin', 'crc', 'pi'] }
   { route: '/inpatient/beds', load: () => import('@/app/(dashboard)/inpatient/beds/page'), allowed: ['frontdesk', 'admin', 'crc', 'pi'] },
   // LeftNav.tsx:43 — { href: '/labs', roles: ['admin', 'crc', 'pi', 'labs'] }

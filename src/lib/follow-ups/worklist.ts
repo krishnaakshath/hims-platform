@@ -2,6 +2,9 @@
 // filtering, per-bucket sorting and counts.
 import type { FollowUpView } from '@/lib/follow-ups/view'
 
+/** The worklist query returns at most this many rows; the page tells the user when the cap is hit. */
+export const WORKLIST_ROW_CAP = 500
+
 export const WORKLIST_BUCKETS = ['due', 'overdue', 'upcoming', 'scheduled', 'missed'] as const
 export type WorklistBucket = (typeof WORKLIST_BUCKETS)[number]
 export type WorklistBucketFilter = WorklistBucket | 'all_open'

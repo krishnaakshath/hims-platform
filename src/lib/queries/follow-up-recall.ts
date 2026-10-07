@@ -8,7 +8,7 @@ import { todayIsoIn } from '@/lib/india-time'
 import { UPCOMING_HORIZON_DAYS, addDaysIso, deriveFollowUpStatus, followUpVisitReason, type ApptStatus, type FollowUpStatus } from '@/lib/follow-ups/rules'
 import type { ContactAttemptRequest } from '@/lib/follow-ups/validation'
 import { toFollowUpView, type ContactAttemptView, type FollowUpJoinedRow } from '@/lib/follow-ups/view'
-import type { WorklistRow } from '@/lib/follow-ups/worklist'
+import { WORKLIST_ROW_CAP, type WorklistRow } from '@/lib/follow-ups/worklist'
 import { hasSchedulingConflict } from './appointments'
 import type { WriteExecutor } from './executor'
 import type { FollowUpOrder } from './follow-ups'
@@ -182,7 +182,6 @@ export async function recordContactAttempt(id: number, input: ContactAttemptRequ
 // Recall worklist
 // ---------------------------------------------------------------------------
 
-export const WORKLIST_ROW_CAP = 500
 
 // Plan notes and the cancel reason are never selected for the worklist.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
