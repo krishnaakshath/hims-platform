@@ -36,6 +36,31 @@ describe('ServicesTable', () => {
     expect(screen.getByRole('link', { name: /import/i })).toHaveAttribute('href', '/tariffs/import')
   })
 
+  it('says when the list is truncated and pages with prev/next links that keep the filters', () => {
+    const filters = { q: 'cons', departmentId: '2', category: 'consultation', inactive: '1' }
+    const { unmount } = render(<ServicesTable services={[svc()]} departments={departments} filters={filters} pagination={{ page: 1, pageSize: 50, total: 120 }} />)
+    expect(screen.getByText('Showing first 50 of 120 — refine your search')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /previous/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /next/i })).toHaveAttribute('href', '/tariffs?q=cons&departmentId=2&category=consultation&inactive=1&page=2')
+    unmount()
+
+    const mid = render(<ServicesTable services={[svc()]} departments={departments} filters={{}} pagination={{ page: 2, pageSize: 50, total: 120 }} />)
+    expect(screen.getByText('Showing 51–100 of 120 — refine your search')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /previous/i })).toHaveAttribute('href', '/tariffs?page=1')
+    expect(screen.getByRole('link', { name: /next/i })).toHaveAttribute('href', '/tariffs?page=3')
+    mid.unmount()
+
+    render(<ServicesTable services={[svc()]} departments={departments} filters={{}} pagination={{ page: 3, pageSize: 50, total: 120 }} />)
+    expect(screen.getByText('Showing 101–120 of 120 — refine your search')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /next/i })).not.toBeInTheDocument()
+  })
+
+  it('shows no paging notice when everything fits on one page', () => {
+    render(<ServicesTable services={[svc()]} departments={departments} filters={{}} pagination={{ page: 1, pageSize: 50, total: 1 }} />)
+    expect(screen.queryByText(/refine your search/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: /pages/i })).not.toBeInTheDocument()
+  })
+
   it('shows an empty state', () => {
     render(<ServicesTable services={[]} departments={departments} filters={{}} />)
     expect(screen.getByText(/no services match/i)).toBeInTheDocument()

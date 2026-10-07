@@ -6,7 +6,7 @@ import { isExclusionViolation } from '@/lib/db-errors'
 import { resolvePrice } from '@/lib/tariff/resolve'
 import type { Session } from '@/lib/auth'
 import {
-  TariffOverlapError, commitRateImport, commitServiceImport, createRate, getRate, getServiceByCode, listPackageItems,
+  TariffOverlapError, commitRateImport, countServices, commitServiceImport, createRate, getRate, getServiceByCode, listPackageItems,
   listRatesForService, listServices, listServicesWithCurrentPrices, loadPricingContext, replacePackageItems, reviseRate,
 } from '@/lib/queries/tariff'
 
@@ -228,5 +228,16 @@ describe.skipIf(!process.env.DATABASE_URL)('tariff query layer (DB)', () => {
     expect(priced).toEqual([expect.objectContaining({ id: serviceId, basePaise: 10000, departmentPaise: 9000 })])
     const before = await listServicesWithCurrentPrices({ departmentId: deptId }, '2025-12-31')
     expect(before[0]).toMatchObject({ basePaise: null, departmentPaise: null })
+  })
+
+  it('countServices counts every match; listServices pages with limit and offset in code order', async () => {
+    const { deptId, serviceId } = await fixtures()
+    const b = await makeService('TEST_SP2_Q7_S2', deptId)
+    const c = await makeService('TEST_SP2_Q7_S3', deptId)
+    expect(await countServices({ departmentId: deptId })).toBe(3)
+    expect(await countServices({ departmentId: deptId, q: 'TEST_SP2_Q7_S3' })).toBe(1)
+    expect((await listServices({ departmentId: deptId, limit: 2 })).map((s) => s.id)).toEqual([serviceId, b])
+    expect((await listServices({ departmentId: deptId, limit: 2, offset: 2 })).map((s) => s.id)).toEqual([c])
+    expect((await listServicesWithCurrentPrices({ departmentId: deptId, limit: 2, offset: 2 }, '2026-05-01')).map((s) => s.id)).toEqual([c])
   })
 })

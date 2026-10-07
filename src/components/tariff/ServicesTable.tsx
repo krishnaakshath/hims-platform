@@ -24,13 +24,45 @@ export interface ServiceListItem {
 }
 
 export interface ServiceFilters { q?: string; departmentId?: string; category?: string; inactive?: string }
+export interface ServicePagination { page: number; pageSize: number; total: number }
+
+/** /tariffs URL for `page`, keeping the active filters. */
+function pageHref(filters: ServiceFilters, page: number): string {
+  const qs = new URLSearchParams()
+  for (const k of ['q', 'departmentId', 'category', 'inactive'] as const) {
+    const v = filters[k]
+    if (v) qs.set(k, v)
+  }
+  qs.set('page', String(page))
+  return `/tariffs?${qs.toString()}`
+}
+
+function PageNav({ filters, pagination }: { filters: ServiceFilters; pagination: ServicePagination }) {
+  const { page, pageSize, total } = pagination
+  if (total <= pageSize) return null
+  const from = (page - 1) * pageSize + 1
+  const to = Math.min(page * pageSize, total)
+  const lastPage = Math.ceil(total / pageSize)
+  const LINK = 'rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted'
+  return (
+    <nav aria-label="Service list pages" className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+      <p>{page === 1 ? `Showing first ${to} of ${total}` : `Showing ${from}–${to} of ${total}`} — refine your search</p>
+      <div className="flex gap-2">
+        {page > 1 && <Link href={pageHref(filters, page - 1)} className={LINK}>Previous page</Link>}
+        {page < lastPage && <Link href={pageHref(filters, page + 1)} className={LINK}>Next page</Link>}
+      </div>
+    </nav>
+  )
+}
 
 const CATEGORY_LABEL = new Map<string, string>(SERVICE_CATEGORIES.map((c) => [c.code, c.label]))
 const TH = 'p-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground'
 
 const money = (paise: number | null) => (paise === null ? '—' : formatPaise(paise))
 
-export function ServicesTable({ services, departments, filters }: { services: ServiceListItem[]; departments: DepartmentOption[]; filters: ServiceFilters }) {
+export function ServicesTable({ services, departments, filters, pagination }: {
+  services: ServiceListItem[]; departments: DepartmentOption[]; filters: ServiceFilters; pagination?: ServicePagination
+}) {
   const router = useRouter()
   const [modal, setModal] = useState<{ mode: 'create' } | { mode: 'edit'; service: ServiceListItem } | null>(null)
   const [deactivating, setDeactivating] = useState<ServiceListItem | null>(null)
@@ -86,6 +118,8 @@ export function ServicesTable({ services, departments, filters }: { services: Se
       {deptView && (
         <p className="text-sm text-muted-foreground">Department price list view: the Department price column shows each service&apos;s current price in the selected department.</p>
       )}
+
+      {pagination && <PageNav filters={filters} pagination={pagination} />}
 
       {services.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No services match these filters.</p>

@@ -2,14 +2,16 @@ import { redirect } from 'next/navigation'
 import { Tags } from 'lucide-react'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
-import { listServicesWithCurrentPrices } from '@/lib/queries/tariff'
+import { countServices, listServicesWithCurrentPrices } from '@/lib/queries/tariff'
 import { listDepartments } from '@/lib/queries/departments'
 import { todayIsoIn } from '@/lib/india-time'
 import { SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/tariff/validation'
 import { ServicesTable } from '@/components/tariff/ServicesTable'
 
+const PAGE_SIZE = 50
+
 export default async function TariffsPage({ searchParams }: {
-  searchParams: Promise<{ q?: string; departmentId?: string; category?: string; inactive?: string }>
+  searchParams: Promise<{ q?: string; departmentId?: string; category?: string; inactive?: string; page?: string }>
 }) {
   const session = await requireSessionOrRedirect()
   // Tariff management is admin + billing only (crc/frontdesk use the lookup API, not these pages).
@@ -21,10 +23,12 @@ export default async function TariffsPage({ searchParams }: {
   const category = SERVICE_CATEGORIES.find((c) => c.code === sp.category)?.code as ServiceCategory | undefined
   const inactive = sp.inactive === '1'
 
-  const [services, departments] = await Promise.all([
-    listServicesWithCurrentPrices({ q: q || undefined, departmentId, category, includeInactive: inactive }, todayIsoIn()),
-    listDepartments({ activeOnly: true }),
-  ])
+  const filter = { q: q || undefined, departmentId, category, includeInactive: inactive }
+  const [total, departments] = await Promise.all([countServices(filter), listDepartments({ activeOnly: true })])
+  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const requested = typeof sp.page === 'string' && /^\d{1,6}$/.test(sp.page) ? Number(sp.page) : 1
+  const page = Math.min(Math.max(requested, 1), lastPage)
+  const services = await listServicesWithCurrentPrices({ ...filter, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }, todayIsoIn())
 
   return (
     <div>
@@ -45,6 +49,7 @@ export default async function TariffsPage({ searchParams }: {
         }))}
         departments={departments.map((d) => ({ id: d.id, code: d.code, name: d.name }))}
         filters={{ q: q || undefined, departmentId: departmentId ? String(departmentId) : undefined, category, inactive: inactive ? '1' : undefined }}
+        pagination={{ page, pageSize: PAGE_SIZE, total }}
       />
     </div>
   )

@@ -126,9 +126,11 @@ export interface ServiceListOptions {
   category?: ServiceCategory
   includeInactive?: boolean
   limit?: number
+  /** Rows to skip (code order), for paging. */
+  offset?: number
 }
 
-export async function listServices(opts: ServiceListOptions = {}): Promise<ServiceRow[]> {
+function serviceWhere(opts: ServiceListOptions): SQL | undefined {
   const where: SQL[] = []
   const q = opts.q?.trim()
   if (q) {
@@ -138,8 +140,19 @@ export async function listServices(opts: ServiceListOptions = {}): Promise<Servi
   if (opts.departmentId !== undefined) where.push(eq(serviceCatalog.departmentId, opts.departmentId))
   if (opts.category !== undefined) where.push(eq(serviceCatalog.category, opts.category))
   if (!opts.includeInactive) where.push(eq(serviceCatalog.isActive, true))
+  return and(...where)
+}
+
+export async function listServices(opts: ServiceListOptions = {}): Promise<ServiceRow[]> {
   const limit = Math.min(Math.max(opts.limit ?? 200, 1), 1000)
-  return serviceSelect(getDb()).where(and(...where)).orderBy(asc(serviceCatalog.code)).limit(limit)
+  const offset = Math.max(Math.trunc(opts.offset ?? 0), 0)
+  return serviceSelect(getDb()).where(serviceWhere(opts)).orderBy(asc(serviceCatalog.code), asc(serviceCatalog.id)).limit(limit).offset(offset)
+}
+
+/** How many services match the same filters as `listServices` (ignores limit/offset). */
+export async function countServices(opts: ServiceListOptions = {}): Promise<number> {
+  const [row] = await getDb().select({ n: sql<number>`count(*)::int` }).from(serviceCatalog).where(serviceWhere(opts))
+  return row?.n ?? 0
 }
 
 /**
