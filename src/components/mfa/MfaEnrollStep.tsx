@@ -49,7 +49,7 @@ export function MfaEnrollStep({ qrDataUrl, manualKey, onSubmit }: {
             className="w-full rounded-lg border border-border bg-background px-3.5 py-2.5 text-center text-lg tracking-[0.5em] text-foreground focus:border-primary focus:outline-none"
           />
         </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <button
           type="submit"
           disabled={submitting || code.length !== 6}

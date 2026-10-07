@@ -20,6 +20,9 @@ import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
 import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
 import { publicPatientColumns, patientPortalConfiguredSql, type PublicPatientRow } from '@/lib/queries/patient-columns'
+import { logAudit } from '@/lib/audit'
+import { lockPatientBilling } from './charge-capture' // SP4
+import type { Session } from '@/lib/auth'
 
 export interface CriteriaSummary {
   inclusionMet: number
@@ -408,16 +411,8 @@ export async function listPharmacyPatientRoster(): Promise<PharmacyRosterRow[]> 
   return rows
 }
 
-/**
- * Permanently removes a patient and every row that references it -- for
- * correcting a real mistake (a duplicate chart, a wrong entry), not a
- * routine action. None of these FKs cascade at the DB level (see
- * db/seed.ts's clearExistingData, which deletes in this same
- * children-before-parents order for the same reason), so each table is
- * cleared explicitly; Postgres would otherwise reject the final delete on
- * `patients` with a foreign-key violation. Returns false if the patient
- * doesn't exist, true once every row is gone.
- */
+type DeleteTx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
+
 // SP4 (plan ruling 11): issued bills, receipts and refunds are tax records that must be kept,
 // so a patient who has any cannot be deleted. The DELETE route maps this to a 409.
 export class PatientHasFinancialRecordsError extends Error {
@@ -427,8 +422,8 @@ export class PatientHasFinancialRecordsError extends Error {
   }
 }
 
-async function hasFinancialRecords(anonId: string): Promise<boolean> {
-  const result = await getDb().execute<{ found: boolean }>(sql`
+async function hasFinancialRecords(db: DeleteTx, anonId: string): Promise<boolean> {
+  const result = await db.execute<{ found: boolean }>(sql`
     select exists (select 1 from invoices where patient_id = ${anonId} and status in ('finalised', 'cancelled'))
         or exists (select 1 from patient_payments where patient_id = ${anonId})
         or exists (select 1 from refunds where patient_id = ${anonId}) as found`)
@@ -436,19 +431,50 @@ async function hasFinancialRecords(anonId: string): Promise<boolean> {
 }
 // end SP4
 
-export async function deletePatient(anonId: string): Promise<boolean> {
-  const db = getDb()
-  const [patient] = await db.select({ id: patients.id }).from(patients).where(eq(patients.id, anonId))
-  if (!patient) return false
-  // SP4: refuse before anything is deleted.
-  if (await hasFinancialRecords(anonId)) throw new PatientHasFinancialRecordsError()
+/**
+ * Permanently removes a patient and every row that references them, as ONE
+ * transaction: either the whole chart goes or (on any error) nothing does --
+ * never a half-deleted patient. When `audit` is given, the audit row is
+ * written inside the same transaction, so it commits or rolls back with the
+ * delete. Caches are invalidated only after commit. Returns false (writing
+ * nothing) when the patient does not exist.
+ *
+ * Covers every table with a live FK to patients(id) as of SP1-SP3
+ * (tests/lib/queries/delete-patient-fk-guard.test.ts). SP4-SP7 add
+ * patient-linked tables: extend deletePatientRows (inside the transaction),
+ * never add deletes outside it.
+ */
+export async function deletePatient(anonId: string, audit?: { session: Session; action?: string }): Promise<boolean> {
+  const outcome = await getDb().transaction((db) => deletePatientRows(db, anonId, audit))
+  if (!outcome) return false
+  const { screenings } = outcome
 
-  // SP4 billing, first and children-first. After the pre-check above only captured/void lines
-  // and draft/discarded invoices remain, and they are deleted. The payment/refund deletes are a
-  // backstop: should a row slip past the pre-check (a concurrent receipt), the migration-B
-  // immutability trigger refuses it (SQLSTATE 55000) before anything else is deleted, as do the
-  // invoice_lines FK (23503) and the invoice guard trigger for an issued invoice. Lines also
-  // reference medication_dispenses, charges, encounters and admissions, so they go before those.
+  await invalidateCache(patientDetailCacheKey(anonId))
+  await invalidateCache(patientListCacheKey(null))
+  await invalidateCache(dashboardCacheKey())
+  await invalidateCache(workbookListCacheKey())
+  for (const s of screenings) {
+    await invalidateCache(patientListCacheKey(s.trialId))
+  }
+
+  return true
+}
+
+// The body of deletePatient's transaction: `db` here IS the transaction.
+async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session: Session; action?: string } | undefined) {
+  // SP4: the billing lock first (the order every billing write uses), so a concurrent receipt or
+  // capture for this patient either commits before the check below or waits for the delete.
+  await lockPatientBilling(db, anonId)
+  const [patient] = await db.select({ id: patients.id }).from(patients).where(eq(patients.id, anonId)).for('update')
+  if (!patient) return null
+  // SP4: refuse before anything is deleted (the whole transaction rolls back).
+  if (await hasFinancialRecords(db, anonId)) throw new PatientHasFinancialRecordsError()
+
+  // SP4 billing, children-first. After the check above only captured/void lines and
+  // draft/discarded invoices remain, and they are deleted. The payment/refund deletes are a
+  // backstop: the migration-B immutability trigger refuses an issued row (SQLSTATE 55000), as do
+  // the invoice_lines FK (23503) and the invoice guard trigger. Lines also reference
+  // medication_dispenses, charges, encounters and admissions, so they go before those.
   await db.delete(refunds).where(eq(refunds.patientId, anonId))
   await db.delete(patientPayments).where(eq(patientPayments.patientId, anonId))
   await db.delete(chargeLines).where(eq(chargeLines.patientId, anonId))
@@ -599,16 +625,9 @@ export async function deletePatient(anonId: string): Promise<boolean> {
   await db.delete(signatures).where(eq(signatures.patientId, anonId))
 
   await db.delete(patients).where(eq(patients.id, anonId))
+  if (audit) await logAudit(audit.session, audit.action ?? 'deleted patient record', anonId, null, db)
 
-  await invalidateCache(patientDetailCacheKey(anonId))
-  await invalidateCache(patientListCacheKey(null))
-  await invalidateCache(dashboardCacheKey())
-  await invalidateCache(workbookListCacheKey())
-  for (const s of screenings) {
-    await invalidateCache(patientListCacheKey(s.trialId))
-  }
-
-  return true
+  return { screenings }
 }
 
 export interface PatientPrintIdentity {

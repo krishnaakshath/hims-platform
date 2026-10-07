@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -36,25 +37,20 @@ export function NewEventModal({ providers, defaultDate, onClose, initialPatient 
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch('/api/appointments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          patientId,
-          providerId,
-          // IST wall-clock time with an explicit offset; the server rejects naive times.
-          startsAt: istSlotString(date, startTime),
-          endsAt: istSlotString(date, endTime),
-          visitReason,
-        }),
+      const res = await sendJson('/api/appointments', 'POST', {
+        patientId,
+        providerId,
+        // IST wall-clock time with an explicit offset; the server rejects naive times.
+        startsAt: istSlotString(date, startTime),
+        endsAt: istSlotString(date, endTime),
+        visitReason,
       })
       if (res.ok) {
         router.refresh()
         onClose()
         return
       }
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not schedule the appointment.')
+      setError(res.error)
     } catch {
       setError('Could not reach the server. Please check your connection and try again.')
     } finally {
@@ -82,7 +78,7 @@ export function NewEventModal({ providers, defaultDate, onClose, initialPatient 
             <input value={endTime} onChange={(e) => setEndTime(e.target.value)} type="time" aria-label="End time (IST)" className="w-1/2 rounded-md border border-border px-3 py-2 text-sm" />
           </div>
           <input value={visitReason} onChange={(e) => setVisitReason(e.target.value)} placeholder="Visit reason" maxLength={VISIT_REASON_MAX_LENGTH} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

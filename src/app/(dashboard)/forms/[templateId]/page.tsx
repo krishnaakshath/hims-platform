@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
@@ -18,7 +19,9 @@ export default async function FormTemplateDetailPage({ params }: { params: Promi
   // got redirected home the moment they opened one.)
   if (!CLINICAL_ROLES.includes(session.role)) redirect('/')
   const { templateId } = await params
-  const template = await getFormTemplate(Number(templateId))
+  const numericId = parseId(templateId)
+  if (numericId === null) notFound()
+  const template = await getFormTemplate(numericId)
   if (!template) notFound()
   const [folders, attachedConsents, consentDocuments, patients] = await Promise.all([
     listFormTemplateFolders(),

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { requireSession } from '@/lib/auth'
 import { ENCOUNTER_STATUS_ROLES } from '@/lib/role-policy'
 import { ENCOUNTER_TRANSITION_ROLES, encounterStatusRequestSchema } from '@/lib/encounters/status'
@@ -17,12 +18,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (session instanceof NextResponse) return session
   if (!ENCOUNTER_STATUS_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body: unknown = json.body
   const parsed = encounterStatusRequestSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid status change' }, { status: 400 })
 

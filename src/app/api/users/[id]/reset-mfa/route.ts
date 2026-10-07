@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId } from '@/lib/http'
 import { requireSession } from '@/lib/auth'
 import { getUserNameById, resetUserMfa } from '@/lib/queries/users'
 import { logAudit } from '@/lib/audit'
@@ -9,8 +10,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
 
   const { id } = await params
-  const userId = Number(id)
-  if (!Number.isInteger(userId)) return NextResponse.json({ error: 'Invalid staff account id' }, { status: 400 })
+  const userId = parseId(id)
+  if (userId === null) return NextResponse.json({ error: 'Invalid staff account id' }, { status: 400 })
 
   const name = await getUserNameById(userId)
   if (!name) return NextResponse.json({ error: 'Staff account not found' }, { status: 404 })

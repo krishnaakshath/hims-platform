@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getConsentDocumentWithCounts } from '@/lib/queries/consent-documents'
@@ -10,7 +11,9 @@ export default async function ConsentDocumentPage({ params }: { params: Promise<
   if (!['admin', 'crc', 'pi'].includes(session.role)) redirect('/')
 
   const { id } = await params
-  const doc = await getConsentDocumentWithCounts(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) notFound()
+  const doc = await getConsentDocumentWithCounts(numericId)
   if (!doc) notFound()
   await logAudit(session, `viewed consent document ${id}`, null)
 

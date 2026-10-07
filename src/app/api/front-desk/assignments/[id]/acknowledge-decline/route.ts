@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId } from '@/lib/http'
 import { eq } from 'drizzle-orm'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -16,8 +17,8 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
   if (!ALLOWED_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const assignmentId = Number(id)
-  if (!Number.isInteger(assignmentId) || assignmentId <= 0) return NextResponse.json({ error: 'Invalid assignment id' }, { status: 400 })
+  const assignmentId = parseId(id)
+  if (assignmentId === null) return NextResponse.json({ error: 'Invalid assignment id' }, { status: 400 })
 
   const [existing] = await getDb().select().from(doctorAssignments).where(eq(doctorAssignments.id, assignmentId))
   if (!existing) return NextResponse.json({ error: 'Assignment not found' }, { status: 404 })

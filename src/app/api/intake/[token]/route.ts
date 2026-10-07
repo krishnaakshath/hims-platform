@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { formSubmissions } from '@/db/schema'
@@ -35,7 +36,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const patientId = await getSubmissionPatientIdByToken(token)
   if (!patientId) return NextResponse.json({ error: 'This link is no longer valid.' }, { status: 404 })
 
-  const parsed = submitSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = submitSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid submission', details: parsed.error.flatten() }, { status: 400 })
 
   // Completion gate: every attached consent must be signed before the packet

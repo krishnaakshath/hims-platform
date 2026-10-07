@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -22,10 +23,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
 
   const { credentialId } = await params
-  const parsedCredentialId = Number(credentialId)
-  if (!Number.isInteger(parsedCredentialId)) return NextResponse.json({ error: 'Invalid credential id' }, { status: 400 })
+  const parsedCredentialId = parseId(credentialId)
+  if (parsedCredentialId === null) return NextResponse.json({ error: 'Invalid credential id' }, { status: 400 })
 
-  const parsed = updateCredentialSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = updateCredentialSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
 
   const result = await updateCredential(parsedCredentialId, parsed.data)

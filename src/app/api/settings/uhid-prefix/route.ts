@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -14,7 +15,9 @@ export async function PUT(request: NextRequest) {
   if (session instanceof NextResponse) return session
   if (!MASTER_DATA_ADMIN_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const body = await request.json().catch(() => null)
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body = json.body
   const parsed = schema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
 

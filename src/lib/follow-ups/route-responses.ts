@@ -2,8 +2,7 @@
 // every route checks its allowlist inline, right after requireSession().
 import { NextResponse } from 'next/server'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
-
-const MAX_INT = 2_147_483_647
+import { parseId, readJsonBody } from '@/lib/http'
 
 export const FOLLOW_UP_NOT_FOUND = 'Follow-up not found'
 export const FOLLOW_UP_CLOSED = 'This follow-up is already completed or cancelled.'
@@ -15,21 +14,11 @@ export function errorResponse(status: number, error: string) {
   return NextResponse.json({ error }, { status })
 }
 
-/** The request body as JSON, or a 400 `Invalid JSON` response. Never a 500. */
-export async function readJsonBody(request: Request): Promise<{ ok: true; body: unknown } | { ok: false; response: NextResponse }> {
-  try {
-    return { ok: true, body: await request.json() }
-  } catch {
-    return { ok: false, response: errorResponse(400, 'Invalid JSON') }
-  }
-}
+/** The request body as JSON, or a 400 `Invalid JSON` response. Never a 500. (Shared: src/lib/http.ts.) */
+export { readJsonBody }
 
 /** A positive int32 path id, or null. */
-export function parseFollowUpId(raw: string): number | null {
-  if (!/^\d{1,10}$/.test(raw)) return null
-  const id = Number(raw)
-  return id > 0 && id <= MAX_INT ? id : null
-}
+export const parseFollowUpId = (raw: string): number | null => parseId(raw)
 
 export const invalidFollowUpId = () => errorResponse(400, 'Invalid follow-up id')
 

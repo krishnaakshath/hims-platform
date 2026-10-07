@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { formatIstDateTime } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -49,11 +50,10 @@ export function BedBoard({ rooms, canManageFacilities, canBlock, canAdmit }: { r
   async function callAction(path: string, body?: object) {
     setBusy(true)
     setError(null)
-    const res = await fetch(path, { method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined })
+    const res = await sendJson(path, 'POST', body)
     setBusy(false)
     if (!res.ok) {
-      const b = await res.json().catch(() => null)
-      setError(b?.error ?? 'Action failed.')
+      setError(res.error)
       return false
     }
     router.refresh()
@@ -137,7 +137,7 @@ export function BedBoard({ rooms, canManageFacilities, canBlock, canAdmit }: { r
                 <p className="text-xs text-muted-foreground">Transfer and discharge actions for this patient&apos;s admission are on their Patient Detail page.</p>
               )}
 
-              {error && <p className="text-xs text-destructive">{error}</p>}
+              {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setSelected(null)}>Close</Button>

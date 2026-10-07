@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { trials } from '@/db/schema'
@@ -41,12 +42,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const { trialId } = await params
 
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body: unknown = json.body
   const parsed = criteriaUpdateSchema.safeParse(body)
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid criteria payload', details: parsed.error.flatten() }, { status: 400 })

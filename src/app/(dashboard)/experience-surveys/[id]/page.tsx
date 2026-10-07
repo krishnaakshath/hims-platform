@@ -1,5 +1,6 @@
 import { formatIstDate } from '@/lib/india-time'
 import { notFound, redirect } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -17,7 +18,9 @@ export default async function ExperienceSurveyDetailPage({ params }: { params: P
   // Wave B P1-21: demo-only page -- 404 unless DEMO_FEATURES is on (after the role gate, before any read).
   if (!demoFeaturesEnabled()) notFound()
   const { id } = await params
-  const review = await getReview(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) notFound()
+  const review = await getReview(numericId)
   if (!review) notFound()
   await logAudit(session, `viewed pre-screening experience survey ${id}`, review.patientId)
 

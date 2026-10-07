@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { AppointmentStatus } from '@/lib/queries/appointments'
@@ -21,17 +22,12 @@ export function AppointmentStatusSelect({ appointmentId, status }: { appointment
     setUpdating(true)
     setError(null)
     try {
-      const res = await fetch(`/api/appointments/${appointmentId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next }),
-      })
+      const res = await sendJson(`/api/appointments/${appointmentId}`, 'PUT', { status: next })
       if (res.ok) {
         router.refresh()
         return
       }
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not update this appointment.')
+      setError(res.error)
     } catch {
       setError('Could not reach the server.')
     } finally {
@@ -49,7 +45,7 @@ export function AppointmentStatusSelect({ appointmentId, status }: { appointment
       >
         {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s.replace('_', '-')}</option>)}
       </select>
-      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="mt-1 text-xs text-destructive">{error}</p>}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { formatIstDateTime } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -139,7 +140,7 @@ function LabRow({
           <Button size="xs" variant="destructive" onClick={onConfirmCancel} disabled={!cancelFor.reason.trim() || busyId === o.id}>Confirm cancel</Button>
         </div>
       )}
-      {rowError?.id === o.id && <p className="mt-2 text-xs text-destructive">{rowError.message}</p>}
+      {rowError?.id === o.id && <p role="alert" className="mt-2 text-xs text-destructive">{rowError.message}</p>}
     </div>
   )
 }
@@ -170,11 +171,10 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
   async function markCollected(id: number) {
     setBusyId(id)
     setRowError(null)
-    const res = await fetch(`/api/lab-orders/${id}/collect`, { method: 'POST' })
+    const res = await sendJson(`/api/lab-orders/${id}/collect`, 'POST')
     setBusyId(null)
     if (res.ok) { router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setRowError({ id, message: body?.error ?? 'Could not mark this order collected.' })
+    setRowError({ id, message: res.error })
   }
 
   async function confirmCancel() {
@@ -182,15 +182,10 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
     const id = cancelFor.id
     setBusyId(id)
     setRowError(null)
-    const res = await fetch(`/api/lab-orders/${id}/cancel`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: cancelFor.reason }),
-    })
+    const res = await sendJson(`/api/lab-orders/${id}/cancel`, 'POST', { reason: cancelFor.reason })
     setBusyId(null)
     if (res.ok) { setCancelFor(null); router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setRowError({ id, message: body?.error ?? 'Could not cancel this order.' })
+    setRowError({ id, message: res.error })
   }
 
   function testDefaults(testId: number) {

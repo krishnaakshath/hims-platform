@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { TARIFF_LOOKUP_ROLES, TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
@@ -50,7 +51,9 @@ export async function POST(request: NextRequest) {
   if (session instanceof NextResponse) return session
   if (!TARIFF_MANAGE_ROLES.includes(session.role)) return forbidden()
 
-  const body = await request.json().catch(() => null)
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body = json.body
   const parsed = serviceCreateSchema.safeParse(body)
   if (!parsed.success) return invalid(parsed.error, 'Invalid service')
 

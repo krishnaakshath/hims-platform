@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { logAudit } from '@/lib/audit'
 import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES, REGISTRATION_ROLES } from '@/lib/role-policy'
@@ -37,12 +38,9 @@ export async function POST(request: NextRequest) {
   // had this too, removed per explicit product direction.
   if (!REGISTRATION_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid registration' }, { status: 400 })
-  }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body: unknown = json.body
   const parsed = patientRegistrationSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid registration', details: parsed.error.flatten() }, { status: 400 })
 

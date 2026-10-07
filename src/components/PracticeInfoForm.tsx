@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { DEFAULT_PRACTICE_TIMEZONE, PRACTICE_TIMEZONES, isPracticeTimezone } from '@/lib/practice-timezones'
 
@@ -19,23 +20,10 @@ export function PracticeInfoForm({ initial, isAdmin }: {
   async function save() {
     setSaving(true)
     setError(null)
-    try {
-      const res = await fetch('/api/settings/practice-info', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ practiceName, practiceSite, practiceTimezone }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        setError(typeof body?.error === 'string' && body.error !== 'Invalid payload' ? body.error : 'Could not save hospital information.')
-        return
-      }
-      setSavedAt(Date.now())
-    } catch {
-      setError('Could not reach the server. Please try again.')
-    } finally {
-      setSaving(false)
-    }
+    const res = await sendJson('/api/settings/practice-info', 'PUT', { practiceName, practiceSite, practiceTimezone })
+    setSaving(false)
+    if (!res.ok) { setError(res.status === 400 && res.error === 'Invalid payload' ? 'Could not save hospital information.' : res.error); return }
+    setSavedAt(Date.now())
   }
 
   return (
@@ -62,7 +50,7 @@ export function PracticeInfoForm({ initial, isAdmin }: {
             {saving ? 'Saving…' : 'Save'}
           </button>
           {savedAt && <span className="text-xs text-muted-foreground">Saved</span>}
-          {error && <span className="text-xs text-destructive">{error}</span>}
+          {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
         </div>
       )}
     </div>

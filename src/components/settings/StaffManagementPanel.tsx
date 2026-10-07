@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { UserPlus, Copy, Check } from 'lucide-react'
@@ -35,18 +36,13 @@ function AddStaffForm({ onCreated }: { onCreated: (row: StaffRow, password: stri
     e.preventDefault()
     setSaving(true)
     setError(null)
-    const res = await fetch('/api/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, role }),
-    })
+    const result = await sendJson<{ id: number; name: string; email: string; role: StaffRow['role']; password: string }>('/api/users', 'POST', { name, email, role })
     setSaving(false)
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not create this account.')
+    if (!result.ok) {
+      setError(result.error)
       return
     }
-    const created = await res.json()
+    const created = result.data
     onCreated({ id: created.id, name: created.name, email: created.email, role: created.role, mfaEnabled: false }, created.password)
     setName('')
     setEmail('')
@@ -92,7 +88,7 @@ function AddStaffForm({ onCreated }: { onCreated: (row: StaffRow, password: stri
           </select>
         </div>
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <div className="flex items-center gap-3">
         <button type="submit" disabled={saving} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
           {saving ? 'Creating…' : 'Create account'}
@@ -130,6 +126,7 @@ export function StaffManagementPanel({ staff, isAdmin }: { staff: StaffRow[]; is
   const router = useRouter()
   const [newCredential, setNewCredential] = useState<{ row: StaffRow; password: string } | null>(null)
   const [resetting, setResetting] = useState<number | null>(null)
+  const [resetError, setResetError] = useState<string | null>(null)
 
   function handleCreated(row: StaffRow, password: string) {
     setNewCredential({ row, password })
@@ -138,8 +135,10 @@ export function StaffManagementPanel({ staff, isAdmin }: { staff: StaffRow[]; is
 
   async function resetMfa(id: number) {
     setResetting(id)
-    await fetch(`/api/users/${id}/reset-mfa`, { method: 'POST' })
+    setResetError(null)
+    const result = await sendJson(`/api/users/${id}/reset-mfa`, 'POST')
     setResetting(null)
+    if (!result.ok) { setResetError(result.error); return }
     router.refresh()
   }
 
@@ -149,6 +148,7 @@ export function StaffManagementPanel({ staff, isAdmin }: { staff: StaffRow[]; is
         <p className="text-xs text-muted-foreground">{staff.length} staff account{staff.length === 1 ? '' : 's'}</p>
         {isAdmin && <AddStaffForm onCreated={handleCreated} />}
       </div>
+      {resetError && <p role="alert" className="mb-3 text-xs text-destructive">{resetError}</p>}
       {newCredential && <NewCredentialBanner row={newCredential.row} password={newCredential.password} onDismiss={() => setNewCredential(null)} />}
       {staff.length === 0 ? (
         <p className="text-sm text-muted-foreground">No staff accounts yet.</p>

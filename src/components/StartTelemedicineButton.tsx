@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -13,11 +14,11 @@ export function StartTelemedicineButton({ appointmentId }: { appointmentId: numb
   async function start() {
     setStarting(true)
     setError(null)
-    const res = await fetch(`/api/appointments/${appointmentId}/telemedicine`, { method: 'POST' })
+    const res = await sendJson<{ id: number; patientJoinToken: string }>(`/api/appointments/${appointmentId}/telemedicine`, 'POST')
     setStarting(false)
 
-    if (res.status === 409) {
-      const body = await res.json().catch(() => null)
+    if (!res.ok && res.status === 409) {
+      const body = res.body as { id?: number; patientJoinToken?: string } | null
       // A 409 means a session already exists for this appointment -- most
       // often because staff refreshed or double-clicked after already
       // creating one. The route now recovers that existing session's
@@ -28,15 +29,15 @@ export function StartTelemedicineButton({ appointmentId }: { appointmentId: numb
         setSession({ id: body.id, joinLink: `${window.location.origin}/telemedicine/join/${body.patientJoinToken}` })
         return
       }
-      setError(body?.error ?? 'A telemedicine session already exists for this appointment.')
+      setError(res.error)
       return
     }
     if (!res.ok) {
-      setError('Could not start the telemedicine visit. Please try again.')
+      setError(res.error)
       return
     }
 
-    const { id, patientJoinToken } = await res.json()
+    const { id, patientJoinToken } = res.data
     // Spec §1: "the actual send action is left to staff copying the link" --
     // this component doesn't wire any SMS/email delivery. It shows the
     // patient's join link as copyable text for staff to send however they
@@ -82,7 +83,7 @@ export function StartTelemedicineButton({ appointmentId }: { appointmentId: numb
       <Button type="button" size="sm" variant="outline" onClick={start} disabled={starting}>
         {starting ? 'Starting…' : 'Start telemedicine visit'}
       </Button>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }

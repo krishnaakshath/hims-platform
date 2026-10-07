@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
@@ -20,11 +21,10 @@ export function DocumentRowActions({ documentId, documentName, status, fileUrl, 
     if (!window.confirm(`Delete "${documentName}"? This cannot be undone.`)) return
     setDeleting(true)
     setError(null)
-    const res = await fetch(`/api/documents/${documentId}`, { method: 'DELETE' })
+    const res = await sendJson(`/api/documents/${documentId}`, 'DELETE')
     setDeleting(false)
     if (res.ok) { router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not delete this document.')
+    setError(res.error)
   }
 
   return (
@@ -49,7 +49,7 @@ export function DocumentRowActions({ documentId, documentName, status, fileUrl, 
           </button>
         )}
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }

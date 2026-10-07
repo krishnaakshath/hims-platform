@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -24,15 +25,10 @@ export function AssignDocumentPatientControl({ documentId, patientId, patientNam
     const value = e.target.value
     setSaving(true)
     setError(null)
-    const res = await fetch(`/api/documents/${documentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patientId: value === '' ? null : value }),
-    })
+    const res = await sendJson(`/api/documents/${documentId}`, 'PATCH', { patientId: value === '' ? null : value })
     setSaving(false)
     if (res.ok) { router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not file this document.')
+    setError(res.error)
   }
 
   return (
@@ -52,7 +48,7 @@ export function AssignDocumentPatientControl({ documentId, patientId, patientNam
           {patientName ?? patientId}{patientDob ? ` (DOB ${patientDob})` : ''}
         </p>
       )}
-      {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="mt-0.5 text-xs text-destructive">{error}</p>}
     </div>
   )
 }

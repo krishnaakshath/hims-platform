@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession, type Session } from '@/lib/auth'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
@@ -40,13 +41,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (session instanceof NextResponse) return session
 
   const { sessionId } = await params
-  const id = Number(sessionId)
-  if (!Number.isInteger(id)) return NextResponse.json({ error: 'Invalid session id' }, { status: 400 })
+  const id = parseId(sessionId)
+  if (id === null) return NextResponse.json({ error: 'Invalid session id' }, { status: 400 })
 
   const resolved = await resolveOwnedSession(session, id)
   if ('response' in resolved) return resolved.response
 
-  const parsed = signalSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = signalSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid signal payload', details: parsed.error.flatten() }, { status: 400 })
 
   const created = await createSignal(id, 'provider', parsed.data.signalType, parsed.data.payload)
@@ -58,8 +61,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (session instanceof NextResponse) return session
 
   const { sessionId } = await params
-  const id = Number(sessionId)
-  if (!Number.isInteger(id)) return NextResponse.json({ error: 'Invalid session id' }, { status: 400 })
+  const id = parseId(sessionId)
+  if (id === null) return NextResponse.json({ error: 'Invalid session id' }, { status: 400 })
 
   const resolved = await resolveOwnedSession(session, id)
   if ('response' in resolved) return resolved.response

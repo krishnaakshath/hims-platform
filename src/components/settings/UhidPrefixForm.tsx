@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { formatUhid, isValidUhidPrefix } from '@/lib/uhid'
 
@@ -13,11 +14,7 @@ export function UhidPrefixForm({ initialPrefix, isAdmin }: { initialPrefix: stri
     setSaving(true)
     setError(null)
     setSavedAt(null)
-    const res = await fetch('/api/settings/uhid-prefix', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prefix }),
-    })
+    const res = await sendJson('/api/settings/uhid-prefix', 'PUT', { prefix })
     setSaving(false)
     if (!res.ok) { setError('Could not save UHID prefix.'); return }
     setSavedAt(Date.now())

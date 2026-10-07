@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -11,11 +12,7 @@ export function RestoreTemplateButton({ templateId }: { templateId: number }) {
     setRestoring(true)
     setError(null)
     try {
-      const res = await fetch(`/api/form-templates/${templateId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isActive: true }),
-      })
+      const res = await sendJson(`/api/form-templates/${templateId}`, 'PUT', { isActive: true })
       if (res.ok) {
         router.refresh()
       } else {
@@ -37,7 +34,7 @@ export function RestoreTemplateButton({ templateId }: { templateId: number }) {
       >
         {restoring ? 'Restoring…' : 'Restore'}
       </button>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }

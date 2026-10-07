@@ -11,7 +11,6 @@ import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { listPendingAssignmentsForProvider } from '@/lib/queries/doctor-assignments'
 import { listAppointmentsInRange } from '@/lib/queries/appointments'
 import { listWorklist } from '@/lib/queries/lab-orders'
-import { listFormSubmissions } from '@/lib/queries/form-submissions'
 import { AssignmentUrgencyChip } from '@/components/AssignmentUrgencyChip'
 import { AssignmentScheduleModalTrigger } from '@/components/AssignmentScheduleModal'
 import { DashboardAppointmentsTable, type DashboardAppointmentRow } from '@/components/DashboardAppointmentsTable'
@@ -58,10 +57,6 @@ export default async function DoctorPortalPage() {
   const labWorklist = await listWorklist()
   const myPatientIds = new Set(myPatients.map((p) => p.id))
   const pendingLabs = labWorklist.filter((l) => myPatientIds.has(l.patientId) && l.status === 'ordered')
-
-  // Client forms
-  const completedForms = await listFormSubmissions({ status: 'completed' })
-  const myForms = completedForms.filter((f) => myPatientIds.has(f.patientId)).slice(0, 10)
 
   await logAudit(session, 'viewed My Patients (doctor portal)', null)
 

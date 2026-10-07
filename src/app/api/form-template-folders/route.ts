@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -28,7 +29,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const parsed = createFolderSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = createFolderSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid folder payload', details: parsed.error.flatten() }, { status: 400 })
 
   const created = await createFormTemplateFolder(parsed.data.name)

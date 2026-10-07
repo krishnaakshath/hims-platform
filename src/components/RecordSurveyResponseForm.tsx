@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -14,17 +15,12 @@ export function RecordSurveyResponseForm({ reviewId }: { reviewId: number }) {
   async function save() {
     setSaving(true)
     setError(null)
-    const res = await fetch(`/api/reviews/${reviewId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ratingOverall, ratingFormsClarity, ratingCommunication, comments: comments || undefined }),
-    })
+    const res = await sendJson(`/api/reviews/${reviewId}`, 'PUT', { ratingOverall, ratingFormsClarity, ratingCommunication, comments: comments || undefined })
     setSaving(false)
     if (res.ok) {
       router.refresh()
     } else {
-      const body = await res.json()
-      setError(body.error ?? 'Could not record this response.')
+      setError(res.error)
     }
   }
 
@@ -54,7 +50,7 @@ export function RecordSurveyResponseForm({ reviewId }: { reviewId: number }) {
 
   return (
     <div className="space-y-4">
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {ratingField('rating-overall', 'Overall Experience (1-5)', ratingOverall, setRatingOverall)}
       {ratingField('rating-forms-clarity', 'Forms Were Clear (1-5)', ratingFormsClarity, setRatingFormsClarity)}
       {ratingField('rating-communication', 'Communication Was Easy (1-5)', ratingCommunication, setRatingCommunication)}

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -14,10 +15,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!['admin', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const orderId = Number(id)
-  if (!Number.isInteger(orderId)) return NextResponse.json({ error: 'Invalid order id' }, { status: 400 })
+  const orderId = parseId(id)
+  if (orderId === null) return NextResponse.json({ error: 'Invalid order id' }, { status: 400 })
 
-  const parsed = cancelOrderSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = cancelOrderSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid cancel payload', details: parsed.error.flatten() }, { status: 400 })
 
   const result = await cancelOrder(orderId, parsed.data.reason)

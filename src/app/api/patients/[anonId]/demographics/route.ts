@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { requireSession } from '@/lib/auth'
 import { DEMOGRAPHICS_CORRECTION_ROLES } from '@/lib/role-policy'
 import { invalidateCache, invalidateCacheByPrefix, patientDetailCacheKey, patientListCacheKey, patientListCachePrefix, workbookListCacheKey } from '@/lib/cache'
@@ -17,12 +18,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!DEMOGRAPHICS_CORRECTION_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { anonId } = await params
 
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid correction' }, { status: 400 })
-  }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body: unknown = json.body
   const parsed = demographicsCorrectionSchema.safeParse(body)
   if (!parsed.success) {
     // Field paths and fixed messages only.

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -28,23 +29,18 @@ export function AddStaffMemberModal({ users, providers, onClose }: { users: User
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/staff', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        department,
-        title,
-        employmentStatus,
-        hireDate,
-        userId: userId === '' ? null : userId,
-        providerId: providerId === '' ? null : providerId,
-      }),
+    const res = await sendJson('/api/staff', 'POST', {
+      name,
+      department,
+      title,
+      employmentStatus,
+      hireDate,
+      userId: userId === '' ? null : userId,
+      providerId: providerId === '' ? null : providerId,
     })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not add this staff member.')
+    setError(res.error)
   }
 
   const canSubmit = Boolean(name.trim()) && Boolean(department.trim()) && Boolean(title.trim()) && Boolean(hireDate) && !submitting
@@ -80,7 +76,7 @@ export function AddStaffMemberModal({ users, providers, onClose }: { users: User
               {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

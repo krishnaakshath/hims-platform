@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId } from '@/lib/http'
 import { get } from '@vercel/blob'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -23,7 +24,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const { id } = await params
-  const existing = await getDocument(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const existing = await getDocument(numericId)
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (session.role === 'labs' && existing.labOrderId === null) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

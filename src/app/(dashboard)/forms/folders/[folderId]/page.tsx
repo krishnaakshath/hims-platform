@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
@@ -13,8 +14,8 @@ export default async function FormTemplateFolderPage({ params }: { params: Promi
   if (!CLINICAL_ROLES.includes(session.role)) redirect('/')
 
   const { folderId } = await params
-  const id = Number(folderId)
-  if (!Number.isInteger(id) || id <= 0) notFound()
+  const id = parseId(folderId)
+  if (id === null) notFound()
   const folder = await getFormTemplateFolder(id)
   if (!folder) notFound()
 

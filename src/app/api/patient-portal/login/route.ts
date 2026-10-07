@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { setPatientSessionCookie } from '@/lib/patient-session'
 import { findPortalLoginCandidate, checkPortalLoginPassword } from '@/lib/queries/patient-portal'
@@ -23,12 +24,9 @@ function getClientIp(request: NextRequest): string {
 }
 
 export async function POST(request: NextRequest) {
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
-  }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body: unknown = json.body
 
   const parsed = loginSchema.safeParse(body)
   if (!parsed.success) {

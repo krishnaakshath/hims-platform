@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -16,15 +17,10 @@ export function TransferAdmissionModal({ admissionId, availableRooms, onClose }:
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/inpatient/admissions/${admissionId}/transfer`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ toRoomId, reason }),
-    })
+    const res = await sendJson(`/api/inpatient/admissions/${admissionId}/transfer`, 'POST', { toRoomId, reason })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not transfer this patient.')
+    setError(res.error)
   }
 
   const canSubmit = toRoomId !== '' && Boolean(reason) && !submitting
@@ -42,7 +38,7 @@ export function TransferAdmissionModal({ admissionId, availableRooms, onClose }:
           </select>
           {availableRooms.length === 0 && <p className="text-sm text-warning">No rooms are currently available.</p>}
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for transfer" aria-label="Reason" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -15,7 +16,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (session instanceof NextResponse) return session
   if (!['admin', 'crc', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
-  const doc = await getConsentDocumentWithCounts(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const doc = await getConsentDocumentWithCounts(numericId)
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   await logAudit(session, `viewed consent document ${id}`, null)
   return NextResponse.json(doc)
@@ -27,10 +30,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!['admin', 'crc', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
 
-  const parsed = updateSchema.safeParse(await request.json().catch(() => null))
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = updateSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid consent document payload', details: parsed.error.flatten() }, { status: 400 })
 
-  const ok = await updateConsentDocument(Number(id), parsed.data)
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const ok = await updateConsentDocument(numericId, parsed.data)
   if (!ok) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   await logAudit(session, `updated consent document ${id}`, null)
   return NextResponse.json({ ok: true })

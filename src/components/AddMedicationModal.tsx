@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -30,24 +31,19 @@ export function AddMedicationModal({
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/pharmacy/medications', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        ...(genericName ? { genericName } : {}),
-        medicationClass,
-        ...(commonDose ? { commonDose } : {}),
-        form,
-        quantityOnHand: Number(quantityOnHand),
-        reorderThreshold: Number(reorderThreshold),
-        unit,
-      }),
+    const res = await sendJson('/api/pharmacy/medications', 'POST', {
+      name,
+      ...(genericName ? { genericName } : {}),
+      medicationClass,
+      ...(commonDose ? { commonDose } : {}),
+      form,
+      quantityOnHand: Number(quantityOnHand),
+      reorderThreshold: Number(reorderThreshold),
+      unit,
     })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not add this medication.')
+    setError(res.error)
   }
 
   const parsedQuantity = Number(quantityOnHand)
@@ -108,7 +104,7 @@ export function AddMedicationModal({
           <input type="number" min={0} step={1} value={quantityOnHand} onChange={(e) => setQuantityOnHand(e.target.value)} placeholder="Quantity on hand" aria-label="Quantity on hand" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
           <input type="number" min={0} step={1} value={reorderThreshold} onChange={(e) => setReorderThreshold(e.target.value)} placeholder="Reorder threshold" aria-label="Reorder threshold" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
           <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Unit, e.g. tablets" aria-label="Unit" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

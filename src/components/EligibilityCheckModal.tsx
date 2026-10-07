@@ -1,4 +1,5 @@
 'use client'
+import { fetchJson, sendJson } from '@/lib/client-fetch'
 import { formatPaise } from '@/lib/format'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -33,7 +34,7 @@ export function EligibilityCheckModal({ onClose }: { onClose: () => void }) {
     fetch('/api/payers')
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((data) => setPayerOptions(data))
-      .catch(() => setPayerOptions([]))
+      .catch(() => { setPayerOptions([]); setError('Could not load the payer list. Close this and try again.') })
   }, [])
 
   // Default the payer dropdown to the patient's own primary payer on file,
@@ -43,24 +44,19 @@ export function EligibilityCheckModal({ onClose }: { onClose: () => void }) {
     if (!id || payerId) return
     // Narrow lookup (admin/crc/billing): only the payer id, never the
     // clinical patient-detail JSON.
-    const res = await fetch(`/api/patients/${encodeURIComponent(id)}/primary-payer`)
+    const res = await fetchJson<{ primaryPayerId?: number | null } | null>(`/api/patients/${encodeURIComponent(id)}/primary-payer`)
     if (!res.ok) return
-    const lookup = await res.json().catch(() => null)
+    const lookup = res.data
     if (lookup?.primaryPayerId) setPayerId(String(lookup.primaryPayerId))
   }
 
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/front-desk/eligibility-check', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patientId, payerId: Number(payerId) }),
-    })
+    const res = await sendJson('/api/front-desk/eligibility-check', 'POST', { patientId, payerId: Number(payerId) })
     setSubmitting(false)
-    if (res.ok) { setResult(await res.json()); router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not verify eligibility.')
+    if (res.ok) { setResult(res.data as EligibilityResult); router.refresh(); return }
+    setError(res.error)
   }
 
   return (
@@ -83,7 +79,7 @@ export function EligibilityCheckModal({ onClose }: { onClose: () => void }) {
               {result.planType && <> · Plan: <span className="uppercase">{result.planType}</span></>}
             </p>
           )}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Close</Button>

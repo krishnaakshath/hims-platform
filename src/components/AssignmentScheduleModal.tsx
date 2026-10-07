@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -29,30 +30,20 @@ function AssignmentScheduleModal({ assignment, onClose }: { assignment: DoctorAs
   async function submitSchedule() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/front-desk/assignments/${assignment.id}/schedule`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // IST wall-clock time with an explicit offset; the server rejects naive times.
-      body: JSON.stringify({ startsAt: istSlotString(date, startTime), endsAt: istSlotString(date, endTime) }),
-    })
+    // IST wall-clock time with an explicit offset; the server rejects naive times.
+    const res = await sendJson(`/api/front-desk/assignments/${assignment.id}/schedule`, 'POST', { startsAt: istSlotString(date, startTime), endsAt: istSlotString(date, endTime) })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not schedule this visit.')
+    setError(res.error)
   }
 
   async function submitDecline() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/front-desk/assignments/${assignment.id}/decline`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: declineReason }),
-    })
+    const res = await sendJson(`/api/front-desk/assignments/${assignment.id}/decline`, 'POST', { reason: declineReason })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not decline this assignment.')
+    setError(res.error)
   }
 
   return (
@@ -79,7 +70,7 @@ function AssignmentScheduleModal({ assignment, onClose }: { assignment: DoctorAs
           </div>
         )}
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           {mode === 'schedule'
