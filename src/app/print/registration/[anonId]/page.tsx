@@ -9,7 +9,7 @@ import { PrintSlip } from '@/components/print/PrintSlip'
 // Wave C: registration slip / UHID card, printed after registration (and
 // reprintable from the patient page). Registration roles only, gated right
 // after the session check, before any query. Name, UHID and the IST
-// registration date -- never DOB, phone, Aadhaar or ABHA.
+// registration date -- never DOB, phone, the national ID number or ABHA.
 export default async function RegistrationSlipPage({ params }: { params: Promise<{ anonId: string }> }) {
   const session = await requireSessionOrRedirect()
   if (!REGISTRATION_ROLES.includes(session.role)) redirect('/')
