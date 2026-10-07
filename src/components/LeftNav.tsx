@@ -9,7 +9,7 @@ import {
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
-  BookOpenCheck, // SP6
+  BookOpenCheck, FileCode2, // SP6
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
@@ -75,6 +75,11 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   // NOT frontdesk -- front desk's job is registration/check-in, not lab
   // results; explicit product direction removed their prior worklist access).
   { href: '/labs', label: 'Labs', icon: TestTube2, roles: ['admin', 'crc', 'pi', 'labs'] as Role[] },
+
+  // SP6: clinical coding worklist, workspace and report -- CODING_ROLES. The coder's only nav entry
+  // besides Home; nothing clinical (patients, chart, notes) is shown to a coder.
+  { href: '/coding', label: 'Coding', icon: FileCode2, roles: ['admin', 'coder'] as Role[] },
+  // end SP6
 
   // Staff directory — admin/crc/pi (pi view-only; NOT frontdesk, NOT billing, NOT pharmacy, NOT labs)
   { href: '/staff', label: 'Staff', icon: IdCard, roles: ['crc', 'admin', 'pi'] as Role[] },

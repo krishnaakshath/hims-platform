@@ -93,4 +93,22 @@ describe('LeftNav', () => {
     render(<LeftNav role="frontdesk" badges={{ '/front-desk/assignments': 2 }} />)
     expect(within(screen.getByRole('link', { name: /assignments/i })).getByText('2')).toBeInTheDocument()
   })
+
+  // SP6: Coding (CODING_ROLES) -- the coder sees only Home and Coding, nothing clinical.
+  it('shows Coding to coder and admin only, and nothing clinical to a coder', () => {
+    const { unmount } = render(<LeftNav role="coder" />)
+    expect(screen.getByRole('link', { name: /^coding$/i })).toHaveAttribute('href', '/coding')
+    expect(screen.queryByRole('link', { name: /patients/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /code systems/i })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/', '/coding'])
+    unmount()
+    const admin = render(<LeftNav role="admin" />)
+    expect(screen.getByRole('link', { name: /^coding$/i })).toBeInTheDocument()
+    admin.unmount()
+    for (const role of ['crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs'] as const) {
+      const r = render(<LeftNav role={role} />)
+      expect(screen.queryByRole('link', { name: /^coding$/i }), role).not.toBeInTheDocument()
+      r.unmount()
+    }
+  })
 })
