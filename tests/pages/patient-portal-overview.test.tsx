@@ -125,3 +125,23 @@ describe('Patient dashboard (patient-portal overview)', () => {
     expect(screen.queryByText('Your follow-up')).toBeNull()
   })
 })
+
+describe('Patient dashboard next-visit time zone', () => {
+  it('shows the next visit in IST even when the server runs in UTC', async () => {
+    const prev = process.env.TZ
+    process.env.TZ = 'UTC'
+    try {
+      const base = await vi.mocked(getPatientPortalData)('RD-0001')
+      vi.mocked(getPatientPortalData).mockResolvedValueOnce({
+        ...base!,
+        upcomingAppointments: [{ ...base!.upcomingAppointments[0], startsAt: '2026-10-21T19:00:00.000Z' }],
+      })
+      const jsx = await PatientPortalOverviewPage()
+      const { container } = render(jsx)
+      expect(container.querySelector('[data-testid="patient-action-items"]')!.textContent).toContain('22 Oct 2026, 12:30 am')
+    } finally {
+      if (prev === undefined) delete process.env.TZ
+      else process.env.TZ = prev
+    }
+  })
+})
