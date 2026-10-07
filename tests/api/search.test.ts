@@ -28,7 +28,7 @@ describe('GET /api/search', () => {
     expect((await search('RD-0001')).status).toBe(401)
   })
 
-  for (const role of ['pharmacy', 'billing', 'labs'] as const) {
+  for (const role of ['pharmacy', 'billing', 'labs', 'collector'] as const) {
     it(`403s ${role} without touching the database`, async () => {
       sessionRole = role
       const res = await search('RD-0001')

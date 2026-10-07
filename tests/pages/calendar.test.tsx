@@ -23,7 +23,7 @@ vi.mock('@/lib/queries/patients', () => ({ listPatientsWithStatus }))
 beforeEach(() => { sessionRef.role = 'crc'; mockRedirect.mockClear() })
 
 describe('/calendar page role gate (admin, crc, pi, frontdesk)', () => {
-  for (const role of ['pharmacy', 'billing', 'labs']) {
+  for (const role of ['pharmacy', 'billing', 'labs', 'collector']) {
     it(`redirects ${role} to / before any query runs`, async () => {
       sessionRef.role = role
       listAppointmentsInRange.mockClear(); listActiveProviders.mockClear(); listPatientsWithStatus.mockClear()

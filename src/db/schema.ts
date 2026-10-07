@@ -2,7 +2,8 @@ import { pgTable, text, timestamp, date, boolean, jsonb, integer, pgEnum, serial
 import { sql } from 'drizzle-orm'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
-export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs'])
+// SP5: + 'collector' (last; added by scripts/migrations/2026-10-08-sp5-lab-enum-values.sql)
+export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'collector'])
 export const mfaMethodEnum = pgEnum('mfa_method', ['totp', 'sms', 'email'])
 export const payerTypeEnum = pgEnum('payer_type', ['commercial', 'medicare', 'medicaid', 'tricare', 'other'])
 export const insuranceRelationshipEnum = pgEnum('insurance_relationship', ['self', 'spouse', 'child', 'other'])

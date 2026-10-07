@@ -50,6 +50,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Transfer an admitted patient between rooms',
       'Discharge an admitted patient and sign the discharge summary',
       'Set and change a patient\'s follow-up plan (due date or interval, window, reason and plan notes), and start or complete a visit',
+      // SP5
+      'Order several lab tests at once and ask for a follow-up visit once the report is released',
+      'Verify lab results before they are reported to the patient',
     ],
   },
   admin: {
@@ -80,6 +83,12 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Book, reschedule or cancel follow-up appointments and log patient contact attempts from the follow-up recall list',
       'Manage the department master and the UHID prefix',
       'Manage the service catalogue, tariffs, packages and room categories, including CSV tariff import',
+      // SP5
+      'Book and dispatch home sample collection visits and assign collectors',
+      'Receive samples by sample ID, enter results and release lab reports',
+      'Order several lab tests at once and ask for a follow-up visit once the report is released',
+      'Verify lab results before they are reported to the patient',
+      'Manage the home-collection service area, collection windows and lab test sample setup',
     ],
   },
   frontdesk: {
@@ -97,6 +106,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Look up the current price of a service',
       'View every follow-up and work the follow-up recall list: book, reschedule or cancel the follow-up appointment and log contact attempts (the clinical plan stays with the doctor)',
       'Check a patient in against a booked follow-up appointment, which issues the OPD token',
+      // SP5
+      'Book, reschedule or cancel a home sample collection for a patient in the service area',
     ],
   },
   pharmacy: {
@@ -132,6 +143,19 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Enter results and flag them normal, abnormal, or critical',
       'Attach imaging results to an order',
       'View lab results and imaging for every ordered test from the Lab worklist (no chart access)',
+      // SP5
+      'Book and dispatch home sample collection visits and assign collectors',
+      'Receive samples by sample ID, enter results and release lab reports',
     ],
   },
+  // SP5
+  collector: {
+    label: 'Home Sample Collector',
+    summary: 'Visits patients at home to collect lab samples on the visits assigned to them.',
+    bullets: [
+      "See today's assigned home-collection visits: patient, phone, address and the tubes to collect",
+      'Mark a visit collected by entering each tube\'s sample ID, or record why it could not be collected',
+    ],
+  },
+  // end SP5
 }

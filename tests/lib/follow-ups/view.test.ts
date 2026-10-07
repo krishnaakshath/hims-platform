@@ -60,7 +60,7 @@ describe('toFollowUpView', () => {
   })
 
   it('never carries plan notes for any non-clinical role, anywhere in the payload', () => {
-    for (const role of ['frontdesk', 'billing', 'pharmacy', 'labs'] as const) {
+    for (const role of ['frontdesk', 'billing', 'pharmacy', 'labs', 'collector'] as const) {
       expect(JSON.stringify(toFollowUpView(ROW, '2026-10-20', role))).not.toContain('Titrate amlodipine')
     }
   })
@@ -70,7 +70,7 @@ describe('toFollowUpView', () => {
     for (const role of ['admin', 'crc', 'pi'] as const) {
       expect(toFollowUpView(cancelled, '2026-10-20', role).cancelReason).toBe('Referred to oncology SECRET')
     }
-    for (const role of ['frontdesk', 'billing', 'pharmacy', 'labs'] as const) {
+    for (const role of ['frontdesk', 'billing', 'pharmacy', 'labs', 'collector'] as const) {
       const v = toFollowUpView(cancelled, '2026-10-20', role)
       expect(v.cancelReason).toBeNull()
       expect(JSON.stringify(v)).not.toContain('SECRET')

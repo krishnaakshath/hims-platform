@@ -68,7 +68,7 @@ describe('POST /api/front-desk/assignments/[id]/acknowledge-decline', () => {
     expect((await getRow(a.id)).declineAcknowledgedAt).toBeNull()
   })
 
-  it.each(['pi', 'billing', 'pharmacy'])('403 for %s, row stays unacknowledged', async (role) => {
+  it.each(['pi', 'billing', 'pharmacy', 'collector'])('403 for %s, row stays unacknowledged', async (role) => {
     sessionRole = role
     const a = await newAssignment()
     await declineAssignment(a.id, 'x')

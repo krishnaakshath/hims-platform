@@ -43,7 +43,7 @@ describe('LeftNav', () => {
       expect(screen.getByRole('link', { name: /^staff$/i })).toHaveAttribute('href', '/staff')
       unmount()
     }
-    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs'] as const) {
+    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'collector'] as const) {
       const { unmount } = render(<LeftNav role={role} />)
       expect(screen.queryByRole('link', { name: /^staff$/i })).not.toBeInTheDocument()
       unmount()
@@ -56,7 +56,7 @@ describe('LeftNav', () => {
       expect(screen.getByRole('link', { name: /^documents$/i })).toHaveAttribute('href', '/documents')
       unmount()
     }
-    for (const role of ['pharmacy', 'billing', 'labs'] as const) {
+    for (const role of ['pharmacy', 'billing', 'labs', 'collector'] as const) {
       const { unmount } = render(<LeftNav role={role} />)
       expect(screen.queryByRole('link', { name: /^documents$/i })).not.toBeInTheDocument()
       unmount()
@@ -73,7 +73,7 @@ describe('LeftNav', () => {
   })
 
   it('hides the forms hub from billing, pharmacy and labs', () => {
-    for (const role of ['billing', 'pharmacy', 'labs'] as const) {
+    for (const role of ['billing', 'pharmacy', 'labs', 'collector'] as const) {
       const { unmount } = render(<LeftNav role={role} />)
       expect(screen.queryByRole('link', { name: /form templates/i })).not.toBeInTheDocument()
       expect(screen.queryByRole('link', { name: /consent documents/i })).not.toBeInTheDocument()

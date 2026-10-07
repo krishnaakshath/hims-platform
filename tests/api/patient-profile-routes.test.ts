@@ -87,7 +87,7 @@ describe('PATCH /api/patients/[anonId]/profile', () => {
   })
 
   it('PATCH profile 403s pi, pharmacy, billing, labs with {error:"Forbidden"}', async () => {
-    for (const role of ['pi', 'pharmacy', 'billing', 'labs'] as const) {
+    for (const role of ['pi', 'pharmacy', 'billing', 'labs', 'collector'] as const) {
       sessionRole = role
       const res = await patchProfile(req('PATCH', 'profile', '{not json'), ctx)
       expect(res.status, role).toBe(403)
@@ -219,7 +219,7 @@ describe('PUT /api/patients/[anonId]/contacts', () => {
   })
 
   it('403s pi, pharmacy, billing, labs before parsing', async () => {
-    for (const role of ['pi', 'pharmacy', 'billing', 'labs'] as const) {
+    for (const role of ['pi', 'pharmacy', 'billing', 'labs', 'collector'] as const) {
       sessionRole = role
       const res = await putContacts(req('PUT', 'contacts', '{not json'), ctx)
       expect(res.status, role).toBe(403)
@@ -252,7 +252,7 @@ describe('PUT /api/patients/[anonId]/aadhaar', () => {
   })
 
   it('PUT aadhaar 403s pi before reading the body', async () => {
-    for (const role of ['pi', 'pharmacy', 'billing', 'labs'] as const) {
+    for (const role of ['pi', 'pharmacy', 'billing', 'labs', 'collector'] as const) {
       sessionRole = role
       const res = await putAadhaar(req('PUT', 'aadhaar', '{not json'), ctx)
       expect(res.status, role).toBe(403)

@@ -63,7 +63,7 @@ describe('/front-desk/follow-ups', () => {
     expect(screen.queryByText(/showing first 500/i)).toBeNull()
   })
 
-  it.each(['pi', 'billing', 'labs'])('redirects %s before any query', async (role) => {
+  it.each(['pi', 'billing', 'labs', 'collector'])('redirects %s before any query', async (role) => {
     vi.resetModules()
     const listFollowUpWorklist = vi.fn(async () => ({ rows: [], capped: false, missedCapped: false }))
     const redirect = vi.fn(() => { throw new Error('NEXT_REDIRECT') })

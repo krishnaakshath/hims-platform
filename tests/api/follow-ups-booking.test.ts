@@ -26,7 +26,7 @@ const ORDER = { id: 3, patientId: 'RD-0001', dueDate: '2026-10-21', planNotes: '
 const VIEW = { id: 3, patientId: 'RD-0001', dueDate: '2026-10-21', planNotes: null, cancelReason: null }
 const SLOT = { providerId: 1, startsAt: '2026-10-22T00:30:00+05:30', endsAt: '2026-10-22T00:45:00+05:30' }
 const ATTEMPT = { id: 9, followUpOrderId: 3, channel: 'phone', outcome: 'no_answer', note: 'busy tone', attemptedByName: 'Probe Desk', attemptedByUserId: 5, attemptedAt: new Date('2026-10-20T04:00:00Z') }
-const DENIED = ['pi', 'crc', 'billing', 'labs', 'pharmacy'] as const
+const DENIED = ['pi', 'crc', 'billing', 'labs', 'pharmacy', 'collector'] as const
 
 beforeEach(() => {
   role = 'frontdesk'

@@ -62,7 +62,7 @@ describe('POST /api/patients -- gate', () => {
   })
 
   it('403s crc, pi, pharmacy, billing, labs before parsing', async () => {
-    for (const role of ['crc', 'pi', 'pharmacy', 'billing', 'labs'] as const) {
+    for (const role of ['crc', 'pi', 'pharmacy', 'billing', 'labs', 'collector'] as const) {
       sessionRole = role
       // A body that is not even JSON: a 403 (not a 400/500) proves the gate runs first.
       const res = await POST(req('{not json'))

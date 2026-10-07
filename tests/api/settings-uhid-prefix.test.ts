@@ -20,7 +20,7 @@ beforeEach(() => { vi.clearAllMocks(); sessionRole = 'admin' })
 
 describe('PUT /api/settings/uhid-prefix', () => {
   it('403s every non-admin before parsing', async () => {
-    for (const role of ['crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs'] as const) {
+    for (const role of ['crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'collector'] as const) {
       sessionRole = role
       const res = await PUT(new NextRequest('http://localhost/api/settings/uhid-prefix', { method: 'PUT', body: 'not json' }))
       expect(res.status, role).toBe(403)

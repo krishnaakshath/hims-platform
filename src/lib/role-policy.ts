@@ -8,7 +8,9 @@ import type { Role } from '@/lib/auth'
 // Every check built on these is an allowlist, so an unknown/future role is
 // denied by default.
 
-export const ALL_ROLES = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs'] as const
+export const ALL_ROLES = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs',
+  'collector', // SP5
+] as const
 
 // Compile-time guard: adding a Role without adding it to ALL_ROLES fails tsc.
 type MissingFromAllRoles = Exclude<Role, (typeof ALL_ROLES)[number]>
@@ -77,6 +79,28 @@ export const CHECK_IN_ROLES: readonly Role[] = ['frontdesk', 'admin', 'crc']
 export const ENCOUNTER_STATUS_ROLES: readonly Role[] = ['admin', 'pi', 'frontdesk', 'crc']
 export const DISCHARGE_ROLES: readonly Role[] = ['admin', 'pi']
 // end SP3
+
+// SP5 lab LIS & home collection. Worklist and collect are the existing lab
+// gates, now named. Result entry is labs (+admin) and verification pi (+admin):
+// the spec's role split. The collector role is field staff: it appears only in
+// the cancel list (own visit, collector reasons only) and the route list (own
+// visits only); every other gate denies it.
+export const LAB_WORKLIST_ROLES: readonly Role[] = ['admin', 'pi', 'crc', 'labs']
+export const LAB_ORDER_ROLES: readonly Role[] = ['admin', 'pi']
+export const LAB_COLLECT_ROLES: readonly Role[] = ['admin', 'pi', 'labs']
+export const LAB_RECEIVE_ROLES: readonly Role[] = ['admin', 'labs']
+export const LAB_RESULT_ENTRY_ROLES: readonly Role[] = ['admin', 'labs']
+export const LAB_VERIFY_ROLES: readonly Role[] = ['admin', 'pi']
+export const LAB_REPORT_RELEASE_ROLES: readonly Role[] = ['admin', 'pi', 'labs']
+export const LAB_REPORT_READ_ROLES: readonly Role[] = ['admin', 'pi', 'crc', 'labs']
+export const LAB_LABEL_ROLES: readonly Role[] = ['admin', 'pi', 'labs', 'frontdesk']
+export const LAB_SETUP_ROLES: readonly Role[] = ['admin']
+export const HOME_COLLECTION_BOOKING_ROLES: readonly Role[] = ['admin', 'frontdesk', 'labs']
+export const HOME_COLLECTION_CANCEL_ROLES: readonly Role[] = ['admin', 'frontdesk', 'labs', 'collector']
+export const HOME_COLLECTION_DISPATCH_ROLES: readonly Role[] = ['admin', 'labs']
+export const COLLECTOR_ROUTE_ROLES: readonly Role[] = ['admin', 'collector']
+export const NOTIFICATION_PREFERENCE_ROLES: readonly Role[] = ['admin', 'crc', 'frontdesk']
+// end SP5
 
 export type SearchScopes = { patients: boolean; trials: boolean; formTemplates: boolean }
 
