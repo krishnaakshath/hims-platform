@@ -10,6 +10,7 @@ import {
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
   UserCircle2, Calculator,
+  ClipboardPlus, // SP4
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
@@ -95,6 +96,8 @@ export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon; demo?
   // the billing-only nav hides the generic Home entry).
   { href: '/billing', label: 'Billing Home', icon: LayoutDashboard },
   { href: '/billing/ar-dashboard', label: 'A/R Dashboard', icon: TrendingUp },
+  // SP4
+  { href: '/billing/capture', label: 'Charge Capture', icon: ClipboardPlus },
   { href: '/billing/charges', label: 'Charges', icon: Receipt },
   { href: '/billing/insurance-collections', label: 'Insurance Collections', icon: ShieldCheck },
   { href: '/billing/patient-collections', label: 'Patient Collections', icon: HandCoins },

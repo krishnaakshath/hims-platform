@@ -270,6 +270,22 @@ describe.skipIf(!process.env.DATABASE_URL)('charge capture (DB)', () => {
     expect(text).not.toContain('Test N')
   })
 
+  it('capture screen reads: header with deposit, the context lines, today\'s visits and admissions', async () => {
+    const { cc } = await m()
+    const r = await cc.captureChargeLine({ ...opd({ serviceId: fx.procId }), context: { admissionId: fx.admissionId } }, crc, NOW)
+    expect(r.ok).toBe(true)
+    const h = await cc.getCaptureHeader({ admissionId: fx.admissionId })
+    expect(h).toMatchObject({ kind: 'admission', patientId: PID, patientName: 'Test SP4 Capture', payerName: null, depositPaise: 0, primaryPayerId: null })
+    expect(h!.label).toContain('30 May 2099')
+    expect((await cc.getCaptureHeader({ encounterId: fx.opdEncounterId }))).toMatchObject({ kind: 'encounter', depositPaise: null, label: 'Outpatient visit, 1 Jun 2099' })
+    expect(await cc.getCaptureHeader({ admissionId: 2_147_483_000 })).toBeNull()
+    expect((await cc.listChargeLinesForContext({ admissionId: fx.admissionId })).map((l) => l.serviceId)).toEqual([fx.procId])
+    const lists = await cc.listCaptureContexts(DAY)
+    expect(lists.encounters.map((e) => e.id)).toContain(fx.opdEncounterId)
+    expect(lists.encounters.map((e) => e.id)).not.toContain(fx.cancelledEncounterId)
+    expect(lists.admissions.find((a) => a.id === fx.admissionId)).toMatchObject({ patientName: 'Test SP4 Capture', ward: 'Test SP4 Ward', admittedOn: '2099-05-30' })
+  })
+
   it('loadMappedProcedureCodes returns [] when the SP6 table is absent', async () => {
     const { loadMappedProcedureCodes } = await import('@/lib/queries/service-code-lookup')
     let calls = 0

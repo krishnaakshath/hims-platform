@@ -1,10 +1,10 @@
 // SP4: charge capture. Context loading, preview, capture and void of charge lines.
 // Capture runs in one transaction that first takes the per-patient billing lock, so two clerks
 // (or a double click) adding the same charge serialise and the second sees the first.
-import { and, eq, gte, inArray, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, lte, ne, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
-  admissions, chargeLines, encounters, patientPayments, patients, payers, providers, refunds, roomCategories, rooms, serviceCatalog,
+  admissions, chargeLines, departments, encounters, patientPayments, patients, payers, providers, refunds, roomCategories, rooms, serviceCatalog,
   type ChargeLineRow, PRICE_SOURCES,
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
@@ -19,7 +19,7 @@ import { lineTax, placeOfSupply, stateCodeOfGstin, type LineTax } from '@/lib/bi
 import { admissionDepositPaise, type LedgerEntry } from '@/lib/billing/ledger'
 import type { ChargeCaptureInput } from '@/lib/billing/validation'
 import { addDaysIso } from '@/lib/follow-ups/rules'
-import { DEFAULT_TIMEZONE, istDateOf, todayIsoIn } from '@/lib/india-time'
+import { DEFAULT_TIMEZONE, formatIsoDate, istDateOf, todayIsoIn } from '@/lib/india-time'
 import { resolvePrice, type PriceResolution, type ServiceForPricing, type TariffRateCandidate } from '@/lib/tariff/resolve'
 import { loadPricingContext } from './tariff'
 import { getBillingSettings, getRuleConfig } from './billing-settings'
@@ -119,6 +119,19 @@ export async function loadChargeContext(executor: WriteExecutor, ref: ChargeCont
   }
 }
 
+/** The admission's advances net of its refunds (what the deposit rule checks). */
+async function admissionDepositFor(executor: WriteExecutor, patientId: string, admissionId: number): Promise<number> {
+  const adv = await executor.select({ id: patientPayments.id, amount: patientPayments.amountPaise, at: patientPayments.receivedAt, number: patientPayments.receiptNumber })
+    .from(patientPayments).where(and(eq(patientPayments.patientId, patientId), eq(patientPayments.admissionId, admissionId), eq(patientPayments.kind, 'advance')))
+  const ref = await executor.select({ id: refunds.id, amount: refunds.amountPaise, at: refunds.issuedAt, number: refunds.refundNumber })
+    .from(refunds).where(and(eq(refunds.patientId, patientId), eq(refunds.admissionId, admissionId)))
+  const entries: LedgerEntry[] = [
+    ...adv.map((r) => ({ kind: 'advance' as const, id: r.id, number: r.number, at: r.at, amountPaise: r.amount, admissionId })),
+    ...ref.map((r) => ({ kind: 'refund' as const, id: r.id, number: r.number, at: r.at, amountPaise: r.amount, admissionId })),
+  ]
+  return admissionDepositPaise(entries, admissionId)
+}
+
 export interface ChargePreview {
   price: PriceResolution
   unitPricePaise: number | null
@@ -187,18 +200,7 @@ async function evaluate(
     eq(encounters.patientId, context.patientId), inArray(encounters.encounterType, ['opd', 'ipd']), ne(encounters.status, 'cancelled'),
     gte(encounters.encounterDate, windowStart), lte(encounters.encounterDate, input.serviceDate),
   ))
-  let deposit: number | null = null
-  if (context.admissionId !== null) {
-    const adv = await executor.select({ id: patientPayments.id, amount: patientPayments.amountPaise, at: patientPayments.receivedAt, number: patientPayments.receiptNumber })
-      .from(patientPayments).where(and(eq(patientPayments.patientId, context.patientId), eq(patientPayments.admissionId, context.admissionId), eq(patientPayments.kind, 'advance')))
-    const ref = await executor.select({ id: refunds.id, amount: refunds.amountPaise, at: refunds.issuedAt, number: refunds.refundNumber })
-      .from(refunds).where(and(eq(refunds.patientId, context.patientId), eq(refunds.admissionId, context.admissionId)))
-    const entries: LedgerEntry[] = [
-      ...adv.map((r) => ({ kind: 'advance' as const, id: r.id, number: r.number, at: r.at, amountPaise: r.amount, admissionId: context.admissionId })),
-      ...ref.map((r) => ({ kind: 'refund' as const, id: r.id, number: r.number, at: r.at, amountPaise: r.amount, admissionId: context.admissionId })),
-    ]
-    deposit = admissionDepositPaise(entries, context.admissionId)
-  }
+  const deposit = context.admissionId === null ? null : await admissionDepositFor(executor, context.patientId, context.admissionId)
   const [dup] = await executor.select({ n: sql<number>`count(*)::int` }).from(chargeLines).where(and(
     eq(chargeLines.patientId, context.patientId), eq(chargeLines.serviceId, input.serviceId), eq(chargeLines.serviceDate, input.serviceDate),
     ne(chargeLines.status, 'void'),
@@ -367,4 +369,72 @@ export async function voidChargeLine(lineId: number, reason: string, session: Se
     await logAudit(session, 'billing: voided charge line', pre.patientId, `line=${lineId}`, tx)
     return { ok: true as const }
   })
+}
+
+// ---------- reads for the charge capture screen ----------
+
+export interface CaptureEncounterRow { id: number; patientId: string; patientName: string; uhid: string | null; opdToken: number | null; departmentName: string | null; providerName: string }
+export interface CaptureAdmissionRow { id: number; patientId: string; patientName: string; uhid: string | null; ward: string | null; roomNumber: string | null; admittedOn: string }
+
+/** Today's (IST) non-cancelled OPD visits and every admitted patient, named columns only. */
+export async function listCaptureContexts(todayIso: string): Promise<{ encounters: CaptureEncounterRow[]; admissions: CaptureAdmissionRow[] }> {
+  const db = getDb()
+  const enc = await db.select({
+    id: encounters.id, patientId: encounters.patientId, patientName: patients.name, uhid: patients.uhid, opdToken: encounters.opdToken,
+    departmentName: departments.name, providerName: providers.name,
+  }).from(encounters).innerJoin(patients, eq(patients.id, encounters.patientId)).innerJoin(providers, eq(providers.id, encounters.providerId))
+    .leftJoin(departments, eq(departments.id, encounters.departmentId))
+    .where(and(eq(encounters.encounterDate, todayIso), eq(encounters.encounterType, 'opd'), ne(encounters.status, 'cancelled')))
+    .orderBy(asc(encounters.opdToken), asc(encounters.id))
+  const adm = await db.select({
+    id: admissions.id, patientId: admissions.patientId, patientName: patients.name, uhid: patients.uhid, ward: rooms.ward, roomNumber: rooms.roomNumber, admittedAt: admissions.admittedAt,
+  }).from(admissions).innerJoin(patients, eq(patients.id, admissions.patientId)).leftJoin(rooms, eq(rooms.id, admissions.currentRoomId))
+    .where(eq(admissions.status, 'admitted')).orderBy(asc(admissions.admittedAt), asc(admissions.id))
+  return {
+    encounters: enc,
+    admissions: adm.map(({ admittedAt, ...a }) => ({ ...a, admittedOn: istDateOf(admittedAt) })),
+  }
+}
+
+export interface CaptureHeader {
+  kind: 'encounter' | 'admission'
+  patientId: string
+  patientName: string
+  uhid: string | null
+  label: string
+  primaryPayerId: number | null
+  payerName: string | null
+  /** Advances net of refunds for an admission; null for a visit. */
+  depositPaise: number | null
+}
+
+export async function getCaptureHeader(ref: ChargeContextRef): Promise<CaptureHeader | null> {
+  const db = getDb()
+  const context = await loadChargeContext(db, ref)
+  if (!context) return null
+  const [patient] = await db.select({ name: patients.name, uhid: patients.uhid }).from(patients).where(eq(patients.id, context.patientId)).limit(1)
+  const [payer] = context.primaryPayerId === null ? [] : await db.select({ name: payers.name }).from(payers).where(eq(payers.id, context.primaryPayerId)).limit(1)
+  const room = context.ward
+  let label: string
+  if (context.kind === 'admission') {
+    label = `Inpatient stay, admitted ${formatIsoDate(context.startDate)}${room ? ` · ${room}` : ''}${context.endDate ? ` · discharged ${formatIsoDate(context.endDate)}` : ''}`
+  } else {
+    label = `${context.isInpatient ? 'Inpatient' : 'Outpatient'} visit, ${formatIsoDate(context.startDate)}${context.cancelled ? ' (cancelled)' : ''}`
+  }
+  return {
+    kind: context.kind,
+    patientId: context.patientId,
+    patientName: patient?.name ?? context.patientId,
+    uhid: patient?.uhid ?? null,
+    label,
+    primaryPayerId: context.primaryPayerId,
+    payerName: payer?.name ?? null,
+    depositPaise: context.kind === 'admission' && context.admissionId !== null ? await admissionDepositFor(db, context.patientId, context.admissionId) : null,
+  }
+}
+
+/** Every line of a visit or stay (void and invoiced included), oldest service date first. */
+export async function listChargeLinesForContext(ref: ChargeContextRef): Promise<ChargeLineRow[]> {
+  const where = 'admissionId' in ref ? eq(chargeLines.admissionId, ref.admissionId) : eq(chargeLines.encounterId, ref.encounterId)
+  return getDb().select().from(chargeLines).where(where).orderBy(asc(chargeLines.serviceDate), asc(chargeLines.id))
 }
