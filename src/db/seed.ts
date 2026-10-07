@@ -3,6 +3,8 @@ import { getDb } from './client'
 import { encryptSensitive } from '../lib/crypto'
 import { hashPassword } from '../lib/password'
 import {
+  // SP6
+  codingQueryResponses, codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures, serviceProcedureCodes,
   trials,
   patients,
   diagnoses,
@@ -939,6 +941,14 @@ async function clearExistingData() {
   // SP3: contact attempts -> follow-up orders -> encounters, all before appointments/patients.
   await db.delete(followUpContactAttempts)
   await db.delete(followUpOrders)
+  // SP6: coding workflow rows reference encounters (diagnoses were cleared above). Code
+  // systems and codes are owner-loaded reference data and are never cleared here.
+  await db.delete(codingQueryResponses)
+  await db.delete(codingQueries)
+  await db.delete(encounterCodingEvents)
+  await db.delete(encounterCoding)
+  await db.delete(encounterProcedures)
+  // end SP6
   await db.delete(encounters)
   await db.delete(appointments)
   await db.delete(patients)
@@ -952,6 +962,7 @@ async function clearExistingData() {
   // SP2: service_catalog references departments; room_categories is
   // referenced by rooms, which were already deleted at the top.
   // tariff_rates and service_package_items reference service_catalog.
+  await db.delete(serviceProcedureCodes) // SP6: references service_catalog
   await db.delete(tariffRates)
   await db.delete(servicePackageItems)
   await db.delete(serviceCatalog)

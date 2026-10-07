@@ -7,6 +7,8 @@ import {
   adverseEvents, drugAccountabilityEntries, signatures,
   // SP3
   encounters, followUpOrders,
+  // SP6
+  codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures,
 } from '@/db/schema'
 import { desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey } from '@/lib/cache'
@@ -489,6 +491,18 @@ export async function deletePatient(anonId: string): Promise<boolean> {
   // doctor assignment, encounter, lab order) is ON DELETE SET NULL, so these two only need
   // to go before the patient row; orders go first so their encounter links are not churned.
   await db.delete(followUpOrders).where(eq(followUpOrders.patientId, anonId))
+  // SP6: the coding tables reference encounters (and most of them patients) with no ON DELETE
+  // action, so they go before the encounters delete. Query responses cascade with their query;
+  // the events table has no patient_id, so it is cleared by this patient's encounter ids. The
+  // patient's diagnoses (including encounter-linked ones) were already deleted above.
+  const patientEncounterIds = (await db.select({ id: encounters.id }).from(encounters).where(eq(encounters.patientId, anonId))).map((e) => e.id)
+  await db.delete(codingQueries).where(eq(codingQueries.patientId, anonId))
+  if (patientEncounterIds.length > 0) {
+    await db.delete(encounterCodingEvents).where(inArray(encounterCodingEvents.encounterId, patientEncounterIds))
+  }
+  await db.delete(encounterCoding).where(eq(encounterCoding.patientId, anonId))
+  await db.delete(encounterProcedures).where(eq(encounterProcedures.patientId, anonId))
+  // end SP6
   await db.delete(encounters).where(eq(encounters.patientId, anonId))
   await db.delete(admissions).where(eq(admissions.patientId, anonId))
   await db.delete(doctorAssignments).where(eq(doctorAssignments.patientId, anonId))
