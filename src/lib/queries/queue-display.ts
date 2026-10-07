@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
 import { doctorAssignments, appointments, admissions, encounters } from '@/db/schema'
-import { and, eq, gte, ne } from 'drizzle-orm'
+import { and, eq, gte, lt, ne } from 'drizzle-orm'
+import { istDayBounds } from '@/lib/india-time'
 
 export type QueueDisplayStage = 'waiting' | 'ready'
 
@@ -10,16 +11,13 @@ export interface QueueDisplayRow {
   stage: QueueDisplayStage
 }
 
-function startOfToday(): Date {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  return start
-}
-
 // Reuses doctorAssignments/rooms/admissions/appointments -- no new status
-// enum (spec §4). Scoped to "today" (see this plan's "Scope decisions" #2).
+// enum (spec §4). Scoped to "today" (see this plan's "Scope decisions" #2):
+// the IST business day, the same day OPD tokens restart on (SP3), whatever
+// zone the server runs in.
 export async function getQueueDisplayRows(): Promise<QueueDisplayRow[]> {
   const db = getDb()
+  const today = istDayBounds()
   const rows = await db
     .select({
       queueTicketNumber: doctorAssignments.queueTicketNumber,
@@ -35,7 +33,7 @@ export async function getQueueDisplayRows(): Promise<QueueDisplayRow[]> {
     .leftJoin(appointments, eq(doctorAssignments.appointmentId, appointments.id))
     .leftJoin(admissions, eq(admissions.createdFromAssignmentId, doctorAssignments.id))
     .leftJoin(encounters, eq(encounters.doctorAssignmentId, doctorAssignments.id)) // SP3
-    .where(and(gte(doctorAssignments.createdAt, startOfToday()), ne(doctorAssignments.status, 'declined')))
+    .where(and(gte(doctorAssignments.createdAt, today.start), lt(doctorAssignments.createdAt, today.end), ne(doctorAssignments.status, 'declined')))
 
   const result: QueueDisplayRow[] = []
   for (const row of rows) {

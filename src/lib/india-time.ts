@@ -26,6 +26,12 @@ export function startOfIstDay(dateIso: string): Date {
   return new Date(`${dateIso}T00:00:00+05:30`)
 }
 
+/** The IST business day containing `now`, as a half-open instant range [start, end). IST has no DST. */
+export function istDayBounds(now: Date = new Date()): { start: Date; end: Date } {
+  const start = startOfIstDay(todayIsoIn(DEFAULT_TIMEZONE, now))
+  return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) }
+}
+
 /** "21 Oct 2026" for a YYYY-MM-DD calendar date (no zone shift). */
 export function formatIsoDate(dateIso: string): string {
   return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${dateIso}T00:00:00Z`))

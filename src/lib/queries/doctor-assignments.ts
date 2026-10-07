@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
 import { appointments, doctorAssignments, patients } from '@/db/schema'
-import { and, asc, desc, eq, getTableColumns, gte, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, getTableColumns, gte, isNull, lt, sql } from 'drizzle-orm'
+import { istDayBounds } from '@/lib/india-time'
 import { sendMessage } from './messages'
 import { SYSTEM_SENDER_NAME } from './eligibility'
 import { buildVisitConfirmationBody } from '@/lib/notification-templates'
@@ -101,18 +102,17 @@ export async function listAllAssignments(): Promise<DoctorAssignmentRow[]> {
 }
 
 /**
- * Restricts the KPI/queue view to assignments created today (calendar day,
- * server-local time) -- listAllAssignments() itself is intentionally left
- * alone since /front-desk/assignments shows the full history, not just
- * today.
+ * Restricts the KPI/queue view to assignments created today (the IST business
+ * day, whatever the server's zone) -- listAllAssignments() itself is
+ * intentionally left alone since /front-desk/assignments shows the full
+ * history, not just today.
  */
 export async function listTodaysAssignments(): Promise<DoctorAssignmentRow[]> {
-  const startOfToday = new Date()
-  startOfToday.setHours(0, 0, 0, 0)
+  const today = istDayBounds()
   return getDb()
     .select()
     .from(doctorAssignments)
-    .where(gte(doctorAssignments.createdAt, startOfToday))
+    .where(and(gte(doctorAssignments.createdAt, today.start), lt(doctorAssignments.createdAt, today.end)))
     .orderBy(desc(doctorAssignments.createdAt))
 }
 

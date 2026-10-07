@@ -16,3 +16,16 @@ describe('india-time SP3 helpers', () => {
     expect(formatDateTimeIn(new Date('2026-10-21T19:00:00Z'))).toMatch(/22 Oct 2026.*12:30/i)
   })
 })
+
+import { istDayBounds } from '@/lib/india-time'
+describe('istDayBounds (I5)', () => {
+  it('02:00 IST belongs to that IST day, not the previous UTC day', () => {
+    const { start, end } = istDayBounds(new Date('2099-05-10T20:30:00Z')) // 02:00 IST 11 May
+    expect(start.toISOString()).toBe('2099-05-10T18:30:00.000Z')
+    expect(end.toISOString()).toBe('2099-05-11T18:30:00.000Z')
+  })
+  it('05:30 IST (UTC midnight) is still the same IST day', () => {
+    const { start } = istDayBounds(new Date('2099-05-11T00:00:00Z'))
+    expect(start.toISOString()).toBe('2099-05-10T18:30:00.000Z')
+  })
+})
