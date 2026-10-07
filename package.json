@@ -10,7 +10,8 @@
     "test": "dotenv -e .env.local -- vitest run",
     "db:generate": "dotenv -e .env.local -- drizzle-kit generate",
     "db:push": "dotenv -e .env.local -- drizzle-kit push",
-    "db:seed": "dotenv -e .env.local -- tsx src/db/seed.ts"
+    "db:seed": "dotenv -e .env.local -- tsx src/db/seed.ts",
+    "codes:import": "dotenv -e .env.local -- tsx scripts/import-code-system.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
