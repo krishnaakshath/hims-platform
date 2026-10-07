@@ -208,3 +208,19 @@ describe.each(ID_CASES)('$name (bad path ids)', (c) => {
     }
   })
 })
+
+// P2-05: a patient-scoped write naming an unknown patient is a 404, not a
+// foreign-key 500. Valid bodies; nothing is written because the patient is missing.
+describe('patient-scoped POSTs for an unknown patient', () => {
+  it.each([
+    ['notes', () => postNote(send('POST', '/x', JSON.stringify({ noteType: 'progress', subjective: 'probe' })), ctx({ anonId: BOGUS_PATIENT }))],
+    ['care-plans', () => postCarePlan(send('POST', '/x', JSON.stringify({ title: 'probe', goals: [] })), ctx({ anonId: BOGUS_PATIENT }))],
+    ['lab-orders', () => postLabOrder(send('POST', '/x', JSON.stringify({ labTestId: 1 })), ctx({ anonId: BOGUS_PATIENT }))],
+    ['prescriptions', () => postPrescription(send('POST', '/x', JSON.stringify({ name: 'Probe', medicationClass: 'probe', frequencyPerDay: 1, durationDays: 1, startDate: '2026-10-08' })), ctx({ anonId: BOGUS_PATIENT }))],
+  ] as const)('%s -> 404 Patient not found', async (_name, call) => {
+    sessionRole = 'admin'
+    const res = await call()
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Patient not found' })
+  })
+})

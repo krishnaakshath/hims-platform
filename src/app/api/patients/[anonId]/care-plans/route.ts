@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readJsonBody } from '@/lib/http'
+import { patientExists } from '@/lib/queries/patient-exists'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -24,6 +25,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!json.ok) return json.response
   const parsed = carePlanSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid care plan payload', details: parsed.error.flatten() }, { status: 400 })
+
+  if (!(await patientExists(anonId))) return NextResponse.json({ error: 'Patient not found' }, { status: 404 })
 
   const { id, supersededPlanId } = await createCarePlan({
     patientId: anonId,
