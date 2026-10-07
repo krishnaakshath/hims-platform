@@ -3,6 +3,7 @@ import { logAudit } from '@/lib/audit'
 import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { getPatientDetail, deletePatient } from '@/lib/queries/patients'
+import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 import { toAadhaarView } from '@/lib/patient-identity'
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
@@ -36,10 +37,17 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { anonId } = await params
-  const deleted = await deletePatient(anonId)
+  // One transaction: the chart, every row referencing it and the audit entry
+  // commit together or not at all.
+  let deleted: boolean
+  try {
+    deleted = await deletePatient(anonId, { session })
+  } catch (err) {
+    if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
+    console.error(`[patients] delete failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
+    return NextResponse.json({ error: 'Could not delete the patient record' }, { status: 500 })
+  }
   if (!deleted) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-  await logAudit(session, 'deleted patient record', anonId)
 
   return NextResponse.json({ ok: true })
 }
