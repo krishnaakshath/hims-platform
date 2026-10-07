@@ -1,5 +1,7 @@
-import { pgTable, text, timestamp, date, boolean, jsonb, integer, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
+// SP4
+import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
 export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs'])
@@ -257,6 +259,11 @@ export const payers = pgTable('payers', {
   name: text('name').notNull(),
   payerId: text('payer_id').notNull(),
   payerType: payerTypeEnum('payer_type').default('commercial').notNull(),
+  // SP4 billing flags (scripts/migrations/2026-10-08-sp4-a-charge-lines.sql). state_code is IN-xx.
+  requiresPreauth: boolean('requires_preauth').default(false).notNull(),
+  gstin: text('gstin'),
+  stateCode: text('state_code'),
+  // end SP4
 })
 
 export const insuranceClaims = pgTable('insurance_claims', {
@@ -594,9 +601,15 @@ export const serviceCatalog = pgTable('service_catalog', {
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  // SP4 billing flags (scripts/migrations/2026-10-08-sp4-a-charge-lines.sql).
+  requiresPreauth: boolean('requires_preauth').default(false).notNull(),
+  maxQuantity: integer('max_quantity'),
+  // end SP4
 }, (t) => [
   check('service_catalog_gst_rate_bp_allowed', sql`${t.gstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`),
   index('service_catalog_department_idx').on(t.departmentId),
+  // SP4
+  check('service_catalog_max_quantity_range', sql`${t.maxQuantity} IS NULL OR ${t.maxQuantity} BETWEEN 1 AND 1000`),
 ])
 
 export type ServiceCatalogRow = typeof serviceCatalog.$inferSelect
@@ -893,6 +906,104 @@ export const followUpContactAttempts = pgTable('follow_up_contact_attempts', {
 export type EncounterRow = typeof encounters.$inferSelect
 export type FollowUpOrderRow = typeof followUpOrders.$inferSelect
 export type FollowUpContactAttemptRow = typeof followUpContactAttempts.$inferSelect
+
+// SP4 charge capture & GST invoices.
+// Migration A: scripts/migrations/2026-10-08-sp4-a-charge-lines.sql (settings, rule config, charge lines).
+// Money: per-unit prices and configured amounts are int4 paise capped at MAX_AMOUNT_PAISE;
+// every computed amount is bigint paise (mode 'number', capped at MAX_DOCUMENT_PAISE < 2^53).
+// No SP4 FK has an ON DELETE action: deletePatient clears a patient's lines explicitly.
+export const chargeLineSourceEnum = pgEnum('charge_line_source', ['manual', 'room_rent', 'pharmacy'])
+export const chargeLineStatusEnum = pgEnum('charge_line_status', ['captured', 'invoiced', 'void'])
+export const PRICE_SOURCES = ['base', 'department', 'payer', 'manual', 'pharmacy'] as const
+
+// Singleton (id = 1), inserted by migration A. Never cleared by the seed.
+export const billingSettings = pgTable('billing_settings', {
+  id: integer('id').primaryKey().default(1),
+  legalName: text('legal_name'),
+  gstin: text('gstin'),
+  stateCode: text('state_code'),                  // IN-xx
+  address: text('address'),
+  placeOfSupplyMode: text('place_of_supply_mode', { enum: ['location_of_service', 'recipient_state'] }).default('location_of_service').notNull(),
+  consultationWindowDays: integer('consultation_window_days').default(30).notNull(),
+  ipdDepositThresholdPaise: integer('ipd_deposit_threshold_paise').default(0).notNull(),
+  roomRentServiceId: integer('room_rent_service_id').references(() => serviceCatalog.id),
+  pharmacyGstRateBp: integer('pharmacy_gst_rate_bp').default(500).notNull(),
+  pharmacyHsn: text('pharmacy_hsn').default('3004').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  updatedByName: text('updated_by_name'),
+}, (t) => [
+  check('billing_settings_singleton', sql`${t.id} = 1`),
+  check('billing_settings_consultation_window_range', sql`${t.consultationWindowDays} BETWEEN 1 AND 365`),
+  check('billing_settings_deposit_threshold_range', sql`${t.ipdDepositThresholdPaise} BETWEEN 0 AND 1000000000`),
+  check('billing_settings_pharmacy_gst_allowed', sql`${t.pharmacyGstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`),
+])
+
+// One row per configured rule (rule_code from CHARGE_RULE_CODES); a missing row = table defaults.
+export const chargeRuleConfigs = pgTable('charge_rule_configs', {
+  ruleCode: text('rule_code').primaryKey(),
+  enabled: boolean('enabled').default(true).notNull(),
+  severity: text('severity', { enum: ['block', 'warn'] }),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  updatedByName: text('updated_by_name').notNull(),
+})
+
+export const chargeLines = pgTable('charge_lines', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  encounterId: integer('encounter_id').references(() => encounters.id),
+  admissionId: integer('admission_id').references(() => admissions.id),
+  source: chargeLineSourceEnum('source').notNull(),
+  status: chargeLineStatusEnum('status').default('captured').notNull(),
+  serviceId: integer('service_id').references(() => serviceCatalog.id),
+  itemCode: text('item_code').notNull(),          // snapshot
+  itemName: text('item_name').notNull(),          // snapshot
+  serviceCategory: serviceCategoryEnum('service_category'),  // snapshot; null for pharmacy
+  departmentId: integer('department_id').references(() => departments.id),
+  orderingProviderId: integer('ordering_provider_id').references(() => providers.id),
+  performingProviderId: integer('performing_provider_id').references(() => providers.id),
+  serviceDate: date('service_date').notNull(),    // Asia/Kolkata business date
+  quantity: integer('quantity').notNull(),
+  unitPricePaise: integer('unit_price_paise').notNull(),
+  priceSource: text('price_source', { enum: PRICE_SOURCES }).notNull(),
+  tariffRateId: integer('tariff_rate_id').references(() => tariffRates.id),
+  resolvedPricePaise: integer('resolved_price_paise'),   // the tariff price an override replaced
+  priceOverrideReason: text('price_override_reason'),
+  taxablePaise: bigint('taxable_paise', { mode: 'number' }).notNull(),
+  gstRateBp: integer('gst_rate_bp').notNull(),
+  hsnSac: text('hsn_sac').notNull(),
+  payerId: integer('payer_id').references(() => payers.id),   // null = self-pay
+  preAuthReference: text('pre_auth_reference'),
+  procedureCodes: jsonb('procedure_codes').$type<ProcedureCodeRef[]>().default([]).notNull(),
+  violations: jsonb('violations').$type<ChargeViolation[]>().default([]).notNull(),
+  ruleOverrides: jsonb('rule_overrides').$type<RuleOverride[]>().default([]).notNull(),
+  legacyChargeId: integer('legacy_charge_id').references(() => charges.id).unique(),
+  medicationDispenseId: integer('medication_dispense_id').references(() => medicationDispenses.id).unique(),
+  voidReason: text('void_reason'),
+  voidedAt: timestamp('voided_at'),
+  voidedByName: text('voided_by_name'),
+  createdByName: text('created_by_name').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('charge_lines_patient_idx').on(t.patientId),
+  index('charge_lines_encounter_idx').on(t.encounterId),
+  index('charge_lines_admission_idx').on(t.admissionId),
+  // Room rent is posted idempotently: one live line per admission per census day.
+  uniqueIndex('charge_lines_room_rent_day_unique').on(t.admissionId, t.serviceDate).where(sql`source = 'room_rent' AND status <> 'void'`),
+  check('charge_lines_quantity_range', sql`${t.quantity} BETWEEN 1 AND 1000`),
+  check('charge_lines_unit_price_range', sql`${t.unitPricePaise} BETWEEN 0 AND 1000000000`),
+  check('charge_lines_taxable_nonneg', sql`${t.taxablePaise} >= 0`),
+  check('charge_lines_gst_rate_allowed', sql`${t.gstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`),
+  check('charge_lines_service_required', sql`${t.source} = 'pharmacy' OR ${t.serviceId} IS NOT NULL`),
+  check('charge_lines_context_required', sql`${t.source} = 'pharmacy' OR ${t.encounterId} IS NOT NULL OR ${t.admissionId} IS NOT NULL`),
+  check('charge_lines_manual_reason', sql`${t.priceSource} <> 'manual' OR ${t.priceOverrideReason} IS NOT NULL`),
+  check('charge_lines_void_reason', sql`${t.status} <> 'void' OR ${t.voidReason} IS NOT NULL`),
+])
+
+export type BillingSettingsRow = typeof billingSettings.$inferSelect
+export type ChargeRuleConfigRow = typeof chargeRuleConfigs.$inferSelect
+export type ChargeLineRow = typeof chargeLines.$inferSelect
+// end SP4
 
 export const noteTypeEnum = pgEnum('note_type', ['progress', 'nursing', 'intake'])
 export const noteStatusEnum = pgEnum('note_status', ['draft', 'signed'])

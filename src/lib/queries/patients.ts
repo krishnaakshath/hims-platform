@@ -7,6 +7,8 @@ import {
   adverseEvents, drugAccountabilityEntries, signatures,
   // SP3
   encounters, followUpOrders,
+  // SP4
+  chargeLines,
 } from '@/db/schema'
 import { desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
@@ -429,6 +431,11 @@ export async function deletePatient(anonId: string): Promise<boolean> {
     await db.delete(medicationAdministrations).where(inArray(medicationAdministrations.admissionId, patientAdmissionIds))
   }
 
+  // SP4: charge_lines reference this patient and also medication_dispenses, charges,
+  // encounters and admissions (all deleted below, none with an ON DELETE action), so the
+  // patient's lines go before any of them.
+  await db.delete(chargeLines).where(eq(chargeLines.patientId, anonId))
+  // end SP4
   await db.delete(formChartDiscrepancies).where(eq(formChartDiscrepancies.patientId, anonId))
   await db.delete(reviews).where(eq(reviews.patientId, anonId))
   await db.delete(patientTrialScreenings).where(eq(patientTrialScreenings.patientId, anonId))

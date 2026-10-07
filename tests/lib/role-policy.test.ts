@@ -34,3 +34,29 @@ describe('searchScopesFor', () => {
     expect(searchScopesFor('labs')).toEqual({ patients: false, trials: false, formTemplates: false, services: false })
   })
 })
+
+// SP4
+import {
+  CHARGE_CAPTURE_ROLES, BILLING_AUTHORITY_ROLES, CASH_DESK_ROLES, BILLING_CONFIG_ROLES,
+  CHARGES_ROLES, MASTER_DATA_ADMIN_ROLES,
+} from '@/lib/role-policy'
+
+describe('SP4 billing role allowlists', () => {
+  it('role constants match the plan', () => {
+    expect(CHARGE_CAPTURE_ROLES).toEqual(CHARGES_ROLES)
+    expect([...CHARGE_CAPTURE_ROLES].sort()).toEqual(['admin', 'billing', 'crc'])
+    expect([...BILLING_AUTHORITY_ROLES].sort()).toEqual(['admin', 'billing'])
+    expect([...CASH_DESK_ROLES].sort()).toEqual(['admin', 'billing', 'crc', 'frontdesk'])
+    expect(BILLING_CONFIG_ROLES).toEqual(MASTER_DATA_ADMIN_ROLES)
+    expect([...BILLING_CONFIG_ROLES]).toEqual(['admin'])
+  })
+
+  it('frontdesk takes money but never holds billing authority or config', () => {
+    expect(CASH_DESK_ROLES).toContain('frontdesk')
+    expect(CHARGE_CAPTURE_ROLES).not.toContain('frontdesk')
+    expect(BILLING_AUTHORITY_ROLES).not.toContain('frontdesk')
+    expect(BILLING_AUTHORITY_ROLES).not.toContain('crc')
+    expect(BILLING_CONFIG_ROLES).not.toContain('billing')
+  })
+})
+// end SP4

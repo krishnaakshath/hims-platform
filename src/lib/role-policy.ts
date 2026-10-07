@@ -78,6 +78,20 @@ export const ENCOUNTER_STATUS_ROLES: readonly Role[] = ['admin', 'pi', 'frontdes
 export const DISCHARGE_ROLES: readonly Role[] = ['admin', 'pi']
 // end SP3
 
+// SP4 charge capture & GST invoices (plan 2026-10-07-sp4-charge-capture.md, RBAC table).
+// Capture = capture/preview/void lines, post room rent, create/discard draft invoices,
+// every /billing/* SP4 page, invoice print. Authority = manual price override, overriding
+// an overridable blocking rule, finalise, cancel by credit note, refund. Cash desk =
+// /cash-desk, record advances and receipts, view a patient's ledger, receipt print
+// (frontdesk takes money but never overrides, finalises, cancels or refunds). Config =
+// billing settings, rule configuration and payer billing flags writes (billing sees them
+// read-only: the department being policed does not switch its own controls off).
+export const CHARGE_CAPTURE_ROLES: readonly Role[] = CHARGES_ROLES
+export const BILLING_AUTHORITY_ROLES: readonly Role[] = ['admin', 'billing']
+export const CASH_DESK_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'frontdesk']
+export const BILLING_CONFIG_ROLES: readonly Role[] = MASTER_DATA_ADMIN_ROLES
+// end SP4
+
 // Wave B: account self-service and reachability.
 // Account = /account (own MFA method, MFA self-reset, "what you can do"):
 // every staff role. A named allowlist (not "no gate") so an unknown/future

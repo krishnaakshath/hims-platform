@@ -9,7 +9,9 @@ describe('service catalogue schema', () => {
     expect(idempotencyProblems(readMigration(FILE))).toEqual([])
   })
   it.each([['room_categories', roomCategories], ['service_catalog', serviceCatalog], ['rooms', rooms]] as const)('declares every %s column', (_n, t) => {
-    expect(missingColumns(t, readMigration(FILE)).filter((c) => t !== rooms || c === 'room_category_id')).toEqual([])
+    // SP4: service_catalog.requires_preauth / max_quantity are added by the SP4 migration A.
+    const sqlText = t === serviceCatalog ? readMigration(FILE) + readMigration('2026-10-08-sp4-a-charge-lines.sql') : readMigration(FILE)
+    expect(missingColumns(t, sqlText).filter((c) => t !== rooms || c === 'room_category_id')).toEqual([])
   })
   it('pins the GST slab check and the unique codes', () => {
     const s = readMigration(FILE)
