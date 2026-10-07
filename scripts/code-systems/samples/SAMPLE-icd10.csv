@@ -1,0 +1,9 @@
+code,display,parent_code,selectable,active,effective_from,effective_to,sex,age_min_years,age_max_years,excludes
+U8Z,SAMPLE fictional group A - not a real code,,no,yes,,,,,,
+U8Z.0,SAMPLE fictional condition A0 - not a real code,U8Z,yes,yes,,,,,,U8Z.1
+U8Z.1,SAMPLE fictional condition A1 - not a real code,U8Z,yes,yes,,,,,,
+U8Z.2,SAMPLE fictional female-only condition - not a real code,U8Z,yes,yes,,,female,,,
+U8Z.3,SAMPLE fictional paediatric condition - not a real code,U8Z,yes,yes,,,,0,17,
+U8Z.4,SAMPLE fictional retired condition - not a real code,U8Z,yes,no,,2025-12-31,,,,
+U9Z,SAMPLE fictional group B - not a real code,,no,yes,,,,,,
+U9Z.0,SAMPLE fictional future condition - not a real code,U9Z,yes,yes,2026-01-01,,,,,

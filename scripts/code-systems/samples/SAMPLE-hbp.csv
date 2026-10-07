@@ -1,0 +1,3 @@
+code,display,parent_code,selectable,active,effective_from,effective_to,sex,age_min_years,age_max_years,excludes
+SMP001A,SAMPLE fictional package 1 - not a real code,,yes,yes,,,,,,
+SMP002A,SAMPLE fictional package 2 - not a real code,,yes,yes,,,,,,
