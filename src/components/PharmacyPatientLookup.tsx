@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
+import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
 import { LogDispenseBillModal } from '@/components/LogDispenseBillModal'
 import { MessageThreadView, type MessageRow } from '@/components/MessageThreadView'
 import { CHARGE_STATUS_LABELS } from '@/lib/charge-status'
@@ -119,7 +120,7 @@ function ContactDoctorComposer({ patientId, onSent }: { patientId: string; onSen
 }
 
 export function PharmacyPatientLookup({ medications, roster }: { medications: MedicationWithInventory[]; roster: PharmacyRosterRow[] }) {
-  const [patientId, setPatientId] = useState('')
+  const [picked, setPicked] = useState<PickedPatient | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<PharmacyPatientViewClient | null>(null)
@@ -134,10 +135,8 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
     if (res.ok) setMessages(await res.json())
   }
 
-  async function lookup(idOverride?: string) {
-    const id = (idOverride ?? patientId).trim()
-    if (!id) return
-    setPatientId(id)
+  async function lookup(id: string) {
+    if (!id.trim()) return
     setLoading(true)
     setError(null)
     setView(null)
@@ -145,7 +144,9 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
     const res = await fetch(`/api/pharmacy/patients/${encodeURIComponent(id)}`)
     setLoading(false)
     if (res.ok) {
-      setView(await res.json())
+      const v: PharmacyPatientViewClient = await res.json()
+      setView(v)
+      setPicked({ id: v.id, name: v.name, uhid: v.uhid ?? null })
       refreshMessages(id)
       return
     }
@@ -178,7 +179,7 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
             {roster.map((r) => (
               <button
                 key={r.id}
-                onClick={() => lookup(r.id)}
+                onClick={() => { setPicked({ id: r.id, name: r.name, uhid: null }); void lookup(r.id) }}
                 className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
                   view?.id === r.id ? 'border-primary bg-primary/10 text-primary' : 'border-border text-foreground hover:bg-secondary'
                 }`}
@@ -190,20 +191,17 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
         )}
       </Card>
 
-      <div className="flex items-end gap-2">
-        <div className="flex-1">
-          <label htmlFor="pharmacy-lookup-id" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Patient ID</label>
-          <input
-            id="pharmacy-lookup-id"
-            value={patientId}
-            onChange={(e) => setPatientId(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') lookup() }}
-            placeholder="Anonymous #, e.g. RD-0001"
-            aria-label="Patient ID"
-            className="w-full rounded-md border border-border px-3 py-2 text-sm"
-          />
-        </div>
-        <Button onClick={() => lookup()} disabled={!patientId.trim() || loading}>{loading ? 'Looking up…' : 'Look up'}</Button>
+      {/* Wave C P0-04: find the patient by name, UHID, mobile or chart id. */}
+      <div className="max-w-xl">
+        <PatientPicker
+          value={picked}
+          onChange={(p) => {
+            setPicked(p)
+            if (p) void lookup(p.id)
+            else { setView(null); setMessages([]); setError(null) }
+          }}
+        />
+        {loading && <p role="status" className="mt-1 text-xs text-muted-foreground">Looking up…</p>}
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -215,7 +213,7 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
             <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
               <div><p className="text-xs text-muted-foreground">Name</p><p className="font-medium text-foreground">{view.name}</p></div>
               <div><p className="text-xs text-muted-foreground">DOB</p><p className="font-medium text-foreground">{view.dob}</p></div>
-              <div><p className="text-xs text-muted-foreground">Patient ID</p><p className="font-medium text-foreground">{view.id}</p></div>
+              <div><p className="text-xs text-muted-foreground">UHID</p><p className="font-medium text-foreground">{view.uhid ?? '—'}</p><p className="font-mono text-[11px] text-muted-foreground">Chart ID {view.id}</p></div>
               <div><p className="text-xs text-muted-foreground">Current provider</p><p className="font-medium text-foreground">{view.currentProvider ?? '—'}</p></div>
             </div>
           </Card>

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
-import { PATIENT_DIRECTORY_ROLES, REGISTRATION_ROLES } from '@/lib/role-policy'
+import { PATIENT_DIRECTORY_ROLES, REGISTRATION_ROLES, CHECK_IN_ROLES, SCHEDULING_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { listAllTrials } from '@/lib/queries/trials'
@@ -88,6 +88,8 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
         showMedicalRecordLink={!isFrontDesk}
         showScreening={!isFrontDesk}
         directory={{ query: q, page: page.page, pageSize: page.pageSize, total: page.total, params: trialId ? { trialId } : {} }}
+        // Wave C quick path: check in / book with the patient preselected.
+        quickActions={{ checkIn: CHECK_IN_ROLES.includes(session.role), book: SCHEDULING_ROLES.includes(session.role) }}
       />
     </div>
   )

@@ -69,8 +69,9 @@ export function AddClientModal({ onClose }: { onClose: () => void }) {
       if (res.status === 201) {
         const created = await res.json()
         onClose()
-        // Navigate straight to the new patient's page so the front desk sees it.
-        router.push(`/patients/${created.id}`)
+        // Navigate straight to the new patient's page so the front desk sees
+        // it; ?registered=1 shows the registration-slip / check-in banner (Wave C).
+        router.push(`/patients/${encodeURIComponent(created.id)}?registered=1`)
         return
       }
       const body = await res.json().catch(() => null)

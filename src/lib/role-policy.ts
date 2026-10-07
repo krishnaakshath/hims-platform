@@ -8,7 +8,7 @@ import type { Role } from '@/lib/auth'
 // Every check built on these is an allowlist, so an unknown/future role is
 // denied by default.
 
-export const ALL_ROLES = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs'] as const
+export const ALL_ROLES = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] as const // SP6: + coder
 
 // Compile-time guard: adding a Role without adding it to ALL_ROLES fails tsc.
 type MissingFromAllRoles = Exclude<Role, (typeof ALL_ROLES)[number]>
@@ -92,12 +92,50 @@ export const CASH_DESK_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'fro
 export const BILLING_CONFIG_ROLES: readonly Role[] = MASTER_DATA_ADMIN_ROLES
 // end SP4
 
+// SP6 clinical coding. Coding = /coding* pages (except code systems), the
+// workspace, status actions, raising/closing queries and service-code mapping
+// writes. Entry = the gate of the diagnosis/procedure write routes (behaviour
+// differs by role: a pi proposes, a coder decides). Propose = the chart's
+// "propose code" UI. Query respond = reply on a coding query. Lookup = code
+// search and service-code lookup (no PHI). Code-system admin = import / set
+// current and /coding/code-systems. The coder is deliberately in neither
+// CLINICAL_ROLES nor PATIENT_DIRECTORY_ROLES: no chart, no /patients, no
+// global search. Per-action status roles live in src/lib/coding/status.ts.
+export const CODING_ROLES: readonly Role[] = ['admin', 'coder']
+export const CODING_ENTRY_ROLES: readonly Role[] = ['admin', 'coder', 'pi']
+// Propose is pi only: the write routes treat admin as a coder (codes directly, code required,
+// completed visits only), so admin codes from the coding workspace, not the chart.
+export const CODE_PROPOSE_ROLES: readonly Role[] = ['pi']
+export const CODING_QUERY_RESPOND_ROLES: readonly Role[] = ['admin', 'pi', 'coder']
+export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc', 'billing']
+export const CODE_SYSTEM_ADMIN_ROLES: readonly Role[] = ['admin']
+// end SP6
+
 // Wave B: account self-service and reachability.
 // Account = /account (own MFA method, MFA self-reset, "what you can do"):
 // every staff role. A named allowlist (not "no gate") so an unknown/future
 // role is still denied by default.
 export const ACCOUNT_ROLES: readonly Role[] = ALL_ROLES
 // end Wave B
+
+// Wave C: patient identification and front-desk flow.
+// Picker = the patient typeahead (GET /api/patients/lookup) used by check-in,
+// booking, the pharmacy counter and billing's eligibility check: the
+// directory roles plus the two counters that already look a patient up by
+// id (pharmacy dispensing, billing eligibility/charges). Labs is not a
+// picker role (its worklist is its lookup). Results are a minimal projection
+// (name, UHID, chart id, age, gender); the mobile number is returned only to
+// PATIENT_DIRECTORY_ROLES, the roles that already see it on /patients.
+export const PATIENT_PICKER_ROLES: readonly Role[] = ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing']
+export const PATIENT_PICKER_PHONE_ROLES: readonly Role[] = PATIENT_DIRECTORY_ROLES
+// OPD token slip (/print/token/[encounterId]) = whoever may check in.
+// Registration slip / UHID card (/print/registration/[anonId]) = registration roles.
+// Name / date-of-birth correction after registration (P1-11): admin only.
+export const DEMOGRAPHICS_CORRECTION_ROLES: readonly Role[] = ['admin']
+// Clearing the MLC flag once set (P2-11): admin only; anyone who edits a
+// profile may still set it.
+export const MLC_UNFLAG_ROLES: readonly Role[] = ['admin']
+// end Wave C
 
 // Global search (TopBanner). Patients only for PATIENT_DIRECTORY_ROLES (no
 // directory for pharmacy/billing/labs); services = the tariff catalogue for

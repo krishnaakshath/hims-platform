@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
 
 interface PayerOption {
   id: number
@@ -19,7 +20,9 @@ interface EligibilityResult {
 
 export function EligibilityCheckModal({ onClose }: { onClose: () => void }) {
   const router = useRouter()
-  const [patientId, setPatientId] = useState('')
+  // Wave C P0-04: picked by name, UHID or mobile; the routes get the chart id.
+  const [patient, setPatient] = useState<PickedPatient | null>(null)
+  const patientId = patient?.id ?? ''
   const [payerId, setPayerId] = useState('')
   const [payerOptions, setPayerOptions] = useState<PayerOption[]>([])
   const [submitting, setSubmitting] = useState(false)
@@ -34,13 +37,13 @@ export function EligibilityCheckModal({ onClose }: { onClose: () => void }) {
   }, [])
 
   // Default the payer dropdown to the patient's own primary payer on file,
-  // once a patient ID is entered -- without stomping on a payer the user
+  // once a patient is picked -- without stomping on a payer the user
   // already picked for this session.
-  async function lookupPatientDefaultPayer() {
-    if (!patientId || payerId) return
+  async function lookupPatientDefaultPayer(id: string) {
+    if (!id || payerId) return
     // Narrow lookup (admin/crc/billing): only the payer id, never the
     // clinical patient-detail JSON.
-    const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}/primary-payer`)
+    const res = await fetch(`/api/patients/${encodeURIComponent(id)}/primary-payer`)
     if (!res.ok) return
     const lookup = await res.json().catch(() => null)
     if (lookup?.primaryPayerId) setPayerId(String(lookup.primaryPayerId))
@@ -67,7 +70,7 @@ export function EligibilityCheckModal({ onClose }: { onClose: () => void }) {
           <DialogTitle>Verify Insurance Eligibility</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <input value={patientId} onChange={(e) => setPatientId(e.target.value)} onBlur={lookupPatientDefaultPayer} placeholder="Anonymous #, e.g. RD-0001" aria-label="Patient ID" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+          <PatientPicker value={patient} onChange={(p) => { setPatient(p); setResult(null); if (p) void lookupPatientDefaultPayer(p.id) }} />
           <select value={payerId} onChange={(e) => setPayerId(e.target.value)} aria-label="Payer" className="w-full rounded-md border border-border px-3 py-2 text-sm">
             <option value="">Select payer…</option>
             {payerOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}

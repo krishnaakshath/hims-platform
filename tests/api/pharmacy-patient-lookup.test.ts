@@ -63,7 +63,7 @@ describe('GET /api/pharmacy/patients/[patientId]', () => {
   it('never leaks the rest of the chart', async () => {
     const body = await (await GET(req() as never, ctx('RD-0001'))).json()
     expect(Object.keys(body).sort()).toEqual(
-      ['activeMedications', 'currentProvider', 'diagnoses', 'dispenses', 'dob', 'id', 'name', 'pastMedications']
+      ['activeMedications', 'currentProvider', 'diagnoses', 'dispenses', 'dob', 'id', 'name', 'pastMedications', 'uhid']
     )
     const serialized = JSON.stringify(body)
     for (const forbidden of ['criteria', 'overallStatus', 'identityVerification', 'discrepancies', 'portalPasswordHash', 'portalConfigured', 'mfaSecretEncrypted', 'intakeqClientIdRef', 'reviewerNotes']) {

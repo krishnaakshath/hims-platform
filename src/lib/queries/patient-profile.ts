@@ -4,7 +4,9 @@ import { patients, patientContacts, patientAadhaar } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { aadhaarConflictSet, identityAuditEntries, toAadhaarSummary, type AadhaarStatus, type IdentitySnapshot, type NewPatientAadhaarRow } from '@/lib/patient-identity'
-import type { ContactInput, PatientProfileUpdateInput } from '@/lib/validation/patient-registration'
+import type { ContactInput, DemographicsCorrectionInput, PatientProfileUpdateInput } from '@/lib/validation/patient-registration'
+import { guardianProblem } from '@/lib/validation/patient-registration'
+import { todayIsoIn } from '@/lib/india-time'
 
 // Post-registration writes to the patient master (SP1). Each write runs in
 // ONE transaction together with its audit rows, so a change and its audit
@@ -148,5 +150,29 @@ export async function upsertPatientAadhaar(anonId: string, row: NewPatientAadhaa
       aadhaarDeclineReason: row.aadhaarLast4 != null ? null : (row.declineReason ?? null),
     }
     for (const e of identityAuditEntries(before.snapshot, after, true)) await logAudit(session, e.action, anonId, e.details, tx)
+  })
+}
+
+// Wave C P1-11: admin correction of name / date of birth (fixed at
+// registration). One transaction with the patient row locked: the guardian
+// rule is re-checked against the contacts on file when the DOB changes, then
+// the update and its audit row (field names + the reason, never the old or
+// new values) commit together.
+export type DemographicsCorrectionResult = 'ok' | 'not_found' | 'guardian_required'
+
+export async function correctPatientDemographics(anonId: string, input: DemographicsCorrectionInput, session: Session): Promise<DemographicsCorrectionResult> {
+  return getDb().transaction(async (tx) => {
+    const [p] = await tx.select({ id: patients.id }).from(patients).where(eq(patients.id, anonId)).for('update')
+    if (!p) return 'not_found'
+    if (input.dob !== undefined) {
+      const contacts = await tx.select({ kind: patientContacts.kind }).from(patientContacts).where(eq(patientContacts.patientId, anonId))
+      if (guardianProblem(contacts, input.dob, todayIsoIn())) return 'guardian_required'
+    }
+    const set: Partial<typeof patients.$inferInsert> = {}
+    if (input.name !== undefined) set.name = input.name
+    if (input.dob !== undefined) set.dob = input.dob
+    await tx.update(patients).set(set).where(eq(patients.id, anonId))
+    await logAudit(session, `corrected patient demographics: ${Object.keys(set).join(', ')}`, anonId, `reason: ${input.reason}`, tx)
+    return 'ok'
   })
 }

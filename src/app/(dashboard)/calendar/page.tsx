@@ -5,7 +5,7 @@ import { SCHEDULING_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { listAppointmentsInRange, type AppointmentWithDetails } from '@/lib/queries/appointments'
-import { listPatientsWithStatus } from '@/lib/queries/patients'
+import { getPickedPatient } from '@/lib/queries/search' // Wave C
 import { addDays, addMonths, formatDateParam, getMonthGridDays, getViewRange, getWeekDays, isSameDay, istDayOfMonth, istMonthIndex, parseDateParam, type CalendarView } from '@/lib/calendar-dates'
 import { formatIstDate, formatIstMonthYear, formatIstTime, formatIstWeekdayDay } from '@/lib/india-time'
 import { MiniCalendar } from '@/components/MiniCalendar'
@@ -37,17 +37,20 @@ function formatTime(date: Date | string): string {
   return formatIstTime(date)
 }
 
-export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ view?: string; date?: string; providerIds?: string }> }) {
+export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ view?: string; date?: string; providerIds?: string; book?: string }> }) {
   // Must be the first statement — see the comment in patients/page.tsx.
   const session = await requireSessionOrRedirect()
   if (!SCHEDULING_ROLES.includes(session.role)) redirect('/')
 
-  const { view: viewParam, date: dateParam, providerIds: providerIdsParam } = await searchParams
+  const { view: viewParam, date: dateParam, providerIds: providerIdsParam, book: bookParam } = await searchParams
   const view = parseView(viewParam)
   const anchor = parseDateParam(dateParam)
   const explicitProviderIds = parseProviderIdsParam(providerIdsParam)
 
-  const [allProviders, allPatients] = await Promise.all([listActiveProviders(), listPatientsWithStatus(null)])
+  // Wave C: no whole patient list for the New Event modal (it uses the
+  // PatientPicker); ?book=<chart id> preselects one patient (quick path).
+  const bookId = typeof bookParam === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(bookParam) ? bookParam : null
+  const [allProviders, bookPatient] = await Promise.all([listActiveProviders(), bookId ? getPickedPatient(bookId) : Promise.resolve(null)])
   const selectedProviderIds = explicitProviderIds ?? allProviders.map((p) => p.id)
 
   const { start, end } = getViewRange(view, anchor)
@@ -55,7 +58,6 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
   await logAudit(session, 'viewed calendar', null)
 
-  const patientOptions = allPatients.map((p) => ({ id: p.id, name: p.name }))
   const providerOptions = allProviders.map((p) => ({ id: p.id, name: p.name, colorTag: p.colorTag }))
 
   const today = new Date()
@@ -66,7 +68,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Calendar</h1>
-        <CalendarNewEventButton patients={patientOptions} providers={providerOptions} defaultDate={formatDateParam(anchor)} />
+        <CalendarNewEventButton providers={providerOptions} defaultDate={formatDateParam(anchor)} initialPatient={bookPatient} />
       </div>
 
       <div className="mb-4 flex items-center justify-between">

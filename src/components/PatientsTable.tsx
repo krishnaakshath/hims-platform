@@ -1,7 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Search, FileText } from 'lucide-react'
+import { Search, FileText, UserCheck, CalendarPlus } from 'lucide-react'
 import { StatusChip } from '@/components/StatusChip'
 import { formatPhoneForDisplay, matchesDirectoryQuery } from '@/lib/patient-directory'
 import { PatientAvatar } from '@/components/PatientAvatar'
@@ -93,7 +93,11 @@ function CriteriaReadout({ summary, status }: { summary?: CriteriaSummaryLike; s
 // showScreening=false (front desk) drops the status chip, the criteria
 // readout and the verdict-colored accent stripe -- the card is then just a
 // directory entry.
-function PatientCard({ patient, showMedicalRecordLink, showScreening }: { patient: PatientRow; showMedicalRecordLink: boolean; showScreening: boolean }) {
+// Wave C front-desk quick path: per-card Check in / Book links (preselect the patient).
+export interface QuickActions { checkIn: boolean; book: boolean }
+const QUICK_LINK = 'relative inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10'
+
+function PatientCard({ patient, showMedicalRecordLink, showScreening, quickActions }: { patient: PatientRow; showMedicalRecordLink: boolean; showScreening: boolean; quickActions?: QuickActions }) {
   const name = patient.name
   const dob = patient.dob
   const status = patient.overallStatus ?? 'yellow'
@@ -124,6 +128,20 @@ function PatientCard({ patient, showMedicalRecordLink, showScreening }: { patien
 
       <div className="relative flex items-center justify-between gap-2 border-t border-border pt-3">
         <p className="truncate text-xs text-muted-foreground">{patient.currentProvider ?? 'Unassigned'}</p>
+        {(quickActions?.checkIn || quickActions?.book) && (
+          <div className="relative flex shrink-0 items-center gap-1">
+            {quickActions.checkIn && (
+              <Link href={`/front-desk/check-in?patient=${encodeURIComponent(patient.id)}`} aria-label={`Check in ${name}`} className={QUICK_LINK}>
+                <UserCheck className="h-3.5 w-3.5" aria-hidden="true" />Check in
+              </Link>
+            )}
+            {quickActions.book && (
+              <Link href={`/calendar?book=${encodeURIComponent(patient.id)}`} aria-label={`Book appointment for ${name}`} className={QUICK_LINK}>
+                <CalendarPlus className="h-3.5 w-3.5" aria-hidden="true" />Book
+              </Link>
+            )}
+          </div>
+        )}
         {showMedicalRecordLink && (
           <Link
             href={`/patients/${patient.id}/medical-record`}
@@ -138,7 +156,7 @@ function PatientCard({ patient, showMedicalRecordLink, showScreening }: { patien
   )
 }
 
-export function PatientsTable({ patients, showMedicalRecordLink = true, showScreening = true, directory }: { patients: PatientRow[]; showMedicalRecordLink?: boolean; showScreening?: boolean; directory?: DirectoryPaging }) {
+export function PatientsTable({ patients, showMedicalRecordLink = true, showScreening = true, directory, quickActions }: { patients: PatientRow[]; showMedicalRecordLink?: boolean; showScreening?: boolean; directory?: DirectoryPaging; quickActions?: QuickActions }) {
   const [search, setSearch] = useState('')
 
   const filtered = useMemo(() => {
@@ -205,7 +223,7 @@ export function PatientsTable({ patients, showMedicalRecordLink = true, showScre
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((p) => <PatientCard key={p.id} patient={p} showMedicalRecordLink={showMedicalRecordLink} showScreening={showScreening} />)}
+          {filtered.map((p) => <PatientCard key={p.id} patient={p} showMedicalRecordLink={showMedicalRecordLink} showScreening={showScreening} quickActions={quickActions} />)}
         </div>
       )}
 

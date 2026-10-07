@@ -1,69 +1,95 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { eq } from 'drizzle-orm'
-import { getDb } from '@/db/client'
-import { patients, diagnoses } from '@/db/schema'
-import { conditionToFhir, conditionsToFhir } from '@/lib/fhir/condition'
+// FHIR Condition mapping (SP6 Task 15 replaces the SP1 'no system' case, ruling 11): a `system`
+// URI and `version` appear only when the diagnosis was coded from a loaded NON-SAMPLE code system;
+// legacy free text keeps today's code+display coding with no system, and an empty code yields text
+// only. Pure: rows are built here (the gather join is tests/lib/fhir/gather.test.ts).
+import { describe, it, expect } from 'vitest'
+import type { DiagnosisFhirRow } from '@/lib/fhir/gather'
+import { codingFor, conditionToFhir, conditionsToFhir } from '@/lib/fhir/condition'
 
-const createdPatientIds: string[] = []
-const createdDiagnosisIds: number[] = []
-afterEach(async () => {
-  while (createdDiagnosisIds.length > 0) await getDb().delete(diagnoses).where(eq(diagnoses.id, createdDiagnosisIds.pop()!))
-  while (createdPatientIds.length > 0) await getDb().delete(patients).where(eq(patients.id, createdPatientIds.pop()!))
-})
+const CATEGORY = 'http://terminology.hl7.org/CodeSystem/condition-category'
+const VER_STATUS = 'http://terminology.hl7.org/CodeSystem/condition-ver-status'
+
+function legacy(o: Partial<DiagnosisFhirRow> = {}): DiagnosisFhirRow {
+  return {
+    id: 7, patientId: 'RD-1', code: 'F32.1', description: o.code === '' ? 'Chest pain' : 'Depression', date: '2026-01-15',
+    encounterId: null, codeId: null, codeSystemKind: null, codeDisplay: null, diagnosisType: null, codingStatus: 'uncoded', sequence: null,
+    proposedByName: null, proposedAt: null, codedByName: null, codedAt: null, voidedAt: null, voidedByName: null, createdByName: null, createdAt: null,
+    binding: null,
+    ...o,
+  }
+}
+
+function coded(o: Partial<DiagnosisFhirRow> = {}): DiagnosisFhirRow {
+  return legacy({
+    id: 11, code: 'E11.9', description: 'Diabetes (doctor wording)', encounterId: 5, codeId: 99, codeSystemKind: 'icd10',
+    codeDisplay: 'Type 2 diabetes mellitus without complications', diagnosisType: 'primary', codingStatus: 'coded',
+    binding: { kind: 'icd10', version: '2019', isSample: false },
+    ...o,
+  })
+}
 
 describe('conditionToFhir', () => {
-  it('maps a diagnosis with a code, description, and recorded date, with no `system` on the coding', async () => {
-    const [patient] = await getDb().insert(patients).values({
-      id: 'RD-FHIR-C1', name: 'Condition Patient', dob: '1980-01-01',
-    }).returning()
-    createdPatientIds.push(patient.id)
-
-    const [diagnosisRow] = await getDb().insert(diagnoses).values({
-      patientId: patient.id, code: 'F32.9', description: 'Major depressive disorder, single episode, unspecified',
-      date: '2026-01-15',
-    }).returning()
-    createdDiagnosisIds.push(diagnosisRow.id)
-
-    const fhir = conditionToFhir(diagnosisRow)
-    expect(fhir.resourceType).toBe('Condition')
-    expect(fhir.id).toBe(`condition-${diagnosisRow.id}`)
-    expect(fhir.subject).toEqual({ reference: `Patient/${patient.id}` })
-    expect(fhir.code.text).toBe('Major depressive disorder, single episode, unspecified')
-    expect(fhir.code.coding).toEqual([{ code: 'F32.9', display: 'Major depressive disorder, single episode, unspecified' }])
-    expect(fhir.code.coding![0]).not.toHaveProperty('system')
-    expect(fhir.recordedDate).toBe('2026-01-15')
+  it('legacy free-text diagnosis has no system', () => {
+    expect(conditionToFhir(legacy({ code: 'F32.1' })).code.coding).toEqual([{ code: 'F32.1', display: 'Depression' }])
+    expect(conditionToFhir(legacy()).code.coding![0]).not.toHaveProperty('system')
+    expect(conditionToFhir(legacy()).code.coding![0]).not.toHaveProperty('version')
   })
 
-  it('maps a null date to a null recordedDate', async () => {
-    const [patient] = await getDb().insert(patients).values({
-      id: 'RD-FHIR-C2', name: 'Condition Patient 2', dob: '1980-01-01',
-    }).returning()
-    createdPatientIds.push(patient.id)
-
-    const [diagnosisRow] = await getDb().insert(diagnoses).values({
-      patientId: patient.id, code: 'Z00.00', description: 'Encounter for general adult medical examination',
-    }).returning()
-    createdDiagnosisIds.push(diagnosisRow.id)
-
-    const fhir = conditionToFhir(diagnosisRow)
-    expect(fhir.recordedDate).toBeNull()
+  it('an empty code yields text only', () => {
+    const c = conditionToFhir(legacy({ code: '' }))
+    expect(c.code).toEqual({ text: 'Chest pain' })
+    expect(c.code).not.toHaveProperty('coding')
   })
 
-  it('conditionsToFhir maps a list of rows', async () => {
-    const [patient] = await getDb().insert(patients).values({
-      id: 'RD-FHIR-C3', name: 'Condition Patient 3', dob: '1980-01-01',
-    }).returning()
-    createdPatientIds.push(patient.id)
+  it('a code from a loaded ICD-10 system carries the WHO URI and version', () => {
+    expect(conditionToFhir(coded({ binding: { kind: 'icd10', version: '2019', isSample: false } })).code.coding).toEqual([
+      { system: 'http://hl7.org/fhir/sid/icd-10', version: '2019', code: 'E11.9', display: 'Type 2 diabetes mellitus without complications' },
+    ])
+    expect(conditionToFhir(coded()).code.text).toBe('Diabetes (doctor wording)')
+  })
 
-    const rows = await getDb().insert(diagnoses).values([
-      { patientId: patient.id, code: 'F41.1', description: 'Generalized anxiety disorder', date: '2026-02-01' },
-      { patientId: patient.id, code: 'F43.10', description: 'Post-traumatic stress disorder, unspecified' },
-    ]).returning()
-    rows.forEach((r) => createdDiagnosisIds.push(r.id))
+  it('a sample code system never carries a system URI', () => {
+    const coding = conditionToFhir(coded({ binding: { kind: 'icd10', version: 'SAMPLE-ICD10-0', isSample: true } })).code.coding!
+    expect(coding[0].system).toBeUndefined()
+    expect(coding[0].version).toBeUndefined()
+    expect(coding).toEqual([{ code: 'E11.9', display: 'Type 2 diabetes mellitus without complications' }])
+  })
 
-    const fhirList = conditionsToFhir(rows)
-    expect(fhirList).toHaveLength(2)
-    expect(fhirList[0].code.text).toBe('Generalized anxiety disorder')
-    expect(fhirList[1].recordedDate).toBeNull()
+  it('SNOMED-coded conditions use http://snomed.info/sct; HBP never gets a system', () => {
+    const snomed = conditionToFhir(coded({ code: '44054006', codeSystemKind: 'snomed', binding: { kind: 'snomed', version: '20260301', isSample: false } }))
+    expect(snomed.code.coding).toEqual([{ system: 'http://snomed.info/sct', version: '20260301', code: '44054006', display: 'Type 2 diabetes mellitus without complications' }])
+    expect(codingFor('SMP001A', 'Package', { kind: 'hbp', version: '2026', isSample: false })).toEqual([{ code: 'SMP001A', display: 'Package' }])
+  })
+
+  it('links the encounter and marks provisional', () => {
+    const c = conditionToFhir(coded({ encounterId: 5, diagnosisType: 'provisional', codingStatus: 'proposed' }))
+    expect(c.encounter).toEqual({ reference: 'Encounter/encounter-5' })
+    expect(c.verificationStatus).toEqual({ coding: [{ system: VER_STATUS, code: 'provisional' }] })
+    expect(c.category).toEqual([{ coding: [{ system: CATEGORY, code: 'encounter-diagnosis' }] }])
+    expect(conditionToFhir(coded({ diagnosisType: 'secondary' })).verificationStatus).toEqual({ coding: [{ system: VER_STATUS, code: 'confirmed' }] })
+  })
+
+  it('a legacy row is a problem-list item with no encounter and no verification status', () => {
+    const c = conditionToFhir(legacy())
+    expect(c).toEqual({
+      resourceType: 'Condition',
+      id: 'condition-7',
+      subject: { reference: 'Patient/RD-1' },
+      category: [{ coding: [{ system: CATEGORY, code: 'problem-list-item' }] }],
+      code: { text: 'Depression', coding: [{ code: 'F32.1', display: 'Depression' }] },
+      recordedDate: '2026-01-15',
+    })
+  })
+
+  it('maps a null date to a null recordedDate; conditionsToFhir maps a list', () => {
+    expect(conditionToFhir(legacy({ date: null })).recordedDate).toBeNull()
+    expect(conditionsToFhir([legacy(), coded()]).map((c) => c.id)).toEqual(['condition-7', 'condition-11'])
+  })
+})
+
+describe('codingFor', () => {
+  it('is undefined for an empty code and omits a null display', () => {
+    expect(codingFor('', 'x', null)).toBeUndefined()
+    expect(codingFor('ZZ00000', null, null)).toEqual([{ code: 'ZZ00000' }])
   })
 })

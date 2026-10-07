@@ -9,6 +9,7 @@ import {
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
+  BookOpenCheck, FileCode2, // SP6
   UserCircle2, Calculator,
   ClipboardPlus, Banknote, SlidersHorizontal, // SP4
 } from 'lucide-react'
@@ -79,6 +80,11 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   // results; explicit product direction removed their prior worklist access).
   { href: '/labs', label: 'Labs', icon: TestTube2, roles: ['admin', 'crc', 'pi', 'labs'] as Role[] },
 
+  // SP6: clinical coding worklist, workspace and report -- CODING_ROLES. The coder's only nav entry
+  // besides Home; nothing clinical (patients, chart, notes) is shown to a coder.
+  { href: '/coding', label: 'Coding', icon: FileCode2, roles: ['admin', 'coder'] as Role[] },
+  // end SP6
+
   // Staff directory — admin/crc/pi (pi view-only; NOT frontdesk, NOT billing, NOT pharmacy, NOT labs)
   { href: '/staff', label: 'Staff', icon: IdCard, roles: ['crc', 'admin', 'pi'] as Role[] },
 
@@ -122,6 +128,9 @@ export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; role
   { href: '/audit-log', label: 'Audit Log', icon: History, roles: ['admin'] as Role[] },
   // Tariffs: service catalogue and price lists -- admin and billing (TARIFF_MANAGE_ROLES). crc/frontdesk only use the lookup API.
   { href: '/tariffs', label: 'Tariffs', icon: Tags, roles: ['admin', 'billing'] as Role[] },
+  // SP6: code-system versions and import -- admin only (CODE_SYSTEM_ADMIN_ROLES).
+  { href: '/coding/code-systems', label: 'Code Systems', icon: BookOpenCheck, roles: ['admin'] as Role[] },
+  // end SP6
   // Settings: admin and the PI only, no other role -- explicit product direction.
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['admin', 'pi'] as Role[] },
   // Wave B P1-05: price lookup (GET /api/tariff/resolve) -- TARIFF_LOOKUP_ROLES.
