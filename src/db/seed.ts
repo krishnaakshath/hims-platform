@@ -25,6 +25,8 @@ import {
   formChartDiscrepancies,
   allergies,
   identityVerifications,
+  patientContacts,
+  patientAadhaar,
   appSettings,
   providers,
   appointments,
@@ -901,6 +903,9 @@ async function clearExistingData() {
   await db.delete(formSubmissions)
   await db.delete(allergies)
   await db.delete(identityVerifications)
+  // SP1 child tables of patients (no ON DELETE action).
+  await db.delete(patientContacts)
+  await db.delete(patientAadhaar)
   await db.delete(appSettings)
   await db.delete(formTemplateConsents)
   await db.delete(formTemplates)

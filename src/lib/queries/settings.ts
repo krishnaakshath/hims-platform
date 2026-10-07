@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm'
 // Single-row settings table: always operate on row id 1 (created by the seed).
 export async function getAppSettings() {
   const [row] = await getDb().select().from(appSettings)
-  return row ?? { id: 1, autoClassifyOnComplete: false, practiceName: null, practiceSite: null, practiceTimezone: 'America/Los_Angeles', adminMfaSecretEncrypted: null, adminMfaEnabled: false, adminMfaMethod: 'totp' as const, adminPhone: null, queueDisplayPin: null }
+  return row ?? { id: 1, autoClassifyOnComplete: false, practiceName: null, practiceSite: null, practiceTimezone: 'Asia/Kolkata', uhidPrefix: 'UH', adminMfaSecretEncrypted: null, adminMfaEnabled: false, adminMfaMethod: 'totp' as const, adminPhone: null, queueDisplayPin: null }
 }
 
 // Scoped practice-identity read for the printable prescription page

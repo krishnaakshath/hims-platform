@@ -1,6 +1,6 @@
 import { getDb } from '@/db/client'
 import {
-  patients, patientTrialScreenings, screeningCriteriaResults, diagnoses, medicationEpisodes, allergies, identityVerifications,
+  patients, patientTrialScreenings, screeningCriteriaResults, diagnoses, medicationEpisodes, allergies, identityVerifications, patientContacts, patientAadhaar,
   formSubmissions, formSubmissionConsents, formChartDiscrepancies, reviews, appointments, messages, charges, insuranceClaims, patientStatements, mockPayments, documents, faxes,
   rooms, doctorAssignments, insuranceEligibilityChecks, admissions, admissionTransfers, encounterNotes, medicationAdministrations,
   medicationDispenses, carePlans, carePlanGoals, labOrders, labResults, medications,
@@ -441,6 +441,9 @@ export async function deletePatient(anonId: string): Promise<boolean> {
   await db.delete(formSubmissions).where(eq(formSubmissions.patientId, anonId))
   await db.delete(allergies).where(eq(allergies.patientId, anonId))
   await db.delete(identityVerifications).where(eq(identityVerifications.patientId, anonId))
+  // SP1 child tables: both reference patients(id) with no ON DELETE action.
+  await db.delete(patientContacts).where(eq(patientContacts.patientId, anonId))
+  await db.delete(patientAadhaar).where(eq(patientAadhaar.patientId, anonId))
   // doctorAssignments must be deleted before appointments -- doctorAssignments.appointmentId
   // is a nullable FK to appointments(id) with no ON DELETE action, so Postgres would reject
   // the appointments delete below with a foreign-key violation once a doctor assignment

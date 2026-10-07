@@ -1,4 +1,5 @@
-import { pgTable, text, timestamp, date, boolean, jsonb, integer, pgEnum, serial, uniqueIndex } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, date, boolean, jsonb, integer, pgEnum, serial, uniqueIndex, pgSequence, check } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
 export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs'])
@@ -6,6 +7,16 @@ export const mfaMethodEnum = pgEnum('mfa_method', ['totp', 'sms', 'email'])
 export const payerTypeEnum = pgEnum('payer_type', ['commercial', 'medicare', 'medicaid', 'tricare', 'other'])
 export const insuranceRelationshipEnum = pgEnum('insurance_relationship', ['self', 'spouse', 'child', 'other'])
 export const insurancePlanTypeEnum = pgEnum('insurance_plan_type', ['ppo', 'hmo', 'epo', 'pos', 'medicare', 'medicaid'])
+
+// SP1 Indian patient master (scripts/migrations/2026-10-07-sp1-patient-master.sql).
+export const genderEnum = pgEnum('gender', ['male', 'female', 'transgender', 'other', 'unknown'])
+export const maritalStatusEnum = pgEnum('marital_status', ['single', 'married', 'divorced', 'widowed', 'separated', 'unknown'])
+export const bloodGroupEnum = pgEnum('blood_group', ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'unknown'])
+export const patientContactKindEnum = pgEnum('patient_contact_kind', ['next_of_kin', 'guardian', 'emergency'])
+export const registrationCouncilEnum = pgEnum('registration_council', ['nmc', 'smc'])
+
+// UHID numeric part. The prefix lives in app_settings.uhid_prefix.
+export const uhidSeq = pgSequence('uhid_seq', { startWith: 1, increment: 1 })
 
 export const trials = pgTable('trials', {
   id: text('id').primaryKey(),                 // e.g. "nct06911112"
@@ -92,6 +103,31 @@ export const patients = pgTable('patients', {
   secondaryPlanType: insurancePlanTypeEnum('secondary_plan_type'),
   secondarySubscriberName: text('secondary_subscriber_name'),
   secondarySubscriberRelationship: insuranceRelationshipEnum('secondary_subscriber_relationship'),
+  // -- SP1 Indian patient master. All nullable/additive so other branches'
+  // inserts on the shared DB keep working. Aadhaar deliberately does NOT live
+  // here (see patientAadhaar) so no whole-row select of patients can carry it.
+  // Legacy `city` is reused as city/town; legacy `zip` is kept but registration
+  // no longer writes it (pinCode replaces it).
+  uhid: text('uhid').unique(),
+  gender: genderEnum('gender'),
+  maritalStatus: maritalStatusEnum('marital_status'),
+  bloodGroup: bloodGroupEnum('blood_group'),
+  occupation: text('occupation'),
+  nationality: text('nationality').default('IN'),
+  religion: text('religion'),
+  preferredLanguage: text('preferred_language'),
+  photoBlobPath: text('photo_blob_path'),
+  addressLine1: text('address_line1'),
+  addressLine2: text('address_line2'),
+  district: text('district'),
+  stateCode: text('state_code'),
+  pinCode: text('pin_code'),
+  abhaNumber: text('abha_number').unique(),
+  abhaAddress: text('abha_address').unique(),
+  abhaUnavailableReason: text('abha_unavailable_reason', { enum: ['not_created', 'patient_declined', 'emergency', 'other'] }),
+  abhaUnavailableNote: text('abha_unavailable_note'),
+  isMlc: boolean('is_mlc').default(false).notNull(),
+  mlcNumber: text('mlc_number'),
 })
 
 export const diagnoses = pgTable('diagnoses', {
@@ -265,7 +301,7 @@ export const mockPayments = pgTable('mock_payments', {
 })
 
 export const formSubmissionStatusEnum = pgEnum('form_submission_status', ['sent', 'partial', 'completed'])
-export const idTypeEnum = pgEnum('id_type', ['drivers_license', 'state_id', 'passport', 'military_id', 'green_card'])
+export const idTypeEnum = pgEnum('id_type', ['drivers_license', 'state_id', 'passport', 'military_id', 'green_card', 'voter_id', 'pan', 'ration_card'])
 export const severityEnum = pgEnum('severity', ['mild', 'moderate', 'severe'])
 
 export const formTemplateFolders = pgTable('form_template_folders', {
@@ -449,13 +485,42 @@ export const identityVerifications = pgTable('identity_verifications', {
   verifiedAt: timestamp('verified_at'),
 })
 
+// NOK / guardian / emergency contacts for a patient (SP1).
+export const patientContacts = pgTable('patient_contacts', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  kind: patientContactKindEnum('kind').notNull(),
+  name: text('name').notNull(),
+  relationship: text('relationship').notNull(),
+  phone: text('phone').notNull(),
+  addressText: text('address_text'),
+  isPrimary: boolean('is_primary').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+// Aadhaar, one row per patient, kept off `patients` on purpose. Either an
+// encrypted value (with consent and last 4) or a recorded decline reason --
+// never both, never neither (enforced by the check constraint).
+export const patientAadhaar = pgTable('patient_aadhaar', {
+  patientId: text('patient_id').primaryKey().references(() => patients.id),
+  aadhaarEncrypted: text('aadhaar_encrypted'),
+  aadhaarLast4: text('aadhaar_last4'),
+  consentGiven: boolean('consent_given').default(false).notNull(),
+  consentRecordedAt: timestamp('consent_recorded_at'),
+  declineReason: text('decline_reason', { enum: ['patient_declined', 'not_available', 'minor_no_aadhaar', 'emergency', 'foreign_national', 'other'] }),
+  declineNote: text('decline_note'),
+  recordedByName: text('recorded_by_name').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [check('patient_aadhaar_value_xor_decline', sql`(${t.aadhaarEncrypted} IS NOT NULL AND ${t.aadhaarLast4} ~ '^[0-9]{4}$' AND ${t.consentGiven} AND ${t.declineReason} IS NULL) OR (${t.aadhaarEncrypted} IS NULL AND ${t.aadhaarLast4} IS NULL AND ${t.declineReason} IS NOT NULL)`)])
+
 // Single-row table: one settings record for the whole pilot deployment.
 export const appSettings = pgTable('app_settings', {
   id: serial('id').primaryKey(),
   autoClassifyOnComplete: boolean('auto_classify_on_complete').default(false).notNull(),
   practiceName: text('practice_name'),
   practiceSite: text('practice_site'),
-  practiceTimezone: text('practice_timezone').default('America/Los_Angeles'),
+  practiceTimezone: text('practice_timezone').default('Asia/Kolkata'),
+  uhidPrefix: text('uhid_prefix').default('UH').notNull(),
   // The admin account authenticates via ADMIN_EMAIL/ADMIN_PASSWORD_HASH env
   // vars (api/login/route.ts), not a users row -- its MFA state has nowhere
   // else to live, so it goes on this pilot-wide singleton instead.
@@ -489,7 +554,14 @@ export const providers = pgTable('providers', {
   colorTag: text('color_tag').notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-})
+  // SP1: department, NMC/SMC registration and consultation fee (integer paise).
+  departmentId: integer('department_id').references(() => departments.id),
+  registrationCouncil: registrationCouncilEnum('registration_council'),
+  registrationStateCode: text('registration_state_code'),
+  registrationNumber: text('registration_number'),
+  consultationFeePaise: integer('consultation_fee_paise'),
+  currency: text('currency').default('INR').notNull(),
+}, (t) => [check('providers_consultation_fee_nonneg', sql`${t.consultationFeePaise} IS NULL OR ${t.consultationFeePaise} >= 0`)])
 
 export const departmentKindEnum = pgEnum('department_kind', ['clinical', 'diagnostic', 'support', 'administrative'])
 
