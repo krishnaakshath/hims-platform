@@ -2,8 +2,8 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, providers, labTests, labOrders, labResults } from '@/db/schema'
-import { listOrdersForPatient } from '@/lib/queries/lab-orders'
-import { observationsToFhir } from '@/lib/fhir/observation'
+import { listOrdersForPatient, type PatientLabOrderRow } from '@/lib/queries/lab-orders'
+import { observationToFhir, observationsToFhir } from '@/lib/fhir/observation'
 
 const createdPatientIds: string[] = []
 const createdTestIds: number[] = []
@@ -54,7 +54,7 @@ describe('observationsToFhir', () => {
 
     const tshFhir = fhirList.find((o) => o.id === `observation-${tshOrder.id}`)!
     expect(tshFhir.resourceType).toBe('Observation')
-    expect(tshFhir.status).toBe('final')
+    expect(tshFhir.status).toBe('preliminary') // SP5: resulted = awaiting verification
     expect(tshFhir.subject).toEqual({ reference: `Patient/${patient.id}` })
     expect(tshFhir.code.coding).toEqual([{ code: 'TSH', display: 'Thyroid Stimulating Hormone' }])
     expect(tshFhir.valueQuantity).toEqual({ value: 2.5, unit: 'mIU/L' })
@@ -66,6 +66,22 @@ describe('observationsToFhir', () => {
     expect(udsFhir).not.toHaveProperty('valueQuantity')
     expect(JSON.stringify(udsFhir)).not.toContain('NaN')
     expect(udsFhir.code.coding).toEqual([{ code: 'UDS', display: 'Urine Drug Screen' }])
+  })
+
+  // SP5: the Observation status follows the order's verification state.
+  it('resulted is preliminary, verified/reported are final, received has no observation', () => {
+    const row = (status: PatientLabOrderRow['status'], withResult = true): PatientLabOrderRow => ({
+      id: 1, status, orderedAt: new Date('2099-01-01T00:00:00Z'), collectedAt: null,
+      testId: 1, testName: 'Glucose', testCode: 'GLU', category: 'lab', defaultUnit: null, referenceRange: null, attachments: [],
+      result: withResult ? { value: '90', unit: 'mg/dL', referenceRange: null, flag: 'normal', resultedByName: 'X', resultedAt: new Date('2099-01-01T00:00:00Z'), notes: null } : null,
+    } as PatientLabOrderRow)
+    expect(observationToFhir('RD-X', row('resulted'))?.status).toBe('preliminary')
+    expect(observationToFhir('RD-X', row('verified'))?.status).toBe('final')
+    expect(observationToFhir('RD-X', row('reported'))?.status).toBe('final')
+    // A result row on a pre-result status (legacy data) never becomes an Observation.
+    expect(observationToFhir('RD-X', row('received'))).toBeNull()
+    expect(observationToFhir('RD-X', row('cancelled'))).toBeNull()
+    expect(observationToFhir('RD-X', row('verified', false))).toBeNull()
   })
 
   it('maps abnormal and critical flags to A and AA interpretation codes', async () => {

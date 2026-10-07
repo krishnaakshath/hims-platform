@@ -23,6 +23,7 @@ let payerId = 0
 let pinId = 0
 let t1 = 0
 let t2 = 0
+let tImg = 0 // SP5 Task 8: an imaging test
 let encounterId = 0
 const rateIds: number[] = []
 const requisitionIds: number[] = []
@@ -65,6 +66,8 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     ]).returning()
     t1 = a.id
     t2 = b.id
+    const [img] = await db.insert(labTests).values({ name: `TEST_SP5 imaging ${RUN}`, code: `TEST-SP5-RI-${RUN}`, category: 'imaging' }).returning()
+    tImg = img.id
     const [pin] = await db.insert(labServiceAreaPins).values({ pinCode: PIN, createdByName: PROBE }).returning()
     pinId = pin.id
     const [enc] = await db.insert(encounters).values({
@@ -79,7 +82,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     await db.delete(labRequisitions).where(inArray(labRequisitions.patientId, [P, P_PAYER, P_OTHER]))
     await db.delete(encounters).where(eq(encounters.id, encounterId))
     await db.delete(labServiceAreaPins).where(eq(labServiceAreaPins.id, pinId))
-    await db.delete(labTests).where(inArray(labTests.id, [t1, t2]))
+    await db.delete(labTests).where(inArray(labTests.id, [t1, t2, tImg]))
     await db.delete(tariffRates).where(inArray(tariffRates.id, rateIds))
     await db.delete(serviceCatalog).where(eq(serviceCatalog.id, serviceId))
     await db.delete(providers).where(eq(providers.id, providerId))
@@ -150,6 +153,14 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     }
     const r3 = await create({ patientId: P_OTHER, labTestIds: [t2] }) // no PIN on file
     expect(r3.ok && r3.patientIsLocal).toBe(false)
+  })
+
+  // SP5 Task 8 ruling: the home-collection notice needs at least one lab (not imaging) test.
+  it('includesLabTest is false only for an imaging-only requisition', async () => {
+    const img = await create({ labTestIds: [tImg] })
+    expect(img.ok && [img.patientIsLocal, img.includesLabTest]).toEqual([true, false])
+    const mixed = await create({ labTestIds: [tImg, t2] })
+    expect(mixed.ok && mixed.includesLabTest).toBe(true)
   })
 
   it('rejects an encounter of another patient and writes nothing', async () => {

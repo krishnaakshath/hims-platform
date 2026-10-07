@@ -25,14 +25,14 @@ const LINE = { orderId: 30, labTestId: 1, quotedPricePaise: 45000, quoteStatus: 
 beforeEach(() => {
   role = 'pi'
   signedIn = true
-  vi.mocked(createLabRequisition).mockReset().mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [LINE], patientIsLocal: false })
+  vi.mocked(createLabRequisition).mockReset().mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [LINE], patientIsLocal: false, includesLabTest: true })
   vi.mocked(notifyPatientSafely).mockReset().mockResolvedValue('logged')
   vi.mocked(resolveDoctorQueueProvider).mockClear()
 })
 
 describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
   it('notifies only local patients, with a requisition dedupe key', async () => {
-    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], patientIsLocal: true })
+    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], patientIsLocal: true, includesLabTest: true })
     const res = await POST(send({ labTestIds: [1] }), ctx)
     expect(res.status).toBe(201)
     expect(await res.json()).toEqual({ requisitionId: 12, lines: [], patientIsLocal: true, notification: 'logged' })
@@ -54,8 +54,17 @@ describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
     expect(notifyPatientSafely).not.toHaveBeenCalled()
   })
 
+  // SP5 Task 8 ruling: imaging stays orderable, but only a lab test triggers the home-collection notice.
+  it('an imaging-only order for a local patient sends no notice', async () => {
+    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], patientIsLocal: true, includesLabTest: false })
+    const res = await POST(send({ labTestIds: [1] }), ctx)
+    expect(res.status).toBe(201)
+    expect((await res.json()).notification).toBeNull()
+    expect(notifyPatientSafely).not.toHaveBeenCalled()
+  })
+
   it('a notifier failure still returns 201', async () => {
-    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], patientIsLocal: true })
+    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], patientIsLocal: true, includesLabTest: true })
     vi.mocked(notifyPatientSafely).mockResolvedValue('error')
     const res = await POST(send({ labTestIds: [1] }), ctx)
     expect(res.status).toBe(201)

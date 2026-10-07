@@ -1,23 +1,25 @@
+// SP5: walk-in collection through the lifecycle query (sample ID allocated in the same
+// transaction, audit on that transaction). frontdesk has no lab access.
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
-import { logAudit } from '@/lib/audit'
-import { markCollected } from '@/lib/queries/lab-orders'
+import { LAB_COLLECT_ROLES } from '@/lib/role-policy'
+import { collectLabOrder } from '@/lib/queries/lab-lifecycle'
+import { errorResponse, labServerError, labTransitionError, parseId } from '@/lib/labs/route-responses'
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
-  // frontdesk previously had mark-collected access (a logistics step, not a
-  // clinical judgment) -- removed per explicit product direction: front
-  // desk's job is registration/check-in, not touching lab results at all.
-  if (!['admin', 'pi', 'labs'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!LAB_COLLECT_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { id } = await params
-  const orderId = Number(id)
-  if (!Number.isInteger(orderId)) return NextResponse.json({ error: 'Invalid order id' }, { status: 400 })
+  const orderId = parseId((await params).id)
+  if (orderId === null) return errorResponse(400, 'Invalid order id')
 
-  const result = await markCollected(orderId)
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 })
-
-  await logAudit(session, 'marked lab order collected', result.patientId)
-  return NextResponse.json({ ok: true })
+  let result: Awaited<ReturnType<typeof collectLabOrder>>
+  try {
+    result = await collectLabOrder(orderId, session)
+  } catch (err) {
+    return labServerError('lab collect', err, 'Could not mark the sample collected')
+  }
+  if (!result.ok) return labTransitionError(result.error)
+  return NextResponse.json({ ok: true, sampleId: result.sampleId })
 }

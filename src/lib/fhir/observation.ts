@@ -1,10 +1,11 @@
 import type { PatientLabOrderRow } from '@/lib/queries/lab-orders'
 import type { FhirCodeableConcept, FhirReference } from './types'
+import { fhirObservationStatusFor } from '@/lib/labs/status' // SP5
 
 export interface FhirObservation {
   resourceType: 'Observation'
   id: string
-  status: 'final'
+  status: 'preliminary' | 'final' // SP5: resulted = preliminary; verified/reported = final
   subject: FhirReference
   code: FhirCodeableConcept
   valueQuantity?: { value: number; unit?: string }
@@ -27,6 +28,9 @@ const INTERPRETATION_CODE: Record<'normal' | 'abnormal' | 'critical', string> = 
 // code+display travels, not a claimed LOINC system binding.
 export function observationToFhir(patientId: string, order: PatientLabOrderRow): FhirObservation | null {
   if (!order.result) return null
+  // SP5: only resulted (preliminary) and verified/reported (final) orders carry an Observation.
+  const status = fhirObservationStatusFor(order.status)
+  if (status === null) return null
   const { result } = order
   const numeric = Number(result.value)
   const isNumeric = result.value.trim() !== '' && Number.isFinite(numeric)
@@ -34,7 +38,7 @@ export function observationToFhir(patientId: string, order: PatientLabOrderRow):
   return {
     resourceType: 'Observation',
     id: `observation-${order.id}`,
-    status: 'final',
+    status,
     subject: { reference: `Patient/${patientId}` },
     code: { text: order.testName, coding: [{ code: order.testCode, display: order.testName }] },
     ...(isNumeric ? { valueQuantity: { value: numeric, ...(result.unit ? { unit: result.unit } : {}) } } : { valueString: result.value }),

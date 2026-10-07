@@ -39,7 +39,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Message patients directly',
       'View the live bed/ward status board',
       'Dispense medications from the Pharmacy dashboard',
-      'Order lab tests and manage the Lab worklist: mark samples collected, attach imaging results, enter results, and cancel orders',
+      // SP5: pi no longer enters results (labs enters, pi verifies).
+      'Order lab tests and manage the Lab worklist: mark samples collected, attach imaging results, and cancel orders',
       'View the Staff Directory and credential expiry status',
       'View the public booking requests queue (read-only -- confirming/declining is a registration-staff action)',
       'Confirm a green trial-eligibility verdict, which automatically notifies the patient',

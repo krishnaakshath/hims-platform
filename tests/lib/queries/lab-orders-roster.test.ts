@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, labOrders, labTests, providers } from '@/db/schema'
-import { markCollected, listPatientsWithLabOrders } from '@/lib/queries/lab-orders'
+import { listPatientsWithLabOrders } from '@/lib/queries/lab-orders'
 
 const TEST_PATIENT_ID = 'RD-LABROSTER-TEST-01'
 
@@ -34,7 +34,8 @@ describe('listPatientsWithLabOrders', () => {
 
   it('moves a collected order out of pending once marked collected (still not resulted)', async () => {
     const [created] = await getDb().select().from(labOrders).where(eq(labOrders.patientId, TEST_PATIENT_ID))
-    await markCollected(created.id)
+    // SP5: markCollected was replaced by collectLabOrder (audited); the roster only needs the status.
+    await getDb().update(labOrders).set({ status: 'collected', collectedAt: new Date() }).where(eq(labOrders.id, created.id))
     const roster = await listPatientsWithLabOrders()
     const row = roster.find((r) => r.id === TEST_PATIENT_ID)
     // Collected still counts as pending (not yet resulted) -- only the

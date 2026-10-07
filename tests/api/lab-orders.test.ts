@@ -1,18 +1,41 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { eq } from 'drizzle-orm'
+// SP5: the old markCollected / enterResult / cancelOrder were replaced by the lifecycle
+// transitions (src/lib/queries/lab-lifecycle.ts); an order reaches `resulted` via collect →
+// receive → result. Fixtures use a TEST-SP5 patient and a probe session name, so every audit row
+// written here is deleted by name (staff) or by that patient id (LIS).
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
+import { and, eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, providers, labTests, labOrders, labResults, documents, auditLog } from '@/db/schema'
-import { logIntegrationEvent } from '@/lib/patient-portal-audit'
-import { markCollected, enterResult, cancelOrder, listWorklist, listOrdersForPatient } from '@/lib/queries/lab-orders'
+import type { Session } from '@/lib/auth'
+import { listWorklist, listOrdersForPatient } from '@/lib/queries/lab-orders'
+import { cancelLabOrder, collectLabOrder, receiveLabSample, recordLabResult } from '@/lib/queries/lab-lifecycle'
+
+// The LIS audit write can be made to fail, to prove the whole result transaction rolls back.
+let failLisAudit = false
+vi.mock('@/lib/patient-portal-audit', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/patient-portal-audit')>('@/lib/patient-portal-audit')
+  return {
+    ...actual,
+    logIntegrationEvent: async (...a: Parameters<typeof actual.logIntegrationEvent>) => {
+      if (failLisAudit) throw new Error('audit down')
+      return actual.logIntegrationEvent(...a)
+    },
+  }
+})
+
+const RUN = `${Date.now()}`
+const PROBE = `TEST_SP5_LO-${RUN}`
+const PATIENT = `TEST-SP5-${RUN}-LO`
+const S: Session = { role: 'admin', name: PROBE, userId: null }
+const RESULT = { value: '5.2', unit: 'mg/dL', flag: 'normal' as const }
 
 const createdOrderIds: number[] = []
 const createdDocumentIds: number[] = []
-const createdAuditActions: string[] = []
+beforeAll(async () => {
+  await getDb().insert(patients).values({ id: PATIENT, name: 'TEST_SP5 lab orders', dob: '1980-01-01' })
+})
 afterEach(async () => {
-  // Only audit rows whose action is a unique probe string created by these tests.
-  while (createdAuditActions.length > 0) {
-    await getDb().delete(auditLog).where(eq(auditLog.action, createdAuditActions.pop()!))
-  }
+  failLisAudit = false
   while (createdDocumentIds.length > 0) {
     await getDb().delete(documents).where(eq(documents.id, createdDocumentIds.pop()!))
   }
@@ -22,16 +45,39 @@ afterEach(async () => {
     await getDb().delete(labOrders).where(eq(labOrders.id, id))
   }
 })
+afterAll(async () => {
+  await getDb().delete(auditLog).where(eq(auditLog.userName, PROBE))
+  await getDb().delete(auditLog).where(and(eq(auditLog.userName, 'LIS integration'), eq(auditLog.patientId, PATIENT)))
+  await getDb().delete(patients).where(eq(patients.id, PATIENT))
+})
 
 async function makeOrder() {
   const db = getDb()
   const [test] = await db.select({ id: labTests.id }).from(labTests).limit(1)
   const [providerRow] = await db.select({ id: providers.id }).from(providers).limit(1)
-  const [patientRow] = await db.select({ id: patients.id }).from(patients).limit(1)
-  // SP5: createLabOrder was replaced by createLabRequisition; a bare row is enough for these lifecycle tests.
-  const [order] = await db.insert(labOrders).values({ patientId: patientRow.id, labTestId: test.id, orderedByProviderId: providerRow.id }).returning()
+  const [order] = await db.insert(labOrders).values({ patientId: PATIENT, labTestId: test.id, orderedByProviderId: providerRow.id }).returning()
   createdOrderIds.push(order.id)
   return order
+}
+
+async function collected() {
+  const order = await makeOrder()
+  const c = await collectLabOrder(order.id, S)
+  if (!c.ok) throw new Error('collect failed')
+  return { order, sampleId: c.sampleId }
+}
+
+async function received() {
+  const { order, sampleId } = await collected()
+  const r = await receiveLabSample(sampleId, S)
+  if (!r.ok) throw new Error('receive failed')
+  return order
+}
+
+async function state(id: number) {
+  const [row] = await getDb().select().from(labOrders).where(eq(labOrders.id, id))
+  const results = await getDb().select().from(labResults).where(eq(labResults.labOrderId, id))
+  return { status: row.status, results: results.length }
 }
 
 async function attachDocument(orderId: number, patientId: string, name: string) {
@@ -58,90 +104,59 @@ describe('lab order lifecycle — query layer', () => {
     expect(order.status).toBe('ordered')
   })
 
-  it('markCollected transitions ordered -> collected and sets collectedAt; a second call does not double-apply (Review Focus #2)', async () => {
+  it('collect transitions ordered -> collected with a sample ID; a second collect does not re-stamp (Review Focus #2)', async () => {
     const order = await makeOrder()
-
-    const first = await markCollected(order.id)
+    const first = await collectLabOrder(order.id, S)
     expect(first.ok).toBe(true)
-
     const [afterFirst] = await getDb().select().from(labOrders).where(eq(labOrders.id, order.id))
     expect(afterFirst.status).toBe('collected')
     expect(afterFirst.collectedAt).not.toBeNull()
-    const collectedAtAfterFirst = afterFirst.collectedAt
+    expect(afterFirst.sampleId).toBe(first.ok ? first.sampleId : null)
 
-    const second = await markCollected(order.id)
-    expect(second.ok).toBe(false)
-
+    expect(await collectLabOrder(order.id, S)).toEqual({ ok: false, error: 'invalid_status' })
     const [afterSecond] = await getDb().select().from(labOrders).where(eq(labOrders.id, order.id))
-    expect(afterSecond.status).toBe('collected')
-    expect(afterSecond.collectedAt?.getTime()).toBe(collectedAtAfterFirst?.getTime())
+    expect(afterSecond.collectedAt?.getTime()).toBe(afterFirst.collectedAt?.getTime())
   })
 
-  it('enterResult rejects an order that has never been collected (Review Focus #1)', async () => {
+  it('a staff result is refused before the sample is received (Review Focus #1)', async () => {
     const order = await makeOrder()
-
-    const result = await enterResult(order.id, { value: '5', flag: 'normal', resultedByName: 'Tester' })
-    expect(result.ok).toBe(false)
-
-    const [row] = await getDb().select().from(labOrders).where(eq(labOrders.id, order.id))
-    expect(row.status).toBe('ordered')
-    const resultRows = await getDb().select().from(labResults).where(eq(labResults.labOrderId, order.id))
-    expect(resultRows.length).toBe(0)
+    expect(await recordLabResult(order.id, RESULT, { kind: 'staff', session: S })).toEqual({ ok: false, error: 'invalid_status' })
+    const { order: c } = await collected()
+    expect(await recordLabResult(c.id, RESULT, { kind: 'staff', session: S })).toEqual({ ok: false, error: 'invalid_status' })
+    expect(await state(order.id)).toEqual({ status: 'ordered', results: 0 })
+    expect(await state(c.id)).toEqual({ status: 'collected', results: 0 })
   })
 
-  it('enterResult transitions collected -> resulted and inserts the result row', async () => {
-    const order = await makeOrder()
-    const collect = await markCollected(order.id)
-    expect(collect.ok).toBe(true)
-
-    const result = await enterResult(order.id, { value: '5.2', unit: 'mg/dL', flag: 'normal', resultedByName: 'Tester' })
+  it('collect -> receive -> result lands as resulted with the result row', async () => {
+    const order = await received()
+    const result = await recordLabResult(order.id, RESULT, { kind: 'staff', session: S })
     expect(result.ok).toBe(true)
-
-    const [row] = await getDb().select().from(labOrders).where(eq(labOrders.id, order.id))
-    expect(row.status).toBe('resulted')
+    expect(await state(order.id)).toEqual({ status: 'resulted', results: 1 })
     const [resultRow] = await getDb().select().from(labResults).where(eq(labResults.labOrderId, order.id))
     expect(resultRow.value).toBe('5.2')
     expect(resultRow.unit).toBe('mg/dL')
   })
 
-  it('cancelOrder transitions an ordered order to cancelled', async () => {
+  it('cancels an ordered and a collected order', async () => {
     const order = await makeOrder()
-    const result = await cancelOrder(order.id, 'Patient declined the draw')
-    expect(result.ok).toBe(true)
-
-    const [row] = await getDb().select().from(labOrders).where(eq(labOrders.id, order.id))
-    expect(row.status).toBe('cancelled')
+    expect((await cancelLabOrder(order.id, 'Patient declined the draw', S)).ok).toBe(true)
+    expect((await state(order.id)).status).toBe('cancelled')
+    const { order: c } = await collected()
+    expect((await cancelLabOrder(c.id, 'Sample lost in transit', S)).ok).toBe(true)
+    expect((await state(c.id)).status).toBe('cancelled')
   })
 
-  it('cancelOrder transitions a collected order to cancelled', async () => {
-    const order = await makeOrder()
-    await markCollected(order.id)
-    const result = await cancelOrder(order.id, 'Sample lost in transit')
-    expect(result.ok).toBe(true)
-
-    const [row] = await getDb().select().from(labOrders).where(eq(labOrders.id, order.id))
-    expect(row.status).toBe('cancelled')
+  it('refuses to cancel a resulted order (Review Focus #3 — a result exists)', async () => {
+    const order = await received()
+    await recordLabResult(order.id, RESULT, { kind: 'staff', session: S })
+    expect(await cancelLabOrder(order.id, 'too late now', S)).toEqual({ ok: false, error: 'not_cancellable' })
+    expect((await state(order.id)).status).toBe('resulted')
   })
 
-  it('cancelOrder rejects a resulted order (Review Focus #3 — terminal state)', async () => {
+  it('refuses to cancel an already-cancelled order (Review Focus #3 — terminal state)', async () => {
     const order = await makeOrder()
-    await markCollected(order.id)
-    await enterResult(order.id, { value: '1', flag: 'normal', resultedByName: 'Tester' })
-
-    const result = await cancelOrder(order.id, 'too late now')
-    expect(result.ok).toBe(false)
-
-    const [row] = await getDb().select().from(labOrders).where(eq(labOrders.id, order.id))
-    expect(row.status).toBe('resulted')
-  })
-
-  it('cancelOrder rejects an already-cancelled order (Review Focus #3 — terminal state)', async () => {
-    const order = await makeOrder()
-    const firstCancel = await cancelOrder(order.id, 'first cancellation')
-    expect(firstCancel.ok).toBe(true)
-
-    const secondCancel = await cancelOrder(order.id, 'second cancellation')
-    expect(secondCancel.ok).toBe(false)
+    expect((await cancelLabOrder(order.id, 'first cancellation', S)).ok).toBe(true)
+    expect(await cancelLabOrder(order.id, 'second cancellation', S)).toEqual({ ok: false, error: 'not_cancellable' })
   })
 
   it('exposes the test category on every worklist row', async () => {
@@ -182,56 +197,32 @@ describe('lab order lifecycle — query layer', () => {
   })
 })
 
-describe('enterResult — transactional atomicity and patient binding (real DB)', () => {
-  async function state(id: number) {
-    const [row] = await getDb().select().from(labOrders).where(eq(labOrders.id, id))
-    const results = await getDb().select().from(labResults).where(eq(labResults.labOrderId, id))
-    return { status: row.status, results: results.length }
-  }
-  const input = { value: '3', flag: 'normal' as const, resultedByName: 'Tester' }
-
-  it('rolls back the status UPDATE and result INSERT when afterEntered throws', async () => {
-    const order = await makeOrder()
-    await markCollected(order.id)
-    await expect(enterResult(order.id, input, { afterEntered: async () => { throw new Error('boom') } })).rejects.toThrow('boom')
+describe('LIS result — transactional atomicity and patient binding (real DB)', () => {
+  it('rolls back the receipt, status change and result row when the audit write fails', async () => {
+    const { order } = await collected()
+    failLisAudit = true
+    await expect(recordLabResult(order.id, RESULT, { kind: 'lis' }, { expectedPatientId: PATIENT })).rejects.toThrow('audit down')
     expect(await state(order.id)).toEqual({ status: 'collected', results: 0 })
+    const [row] = await getDb().select({ receivedAt: labOrders.receivedAt }).from(labOrders).where(eq(labOrders.id, order.id))
+    expect(row.receivedAt).toBeNull()
   })
 
-  it('rolls back the audit row too when the real audit hook is followed by a failure; commits all three on success', async () => {
-    const action = `test-probe lab rollback ${Date.now()}-${Math.random()}`
-    createdAuditActions.push(action)
-    const failing = await makeOrder()
-    await markCollected(failing.id)
-    await expect(enterResult(failing.id, input, {
-      afterEntered: async (tx, patientId) => {
-        await logIntegrationEvent(action, patientId, undefined, tx)
-        throw new Error('after audit')
-      },
-    })).rejects.toThrow('after audit')
-    expect(await state(failing.id)).toEqual({ status: 'collected', results: 0 })
-    expect((await getDb().select().from(auditLog).where(eq(auditLog.action, action))).length).toBe(0)
-
-    const ok = await makeOrder()
-    await markCollected(ok.id)
-    const res = await enterResult(ok.id, input, {
-      afterEntered: (tx, patientId) => logIntegrationEvent(action, patientId, undefined, tx),
-    })
+  it('commits the status, the result and one integration audit row together', async () => {
+    const { order } = await collected()
+    const res = await recordLabResult(order.id, RESULT, { kind: 'lis' }, { expectedPatientId: PATIENT })
     expect(res.ok).toBe(true)
-    expect(await state(ok.id)).toEqual({ status: 'resulted', results: 1 })
-    const rows = await getDb().select().from(auditLog).where(eq(auditLog.action, action))
-    expect(rows.length).toBe(1)
+    expect(await state(order.id)).toEqual({ status: 'resulted', results: 1 })
+    const rows = await getDb().select().from(auditLog).where(eq(auditLog.action, `accepted LIS lab result for order ${order.id}`))
+    expect(rows).toHaveLength(1)
     expect(rows[0].userName).toBe('LIS integration')
-    expect(rows[0].patientId).toBe(ok.patientId)
+    expect(rows[0].patientId).toBe(PATIENT)
   })
 
   it('expectedPatientId mismatch returns ok:false and writes nothing; the owner succeeds', async () => {
-    const order = await makeOrder()
-    await markCollected(order.id)
-    const bad = await enterResult(order.id, input, { expectedPatientId: 'NOT-THE-OWNER' })
-    expect(bad.ok).toBe(false)
+    const { order } = await collected()
+    expect(await recordLabResult(order.id, RESULT, { kind: 'lis' }, { expectedPatientId: 'NOT-THE-OWNER' })).toEqual({ ok: false, error: 'patient_mismatch' })
     expect(await state(order.id)).toEqual({ status: 'collected', results: 0 })
-    const good = await enterResult(order.id, input, { expectedPatientId: order.patientId })
-    expect(good.ok).toBe(true)
+    expect((await recordLabResult(order.id, RESULT, { kind: 'lis' }, { expectedPatientId: PATIENT })).ok).toBe(true)
     expect(await state(order.id)).toEqual({ status: 'resulted', results: 1 })
   })
 })

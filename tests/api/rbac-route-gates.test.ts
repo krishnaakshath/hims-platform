@@ -413,6 +413,14 @@ import { POST as postCollectionWindow } from '@/app/api/settings/home-collection
 import { PATCH as patchCollectionWindow } from '@/app/api/settings/home-collection-windows/[id]/route'
 import { PATCH as patchLabTestSetup } from '@/app/api/lab-tests/[id]/route'
 import { PUT as putNotificationPreference } from '@/app/api/patients/[anonId]/notification-preference/route'
+import { LAB_COLLECT_ROLES, LAB_RECEIVE_ROLES, LAB_RESULT_ENTRY_ROLES, LAB_VERIFY_ROLES, LAB_WORKLIST_ROLES } from '@/lib/role-policy'
+import { GET as listLabWorklist } from '@/app/api/lab-orders/route'
+import { POST as postLabCollect } from '@/app/api/lab-orders/[id]/collect/route'
+import { POST as postLabReceive } from '@/app/api/lab-orders/receive/route'
+import { POST as postLabResult } from '@/app/api/lab-orders/[id]/result/route'
+import { POST as postLabVerify } from '@/app/api/lab-orders/[id]/verify/route'
+import { POST as postLabCancel } from '@/app/api/lab-orders/[id]/cancel/route'
+import { POST as postLabImaging } from '@/app/api/lab-orders/[id]/imaging/route'
 // end SP5
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
@@ -617,6 +625,14 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PUT /api/patients/[anonId]/notification-preference', call: () => settle(() => putNotificationPreference(send('PUT', `/api/patients/${BOGUS_PATIENT}/notification-preference`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...NOTIFICATION_PREFERENCE_ROLES] },
   // SP5 doctor's order (LAB_ORDER_ROLES): `{}` fails validation before any query.
   { name: 'POST /api/patients/[anonId]/lab-orders', call: () => settle(() => postLabRequisition(send('POST', `/api/patients/${BOGUS_PATIENT}/lab-orders`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...LAB_ORDER_ROLES] },
+  // SP5 lab lifecycle (Task 8): the bogus id is not found / `{}` fails validation for an allowed role.
+  { name: 'GET /api/lab-orders', call: () => settle(() => listLabWorklist()), allowed: [...LAB_WORKLIST_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/collect', call: () => settle(() => postLabCollect(send('POST', `/api/lab-orders/${BOGUS_ID}/collect`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_COLLECT_ROLES] },
+  { name: 'POST /api/lab-orders/receive', call: () => settle(() => postLabReceive(send('POST', '/api/lab-orders/receive'))), allowed: [...LAB_RECEIVE_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/result', call: () => settle(() => postLabResult(send('POST', `/api/lab-orders/${BOGUS_ID}/result`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_RESULT_ENTRY_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/verify', call: () => settle(() => postLabVerify(send('POST', `/api/lab-orders/${BOGUS_ID}/verify`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_VERIFY_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/cancel', call: () => settle(() => postLabCancel(send('POST', `/api/lab-orders/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_ORDER_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/imaging', call: () => settle(() => postLabImaging(send('POST', `/api/lab-orders/${BOGUS_ID}/imaging`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_COLLECT_ROLES] },
   // end SP5
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
@@ -670,6 +686,9 @@ const SP5_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PATCH /api/lab-tests/[id]', call: () => patchLabTestSetup(send('PATCH', `/api/lab-tests/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SETUP_ROLES },
   { name: 'PUT /api/patients/[anonId]/notification-preference', call: () => putNotificationPreference(send('PUT', `/api/patients/${BOGUS_PATIENT}/notification-preference`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: NOTIFICATION_PREFERENCE_ROLES },
   { name: 'POST /api/patients/[anonId]/lab-orders', call: () => postLabRequisition(send('POST', `/api/patients/${BOGUS_PATIENT}/lab-orders`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: LAB_ORDER_ROLES },
+  { name: 'POST /api/lab-orders/receive', call: () => postLabReceive(send('POST', '/api/lab-orders/receive', NOT_JSON)), allowed: LAB_RECEIVE_ROLES },
+  { name: 'POST /api/lab-orders/[id]/result', call: () => postLabResult(send('POST', `/api/lab-orders/${BOGUS_ID}/result`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_RESULT_ENTRY_ROLES },
+  { name: 'POST /api/lab-orders/[id]/cancel', call: () => postLabCancel(send('POST', `/api/lab-orders/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_ORDER_ROLES },
 ]
 // end SP5
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP5_WRITE_GATES])('$name (deny before parse)', (c) => {

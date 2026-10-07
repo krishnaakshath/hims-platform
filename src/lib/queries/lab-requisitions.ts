@@ -27,7 +27,9 @@ export interface CreateLabRequisitionInput extends CreateLabRequisitionRequest {
 export type QuotedLine = { orderId: number; labTestId: number; quotedPricePaise: number | null; quoteStatus: LabQuoteStatus }
 
 export type CreateLabRequisitionResult =
-  | { ok: true; requisition: LabRequisitionRow; lines: QuotedLine[]; patientIsLocal: boolean }
+  // includesLabTest: at least one ordered test is a lab test (not imaging); the home-collection
+  // notice is sent only then (Task 8 ruling).
+  | { ok: true; requisition: LabRequisitionRow; lines: QuotedLine[]; patientIsLocal: boolean; includesLabTest: boolean }
   | { ok: false; error: 'patient_not_found' | 'test_not_found' | 'encounter_not_found' | 'encounter_mismatch' }
 
 export async function createLabRequisition(input: CreateLabRequisitionInput, session: Session, now = new Date()): Promise<CreateLabRequisitionResult> {
@@ -41,7 +43,7 @@ export async function createLabRequisition(input: CreateLabRequisitionInput, ses
     .where(eq(patients.id, input.patientId))
   if (!patient) return { ok: false, error: 'patient_not_found' }
 
-  const testRows = await db.select({ id: labTests.id, serviceId: labTests.serviceId }).from(labTests).where(inArray(labTests.id, input.labTestIds))
+  const testRows = await db.select({ id: labTests.id, serviceId: labTests.serviceId, category: labTests.category }).from(labTests).where(inArray(labTests.id, input.labTestIds))
   const serviceByTest = new Map(testRows.map((t) => [t.id, t.serviceId]))
   if (input.labTestIds.some((id) => !serviceByTest.has(id))) return { ok: false, error: 'test_not_found' }
 
@@ -111,7 +113,8 @@ export async function createLabRequisition(input: CreateLabRequisitionInput, ses
 
   // 4. Local patient (Ruling 3: the registered SP1 PIN against the active service-area list).
   const patientIsLocal = await isLocalPatientPin(patient.pinCode)
-  return { ok: true, requisition, lines, patientIsLocal }
+  const includesLabTest = testRows.some((t) => t.category === 'lab')
+  return { ok: true, requisition, lines, patientIsLocal, includesLabTest }
 }
 
 export async function getRequisitionWithOrders(id: number): Promise<{ requisition: LabRequisitionRow; orders: LabOrderRow[] } | null> {

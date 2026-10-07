@@ -69,7 +69,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const requisitionId = result.requisition.id
   let notification: NotifyOutcome | 'error' | null = null
-  if (result.patientIsLocal) {
+  // Imaging-only orders stay orderable but get no home-collection notice (Task 8 ruling).
+  if (result.patientIsLocal && result.includesLabTest) {
     notification = await notifyPatientSafely(session, {
       patientId: anonId,
       templateKey: 'lab_tests_ordered',

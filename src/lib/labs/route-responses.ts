@@ -24,6 +24,21 @@ export function invalidBody(error: ZodError, fallback: string) {
   return errorResponse(400, authored ? issue.message : fallback)
 }
 
+/** The fixed message for every lab-order transition refusal (Task 8). Never echoes input. */
+export const LAB_ORDER_NOT_FOUND = 'Lab order not found'
+const LAB_TRANSITION_CONFLICT = {
+  invalid_status: 'This order is not at a stage where that can be done.',
+  booked_for_home: 'This test is booked for home collection. Cancel the home visit first.',
+  self_verification: 'Results must be verified by someone other than the person who entered them.',
+  not_cancellable: 'Only tests without a result can be cancelled.',
+} as const
+export type LabTransitionError = 'not_found' | keyof typeof LAB_TRANSITION_CONFLICT
+
+export function labTransitionError(error: LabTransitionError) {
+  if (error === 'not_found') return errorResponse(404, LAB_ORDER_NOT_FOUND)
+  return errorResponse(409, LAB_TRANSITION_CONFLICT[error])
+}
+
 /**
  * A thrown error: a deadlock / serialization failure (nothing was written) is a 409 asking to
  * try again; anything else a generic 500. Logs only the pg code and constraint.
