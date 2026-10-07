@@ -81,3 +81,18 @@ describe('daysBetweenIso (M3: the one shared calendar-day difference)', () => {
     expect(sharedDaysBetween('2026-10-21', '2026-10-21')).toBe(0)
   })
 })
+
+describe('a 24-month follow-up is always within "2 years" (M5)', () => {
+  it('across a leap day (2027-03-01 + 24 months = 731 days)', () => {
+    const due = addMonthsIso('2027-03-01', 24)
+    expect(due).toBe('2029-03-01')
+    expect(dueDateProblem(due, '2027-03-01')).toBeNull()
+    expect(dueDateProblem(addDaysIso(due, 1), '2027-03-01')).toMatch(/2 years/)
+  })
+  it('for every base date over five years, via the interval path', () => {
+    for (let d = '2026-01-01'; d < '2031-01-01'; d = addDaysIso(d, 1)) {
+      const { dueDate } = resolveFollowUpDates({ kind: 'interval', interval: { value: 24, unit: 'months' } }, d)
+      expect(dueDateProblem(dueDate, d), d).toBeNull()
+    }
+  })
+})

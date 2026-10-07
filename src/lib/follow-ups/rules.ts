@@ -19,7 +19,7 @@ export const DEFAULT_WINDOW_DAYS_BEFORE = 3
 export const DEFAULT_WINDOW_DAYS_AFTER = 7
 export const MISSED_GRACE_DAYS = 14
 export const UPCOMING_HORIZON_DAYS = 30
-export const MAX_DUE_DAYS_AHEAD = 730
+export const MAX_DUE_MONTHS_AHEAD = 24
 
 function parts(dateIso: string): [number, number, number] {
   const [y, m, d] = dateIso.slice(0, 10).split('-').map(Number)
@@ -68,7 +68,9 @@ export function resolveFollowUpDates(
 
 export function dueDateProblem(dueIso: string, todayIso: string): string | null {
   if (dueIso < todayIso) return 'The follow-up date cannot be in the past.'
-  if (dueIso > addDaysIso(todayIso, MAX_DUE_DAYS_AHEAD)) return 'The follow-up date must be within 2 years.'
+  // Calendar math (M5): "within 2 years" is today + 24 months, so a 24-month
+  // interval is valid even when it spans a leap day (731 days).
+  if (dueIso > addMonthsIso(todayIso, MAX_DUE_MONTHS_AHEAD)) return 'The follow-up date must be within 2 years.'
   return null
 }
 
