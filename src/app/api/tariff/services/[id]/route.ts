@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
-import { getService, updateService } from '@/lib/queries/tariff'
+import { TariffPackageIntegrityError, getService, updateService } from '@/lib/queries/tariff'
 import { getDepartmentById } from '@/lib/queries/departments'
 import { hsnSacProblem, serviceUpdateSchema } from '@/lib/tariff/validation'
-import { badRequest, forbidden, invalid, notFound, parseId, serverError } from '@/lib/tariff/route-responses'
+import { badRequest, conflict, forbidden, invalid, notFound, parseId, serverError } from '@/lib/tariff/route-responses'
 
 // `code` is immutable: serviceUpdateSchema omits it and is .strict(), so sending it is a 400.
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -35,6 +35,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!row) return notFound('Service not found')
     return NextResponse.json(row)
   } catch (err) {
+    if (err instanceof TariffPackageIntegrityError) return conflict(err.message)
     return serverError('update service', err, 'Could not update service')
   }
 }

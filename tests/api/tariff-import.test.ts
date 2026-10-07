@@ -319,6 +319,14 @@ describe('POST /api/tariff/import: validate and commit', () => {
     expect(await res.json()).toEqual({ error: 'Another change was being saved at the same time; please try again' })
   })
 
+  it('a commit-time package integrity refusal is a 409 with its fixed message', async () => {
+    const { TariffPackageIntegrityError } = await import('@/lib/queries/tariff')
+    vi.mocked(commitServiceImport).mockRejectedValue(new TariffPackageIntegrityError('This package still has items; remove them before changing its category'))
+    const res = await postTariffImport(post({ kind: 'services', csv: goodServices, commit: true }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'This package still has items; remove them before changing its category' })
+  })
+
   it('any other commit failure is a generic 500 that logs no row data', async () => {
     vi.mocked(commitRateImport).mockRejectedValue(pgErr('57P01'))
     const res = await postTariffImport(post({ kind: 'rates', csv: goodRates, commit: true }))

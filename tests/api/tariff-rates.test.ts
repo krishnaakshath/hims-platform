@@ -29,7 +29,7 @@ vi.mock('@/lib/queries/payers', async () => {
 
 import {
   createRate, reviseRate, endRate, deactivateRate, getRate, getService, listRatesForService, listRoomCategories,
-  replacePackageItems, TariffOverlapError,
+  replacePackageItems, TariffOverlapError, TariffPackageIntegrityError,
 } from '@/lib/queries/tariff'
 import { getDepartmentById } from '@/lib/queries/departments'
 import { getPayerById } from '@/lib/queries/payers'
@@ -284,6 +284,14 @@ describe('PUT /api/tariff/packages/[id]/items', () => {
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: 'PKG-OTHER is a package; packages cannot be nested' })
     expect(replacePackageItems).not.toHaveBeenCalled()
+  })
+
+  it('409s when the package or an item changed category after the route checked (re-checked under lock)', async () => {
+    vi.mocked(getService).mockImplementation(async (id: number) => svc(id === 7 ? { category: 'package' } : { id }) as never)
+    vi.mocked(replacePackageItems).mockRejectedValue(new TariffPackageIntegrityError('The package or one of its items changed category; reload and try again'))
+    const res = await putItems(req({ items: [{ serviceId: 8, quantity: 1 }] }, 'PUT', '/api/tariff/packages/7/items'), ctx('7'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'The package or one of its items changed category; reload and try again' })
   })
 
   it('replaces the items and audits inside the write', async () => {

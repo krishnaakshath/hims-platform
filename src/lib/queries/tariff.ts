@@ -19,6 +19,9 @@ import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { normalizeWard, resolvePrice, type ServiceForPricing, type TariffRateCandidate } from '@/lib/tariff/resolve'
 import { findOverlap, planRevision, type DatedRate } from '@/lib/tariff/versions'
+import {
+  IS_PACKAGE_ITEM_MESSAGE, PACKAGE_CHANGED_MESSAGE, PACKAGE_HAS_ITEMS_MESSAGE,
+} from '@/lib/tariff/validation'
 import type {
   PackageItemsInput, RateCreateInput, RateRevisionInput, ServiceCategory, ServiceCreateInput, ServiceUpdateInput,
 } from '@/lib/tariff/validation'
@@ -40,6 +43,14 @@ export class TariffOverlapError extends Error {
     super('Overlaps an existing rate for the same service and scope')
     this.name = 'TariffOverlapError'
     this.conflictingRateId = conflictingRateId
+  }
+}
+
+/** A write that would nest packages or strand package items; `message` is fixed text, safe to show. */
+export class TariffPackageIntegrityError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TariffPackageIntegrityError'
   }
 }
 
@@ -219,8 +230,31 @@ export async function createService(input: ServiceCreateInput, audit?: TariffAud
   })
 }
 
+/**
+ * Throws TariffPackageIntegrityError when a category change would leave a non-package with items,
+ * or make a package of a service that is itself an item. Callers hold the service lock(s).
+ */
+async function assertCategoryChangesAllowed(tx: Tx, changes: { id: number; from: ServiceCategory; to: ServiceCategory }[]): Promise<void> {
+  const leaving = changes.filter((c) => c.from === 'package' && c.to !== 'package').map((c) => c.id)
+  const joining = changes.filter((c) => c.from !== 'package' && c.to === 'package').map((c) => c.id)
+  if (leaving.length > 0) {
+    const [hit] = await tx.select({ id: servicePackageItems.id }).from(servicePackageItems).where(inArray(servicePackageItems.packageServiceId, leaving)).limit(1)
+    if (hit) throw new TariffPackageIntegrityError(PACKAGE_HAS_ITEMS_MESSAGE)
+  }
+  if (joining.length > 0) {
+    const [hit] = await tx.select({ id: servicePackageItems.id }).from(servicePackageItems).where(inArray(servicePackageItems.itemServiceId, joining)).limit(1)
+    if (hit) throw new TariffPackageIntegrityError(IS_PACKAGE_ITEM_MESSAGE)
+  }
+}
+
 export async function updateService(id: number, patch: ServiceUpdateInput, audit?: TariffAudit): Promise<ServiceRow | null> {
   return inTx(audit, async (tx) => {
+    if (patch.category !== undefined) {
+      // Lock the service (same lock as package-item writes) so the item check cannot race.
+      const [cur] = await tx.select({ category: serviceCatalog.category }).from(serviceCatalog).where(eq(serviceCatalog.id, id)).for('update')
+      if (!cur) return null
+      await assertCategoryChangesAllowed(tx, [{ id, from: cur.category, to: patch.category }])
+    }
     const [row] = await tx.update(serviceCatalog).set({ ...patch, updatedAt: new Date() })
       .where(eq(serviceCatalog.id, id)).returning({ id: serviceCatalog.id })
     return row ? serviceById(tx, row.id) : null
@@ -385,7 +419,16 @@ export async function listPackageItems(packageServiceId: number): Promise<{ item
 /** Replace a package's whole item list in one transaction (delete + insert). */
 export async function replacePackageItems(packageServiceId: number, items: PackageItemsInput['items'], audit?: TariffAudit): Promise<void> {
   await inTx(audit, async (tx) => {
-    await lockService(tx, packageServiceId)
+    // Lock the package and every item (ascending, like every multi-service write), then re-check
+    // categories: a concurrent category change cannot nest packages after the route's check.
+    const ids = [...new Set([packageServiceId, ...items.map((it) => it.serviceId)])]
+    const locked = await tx.select({ id: serviceCatalog.id, category: serviceCatalog.category }).from(serviceCatalog)
+      .where(inArray(serviceCatalog.id, ids)).orderBy(asc(serviceCatalog.id)).for('update')
+    const category = new Map(locked.map((r) => [r.id, r.category]))
+    if (!category.has(packageServiceId)) throw new Error('Service not found')
+    if (category.get(packageServiceId) !== 'package' || items.some((it) => category.get(it.serviceId) === 'package')) {
+      throw new TariffPackageIntegrityError(PACKAGE_CHANGED_MESSAGE)
+    }
     await tx.delete(servicePackageItems).where(eq(servicePackageItems.packageServiceId, packageServiceId))
     if (items.length > 0) {
       await tx.insert(servicePackageItems).values(items.map((it) => ({ packageServiceId, itemServiceId: it.serviceId, quantity: it.quantity })))
@@ -397,12 +440,13 @@ export async function replacePackageItems(packageServiceId: number, items: Packa
 
 export async function getImportLookups(): Promise<ImportLookups> {
   const db = getDb()
-  const [depts, payerRows, cats, services, rates] = await Promise.all([
+  const [depts, payerRows, cats, services, rates, packageItems] = await Promise.all([
     db.select({ id: departments.id, code: departments.code }).from(departments),
     db.select({ id: payers.id, code: payers.payerId }).from(payers),
     db.select({ id: roomCategories.id, code: roomCategories.code }).from(roomCategories),
     db.select({ id: serviceCatalog.id, code: serviceCatalog.code, category: serviceCatalog.category }).from(serviceCatalog),
     db.select().from(tariffRates).where(isNull(tariffRates.deactivatedAt)),
+    db.select({ pkg: servicePackageItems.packageServiceId, item: servicePackageItems.itemServiceId }).from(servicePackageItems),
   ])
   return {
     departmentsByCode: new Map(depts.map((d) => [d.code.toUpperCase(), d.id])),
@@ -410,6 +454,8 @@ export async function getImportLookups(): Promise<ImportLookups> {
     roomCategoriesByCode: new Map(cats.map((c) => [c.code.toUpperCase(), c.id])),
     servicesByCode: new Map(services.map((s) => [s.code.toUpperCase(), { id: s.id, category: s.category }])),
     existingRates: rates.map(toDatedRate),
+    packagesWithItems: new Set(packageItems.map((p) => p.pkg)),
+    packageItemIds: new Set(packageItems.map((p) => p.item)),
   }
 }
 
@@ -417,6 +463,14 @@ export async function getImportLookups(): Promise<ImportLookups> {
 export async function commitServiceImport(rows: ServiceImportRow[], audit?: TariffAudit): Promise<number> {
   if (rows.length === 0) return 0
   return inTx(audit, async (tx) => {
+    const existingIds = rows.flatMap((r) => (r.existingId === null ? [] : [r.existingId]))
+    if (existingIds.length > 0) {
+      const current = await tx.select({ id: serviceCatalog.id, category: serviceCatalog.category }).from(serviceCatalog)
+        .where(inArray(serviceCatalog.id, [...new Set(existingIds)])).orderBy(asc(serviceCatalog.id)).for('update')
+      const from = new Map(current.map((c) => [c.id, c.category]))
+      await assertCategoryChangesAllowed(tx, rows.flatMap((r) =>
+        r.existingId !== null && from.has(r.existingId) ? [{ id: r.existingId, from: from.get(r.existingId)!, to: r.category }] : []))
+    }
     let applied = 0
     for (const r of rows) {
       const values = { name: r.name, departmentId: r.departmentId, category: r.category, hsnSac: r.hsnSac, gstRateBp: r.gstRateBp, isActive: r.isActive }

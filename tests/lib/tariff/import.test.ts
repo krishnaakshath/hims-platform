@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { IS_PACKAGE_ITEM_MESSAGE, PACKAGE_HAS_ITEMS_MESSAGE } from '@/lib/tariff/validation'
 import { validateServiceImport, validateRateImport, MAX_IMPORT_ROWS, MAX_IMPORT_BYTES, SERVICE_CSV_HEADERS, RATE_CSV_HEADERS, type ImportLookups } from '@/lib/tariff/import'
 
 const lookups = (): ImportLookups => ({
@@ -128,5 +129,28 @@ describe('validateRateImport performance', () => {
     expect(r.issues).toHaveLength(5000)
     expect(r.issues[0]).toEqual({ line: 2, column: 'valid_from', message: 'Overlaps an existing rate for the same service and scope' })
     expect(ms).toBeLessThan(2000)
+  })
+})
+
+describe('validateServiceImport package integrity', () => {
+  const withPackages = (): ImportLookups => ({
+    ...lookups(),
+    servicesByCode: new Map([
+      ['PKG', { id: 20, category: 'package' as const }], ['EMPTY_PKG', { id: 21, category: 'package' as const }],
+      ['ITEM', { id: 22, category: 'procedure' as const }], ['LOOSE', { id: 23, category: 'procedure' as const }],
+    ]),
+    packagesWithItems: new Set([20]),
+    packageItemIds: new Set([22]),
+  })
+  it('blocks moving a package with items out of package, or an item into package, with fixed messages', () => {
+    const r = validateServiceImport(`${SH}\nPKG,P,SURG,procedure,999316,18,yes\nITEM,I,SURG,package,999316,18,yes\n`, withPackages())
+    expect(r.issues).toEqual([
+      { line: 2, column: 'category', message: PACKAGE_HAS_ITEMS_MESSAGE },
+      { line: 3, column: 'category', message: IS_PACKAGE_ITEM_MESSAGE },
+    ])
+  })
+  it('allows the same changes when there are no items involved, and no-op categories', () => {
+    const r = validateServiceImport(`${SH}\nEMPTY_PKG,P,SURG,procedure,999316,18,yes\nLOOSE,L,SURG,package,999316,18,yes\nPKG,P,SURG,package,999316,18,yes\nITEM,I,SURG,procedure,999316,18,yes\n`, withPackages())
+    expect(r.issues).toEqual([])
   })
 })

@@ -23,6 +23,11 @@ export const SERVICE_CATEGORIES: readonly { code: ServiceCategory; label: string
 ]
 const CATEGORY_CODES = SERVICE_CATEGORIES.map((c) => c.code) as [ServiceCategory, ...ServiceCategory[]]
 
+// Package integrity: a package's items are never packages, so a category change may not break that.
+export const PACKAGE_HAS_ITEMS_MESSAGE = 'This package still has items; remove them before changing its category'
+export const IS_PACKAGE_ITEM_MESSAGE = 'This service is an item of a package; remove it from that package before making it a package'
+export const PACKAGE_CHANGED_MESSAGE = 'The package or one of its items changed category; reload and try again'
+
 export const GOODS_CATEGORIES = ['pharmacy', 'consumable'] as const
 
 // Pre-September-2025 slabs are kept because tariffs are effective-dated.

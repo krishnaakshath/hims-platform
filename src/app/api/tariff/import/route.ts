@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
-import { commitRateImport, commitServiceImport, getImportLookups } from '@/lib/queries/tariff'
+import { TariffPackageIntegrityError, commitRateImport, commitServiceImport, getImportLookups } from '@/lib/queries/tariff'
 import { MAX_IMPORT_BYTES, validateRateImport, validateServiceImport } from '@/lib/tariff/import'
 import { isExclusionViolation, isUniqueViolation, pgErrorCode } from '@/lib/db-errors'
 import { badRequest, conflict, forbidden, serverError } from '@/lib/tariff/route-responses'
@@ -107,6 +107,7 @@ export async function POST(request: NextRequest) {
       : await commitRateImport(rates!.rows, session.name, audit)
     return NextResponse.json({ ...report, committed: true, applied })
   } catch (err) {
+    if (err instanceof TariffPackageIntegrityError) return conflict(err.message)
     // Data that changed between validation and commit (a concurrent import or edit).
     if (isExclusionViolation(err) || isUniqueViolation(err) || pgErrorCode(err) === '23503') return conflict(CONFLICT)
     return serverError('import commit', err, 'Could not import the file; nothing was applied')

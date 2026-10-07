@@ -28,6 +28,8 @@ import {
 } from '@/lib/queries/tariff'
 import { getDepartmentById } from '@/lib/queries/departments'
 import { logAudit } from '@/lib/audit'
+import { TariffPackageIntegrityError } from '@/lib/queries/tariff'
+import { PACKAGE_HAS_ITEMS_MESSAGE } from '@/lib/tariff/validation'
 import { GET as listRoute, POST as postService } from '@/app/api/tariff/services/route'
 import { PATCH as patchService } from '@/app/api/tariff/services/[id]/route'
 import { GET as listCats, POST as postCat } from '@/app/api/tariff/room-categories/route'
@@ -285,3 +287,14 @@ describe('PUT /api/tariff/rooms/[id]/category', () => {
     expect(setRoomCategory).not.toHaveBeenCalled()
   })
 })
+
+describe('PATCH /api/tariff/services/[id] package integrity', () => {
+  it('409s a category change the query layer refuses (package with items, or a package item), with its fixed message', async () => {
+    vi.mocked(getService).mockResolvedValue({ ...service, category: 'package', hsnSac: '999312' } as never)
+    vi.mocked(updateService).mockRejectedValue(new TariffPackageIntegrityError(PACKAGE_HAS_ITEMS_MESSAGE))
+    const res = await patchService(req('PATCH', '/api/tariff/services/7', { category: 'procedure' }), ctx('7'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: PACKAGE_HAS_ITEMS_MESSAGE })
+  })
+})
+

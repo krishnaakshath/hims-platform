@@ -3,7 +3,7 @@
 import { parseRupeesToPaise } from '@/lib/money'
 import { CsvSyntaxError, parseCsv } from './csv'
 import {
-  gstPercentToBp, rateCreateSchema, serviceCreateSchema,
+  IS_PACKAGE_ITEM_MESSAGE, PACKAGE_HAS_ITEMS_MESSAGE, gstPercentToBp, rateCreateSchema, serviceCreateSchema,
   type RateCreateInput, type ServiceCategory, type ServiceCreateInput,
 } from './validation'
 import { findOverlap, normalizeWard, type DatedRate } from './versions'
@@ -19,6 +19,9 @@ export interface ImportLookups {
   roomCategoriesByCode: Map<string, number>
   servicesByCode: Map<string, { id: number; category: ServiceCategory }>
   existingRates: DatedRate[]
+  /** Package service ids that have at least one item, and every service id that is an item of a package. */
+  packagesWithItems?: Set<number>
+  packageItemIds?: Set<number>
 }
 export interface ImportIssue { line: number; column?: string; message: string }
 export type ServiceImportRow = ServiceCreateInput & { isActive: boolean; existingId: number | null }
@@ -95,7 +98,14 @@ export function validateServiceImport(text: string, lookups: ImportLookups): { r
       code, name: r.name, departmentId, category: r.category.toLowerCase(), hsnSac: r.hsn_sac, gstRateBp,
     })
     if (!parsed.success) { issues.push(...schemaIssues(line, parsed.error.issues, columnOf)); continue }
-    rows.push({ ...parsed.data, isActive: isActive as boolean, existingId: lookups.servicesByCode.get(parsed.data.code)?.id ?? null })
+    const existing = lookups.servicesByCode.get(parsed.data.code)
+    if (existing && existing.category === 'package' && parsed.data.category !== 'package' && lookups.packagesWithItems?.has(existing.id)) {
+      issues.push({ line, column: 'category', message: PACKAGE_HAS_ITEMS_MESSAGE }); continue
+    }
+    if (existing && existing.category !== 'package' && parsed.data.category === 'package' && lookups.packageItemIds?.has(existing.id)) {
+      issues.push({ line, column: 'category', message: IS_PACKAGE_ITEM_MESSAGE }); continue
+    }
+    rows.push({ ...parsed.data, isActive: isActive as boolean, existingId: existing?.id ?? null })
   }
   return { rows, issues }
 }

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
-import { getService, packageItemsProblem, replacePackageItems, type ServiceRow } from '@/lib/queries/tariff'
+import { TariffPackageIntegrityError, getService, packageItemsProblem, replacePackageItems, type ServiceRow } from '@/lib/queries/tariff'
 import { packageItemsSchema } from '@/lib/tariff/validation'
 import { pgErrorCode } from '@/lib/db-errors'
-import { badRequest, forbidden, invalid, notFound, parseId, serverError } from '@/lib/tariff/route-responses'
+import { badRequest, conflict, forbidden, invalid, notFound, parseId, serverError } from '@/lib/tariff/route-responses'
 
 // Replace a package's whole item list (no nesting, no self-reference, active items only).
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -32,6 +32,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     await replacePackageItems(id, items, { session, action: `tariff: updated package items for ${pkg.code}` })
     return NextResponse.json({ packageServiceId: id, items })
   } catch (err) {
+    if (err instanceof TariffPackageIntegrityError) return conflict(err.message)
     if (pgErrorCode(err) === '23503') return badRequest('Unknown service in package')
     return serverError('replace package items', err, 'Could not update the package items')
   }

@@ -6,7 +6,7 @@ import { isExclusionViolation } from '@/lib/db-errors'
 import { resolvePrice } from '@/lib/tariff/resolve'
 import type { Session } from '@/lib/auth'
 import {
-  TariffOverlapError, commitRateImport, countServices, endRate, commitServiceImport, createRate, getRate, getServiceByCode, listPackageItems,
+  TariffOverlapError, TariffPackageIntegrityError, commitRateImport, countServices, endRate, getImportLookups, updateService, commitServiceImport, createRate, getRate, getServiceByCode, listPackageItems,
   listRatesForService, listServices, listServicesWithCurrentPrices, loadPricingContext, replacePackageItems, reviseRate,
 } from '@/lib/queries/tariff'
 
@@ -324,5 +324,40 @@ describe.skipIf(!process.env.DATABASE_URL)('tariff query layer (DB)', () => {
     const items = await whileServiceLocked(pkg, () => replacePackageItems(pkg, [{ serviceId, quantity: 1 }]))
     expect(items.waited).toBe(true)
     expect((await listPackageItems(pkg)).map((i) => i.itemServiceId)).toEqual([serviceId])
+  })
+
+  it('category changes keep packages consistent: updateService, commitServiceImport and replacePackageItems refuse under lock', async () => {
+    const { deptId, serviceId } = await fixtures()
+    const pkg = await makeService('TEST_SP2_Q7_PKG', deptId, 'package')
+    await replacePackageItems(pkg, [{ serviceId, quantity: 1 }])
+
+    const away = await errorOf(updateService(pkg, { category: 'procedure', hsnSac: '999311' }, { session: SESSION, action: 'tariff: probe' }))
+    expect(away).toBeInstanceOf(TariffPackageIntegrityError)
+    expect((away as Error).message).toBe('This package still has items; remove them before changing its category')
+    const into = await errorOf(updateService(serviceId, { category: 'package' }))
+    expect((into as Error).message).toBe('This service is an item of a package; remove it from that package before making it a package')
+    expect((await listServices({ q: 'TEST_SP2_Q7_PKG' }))[0].category).toBe('package')
+    expect(await probeAudit()).toEqual([])
+    // Unrelated edits still work.
+    expect((await updateService(pkg, { name: 'Renamed package' }))?.name).toBe('Renamed package')
+
+    const lookups = await getImportLookups()
+    expect(lookups.packagesWithItems?.has(pkg)).toBe(true)
+    expect(lookups.packageItemIds?.has(serviceId)).toBe(true)
+    const imp = await errorOf(commitServiceImport([
+      { code: 'TEST_SP2_Q7_PKG', name: 'x', departmentId: deptId, category: 'procedure', hsnSac: '999311', gstRateBp: 0, isActive: true, existingId: pkg },
+    ], { session: SESSION, action: 'tariff: probe' }))
+    expect(imp).toBeInstanceOf(TariffPackageIntegrityError)
+    expect((await listServices({ q: 'TEST_SP2_Q7_PKG' }))[0].category).toBe('package')
+
+    // A nested item slipped past the route's check is refused inside the locked write.
+    const inner = await makeService('TEST_SP2_Q7_PK2', deptId, 'package')
+    expect(await errorOf(replacePackageItems(pkg, [{ serviceId: inner, quantity: 1 }]))).toBeInstanceOf(TariffPackageIntegrityError)
+    expect((await listPackageItems(pkg)).map((i) => i.itemServiceId)).toEqual([serviceId])
+    expect(await probeAudit()).toEqual([])
+
+    // Emptying the package makes the change allowed.
+    await replacePackageItems(pkg, [])
+    expect((await updateService(pkg, { category: 'procedure', hsnSac: '999311' }))?.category).toBe('procedure')
   })
 })
