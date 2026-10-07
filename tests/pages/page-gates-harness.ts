@@ -308,10 +308,19 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/tariffs/room-categories', load: () => import('@/app/(dashboard)/tariffs/room-categories/page'), allowed: ['admin', 'billing'] },
   { route: '/tariffs/import', load: () => import('@/app/(dashboard)/tariffs/import/page'), allowed: ['admin', 'billing'] },
   { route: '/settings', load: () => import('@/app/(dashboard)/settings/page'), allowed: ['admin', 'pi'] },
+  // SP6: LeftNav NAV_TRAILING_ITEMS /coding/code-systems -- CODE_SYSTEM_ADMIN_ROLES
+  { route: '/coding/code-systems', load: () => import('@/app/(dashboard)/coding/code-systems/page'), allowed: ['admin'] },
+  // SP6: LeftNav NAV_ITEMS /coding -- CODING_ROLES (worklist, productivity report)
+  { route: '/coding', load: () => import('@/app/(dashboard)/coding/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
+  { route: '/coding/report', load: () => import('@/app/(dashboard)/coding/report/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
+  { route: '/coding/encounters/[id]', load: () => import('@/app/(dashboard)/coding/encounters/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'coder'] },
+  // SP6: /coding/service-codes -- CODING_ROLES (linked from the worklist; not a nav entry)
+  { route: '/coding/service-codes', load: () => import('@/app/(dashboard)/coding/service-codes/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
+  // end SP6
   // Wave B P1-05: price lookup -- TARIFF_LOOKUP_ROLES (LeftNav NAV_TRAILING_ITEMS /price-lookup).
   { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
   // Wave B P1-01: own account (MFA method, self-reset, capabilities) -- ACCOUNT_ROLES = every staff role.
-  { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs'] },
+  { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] },
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).
   {

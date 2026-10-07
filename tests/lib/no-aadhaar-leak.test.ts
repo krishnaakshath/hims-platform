@@ -37,6 +37,15 @@ const EXPORT_PATHS = [
   'src/app/(dashboard)/audit-log',
   'src/lib/queries/audit-log.ts',
   'src/app/api/patient-portal/medications-export',
+  // SP6: coder-facing modules and routes
+  'src/lib/coding',
+  'src/app/api/coding',
+  'src/lib/queries/coding.ts',
+  'src/lib/queries/coding-workspace.ts',
+  'src/lib/queries/coding-queries.ts',
+  'src/lib/queries/coding-worklist.ts',
+  'src/lib/queries/service-procedure-codes.ts',
+  // end SP6
 ]
 
 describe('no Aadhaar leak (static)', () => {

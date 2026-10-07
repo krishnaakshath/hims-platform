@@ -18,6 +18,8 @@ vi.mock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(as
 vi.mock('@/lib/queries/lab-orders', () => ({ listWorklist: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(async () => []) }))
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => null) }))
+// SP6: the "Coding queries for you" card; empty by default so no test reaches the DB.
+vi.mock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider: vi.fn(async () => []) }))
 
 describe('PI dashboard (/doctor)', () => {
   it('keeps the panel stat tiles (content parity)', async () => {
@@ -191,5 +193,52 @@ describe('PI dashboard (/doctor)', () => {
     expect(screen.getByText('#7')).toBeInTheDocument()
     expect(screen.getByText(/Taylor Nguyen/)).toBeInTheDocument()
     expect(screen.getByText('Urgent')).toBeInTheDocument()
+  })
+
+  // SP6 Task 13
+  it('lists open coding queries addressed to the signed-in doctor', async () => {
+    vi.resetModules()
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam', userId: null })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 4, name: 'Dr. R. Kunam' }]) }))
+    vi.doMock('@/lib/queries/doctor-assignments', () => ({ listPendingAssignmentsForProvider: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/lab-orders', () => ({ listWorklist: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(async () => []) }))
+    vi.doMock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 4, name: 'Dr. R. Kunam' })) }))
+    const listOpenCodingQueriesForProvider = vi.fn(async () => [{
+      queryId: 31, encounterId: 12, patientId: 'RD-0042', patientName: 'Meera Iyer', uhid: 'UH-42', encounterDate: '2026-03-01',
+      question: 'Was the fracture open or closed?', raisedByName: 'Coder Asha', raisedAt: new Date('2026-03-02T05:00:00Z'),
+    }])
+    vi.doMock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider }))
+    const { default: Page } = await import('@/app/(dashboard)/doctor/page')
+    const jsx = await Page()
+    const { render, screen } = await import('@testing-library/react')
+    render(jsx)
+    expect(listOpenCodingQueriesForProvider).toHaveBeenCalledWith(4)
+    expect(screen.getByRole('heading', { name: /coding queries for you/i })).toBeInTheDocument()
+    expect(screen.getByText('Was the fracture open or closed?')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /meera iyer/i })).toHaveAttribute('href', '/patients/RD-0042/medical-record#visit-coding')
+  })
+
+  it('hides the coding queries card when nothing is open, and never asks without a provider row', async () => {
+    vi.resetModules()
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. Nobody', userId: null })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/doctor-assignments', () => ({ listPendingAssignmentsForProvider: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/lab-orders', () => ({ listWorklist: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(async () => []) }))
+    vi.doMock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => null) }))
+    const listOpenCodingQueriesForProvider = vi.fn(async () => [])
+    vi.doMock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider }))
+    const { default: Page } = await import('@/app/(dashboard)/doctor/page')
+    const jsx = await Page()
+    const { render, screen } = await import('@testing-library/react')
+    render(jsx)
+    expect(listOpenCodingQueriesForProvider).not.toHaveBeenCalled()
+    expect(screen.queryByRole('heading', { name: /coding queries for you/i })).toBeNull()
   })
 })

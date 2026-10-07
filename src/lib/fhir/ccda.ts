@@ -83,6 +83,7 @@ ${entriesXml.length > 0 ? entriesXml.join('\n') : '      <entry/>'}
 export function toCcdaXml(data: PatientFhirData): string {
   const patient = patientToFhir(data.patient)
   const allergies = allergiesToFhir(data.allergyRows)
+  // SP6: diagnosisRows are DiagnosisFhirRow now; C-CDA output (no codeSystem OIDs) is unchanged in SP6.
   const conditions = conditionsToFhir(data.diagnosisRows)
   const medicationRequests = medicationEpisodesToFhir(data.medicationEpisodeRows)
   const observations = observationsToFhir(data.patient.id, data.labOrderRows)

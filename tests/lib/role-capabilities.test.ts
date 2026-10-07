@@ -4,7 +4,7 @@ import type { Role } from '@/lib/auth'
 
 describe('ROLE_CAPABILITIES', () => {
   it('has an entry for exactly the real roles, no more, no less', () => {
-    const expectedRoles: Role[] = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs']
+    const expectedRoles: Role[] = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder']
     expect(new Set(Object.keys(ROLE_CAPABILITIES))).toEqual(new Set(expectedRoles))
   })
 
@@ -92,7 +92,7 @@ describe('ROLE_CAPABILITIES', () => {
       expect(has(role, /Look up the current price of a service/)).toBe(true)
       expect(has(role, /Manage the service catalogue/)).toBe(false)
     }
-    for (const role of ['pi', 'pharmacy', 'labs'] as Role[]) expect(has(role, /tariff|price of a service/i)).toBe(false)
+    for (const role of ['pi', 'pharmacy', 'labs', 'coder'] as Role[]) expect(has(role, /tariff|price of a service/i)).toBe(false)
   })
 })
 
@@ -115,3 +115,15 @@ describe('SP3 follow-up capabilities', () => {
     }
   })
 })
+
+// SP6
+describe('SP6 coding capabilities', () => {
+  const has = (role: Role, re: RegExp) => ROLE_CAPABILITIES[role].bullets.some((b) => re.test(b))
+  it('states the coder capabilities and no clinical-note write', () => {
+    expect(has('coder', /coding worklist/i)).toBe(true); expect(has('coder', /query/i)).toBe(true)
+    expect(has('coder', /encounter note|care plan|prescri/i)).toBe(false); expect(has('pi', /propose diagnosis/i)).toBe(true)
+    expect(has('admin', /licensed code sets/i)).toBe(true); expect(has('admin', /assign coding work/i)).toBe(true)
+    expect(ROLE_CAPABILITIES.coder.label).toBe('Clinical Coder')
+  })
+})
+// end SP6

@@ -276,7 +276,7 @@ describe('appointments role gate', () => {
     return { row, providers }
   }
 
-  for (const role of ['pharmacy', 'billing', 'labs']) {
+  for (const role of ['pharmacy', 'billing', 'labs', 'coder']) {
     it(`403s ${role} on GET, POST and PUT without creating or changing a row`, async () => {
       const { row, providers } = await fixtureAppointment()
       sessionRef.current = { role, name: probeName }

@@ -17,6 +17,10 @@ import { AssignmentScheduleModalTrigger } from '@/components/AssignmentScheduleM
 import { DashboardAppointmentsTable, type DashboardAppointmentRow } from '@/components/DashboardAppointmentsTable'
 import { PatientsTable } from '@/components/PatientsTable'
 import { DoctorScheduleTimeline } from '@/components/DoctorScheduleTimeline'
+// SP6
+import { listOpenCodingQueriesForProvider } from '@/lib/queries/coding-queries'
+import { DoctorCodingQueries } from '@/components/coding/DoctorCodingQueries'
+// end SP6
 
 // Enterprise EMR dense layout
 export default async function DoctorPortalPage() {
@@ -35,6 +39,8 @@ export default async function DoctorPortalPage() {
     ? patients.filter((p) => matchProviderByName(p.currentProvider ?? '', roster)?.id === providerMatch.id)
     : []
   const pendingAssignments = providerMatch ? await listPendingAssignmentsForProvider(providerMatch.id) : []
+  // SP6: coding queries addressed to this doctor's own provider row (none without a match).
+  const codingQueries = providerMatch ? await listOpenCodingQueriesForProvider(providerMatch.id) : []
 
   const now = new Date()
   // Today's IST business day, whatever zone the server runs in.
@@ -142,6 +148,9 @@ export default async function DoctorPortalPage() {
               )}
             </div>
           </div>
+
+          {/* SP6: coding queries for this doctor; hidden when none are open */}
+          <DoctorCodingQueries queries={codingQueries} />
 
           {/* Pending Lab Results */}
           <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
