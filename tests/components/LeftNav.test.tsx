@@ -157,7 +157,7 @@ describe('LeftNav', () => {
     expect(screen.getByRole('link', { name: /^coding$/i })).toHaveAttribute('href', '/coding')
     expect(screen.queryByRole('link', { name: /patients/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /code systems/i })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/', '/coding'])
+    expect(screen.getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/', '/coding', '/account'])
     unmount()
     const admin = render(<LeftNav role="admin" />)
     expect(screen.getByRole('link', { name: /^coding$/i })).toBeInTheDocument()
