@@ -16,6 +16,8 @@ import { PatientProfilePanel } from '@/components/patient-profile/PatientProfile
 import { CopyUhidButton } from '@/components/patient-profile/CopyUhidButton'
 import { VerifyIdentityButton } from '@/components/patient-profile/VerifyIdentityButton' // Wave B
 import { IDENTITY_VERIFY_ROLES } from '@/lib/role-policy' // Wave B
+import { REGISTRATION_ROLES, SCHEDULING_ROLES } from '@/lib/role-policy' // Wave C
+import { PatientQuickActions, RegisteredBanner } from '@/components/patient-profile/PatientQuickActions' // Wave C
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { FollowUpPanel } from '@/components/follow-ups/FollowUpPanel'
 import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
@@ -49,7 +51,7 @@ function SummaryTile({ icon: Icon, value, label }: { icon: React.ComponentType<{
   )
 }
 
-export default async function PatientDetailPage({ params }: { params: Promise<{ anonId: string }> }) {
+export default async function PatientDetailPage({ params, searchParams }: { params: Promise<{ anonId: string }>; searchParams?: Promise<{ registered?: string | string[] }> }) {
   // Must be the first statement — see the comment in patients/page.tsx.
   const session = await requireSessionOrRedirect()
   if (!PATIENT_DIRECTORY_ROLES.includes(session.role)) redirect('/')
@@ -61,6 +63,7 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
   const isFrontDesk = session.role === 'frontdesk'
 
   const { anonId } = await params
+  const justRegistered = (await searchParams)?.registered === '1' // Wave C
   const patient = await getPatientDetail(anonId)
   if (!patient) notFound()
   await logAudit(session, 'viewed patient detail', anonId)
@@ -242,6 +245,10 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
   return (
     <div className="max-w-4xl space-y-6">
       <BackLink href="/patients" label="Back to Patients" />
+      {/* Wave C: right after registration, offer the slip and check-in. */}
+      {justRegistered && REGISTRATION_ROLES.includes(session.role) && (
+        <RegisteredBanner patientId={patient.id} uhid={patient.uhid} canCheckIn={CHECK_IN_ROLES.includes(session.role)} />
+      )}
       <div className={`${SECTION} flex items-center justify-between`}>
         <div className="flex items-center gap-4">
           <PatientAvatar name={name} size="lg" />
@@ -269,6 +276,11 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
           {!isFrontDesk && <StatusChip status={patient.overallStatus ?? 'yellow'} />}
         </div>
       </div>
+      {/* Wave C front-desk quick path. */}
+      <PatientQuickActions
+        patientId={patient.id}
+        can={{ checkIn: CHECK_IN_ROLES.includes(session.role), book: SCHEDULING_ROLES.includes(session.role), printCard: REGISTRATION_ROLES.includes(session.role) }}
+      />
       {!isFrontDesk && !patient.overallStatus && (
         <p className="text-xs text-muted-foreground">Not currently enrolled in a trial — assign this patient to a trial to run an eligibility check.</p>
       )}
