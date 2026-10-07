@@ -32,7 +32,7 @@ describe('PatientPicker', () => {
   })
 
   it('searches by what was typed and shows name, UHID, chart id, age and mobile', async () => {
-    const fetchMock = vi.fn(async (_url: string) => page([ASHA, RAVI]))
+    const fetchMock = vi.fn(async (url: string) => { void url; return page([ASHA, RAVI]) })
     vi.stubGlobal('fetch', fetchMock)
     render(<Harness />)
     fireEvent.change(combobox(), { target: { value: '98123 45671' } })
