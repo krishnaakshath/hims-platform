@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -41,22 +42,17 @@ export function LogDispenseBillModal({
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/pharmacy/dispenses/${dispense.id}/charge`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        diagnosisId,
-        procedureCode: procedureCode.trim(),
-        procedureDescription: procedureDescription.trim(),
-        unitChargeCents,
-      }),
+    const res = await sendJson(`/api/pharmacy/dispenses/${dispense.id}/charge`, 'POST', {
+      diagnosisId,
+      procedureCode: procedureCode.trim(),
+      procedureDescription: procedureDescription.trim(),
+      unitChargeCents,
     })
     setSubmitting(false)
     if (res.ok) { onLogged?.(); onClose(); return }
     // Surfaced verbatim -- covers both the 400 validation messages and the
     // 409 "already billed" race message the route returns.
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not log this bill.')
+    setError(res.error)
   }
 
   const noDiagnoses = diagnoses.length === 0
@@ -114,7 +110,7 @@ export function LogDispenseBillModal({
           />
           <p className="text-sm text-muted-foreground">Total (server-computed): ${(totalCents / 100).toFixed(2)}</p>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

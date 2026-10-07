@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useId, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -28,21 +29,17 @@ export function CheckInModal({ providers, rooms, onClose }: { providers: Provide
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/front-desk/check-in', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        patientId,
-        providerId,
-        visitType,
-        urgency,
-        reason,
-        ...(visitType === 'inpatient' && roomId !== '' ? { roomId } : {}),
-      }),
+    const res = await sendJson<{ queueTicketNumber: number; patientId?: string; roomId?: number | null }>('/api/front-desk/check-in', 'POST', {
+      patientId,
+      providerId,
+      visitType,
+      urgency,
+      reason,
+      ...(visitType === 'inpatient' && roomId !== '' ? { roomId } : {}),
     })
     setSubmitting(false)
     if (res.ok) {
-      const body = await res.json()
+      const body = res.data
       setCheckinResult({
         queueTicketNumber: body.queueTicketNumber,
         patientId: body.patientId ?? patientId,
@@ -52,8 +49,7 @@ export function CheckInModal({ providers, rooms, onClose }: { providers: Provide
       router.refresh()
       return
     }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not check in this patient.')
+    setError(res.error)
   }
 
   const canSubmit = Boolean(patientId) && providerId !== '' && Boolean(reason) && (visitType === 'outpatient' || roomId !== '' || rooms.length === 0) && !submitting
@@ -131,7 +127,7 @@ export function CheckInModal({ providers, rooms, onClose }: { providers: Provide
             <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for visit" aria-label="Reason" aria-describedby={reasonHintId} maxLength={140} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
             <p id={reasonHintId} className="text-xs text-muted-foreground">Shown to the patient in their visit confirmation — keep it brief and non-clinical.</p>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

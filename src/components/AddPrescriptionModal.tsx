@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sparkles } from 'lucide-react'
@@ -74,29 +75,23 @@ export function AddPrescriptionModal({
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/patients/${patientId}/prescriptions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        medicationId: medicationId === '' ? null : medicationId,
-        name,
-        medicationClass,
-        dose: dose.trim() === '' ? null : dose,
-        frequencyPerDay,
-        durationDays,
-        startDate,
-        instructions: instructions.trim() === '' ? null : instructions,
-        ...(needsOnBehalfOf && onBehalfOfProviderId !== '' ? { onBehalfOfProviderId } : {}),
-      }),
+    const res = await sendJson<{ id: number }>(`/api/patients/${patientId}/prescriptions`, 'POST', {
+      medicationId: medicationId === '' ? null : medicationId,
+      name,
+      medicationClass,
+      dose: dose.trim() === '' ? null : dose,
+      frequencyPerDay,
+      durationDays,
+      startDate,
+      instructions: instructions.trim() === '' ? null : instructions,
+      ...(needsOnBehalfOf && onBehalfOfProviderId !== '' ? { onBehalfOfProviderId } : {}),
     })
     setSubmitting(false)
     if (res.ok) {
-      const body = await res.json()
-      setCreated(body)
+      setCreated(res.data)
       return
     }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not save this prescription.')
+    setError(res.error)
   }
 
   // Closing without printing is fine -- the Print link stays permanently
@@ -242,7 +237,7 @@ export function AddPrescriptionModal({
                   {activeProviders.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.specialty}</option>)}
                 </select>
               )}
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={onClose}>Cancel</Button>

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -74,18 +75,13 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
       }
     }
     setSubmitting(true)
-    const res = await fetch(`/api/inpatient/admissions/${admissionId}/discharge`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dischargeDiagnosis, dischargeDrugs, dischargeDevices, dischargeDiet, dischargeSummaryNotes, typedName, ...(slot ?? {}), ...(followUp ? { followUp } : {}) }),
-    })
+    const res = await sendJson<{ followUpAppointmentId?: number | null; followUpOrderId?: number | null }>(`/api/inpatient/admissions/${admissionId}/discharge`, 'POST', { dischargeDiagnosis, dischargeDrugs, dischargeDevices, dischargeDiet, dischargeSummaryNotes, typedName, ...(slot ?? {}), ...(followUp ? { followUp } : {}) })
     setSubmitting(false)
     if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not discharge this patient.')
+      setError(res.error)
       return
     }
-    const body = await res.json()
+    const body = res.data
     setFollowUpCreated(Boolean(body.followUpAppointmentId))
     setFollowUpPlanned(Boolean(body.followUpOrderId))
     setStep('confirmation')
