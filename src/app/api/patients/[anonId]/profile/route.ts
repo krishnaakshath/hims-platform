@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { requireSession } from '@/lib/auth'
 import { PATIENT_PROFILE_EDIT_ROLES } from '@/lib/role-policy'
 import { invalidateCache, invalidateCacheByPrefix, patientDetailCacheKey, patientListCacheKey, patientListCachePrefix, workbookListCacheKey } from '@/lib/cache'
@@ -16,12 +17,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!PATIENT_PROFILE_EDIT_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { anonId } = await params
 
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid profile update' }, { status: 400 })
-  }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body: unknown = json.body
   const parsed = patientProfileUpdateSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid profile update', details: parsed.error.flatten() }, { status: 400 })
   const input = parsed.data

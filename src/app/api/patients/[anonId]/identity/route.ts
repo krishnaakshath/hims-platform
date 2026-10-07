@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { identityVerifications, patients } from '@/db/schema'
@@ -25,7 +26,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!IDENTITY_VERIFY_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { anonId } = await params
 
-  const parsed = verifySchema.safeParse(await request.json().catch(() => null))
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = verifySchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid identity verification payload', details: parsed.error.flatten() }, { status: 400 })
 
   try {

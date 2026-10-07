@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -13,10 +14,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!['frontdesk', 'admin', 'crc', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const admissionId = Number(id)
-  if (!Number.isInteger(admissionId)) return NextResponse.json({ error: 'Invalid admission id' }, { status: 400 })
+  const admissionId = parseId(id)
+  if (admissionId === null) return NextResponse.json({ error: 'Invalid admission id' }, { status: 400 })
 
-  const parsed = transferSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = transferSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid transfer payload', details: parsed.error.flatten() }, { status: 400 })
 
   const admission = await getAdmissionById(admissionId)

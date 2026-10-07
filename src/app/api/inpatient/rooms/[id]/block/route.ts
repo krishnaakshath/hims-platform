@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -12,10 +13,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const roomId = Number(id)
-  if (!Number.isInteger(roomId)) return NextResponse.json({ error: 'Invalid room id' }, { status: 400 })
+  const roomId = parseId(id)
+  if (roomId === null) return NextResponse.json({ error: 'Invalid room id' }, { status: 400 })
 
-  const parsed = blockSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = blockSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
 
   const ok = await blockRoom(roomId, parsed.data.reason)

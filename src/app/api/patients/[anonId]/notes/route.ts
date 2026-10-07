@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -22,7 +23,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!['pi', 'admin'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { anonId } = await params
-  const parsed = noteSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = noteSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid note payload', details: parsed.error.flatten() }, { status: 400 })
 
   if (parsed.data.appointmentId !== undefined && parsed.data.admissionId !== undefined) {

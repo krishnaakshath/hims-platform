@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { AADHAAR_WRITE_ROLES } from '@/lib/role-policy'
@@ -24,12 +25,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!AADHAAR_WRITE_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { anonId } = await params
 
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid Aadhaar update' }, { status: 400 })
-  }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body: unknown = json.body
   // Validation messages are fixed strings; flatten() never carries the input.
   const parsed = aadhaarUpdateSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid Aadhaar update', details: parsed.error.flatten() }, { status: 400 })
