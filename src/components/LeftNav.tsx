@@ -98,6 +98,7 @@ export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon; demo?
   { href: '/billing/ar-dashboard', label: 'A/R Dashboard', icon: TrendingUp },
   // SP4
   { href: '/billing/capture', label: 'Charge Capture', icon: ClipboardPlus },
+  { href: '/billing/invoices', label: 'Invoices', icon: FileText },
   { href: '/billing/charges', label: 'Charges', icon: Receipt },
   { href: '/billing/insurance-collections', label: 'Insurance Collections', icon: ShieldCheck },
   { href: '/billing/patient-collections', label: 'Patient Collections', icon: HandCoins },

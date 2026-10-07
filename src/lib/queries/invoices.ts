@@ -97,6 +97,34 @@ function contextLabel(inv: { admissionId: number | null; encounterId: number | n
   return 'Pharmacy'
 }
 
+type Settings = Awaited<ReturnType<typeof getBillingSettings>>
+
+/** The bill-to parties from the current masters: frozen into the snapshot at finalisation, shown live on drafts. */
+async function liveParties(
+  executor: Pick<ReturnType<typeof getDb>, 'select'>, inv: Pick<InvoiceRow, 'patientId' | 'payerId' | 'encounterId' | 'admissionId'>, settings: Settings,
+): Promise<{ parties: InvoiceSnapshot; recipientState: string | null }> {
+  // Named patient columns only: id, name, UHID and postal address.
+  const [patient] = await executor.select({
+    id: patients.id, name: patients.name, uhid: patients.uhid, addressLine1: patients.addressLine1, addressLine2: patients.addressLine2,
+    city: patients.city, district: patients.district, stateCode: patients.stateCode, pinCode: patients.pinCode,
+  }).from(patients).where(eq(patients.id, inv.patientId))
+  const [payer] = inv.payerId === null ? [] : await executor.select({ id: payers.id, name: payers.name, gstin: payers.gstin, stateCode: payers.stateCode })
+    .from(payers).where(eq(payers.id, inv.payerId))
+  const stateCode = settings.stateCode ?? ''
+  return {
+    parties: {
+      hospital: { legalName: settings.legalName ?? '', gstin: settings.gstin, stateCode, gstStateCode: GST_STATE_CODES[stateCode] ?? '', address: settings.address },
+      patient: {
+        id: patient.id, name: patient.name, uhid: patient.uhid, addressLine1: patient.addressLine1, addressLine2: patient.addressLine2,
+        city: patient.city, district: patient.district, stateCode: patient.stateCode, pinCode: patient.pinCode,
+      },
+      payer: payer ? { id: payer.id, name: payer.name, gstin: payer.gstin, stateCode: payer.stateCode } : null,
+      context: { encounterId: inv.encounterId, admissionId: inv.admissionId, label: contextLabel(inv) },
+    },
+    recipientState: recipientStateOf(payer ?? null, patient.stateCode),
+  }
+}
+
 /**
  * Numbers, snapshots and totals a draft. The number is drawn only after every check, inside the
  * same transaction as the update, so a failure leaves the draft and burns no number.
@@ -121,13 +149,7 @@ export async function finaliseInvoice(
       if (!settings.legalName || !settings.stateCode) return { ok: false as const, error: 'settings_incomplete' as const }
       if (!settings.gstin && lines.some((l) => l.gstRateBp > 0)) return { ok: false as const, error: 'taxable_without_gstin' as const }
 
-      const [patient] = await tx.select({
-        id: patients.id, name: patients.name, uhid: patients.uhid, addressLine1: patients.addressLine1, addressLine2: patients.addressLine2,
-        city: patients.city, district: patients.district, stateCode: patients.stateCode, pinCode: patients.pinCode,
-      }).from(patients).where(eq(patients.id, inv.patientId))
-      const [payer] = inv.payerId === null ? [] : await tx.select({ id: payers.id, name: payers.name, gstin: payers.gstin, stateCode: payers.stateCode })
-        .from(payers).where(eq(payers.id, inv.payerId))
-      const recipient = recipientStateOf(payer ?? null, patient.stateCode)
+      const { parties: snapshot, recipientState: recipient } = await liveParties(tx, inv, settings)
       const pos = placeOfSupply({ mode: settings.placeOfSupplyMode, hospitalStateCode: settings.stateCode, recipientStateCode: recipient })
 
       const invoiceDate = istDateOf(now)
@@ -140,16 +162,6 @@ export async function finaliseInvoice(
         cgstPaise: tax.cgstPaise, sgstPaise: tax.sgstPaise, igstPaise: tax.igstPaise, totalPaise: tax.totalPaise,
       })))
       const total = (pick: (t: (typeof taxed)[number]) => number) => sumPaise(taxed.map(pick))
-      const snapshot: InvoiceSnapshot = {
-        hospital: { legalName: settings.legalName, gstin: settings.gstin, stateCode: settings.stateCode, gstStateCode: GST_STATE_CODES[settings.stateCode] ?? '', address: settings.address },
-        patient: {
-          id: patient.id, name: patient.name, uhid: patient.uhid, addressLine1: patient.addressLine1, addressLine2: patient.addressLine2,
-          city: patient.city, district: patient.district, stateCode: patient.stateCode, pinCode: patient.pinCode,
-        },
-        payer: payer ? { id: payer.id, name: payer.name, gstin: payer.gstin, stateCode: payer.stateCode } : null,
-        context: { encounterId: inv.encounterId, admissionId: inv.admissionId, label: contextLabel(inv) },
-      }
-
       const invoiceNumber = await allocateDocumentNumber(tx, 'invoice', fy)
       hooks.afterNumber?.()
       const totalPaise = total((t) => t.tax.totalPaise)
@@ -210,45 +222,50 @@ export type InvoiceDetail = InvoiceRow & {
   uhid: string | null
   /** True for a draft: its lines carry an estimated split from the current settings. */
   estimated: boolean
+  /** The snapshot for an issued invoice; the current masters for a draft. */
+  parties: InvoiceSnapshot
+  /** Place of supply: stored when issued, estimated for a draft (stateCode null until the hospital state is set). */
+  place: { stateCode: string | null; supplyType: SupplyType }
 }
 
 export async function getInvoice(id: number): Promise<InvoiceDetail | null> {
   const db = getDb()
-  const [row] = await db.select({ invoice: invoices, patientName: patients.name, uhid: patients.uhid, patientState: patients.stateCode })
+  const [row] = await db.select({ invoice: invoices, patientName: patients.name, uhid: patients.uhid })
     .from(invoices).innerJoin(patients, eq(patients.id, invoices.patientId)).where(eq(invoices.id, id)).limit(1)
   if (!row) return null
   const inv = row.invoice
   const [creditNote] = await db.select().from(creditNotes).where(eq(creditNotes.invoiceId, id)).limit(1)
-  let lines: InvoiceDetailLine[]
   const estimated = inv.status === 'draft' || inv.status === 'discarded'
   if (!estimated) {
-    lines = await db.select({
+    const lines = await db.select({
       lineNo: invoiceLines.lineNo, chargeLineId: invoiceLines.chargeLineId, itemCode: invoiceLines.itemCode, itemName: invoiceLines.itemName,
       hsnSac: invoiceLines.hsnSac, serviceDate: invoiceLines.serviceDate, quantity: invoiceLines.quantity, unitPricePaise: invoiceLines.unitPricePaise,
       priceSource: invoiceLines.priceSource, taxablePaise: invoiceLines.taxablePaise, gstRateBp: invoiceLines.gstRateBp, cgstRateBp: invoiceLines.cgstRateBp,
       sgstRateBp: invoiceLines.sgstRateBp, igstRateBp: invoiceLines.igstRateBp, cgstPaise: invoiceLines.cgstPaise, sgstPaise: invoiceLines.sgstPaise,
       igstPaise: invoiceLines.igstPaise, totalPaise: invoiceLines.totalPaise,
     }).from(invoiceLines).where(eq(invoiceLines.invoiceId, id)).orderBy(asc(invoiceLines.lineNo))
-  } else {
-    const attached = await db.select().from(chargeLines).where(and(eq(chargeLines.invoiceId, id), eq(chargeLines.status, 'captured')))
-      .orderBy(asc(chargeLines.serviceDate), asc(chargeLines.id))
-    const settings = await getBillingSettings(db)
-    let supplyType: SupplyType = 'intra'
-    if (settings.stateCode) {
-      const [payer] = inv.payerId === null ? [] : await db.select({ gstin: payers.gstin, stateCode: payers.stateCode }).from(payers).where(eq(payers.id, inv.payerId))
-      const recipient = recipientStateOf(payer ?? null, row.patientState)
-      supplyType = placeOfSupply({ mode: settings.placeOfSupplyMode, hospitalStateCode: settings.stateCode, recipientStateCode: recipient }).supplyType
+    const parties = inv.snapshot ?? (await liveParties(db, inv, await getBillingSettings(db))).parties
+    return {
+      ...inv, lines, creditNote: creditNote ?? null, patientName: row.patientName, uhid: row.uhid, estimated,
+      parties, place: { stateCode: inv.placeOfSupplyStateCode, supplyType: inv.supplyType ?? 'intra' },
     }
-    lines = attached.map((l, i) => {
-      const t = lineTax(l.taxablePaise, l.gstRateBp, supplyType)
-      return {
-        lineNo: i + 1, chargeLineId: l.id, itemCode: l.itemCode, itemName: l.itemName, hsnSac: l.hsnSac, serviceDate: l.serviceDate, quantity: l.quantity,
-        unitPricePaise: l.unitPricePaise, priceSource: l.priceSource, taxablePaise: l.taxablePaise, gstRateBp: l.gstRateBp,
-        cgstRateBp: t.cgstRateBp, sgstRateBp: t.sgstRateBp, igstRateBp: t.igstRateBp, cgstPaise: t.cgstPaise, sgstPaise: t.sgstPaise, igstPaise: t.igstPaise, totalPaise: t.totalPaise,
-      }
-    })
   }
-  return { ...inv, lines, creditNote: creditNote ?? null, patientName: row.patientName, uhid: row.uhid, estimated }
+  const attached = await db.select().from(chargeLines).where(and(eq(chargeLines.invoiceId, id), eq(chargeLines.status, 'captured')))
+    .orderBy(asc(chargeLines.serviceDate), asc(chargeLines.id))
+  const settings = await getBillingSettings(db)
+  const { parties, recipientState } = await liveParties(db, inv, settings)
+  const place = settings.stateCode
+    ? placeOfSupply({ mode: settings.placeOfSupplyMode, hospitalStateCode: settings.stateCode, recipientStateCode: recipientState })
+    : { stateCode: null, supplyType: 'intra' as SupplyType }
+  const lines = attached.map((l, i) => {
+    const t = lineTax(l.taxablePaise, l.gstRateBp, place.supplyType)
+    return {
+      lineNo: i + 1, chargeLineId: l.id, itemCode: l.itemCode, itemName: l.itemName, hsnSac: l.hsnSac, serviceDate: l.serviceDate, quantity: l.quantity,
+      unitPricePaise: l.unitPricePaise, priceSource: l.priceSource, taxablePaise: l.taxablePaise, gstRateBp: l.gstRateBp,
+      cgstRateBp: t.cgstRateBp, sgstRateBp: t.sgstRateBp, igstRateBp: t.igstRateBp, cgstPaise: t.cgstPaise, sgstPaise: t.sgstPaise, igstPaise: t.igstPaise, totalPaise: t.totalPaise,
+    }
+  })
+  return { ...inv, lines, creditNote: creditNote ?? null, patientName: row.patientName, uhid: row.uhid, estimated, parties, place }
 }
 
 export interface InvoiceListRow {
@@ -258,6 +275,7 @@ export interface InvoiceListRow {
   patientId: string
   patientName: string
   uhid: string | null
+  payerName: string | null
   invoiceDate: string | null
   totalPaise: number | null
   createdAt: Date
@@ -279,8 +297,8 @@ export async function listInvoices(opts: { status?: InvoiceStatus; q?: string; p
   const page = Math.max(1, Math.trunc(opts.page ?? 1))
   const rows = await db.select({
     id: invoices.id, invoiceNumber: invoices.invoiceNumber, status: invoices.status, patientId: invoices.patientId, patientName: patients.name,
-    uhid: patients.uhid, invoiceDate: invoices.invoiceDate, totalPaise: invoices.totalPaise, createdAt: invoices.createdAt,
-  }).from(invoices).innerJoin(patients, eq(patients.id, invoices.patientId)).where(where)
+    uhid: patients.uhid, payerName: payers.name, invoiceDate: invoices.invoiceDate, totalPaise: invoices.totalPaise, createdAt: invoices.createdAt,
+  }).from(invoices).innerJoin(patients, eq(patients.id, invoices.patientId)).leftJoin(payers, eq(payers.id, invoices.payerId)).where(where)
     .orderBy(desc(invoices.createdAt), desc(invoices.id)).limit(INVOICE_PAGE_SIZE).offset((page - 1) * INVOICE_PAGE_SIZE)
   const [{ n }] = await db.select({ n: count() }).from(invoices).innerJoin(patients, eq(patients.id, invoices.patientId)).where(where)
   return { rows, total: n }

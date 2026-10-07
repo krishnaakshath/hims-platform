@@ -102,7 +102,7 @@ export function documentTitle(lineRatesBp: readonly number[], hospitalGstin: str
 /**
  * Frozen at finalisation into `invoices.snapshot` so a reprint never changes when the
  * hospital, patient or payer master is later edited. PHI: patient id, name, UHID and postal
- * address only (no Aadhaar, ABHA, phone, email or DOB).
+ * address only (no national identity numbers, phone, email or date of birth).
  */
 export interface InvoiceSnapshot {
   hospital: { legalName: string; gstin: string | null; stateCode: string; gstStateCode: string; address: string | null }

@@ -314,6 +314,9 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs'] },
   // SP4 billing screens -- NAV_BILLING_ITEMS are gated to exactly BILLING_ROLES (= CHARGE_CAPTURE_ROLES).
   { route: '/billing/capture', load: () => import('@/app/(dashboard)/billing/capture/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
+  { route: '/billing/invoices', load: () => import('@/app/(dashboard)/billing/invoices/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
+  { route: '/billing/invoices/[id]', load: () => import('@/app/(dashboard)/billing/invoices/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'crc', 'billing'] },
+  { route: '/print/invoices/[id]', load: () => import('@/app/print/invoices/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'crc', 'billing'] },
   // end SP4
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).
