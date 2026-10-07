@@ -43,6 +43,9 @@ export const CHARGES_ROLES: readonly Role[] = ['admin', 'crc', 'billing']
 // /workbook page itself is CLINICAL_ROLES; pi views it but cannot download.
 export const WORKBOOK_EXPORT_ROLES: readonly Role[] = ['admin', 'crc']
 
+// Practice master-data configuration (UHID prefix, and later tariff/department masters).
+export const MASTER_DATA_ADMIN_ROLES: readonly Role[] = ['admin']
+
 export type SearchScopes = { patients: boolean; trials: boolean; formTemplates: boolean }
 
 export function searchScopesFor(role: Role): SearchScopes {

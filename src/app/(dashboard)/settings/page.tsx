@@ -11,6 +11,7 @@ import { ROLE_CAPABILITIES } from '@/lib/role-capabilities'
 import { AutoClassifyToggle } from '@/components/AutoClassifyToggle'
 import { QueueDisplayPinForm } from '@/components/QueueDisplayPinForm'
 import { PracticeInfoForm } from '@/components/PracticeInfoForm'
+import { UhidPrefixForm } from '@/components/settings/UhidPrefixForm'
 import { ProviderProfilesPanel } from '@/components/settings/ProviderProfilesPanel'
 import { StaffManagementPanel } from '@/components/settings/StaffManagementPanel'
 import { StaffMfaSelfResetForm } from '@/components/settings/StaffMfaSelfResetForm'
@@ -55,6 +56,9 @@ export default async function SettingsPage() {
   const practiceTab = (
     <section className={SECTION}>
       <PracticeInfoForm initial={{ practiceName: settings.practiceName, practiceSite: settings.practiceSite, practiceTimezone: settings.practiceTimezone }} isAdmin={isAdmin} />
+      <div className="mt-5 border-t border-border pt-5">
+        <UhidPrefixForm initialPrefix={settings.uhidPrefix} isAdmin={isAdmin} />
+      </div>
     </section>
   )
 

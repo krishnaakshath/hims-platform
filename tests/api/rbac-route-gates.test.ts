@@ -10,6 +10,7 @@ import {
   DOCUMENT_READ_ROLES,
   IDENTITY_VERIFY_ROLES,
   INSURANCE_CARD_READ_ROLES,
+  MASTER_DATA_ADMIN_ROLES,
   PAYER_LOOKUP_ROLES,
   SCHEDULING_ROLES,
   TRIAL_CRITERIA_EDIT_ROLES,
@@ -49,6 +50,7 @@ afterEach(() => {
   sessionRole = 'crc'
 })
 
+import { PUT as putUhidPrefix } from '@/app/api/settings/uhid-prefix/route'
 import { GET as getWorkbookFull } from '@/app/api/workbook/full/route'
 import { GET as getWorkbookExport } from '@/app/api/workbook/export/route'
 import { POST as postMockPayment } from '@/app/api/mock-payments/route'
@@ -515,6 +517,8 @@ export const API_GATES: ApiGateCase[] = [
     call: () => getStaffMember(get(`/api/staff/${BOGUS_ID}`), ctx({ id: BOGUS_ID })),
     allowed: [...CLINICAL_ROLES],
   },
+  // MASTER_DATA_ADMIN_ROLES -- UHID prefix is practice configuration
+  { name: 'PUT /api/settings/uhid-prefix', call: () => settle(() => putUhidPrefix(send('PUT', '/api/settings/uhid-prefix'))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]

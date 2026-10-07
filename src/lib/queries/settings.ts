@@ -25,6 +25,7 @@ export async function getSettingsSummary() {
     practiceName: settings.practiceName,
     practiceSite: settings.practiceSite,
     practiceTimezone: settings.practiceTimezone,
+    uhidPrefix: settings.uhidPrefix,
     queueDisplayPinConfigured: !!settings.queueDisplayPin,
   }
 }
