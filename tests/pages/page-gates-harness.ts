@@ -313,6 +313,7 @@ export const PAGE_GATES: PageGateCase[] = [
   // SP6: LeftNav NAV_ITEMS /coding -- CODING_ROLES (worklist, productivity report)
   { route: '/coding', load: () => import('@/app/(dashboard)/coding/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
   { route: '/coding/report', load: () => import('@/app/(dashboard)/coding/report/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
+  { route: '/coding/encounters/[id]', load: () => import('@/app/(dashboard)/coding/encounters/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'coder'] },
   // end SP6
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).
