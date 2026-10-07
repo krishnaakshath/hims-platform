@@ -8,7 +8,7 @@ import { declineAssignment } from '@/lib/queries/doctor-assignments'
 import { createDoctorAssignment } from '../fixtures/doctor-assignment'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { sendMessage } from '@/lib/queries/messages'
-import { hasSchedulingConflict } from '@/lib/queries/appointments'
+import { lockProviderSchedule } from '@/lib/queries/appointments'
 
 vi.mock('@/lib/queries/messages', async () => {
   const a = await vi.importActual<typeof import('@/lib/queries/messages')>('@/lib/queries/messages')
@@ -16,11 +16,11 @@ vi.mock('@/lib/queries/messages', async () => {
 })
 
 // Pass-through spy so the concurrency test can hold both requests at the
-// conflict check (after the pending-status read, before the appointment
-// insert) and force the real race.
+// provider schedule lock (after the pending-status read, before the
+// transaction's conflict check and insert) and force the real race.
 vi.mock('@/lib/queries/appointments', async () => {
   const a = await vi.importActual<typeof import('@/lib/queries/appointments')>('@/lib/queries/appointments')
-  return { ...a, hasSchedulingConflict: vi.fn(a.hasSchedulingConflict) }
+  return { ...a, lockProviderSchedule: vi.fn(a.lockProviderSchedule) }
 })
 
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam' })) }))
@@ -167,13 +167,13 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- notification and sta
     const a = await newAssignment()
     const providerId = await kunamProviderId()
     const slots = ['2026-11-09T09:00:00', '2026-11-09T10:00:00']
-    // Barrier: neither request continues past the conflict check until both
-    // have read the assignment as pending.
-    const actual = (await vi.importActual<typeof import('@/lib/queries/appointments')>('@/lib/queries/appointments')).hasSchedulingConflict
+    // Barrier: neither request takes the schedule lock until both have read
+    // the assignment as pending.
+    const actual = (await vi.importActual<typeof import('@/lib/queries/appointments')>('@/lib/queries/appointments')).lockProviderSchedule
     let arrived = 0
     let release!: () => void
     const bothArrived = new Promise<void>((r) => { release = r })
-    vi.mocked(hasSchedulingConflict).mockImplementation(async (...args) => {
+    vi.mocked(lockProviderSchedule).mockImplementation(async (...args) => {
       if (++arrived === 2) release()
       await bothArrived
       return actual(...args)
@@ -187,7 +187,7 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- notification and sta
       .where(and(eq(appointments.providerId, providerId), inArray(appointments.startsAt, slots.map((s) => new Date(s)))))
     for (const r of appts) createdAppointmentIds.push(r.id)
     const msgs = await systemMsgs('RD-0001', before)
-    vi.mocked(hasSchedulingConflict).mockImplementation(actual)
+    vi.mocked(lockProviderSchedule).mockImplementation(actual)
     expect(arrived).toBe(2)
 
     expect(results.map((r) => r.status).sort()).toEqual([200, 409])

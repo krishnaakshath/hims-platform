@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, getTableColumns, gte, inArray, lt, lte, or, sql, type SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, getTableColumns, gte, inArray, lt, lte, or, type SQL } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import { appointments, departments, followUpContactAttempts, followUpOrders, patients, providers, type FollowUpContactAttemptRow } from '@/db/schema'
@@ -9,18 +9,18 @@ import { MISSED_GRACE_DAYS, UPCOMING_HORIZON_DAYS, addDaysIso, deriveFollowUpSta
 import type { ContactAttemptRequest } from '@/lib/follow-ups/validation'
 import { toFollowUpView, type ContactAttemptView, type FollowUpJoinedRow } from '@/lib/follow-ups/view'
 import { MISSED_ROW_CAP, WORKLIST_ROW_CAP, type WorklistRow } from '@/lib/follow-ups/worklist'
-import { hasSchedulingConflict } from './appointments'
+import { hasSchedulingConflict, lockProviderSchedule } from './appointments'
 import type { WriteExecutor } from './executor'
 import type { FollowUpOrder } from './follow-ups'
 
-type LinkedAppointment = { id: number; status: ApptStatus; startsAt: Date }
+type LinkedAppointment = { id: number; status: ApptStatus; startsAt: Date; providerId: number }
 
 /** The order's derived status (IST today) and its linked appointment, read on the caller's executor. */
 async function derive(ex: WriteExecutor, order: FollowUpOrder, todayIso: string): Promise<{ status: FollowUpStatus; appointment: LinkedAppointment | null }> {
   let appointment: LinkedAppointment | null = null
   if (order.appointmentId !== null) {
     const [a] = await ex
-      .select({ id: appointments.id, status: appointments.status, startsAt: appointments.startsAt })
+      .select({ id: appointments.id, status: appointments.status, startsAt: appointments.startsAt, providerId: appointments.providerId })
       .from(appointments)
       .where(eq(appointments.id, order.appointmentId))
     appointment = a ?? null
@@ -67,11 +67,12 @@ export async function bookFollowUp(
     // 4. No slot in the past.
     if (slot.startsAt.getTime() <= now.getTime()) return { ok: false, error: 'slot_in_past' }
 
-    // 5. Per-provider booking lock, held until commit/rollback.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'appointments.provider:' + slot.providerId}))`)
+    // 5. Per-provider schedule lock, held until commit/rollback. A reschedule
+    //    to another doctor locks both (ascending id order).
+    const existing = appointment?.status === 'scheduled' ? appointment : null
+    await lockProviderSchedule(tx, slot.providerId, ...(existing ? [existing.providerId] : []))
 
     // 6. Conflict check under the lock, excluding the appointment being moved.
-    const existing = appointment?.status === 'scheduled' ? appointment : null
     if (await hasSchedulingConflict(slot.providerId, slot.startsAt, slot.endsAt, existing?.id, tx)) return { ok: false, error: 'conflict' }
 
     // 7. Move the still-scheduled appointment, or create one.

@@ -1,12 +1,12 @@
 import { getDb } from '@/db/client'
 import { admissions, admissionTransfers, rooms, appointments, encounters } from '@/db/schema'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { istDateOf } from '@/lib/india-time'
 import type { FollowUpTiming } from '@/lib/follow-ups/rules'
 import { getLatestSignatureForSignable } from '@/lib/queries/signatures'
-import { hasSchedulingConflict } from '@/lib/queries/appointments'
+import { hasSchedulingConflict, lockProviderSchedule } from '@/lib/queries/appointments'
 import { completeAdmissionEncounter } from '@/lib/queries/encounters'
 import { createFollowUpOrder } from '@/lib/queries/follow-ups'
 
@@ -240,7 +240,7 @@ export async function dischargeAdmission(admissionId: number, input: DischargeIn
       let followUpAppointmentId: number | undefined
       if (input.followUp) {
         const providerId = admission.attendingProviderId
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'appointments.provider:' + providerId}))`)
+        await lockProviderSchedule(tx, providerId)
         if (await hasSchedulingConflict(providerId, input.followUp.startsAt, input.followUp.endsAt, undefined, tx)) {
           throw new DischargeRollback({ ok: false, error: 'conflict' })
         }

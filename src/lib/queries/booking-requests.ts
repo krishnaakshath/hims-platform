@@ -1,7 +1,7 @@
 import { getDb } from '@/db/client'
 import { bookingRequests, appointments } from '@/db/schema'
 import { and, desc, eq } from 'drizzle-orm'
-import { hasSchedulingConflict } from '@/lib/queries/appointments'
+import { hasSchedulingConflict, lockProviderSchedule } from '@/lib/queries/appointments'
 
 export type BookingRequestRow = typeof bookingRequests.$inferSelect
 
@@ -45,40 +45,44 @@ export interface BookingRequestActionResult {
   appointmentId?: number
 }
 
-// Order matters and is deliberate: check the real scheduling conflict
-// first (no DB write either way), then the conditional UPDATE guarding the
-// pending->confirmed transition (WHERE status = 'pending' -- only one of
-// two racing calls can win it), and only create the real appointments row
-// -- and point resultingAppointmentId at it -- after that UPDATE actually
-// succeeded. This codebase has no established db.transaction() convention
-// (see the lab-orders and pharmacy plans' own UPDATE-then-insert ordering),
-// so ordering the writes this way, rather than wrapping them, is what keeps
-// a losing/racing caller from ever creating an orphaned appointment.
+class AlreadyResolved extends Error {}
+
+// I7: ONE transaction behind the provider schedule lock: the conflict check
+// (which then sees every booking committed before it), the conditional UPDATE
+// guarding the pending->confirmed transition (WHERE status = 'pending' -- only
+// one of two racing calls can win it), the appointment insert and the link
+// back to it. A lost race or a conflict rolls everything back, so no orphaned
+// appointment and no half-confirmed request is ever left.
 export async function confirmBookingRequest(id: number, input: ConfirmBookingRequestInput): Promise<BookingRequestActionResult> {
-  const db = getDb()
+  try {
+    return await getDb().transaction(async (tx): Promise<BookingRequestActionResult> => {
+      await lockProviderSchedule(tx, input.providerId)
+      if (await hasSchedulingConflict(input.providerId, input.startsAt, input.endsAt, undefined, tx)) {
+        return { ok: false, error: 'This provider already has an appointment during that time.' }
+      }
 
-  if (await hasSchedulingConflict(input.providerId, input.startsAt, input.endsAt)) {
-    return { ok: false, error: 'This provider already has an appointment during that time.' }
+      const updated = await tx.update(bookingRequests)
+        .set({ status: 'confirmed', reviewedByName: input.reviewedByName, reviewedAt: new Date() })
+        .where(and(eq(bookingRequests.id, id), eq(bookingRequests.status, 'pending')))
+        .returning({ id: bookingRequests.id })
+      if (updated.length === 0) throw new AlreadyResolved()
+
+      const [appointment] = await tx.insert(appointments).values({
+        patientId: input.patientId,
+        providerId: input.providerId,
+        startsAt: input.startsAt,
+        endsAt: input.endsAt,
+        visitReason: input.visitReason,
+        status: 'scheduled',
+      }).returning()
+
+      await tx.update(bookingRequests).set({ resultingAppointmentId: appointment.id }).where(eq(bookingRequests.id, id))
+      return { ok: true, appointmentId: appointment.id }
+    })
+  } catch (err) {
+    if (err instanceof AlreadyResolved) return { ok: false, error: 'This request has already been resolved.' }
+    throw err
   }
-
-  const updated = await db.update(bookingRequests)
-    .set({ status: 'confirmed', reviewedByName: input.reviewedByName, reviewedAt: new Date() })
-    .where(and(eq(bookingRequests.id, id), eq(bookingRequests.status, 'pending')))
-    .returning({ id: bookingRequests.id })
-  if (updated.length === 0) return { ok: false, error: 'This request has already been resolved.' }
-
-  const [appointment] = await db.insert(appointments).values({
-    patientId: input.patientId,
-    providerId: input.providerId,
-    startsAt: input.startsAt,
-    endsAt: input.endsAt,
-    visitReason: input.visitReason,
-    status: 'scheduled',
-  }).returning()
-
-  await db.update(bookingRequests).set({ resultingAppointmentId: appointment.id }).where(eq(bookingRequests.id, id))
-
-  return { ok: true, appointmentId: appointment.id }
 }
 
 export async function declineBookingRequest(id: number, input: { reason: string; reviewedByName: string }): Promise<BookingRequestActionResult> {

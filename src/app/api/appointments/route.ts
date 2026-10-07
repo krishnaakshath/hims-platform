@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { getDb } from '@/db/client'
-import { appointments } from '@/db/schema'
 import { requireSession } from '@/lib/auth'
 import { SCHEDULING_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
-import { hasSchedulingConflict, listAppointmentsInRange } from '@/lib/queries/appointments'
+import { insertAppointmentIfFree, listAppointmentsInRange } from '@/lib/queries/appointments'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
 
 const createAppointmentSchema = z.object({
@@ -51,18 +49,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'endsAt must be a valid time after startsAt' }, { status: 400 })
   }
 
-  if (await hasSchedulingConflict(parsed.data.providerId, startsAt, endsAt)) {
-    return NextResponse.json({ error: 'This provider already has an appointment during that time.' }, { status: 409 })
-  }
-
-  const [created] = await getDb().insert(appointments).values({
+  // I7: lock the doctor's schedule, check and insert in one transaction.
+  const result = await insertAppointmentIfFree({
     patientId: parsed.data.patientId,
     providerId: parsed.data.providerId,
     startsAt,
     endsAt,
     visitReason: parsed.data.visitReason,
     status: parsed.data.status ?? 'scheduled',
-  }).returning()
+  })
+  if (!result.ok) {
+    return NextResponse.json({ error: 'This provider already has an appointment during that time.' }, { status: 409 })
+  }
+  const created = result.appointment
 
   await logAudit(session, 'scheduled appointment', parsed.data.patientId)
   return NextResponse.json(created, { status: 201 })

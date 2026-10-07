@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm'
 import { requireSession } from '@/lib/auth'
 import { SCHEDULING_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
-import { getAppointment, hasSchedulingConflict } from '@/lib/queries/appointments'
+import { getAppointment, rescheduleAppointmentIfFree } from '@/lib/queries/appointments'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
 
 const updateAppointmentSchema = z.object({
@@ -46,13 +46,15 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   // Only re-check for a double-booking when the reschedule actually moves
   // the time range -- excludes this appointment's own id so it never
   // conflicts with itself.
+  // I7: a move takes the doctor's schedule lock; check and update are one transaction.
   if (parsed.data.startsAt || parsed.data.endsAt) {
-    if (await hasSchedulingConflict(existing.providerId, resultingStartsAt, resultingEndsAt, existing.id)) {
+    const moved = await rescheduleAppointmentIfFree(existing.id, existing.providerId, resultingStartsAt, resultingEndsAt, patch)
+    if (!moved.ok) {
       return NextResponse.json({ error: 'This provider already has an appointment during that time.' }, { status: 409 })
     }
+  } else {
+    await getDb().update(appointments).set(patch).where(eq(appointments.id, Number(id)))
   }
-
-  await getDb().update(appointments).set(patch).where(eq(appointments.id, Number(id)))
 
   const action = parsed.data.status ? `marked appointment ${id} as ${parsed.data.status}` : `updated appointment ${id}`
   await logAudit(session, action, existing.patientId)

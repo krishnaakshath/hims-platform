@@ -2,6 +2,7 @@ import { getDb } from '@/db/client'
 import { appointments, doctorAssignments, patients } from '@/db/schema'
 import { and, asc, desc, eq, getTableColumns, gte, isNull, lt, sql } from 'drizzle-orm'
 import { istDayBounds } from '@/lib/india-time'
+import { hasSchedulingConflict, lockProviderSchedule } from './appointments'
 import { sendMessage } from './messages'
 import { SYSTEM_SENDER_NAME } from './eligibility'
 import { buildVisitConfirmationBody } from '@/lib/notification-templates'
@@ -76,6 +77,40 @@ export async function scheduleAssignment(assignmentId: number, appointmentId: nu
     .where(and(eq(doctorAssignments.id, assignmentId), eq(doctorAssignments.status, 'pending')))
     .returning()
   return updated ?? null
+}
+
+class AlreadyHandled extends Error {}
+
+/**
+ * The doctor schedules a pending assignment (I7): the provider schedule lock,
+ * the conflict check, the appointment insert and the pending -> scheduled
+ * transition are ONE transaction. A concurrent schedule/decline makes the
+ * conditional update match nothing, and the whole transaction (including the
+ * appointment) rolls back, so no orphan appointment is ever left.
+ */
+export async function scheduleAssignmentIntoAppointment(
+  assignmentId: number,
+  slot: { patientId: string; providerId: number; startsAt: Date; endsAt: Date; visitReason: string },
+): Promise<
+  | { ok: true; assignment: DoctorAssignmentRow; appointment: typeof appointments.$inferSelect }
+  | { ok: false; error: 'conflict' | 'already_handled' }
+> {
+  try {
+    return await getDb().transaction(async (tx) => {
+      await lockProviderSchedule(tx, slot.providerId)
+      if (await hasSchedulingConflict(slot.providerId, slot.startsAt, slot.endsAt, undefined, tx)) return { ok: false as const, error: 'conflict' as const }
+      const [appointment] = await tx.insert(appointments).values({ ...slot, status: 'scheduled' }).returning()
+      const [assignment] = await tx.update(doctorAssignments)
+        .set({ status: 'scheduled', appointmentId: appointment.id })
+        .where(and(eq(doctorAssignments.id, assignmentId), eq(doctorAssignments.status, 'pending')))
+        .returning()
+      if (!assignment) throw new AlreadyHandled()
+      return { ok: true as const, assignment, appointment }
+    })
+  } catch (err) {
+    if (err instanceof AlreadyHandled) return { ok: false, error: 'already_handled' }
+    throw err
+  }
 }
 
 /** Transitions a PENDING assignment to declined. The status condition is in
