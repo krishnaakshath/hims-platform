@@ -219,11 +219,9 @@ describe.skipIf(!process.env.DATABASE_URL)('charge capture (DB)', () => {
     expect(!r.ok && r.violations!.map((v) => v.code)).toContain('date_outside_encounter')
   })
 
-  it('a mapped service refuses an unmapped procedure code and auto-fills the primary (needs the SP6 table)', async (t) => {
+  it('a mapped service refuses an unmapped procedure code and auto-fills the primary (SP6 service map)', async () => {
     const { getDb, sql, cc } = await m()
     const db = getDb()
-    const present = (await db.execute<{ present: boolean }>(sql`select to_regclass('public.service_procedure_codes') is not null as present`)).rows[0].present
-    if (!present) t.skip()
     await db.execute(sql`insert into service_procedure_codes (service_id, code_system_kind, code, is_primary, created_by_name)
       values (${fx.procId}, 'icd10pcs', 'TSP4A', true, 'TEST-SP4'), (${fx.procId}, 'icd10pcs', 'TSP4B', false, 'TEST-SP4')`)
     try {

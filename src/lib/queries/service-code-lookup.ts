@@ -1,6 +1,7 @@
-// SP4: the procedure codes SP6 maps to a service, read by TABLE detection (plan ruling 9).
-// SP4 never imports SP6 modules: when `service_procedure_codes` does not exist every service is
-// unmapped (unconstrained); once SP6 is merged the check switches on with no code change.
+// SP4: the procedure codes SP6 maps to a service (plan ruling 9). Written before SP6 merged, so it
+// still probes for `service_procedure_codes`: on a database where the SP6 migration has not been
+// applied every service reads as unmapped (unconstrained) instead of failing the capture. The
+// comparison itself is SP6's chargeProcedureCodeProblems (see charge-rules.ts).
 import { sql } from 'drizzle-orm'
 import type { ProcedureCodeRef } from '@/lib/billing/charge-rules'
 import type { WriteExecutor } from './executor'

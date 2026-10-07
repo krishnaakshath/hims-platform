@@ -115,6 +115,8 @@ describe('charge rule engine', () => {
     const two = evaluateChargeRules({ ...m, requestedProcedureCodes: [{ kind: 'hbp', code: 'A' }, { kind: 'hbp', code: 'B' }, { kind: 'hbp', code: 'SMP001A' }] }, S, {})
     expect(two.map((v) => v.message)).toEqual(['A is not a procedure code mapped to this service', 'B is not a procedure code mapped to this service'])
     expect(two[0]).toMatchObject({ field: 'procedureCodes', overridable: false })
+    // same answer as SP6's chargeProcedureCodeProblems (normalised code in the message)
+    expect(evaluateChargeRules({ ...m, requestedProcedureCodes: [{ kind: 'hbp', code: ' smp002a ' }] }, S, {})[0].message).toBe('SMP002A is not a procedure code mapped to this service')
   })
   it('config disables or re-grades configurable rules only', () => {
     const dup = { ...base, sameDayDuplicates: 1 }

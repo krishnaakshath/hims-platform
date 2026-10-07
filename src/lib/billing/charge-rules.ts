@@ -4,6 +4,8 @@ import { addDaysIso } from '@/lib/follow-ups/rules'
 import { formatIsoDate } from '@/lib/india-time'
 import { formatPaise } from '@/lib/money'
 import type { ServiceCategory } from '@/lib/tariff/validation'
+import { chargeProcedureCodeProblems } from '@/lib/coding/service-codes'
+import type { CodeSystemKind } from '@/lib/coding/code-systems'
 
 export const CHARGE_RULE_CODES = ['service_not_found', 'service_inactive', 'price_unresolved', 'date_outside_encounter',
   'department_mismatch', 'consultation_required', 'deposit_below_threshold', 'duplicate_charge', 'preauth_required',
@@ -55,7 +57,7 @@ export interface ChargeRuleInput {
 type Service = NonNullable<ChargeRuleInput['service']>
 type Predicate = (input: ChargeRuleInput, service: Service, settings: ChargeRuleSettings) => string[]
 
-const codeKey = (c: ProcedureCodeRef) => `${c.kind}\u0000${c.code.trim().toUpperCase()}`
+const asCodeRefs = (refs: ProcedureCodeRef[]) => refs as { kind: CodeSystemKind; code: string }[]
 
 // Predicates for the rules that need a service; the two service-existence rules are handled up front
 // because they short-circuit everything else.
@@ -90,11 +92,8 @@ const PREDICATES: Record<Exclude<ChargeRuleCode, 'service_not_found' | 'service_
     i.payer?.requiresPreauth && s.requiresPreauth && !i.preAuthReference?.trim()
       ? ['This payer needs a pre-authorisation reference for this service'] : [],
   quantity_limit: (i, s) => (s.maxQuantity !== null && i.quantity > s.maxQuantity ? [`Quantity cannot exceed ${s.maxQuantity} for this service`] : []),
-  procedure_code_not_mapped: (i) => {
-    if (i.mappedProcedureCodes.length === 0) return []
-    const mapped = new Set(i.mappedProcedureCodes.map(codeKey))
-    return i.requestedProcedureCodes.filter((c) => !mapped.has(codeKey(c))).map((c) => `${c.code} is not a procedure code mapped to this service`)
-  },
+  // SP6 owns the comparison (unmapped service = unconstrained; kind + normalised code).
+  procedure_code_not_mapped: (i) => chargeProcedureCodeProblems(asCodeRefs(i.mappedProcedureCodes), asCodeRefs(i.requestedProcedureCodes)),
 }
 
 const DEFINITION = new Map(CHARGE_RULES.map((r) => [r.code, r]))

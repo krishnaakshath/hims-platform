@@ -105,4 +105,19 @@ describe('ChargeCaptureForm', () => {
     expect(body).toMatchObject({ manualUnitPricePaise: 125050, priceOverrideReason: 'Agreed package rate' })
     expect(screen.getByLabelText('Search service')).toHaveValue('')
   })
+
+  it('procedure codes pick a code system from the list the service map uses', async () => {
+    render(<ChargeCaptureForm context={ctx} canOverride={false} hasPayer today="2099-06-01" />)
+    await pickService()
+    fireEvent.click(screen.getByRole('button', { name: /Add procedure code/ }))
+    const kind = screen.getByLabelText('Code system 1') as HTMLSelectElement
+    expect(kind.tagName).toBe('SELECT')
+    expect(Array.from(kind.options).map((o) => o.value)).toEqual(['icd10pcs', 'snomed', 'hbp', 'loinc'])
+    fireEvent.change(kind, { target: { value: 'hbp' } })
+    fireEvent.change(screen.getByLabelText('Code 1'), { target: { value: 'smp001a' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add charge' }))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+    const body = JSON.parse(fetchMock.mock.calls.find((c) => c[0] === '/api/billing/charge-lines')![1].body)
+    expect(body.procedureCodes).toEqual([{ kind: 'hbp', code: 'smp001a' }])
+  })
 })

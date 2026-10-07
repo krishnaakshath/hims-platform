@@ -10,6 +10,8 @@ import type { ChargeRuleCode, ChargeViolation } from '@/lib/billing/charge-rules
 import type { LineTax } from '@/lib/billing/gst'
 import { ViolationList } from './ViolationList'
 import { PRICE_SOURCE_LABELS, bpToPercent } from './labels'
+import { CHARGE_PROCEDURE_CODE_KINDS } from '@/lib/billing/validation'
+import { CODE_SYSTEM_LABEL } from '@/lib/coding/code-systems'
 
 type Context = { encounterId: number } | { admissionId: number }
 interface ServiceOption { id: number; code: string; name: string; gstRateBp: number; departmentName?: string }
@@ -100,7 +102,7 @@ export function ChargeCaptureForm({ context, canOverride, hasPayer, today }: {
     return {
       context, serviceId: service.id, quantity: qty, serviceDate, billTo,
       ...(preAuth.trim() ? { preAuthReference: preAuth.trim() } : {}),
-      ...(codes.some((c) => c.code.trim()) ? { procedureCodes: codes.filter((c) => c.code.trim()).map((c) => ({ kind: c.kind.trim().toLowerCase(), code: c.code.trim() })) } : {}),
+      ...(codes.some((c) => c.code.trim()) ? { procedureCodes: codes.filter((c) => c.code.trim()).map((c) => ({ kind: c.kind, code: c.code.trim() })) } : {}),
       ...(canOverride && manualPaise != null ? { manualUnitPricePaise: manualPaise, priceOverrideReason: manualReason.trim() } : {}),
       ...(overrides.length ? { overrides } : {}),
     }
@@ -199,8 +201,10 @@ export function ChargeCaptureForm({ context, canOverride, hasPayer, today }: {
         <legend className="text-xs font-medium text-muted-foreground">Procedure codes</legend>
         {codes.map((c, i) => (
           <div key={i} className="flex gap-2">
-            <input aria-label={`Code system ${i + 1}`} placeholder="e.g. icd10pcs" value={c.kind} maxLength={12} className={`${FIELD_CLASS} w-36`}
-              onChange={(e) => setCodes(codes.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))} />
+            <select aria-label={`Code system ${i + 1}`} value={c.kind} className={`${FIELD_CLASS} w-44`}
+              onChange={(e) => setCodes(codes.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}>
+              {CHARGE_PROCEDURE_CODE_KINDS.map((k) => <option key={k} value={k}>{CODE_SYSTEM_LABEL[k]}</option>)}
+            </select>
             <input aria-label={`Code ${i + 1}`} placeholder="Code" value={c.code} maxLength={20} className={FIELD_CLASS}
               onChange={(e) => setCodes(codes.map((x, j) => (j === i ? { ...x, code: e.target.value } : x)))} />
             <Button type="button" variant="outline" size="icon" aria-label={`Remove code ${i + 1}`} onClick={() => setCodes(codes.filter((_, j) => j !== i))}>
@@ -209,7 +213,7 @@ export function ChargeCaptureForm({ context, canOverride, hasPayer, today }: {
           </div>
         ))}
         {codes.length < 5 && (
-          <Button type="button" variant="outline" size="sm" onClick={() => setCodes([...codes, { kind: '', code: '' }])}>
+          <Button type="button" variant="outline" size="sm" onClick={() => setCodes([...codes, { kind: CHARGE_PROCEDURE_CODE_KINDS[0], code: '' }])}>
             <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add procedure code
           </Button>
         )}

@@ -5,11 +5,18 @@ import { isoDate, GST_RATES_BP, MAX_AMOUNT_PAISE } from '@/lib/tariff/validation
 import { MAX_DOCUMENT_PAISE, MAX_LINE_QUANTITY } from './amounts'
 import { CHARGE_RULE_CODES, OVERRIDE_REASON_MIN } from './charge-rules'
 import { isValidGstin, stateCodeOfGstin } from './gst'
+import { normalizeCode } from '@/lib/coding/code-systems'
 
 const positiveInt = z.number().int().positive()
 const reason = (min: number) => z.string().trim().min(min).max(300)
 
-export const procedureCodeRef = z.object({ kind: z.string().regex(/^[a-z0-9]{2,12}$/), code: z.string().trim().min(1).max(20) }).strict()
+// The code kinds a service map can carry (SP6 SERVICE_CODE_KINDS_BY_CATEGORY); codes are
+// normalised as SP6 normalises them, so a line stores what the map compares.
+export const CHARGE_PROCEDURE_CODE_KINDS = ['icd10pcs', 'snomed', 'hbp', 'loinc'] as const
+export const procedureCodeRef = z.object({
+  kind: z.enum(CHARGE_PROCEDURE_CODE_KINDS),
+  code: z.string().trim().min(1).max(20).transform(normalizeCode),
+}).strict()
 
 export const chargeContextRef = z.union([
   z.object({ encounterId: positiveInt }).strict(),
