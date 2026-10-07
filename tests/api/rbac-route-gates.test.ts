@@ -403,6 +403,14 @@ import { PUT as putFollowUpBooking } from '@/app/api/follow-ups/[id]/booking/rou
 import { POST as unbookFollowUp } from '@/app/api/follow-ups/[id]/unbook/route'
 import { POST as postFollowUpContact } from '@/app/api/follow-ups/[id]/contact-attempts/route'
 import { POST as postDischarge } from '@/app/api/inpatient/admissions/[id]/discharge/route'
+// SP5
+import { LAB_SETUP_ROLES } from '@/lib/role-policy'
+import { POST as postLabServiceArea } from '@/app/api/settings/lab-service-area/route'
+import { PATCH as patchLabServiceArea } from '@/app/api/settings/lab-service-area/[id]/route'
+import { POST as postCollectionWindow } from '@/app/api/settings/home-collection-windows/route'
+import { PATCH as patchCollectionWindow } from '@/app/api/settings/home-collection-windows/[id]/route'
+import { PATCH as patchLabTestSetup } from '@/app/api/lab-tests/[id]/route'
+// end SP5
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -596,6 +604,13 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => settle(() => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_BOOKING_ROLES] },
   // SP3 discharge (DISCHARGE_ROLES): `{}` fails validation before any query.
   { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => settle(() => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`), ctx({ id: BOGUS_ID }))), allowed: [...DISCHARGE_ROLES] },
+  // SP5 lab setup (LAB_SETUP_ROLES): an allowed role's `{}` body fails validation before any query.
+  { name: 'POST /api/settings/lab-service-area', call: () => settle(() => postLabServiceArea(send('POST', '/api/settings/lab-service-area'))), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'PATCH /api/settings/lab-service-area/[id]', call: () => settle(() => patchLabServiceArea(send('PATCH', `/api/settings/lab-service-area/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'POST /api/settings/home-collection-windows', call: () => settle(() => postCollectionWindow(send('POST', '/api/settings/home-collection-windows'))), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'PATCH /api/settings/home-collection-windows/[id]', call: () => settle(() => patchCollectionWindow(send('PATCH', `/api/settings/home-collection-windows/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'PATCH /api/lab-tests/[id]', call: () => settle(() => patchLabTestSetup(send('PATCH', `/api/lab-tests/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_SETUP_ROLES] },
+  // end SP5
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
@@ -639,7 +654,16 @@ const SP3_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_BOOKING_ROLES },
   { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: DISCHARGE_ROLES },
 ]
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES])('$name (deny before parse)', (c) => {
+// SP5 writes: the same deny-before-parse contract.
+const SP5_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'POST /api/settings/lab-service-area', call: () => postLabServiceArea(send('POST', '/api/settings/lab-service-area', NOT_JSON)), allowed: LAB_SETUP_ROLES },
+  { name: 'PATCH /api/settings/lab-service-area/[id]', call: () => patchLabServiceArea(send('PATCH', `/api/settings/lab-service-area/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SETUP_ROLES },
+  { name: 'POST /api/settings/home-collection-windows', call: () => postCollectionWindow(send('POST', '/api/settings/home-collection-windows', NOT_JSON)), allowed: LAB_SETUP_ROLES },
+  { name: 'PATCH /api/settings/home-collection-windows/[id]', call: () => patchCollectionWindow(send('PATCH', `/api/settings/home-collection-windows/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SETUP_ROLES },
+  { name: 'PATCH /api/lab-tests/[id]', call: () => patchLabTestSetup(send('PATCH', `/api/lab-tests/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SETUP_ROLES },
+]
+// end SP5
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP5_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role

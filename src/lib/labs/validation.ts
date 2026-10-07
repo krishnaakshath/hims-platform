@@ -80,6 +80,7 @@ export const collectionWindowSchema = z
   })
   .strict()
   .refine((w) => w.startTime < w.endTime, { path: ['endTime'], message: 'The window must end after it starts' })
+export type CollectionWindowInput = z.infer<typeof collectionWindowSchema>
 
 export const collectionWindowPatchSchema = z
   .object({
@@ -96,6 +97,7 @@ export const collectionWindowPatchSchema = z
     path: ['endTime'],
     message: 'The window must end after it starts',
   })
+export type CollectionWindowPatch = z.infer<typeof collectionWindowPatchSchema>
 
 export const labTestSetupSchema = z
   .object({
@@ -105,6 +107,7 @@ export const labTestSetupSchema = z
   })
   .strict()
   .refine((s) => Object.values(s).some((v) => v !== undefined), 'Nothing to change')
+export type LabTestSetupRequest = z.infer<typeof labTestSetupSchema>
 
 // ── Home collection ─────────────────────────────────────────────────────────
 
