@@ -128,3 +128,15 @@ describe('MedicationHistorySection', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
   })
 })
+
+import { PharmacyBillingTable } from '@/components/PharmacyBillingTable'
+
+describe('PharmacyBillingTable', () => {
+  it('shows a failed chart load instead of silently doing nothing', async () => {
+    mockFetch(500, { error: LEAK })
+    render(<PharmacyBillingTable rows={[{ dispenseId: 1, patientId: 'RD-1', patientName: 'P', medicationName: 'X', quantity: 1, dispensedByName: 'Ph', dispensedAt: '2026-10-08T04:00:00Z', charge: null }]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Log bill' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
+    expect(screen.getByRole('button', { name: 'Log bill' })).toBeEnabled()
+  })
+})
