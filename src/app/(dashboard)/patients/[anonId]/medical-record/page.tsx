@@ -1,3 +1,4 @@
+import { formatIstDate, formatIstDateTime } from '@/lib/india-time'
 import { notFound, redirect } from 'next/navigation'
 import { CalendarClock, CalendarCheck2, Stethoscope, Pill, ClipboardList } from 'lucide-react'
 import { BackLink } from '@/components/BackLink'
@@ -28,7 +29,7 @@ const SECTION_HEADING = 'mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-s
 
 function formatDate(value: string | Date | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return formatIstDate(value)
 }
 
 function VisitStat({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
@@ -120,7 +121,7 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
           <div>
             <h1 className="text-xl font-bold text-foreground">{name}</h1>
             <p className="font-mono text-xs text-muted-foreground">{patient.id} · DOB {patient.dob}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">Chart data as of {new Date(patient.chartDataAsOf).toLocaleString()}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Chart data as of {formatIstDateTime(patient.chartDataAsOf)}</p>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">

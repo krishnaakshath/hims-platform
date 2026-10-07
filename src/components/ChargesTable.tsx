@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { DataGridToolbar, type DataGridFilterField, type DataGridColumn } from '@/components/DataGridToolbar'
 import { NewChargeModal } from '@/components/NewChargeModal'
-import { formatCents } from '@/lib/format'
+import { formatPaise } from '@/lib/format'
 import { CHARGE_STATUS_LABELS, nextStatusActions, type ChargeStatus } from '@/lib/charge-status'
 
 type Charge = {
@@ -131,7 +131,7 @@ export function ChargesTable({ charges, patients }: { charges: Charge[]; patient
                       </span>
                     </td>
                   )}
-                  {show('amount') && <td className="p-3 text-foreground">{formatCents(c.amountCents)}</td>}
+                  {show('amount') && <td className="p-3 text-foreground">{formatPaise(c.amountCents)}</td>}
                   {show('actions') && (
                     <td className="p-3">
                       <div className="flex gap-2">

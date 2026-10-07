@@ -1,4 +1,5 @@
 'use client'
+import { formatIstTime } from '@/lib/india-time'
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
@@ -79,7 +80,7 @@ export function DoctorScheduleTimeline({ appointments }: { appointments: Schedul
             <div key={a.id} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/10">
               <div className="flex w-24 flex-col items-end border-r border-border pr-4">
                 <span className="text-sm font-bold text-foreground">
-                  {new Date(a.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {formatIstTime(a.startsAt)}
                 </span>
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{a.status}</span>
               </div>

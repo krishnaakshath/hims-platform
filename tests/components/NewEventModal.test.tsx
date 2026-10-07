@@ -43,7 +43,7 @@ describe('NewEventModal', () => {
     expect(screen.queryByRole('option', { name: /select a patient/i })).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('combobox', { name: /patient/i }), { target: { value: '98123' } })
     fireEvent.click(await screen.findByRole('option', { name: /asha rao/i }))
-    fireEvent.change(screen.getByLabelText(/provider/i), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText(/doctor/i), { target: { value: '1' } })
     fireEvent.change(screen.getByPlaceholderText('Visit reason'), { target: { value: 'Review' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => u === '/api/appointments')).toBe(true))

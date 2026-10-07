@@ -1,3 +1,4 @@
+import { formatIstDateTime } from '@/lib/india-time'
 import { NextResponse } from 'next/server'
 import { requirePatientSession } from '@/lib/patient-session'
 import { getPatientPortalData } from '@/lib/queries/patient-portal'
@@ -12,7 +13,7 @@ export async function GET() {
 
   const lines = [
     `Medication summary for ${data.name} (${data.id})`,
-    `Generated ${new Date().toLocaleString()}`,
+    `Generated ${formatIstDateTime(new Date(), { label: true })}`,
     '',
     'CURRENT MEDICATIONS',
     ...(data.activeMedications.length === 0

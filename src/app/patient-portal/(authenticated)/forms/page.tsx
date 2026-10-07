@@ -1,3 +1,4 @@
+import { formatIstDate } from '@/lib/india-time'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
@@ -42,7 +43,7 @@ export default async function PatientPortalFormsPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-medium">{f.templateName}</p>
-                    <p className="text-xs text-muted-foreground">Sent {new Date(f.sentDate).toLocaleDateString()}</p>
+                    <p className="text-xs text-muted-foreground">Sent {formatIstDate(f.sentDate)}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${FORM_STATUS_STYLE[f.status]}`}>{FORM_STATUS_LABEL[f.status]}</span>

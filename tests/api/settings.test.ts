@@ -52,10 +52,24 @@ describe('PUT /api/settings/practice-info', () => {
   })
 
   it('saves practice info and it is reflected in the settings summary', async () => {
-    const res = await updatePracticeInfo(req('http://localhost/api/settings/practice-info', { practiceName: 'IPMG Test', practiceSite: 'Redlands, CA', practiceTimezone: 'America/Los_Angeles' }))
+    const res = await updatePracticeInfo(req('http://localhost/api/settings/practice-info', { practiceName: 'IPMG Test', practiceSite: 'Redlands, CA', practiceTimezone: 'Asia/Kolkata' }))
     expect(res.status).toBe(200)
     const summary = await getSettingsSummary()
     expect(summary.practiceName).toBe('IPMG Test')
     expect(summary.practiceSite).toBe('Redlands, CA')
+  })
+
+  it('stores Asia/Kolkata and reads it back', async () => {
+    const res = await updatePracticeInfo(req('http://localhost/api/settings/practice-info', { practiceName: 'IPMG Test', practiceSite: 'Pune', practiceTimezone: 'Asia/Kolkata' }))
+    expect(res.status).toBe(200)
+    expect((await getAppSettings()).practiceTimezone).toBe('Asia/Kolkata')
+  })
+
+  it.each(['America/Los_Angeles', 'Not/AZone', 'UTC'])('rejects an unsupported time zone %s with 400 and leaves the stored zone unchanged', async (tz) => {
+    await updatePracticeInfo(req('http://localhost/api/settings/practice-info', { practiceName: 'IPMG Test', practiceSite: 'Pune', practiceTimezone: 'Asia/Kolkata' }))
+    const res = await updatePracticeInfo(req('http://localhost/api/settings/practice-info', { practiceName: 'IPMG Test', practiceSite: 'Pune', practiceTimezone: tz }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('Choose a supported hospital time zone.')
+    expect((await getAppSettings()).practiceTimezone).toBe('Asia/Kolkata')
   })
 })

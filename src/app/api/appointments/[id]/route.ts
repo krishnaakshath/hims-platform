@@ -8,12 +8,13 @@ import { SCHEDULING_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { getAppointment, rescheduleAppointmentIfFree } from '@/lib/queries/appointments'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
+import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
 
 const updateAppointmentSchema = z.object({
   status: z.enum(['scheduled', 'completed', 'cancelled', 'no_show']).optional(),
   visitReason: visitReasonSchema.optional(),
-  startsAt: z.string().min(1).optional(),
-  endsAt: z.string().min(1).optional(),
+  startsAt: appointmentInstantSchema.optional(),
+  endsAt: appointmentInstantSchema.optional(),
   notes: z.string().optional(),
 }).strict()
 
@@ -24,6 +25,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params
 
   const parsed = updateAppointmentSchema.safeParse(await request.json())
+  if (!parsed.success && isTimeFieldError(parsed.error)) return invalidAppointmentTime()
   if (!parsed.success) return NextResponse.json({ error: 'Invalid appointment update', details: parsed.error.flatten() }, { status: 400 })
 
   const existing = await getAppointment(Number(id))

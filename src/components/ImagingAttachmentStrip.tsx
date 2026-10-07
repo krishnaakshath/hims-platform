@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDateTime } from '@/lib/india-time'
 
 // Client-side mirror of ImagingAttachment (src/lib/queries/documents.ts) --
 // kept as a separate type rather than importing the query-layer type
@@ -36,7 +37,7 @@ export function ImagingAttachmentStrip({ attachments }: { attachments: Attachmen
     <div className="mt-2 flex flex-wrap items-center gap-2">
       {attachments.map((a) => {
         const filedBy = a.filedByName
-          ? `${a.name} — filed by ${a.filedByName}${a.filedAt ? ` on ${a.filedAt.toLocaleString()}` : ''}`
+          ? `${a.name} — filed by ${a.filedByName}${a.filedAt ? ` on ${formatIstDateTime(a.filedAt)}` : ''}`
           : a.name
         return (
           <a

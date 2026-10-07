@@ -9,7 +9,7 @@ import {
   encounters, followUpOrders,
 } from '@/db/schema'
 import { desc, eq, inArray, sql } from 'drizzle-orm'
-import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey } from '@/lib/cache'
+import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
@@ -70,7 +70,7 @@ export async function listPatientNameOptions(): Promise<PatientNameOption[]> {
     .orderBy(sql`patients.name`)
 }
 
-export async function listPatientsWithStatus(trialId: string | null): Promise<PatientWithStatus[]> {
+export async function listPatientsWithStatus(trialId: string | null): Promise<Jsonified<PatientWithStatus>[]> {
   return getOrSetCache(patientListCacheKey(trialId), 30, async () => {
     const rows = await getDb()
       .select({ patient: publicPatientColumns, screening: patientTrialScreenings })

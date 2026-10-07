@@ -1,3 +1,4 @@
+import { formatIstDate } from '@/lib/india-time'
 import { notFound, redirect } from 'next/navigation'
 import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
@@ -25,7 +26,7 @@ export default async function ExperienceSurveyDetailPage({ params }: { params: P
       <BackLink href="/experience-surveys" label="Back to Experience Surveys" />
       <div className={SECTION}>
         <h1 className="text-xl font-bold text-foreground">{review.patientName}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{review.templateName} · Sent {new Date(review.sentAt).toLocaleDateString()}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{review.templateName} · Sent {formatIstDate(review.sentAt)}</p>
       </div>
 
       {review.status === 'completed' ? (
@@ -50,7 +51,7 @@ export default async function ExperienceSurveyDetailPage({ params }: { params: P
               <p className="mt-1 text-sm text-foreground">{review.comments}</p>
             </div>
           )}
-          <p className="text-xs text-muted-foreground">Responded {new Date(review.respondedAt!).toLocaleDateString()}</p>
+          <p className="text-xs text-muted-foreground">Responded {formatIstDate(review.respondedAt!)}</p>
         </div>
       ) : (
         <div className={SECTION}>

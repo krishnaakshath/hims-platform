@@ -3,7 +3,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { DataGridToolbar, type DataGridFilterField, type DataGridColumn } from '@/components/DataGridToolbar'
-import { formatCents } from '@/lib/format'
+import { formatPaise } from '@/lib/format'
 
 type Claim = {
   id: number
@@ -137,8 +137,8 @@ export function InsuranceClaimsTable({ claims, linkPatients = true }: { claims: 
                       </span>
                     </td>
                   )}
-                  {show('billed') && <td className="p-3 text-foreground">{formatCents(c.billedAmountCents)}</td>}
-                  {show('paid') && <td className="p-3 text-foreground">{c.paidAmountCents === null ? '—' : formatCents(c.paidAmountCents)}</td>}
+                  {show('billed') && <td className="p-3 text-foreground">{formatPaise(c.billedAmountCents)}</td>}
+                  {show('paid') && <td className="p-3 text-foreground">{c.paidAmountCents === null ? '—' : formatPaise(c.paidAmountCents)}</td>}
                 </tr>
               ))}
             </tbody>

@@ -1,3 +1,4 @@
+import { todayIsoIn } from '@/lib/india-time'
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
 import { NextResponse } from 'next/server'
 import { and, eq, ne } from 'drizzle-orm'
@@ -310,7 +311,7 @@ describe('PATCH /api/patients/[anonId]/prescriptions/[id]', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.status).toBe('inactive')
-    expect(body.stopDate).toBe(new Date().toISOString().slice(0, 10))
+    expect(body.stopDate).toBe(todayIsoIn()) // today in IST
   })
 
   it('a second PATCH on the same row returns 409', async () => {

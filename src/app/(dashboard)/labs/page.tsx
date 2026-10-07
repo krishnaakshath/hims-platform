@@ -1,3 +1,4 @@
+import { istDateOf, todayIsoIn } from '@/lib/india-time'
 import { redirect } from 'next/navigation'
 import { ClipboardList, Beaker, CheckCircle2, AlertTriangle, Users, ListChecks } from 'lucide-react'
 import { requireSessionOrRedirect } from '@/lib/auth'
@@ -87,6 +88,6 @@ export default async function LabsPage() {
 }
 
 function isToday(d: Date): boolean {
-  const now = new Date()
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  // Same IST calendar day as now.
+  return istDateOf(new Date(d)) === todayIsoIn()
 }

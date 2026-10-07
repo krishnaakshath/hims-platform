@@ -1,3 +1,4 @@
+import { formatIstTime, istDateOf } from '@/lib/india-time'
 import { getDb } from '@/db/client'
 import {
   appointments, providers, patients, formSubmissions, formTemplates,
@@ -22,20 +23,13 @@ import { publicPatientColumns } from '@/lib/queries/patient-columns'
  * - insuranceClaims has no providerId/serviceDate -- "service date" is derived from the linked charge.
  */
 
-// Both derive from the Date object's LOCAL getters/formatters -- never mix
-// toISOString() (UTC) with toLocaleTimeString() (local) here, since for an
-// appointment within the ~UTC-offset window of local midnight the two would
-// disagree about which calendar day it falls on (a real bug caught in
-// review: an appointment shortly after local midnight could show a date one
-// day earlier than the time displayed next to it).
+// Both derive from the same IST (Asia/Kolkata) view of the instant, so the
+// date and time columns always agree -- never the server's own zone.
 function formatDate(d: Date): string {
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return istDateOf(new Date(d))
 }
 function formatTime(d: Date): string {
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  return formatIstTime(d)
 }
 
 export async function listAllAppointmentsReport() {
