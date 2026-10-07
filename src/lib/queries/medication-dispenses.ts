@@ -6,6 +6,8 @@ import { invalidateChargesList } from '@/lib/queries/charges'
 import { MAX_LINE_QUANTITY, lineTaxablePaise } from '@/lib/billing/amounts'
 import { getBillingSettings } from '@/lib/queries/billing-settings'
 import { lockPatientBilling } from '@/lib/queries/charge-capture'
+import { logAudit } from '@/lib/audit'
+import type { Session } from '@/lib/auth'
 
 export interface DispenseInput {
   patientId: string
@@ -121,7 +123,8 @@ export interface DispenseChargeResult {
 // medicationDispenses.chargeId is the real backstop; this conditional WHERE
 // is what turns a race into a clean rollback instead of a
 // constraint-violation 500.
-export async function createChargeForDispense(input: DispenseChargeInput): Promise<DispenseChargeResult> {
+// `session` (the route always passes it): the audit row is written on the same transaction.
+export async function createChargeForDispense(input: DispenseChargeInput, session?: Session): Promise<DispenseChargeResult> {
   const db = getDb()
   // SP4: the bill also becomes one charge line, which caps a line at MAX_LINE_QUANTITY units.
   if (input.procedureCode.units > MAX_LINE_QUANTITY) {
@@ -174,6 +177,7 @@ export async function createChargeForDispense(input: DispenseChargeInput): Promi
         createdByName: input.createdByName,
       }).returning({ id: chargeLines.id })
 
+      if (session) await logAudit(session, 'logged a bill for a dispensed medication', input.patientId, `charge=${created.id} line=${line.id}`, tx)
       return { chargeId: created.id, lineId: line.id }
     })
 

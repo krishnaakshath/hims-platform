@@ -6,7 +6,6 @@ import { liveDiagnosis, withCodeValue } from '@/lib/queries/diagnoses' // SP6
 import { getDb } from '@/db/client'
 import { diagnoses, patients } from '@/db/schema'
 import { requireSession } from '@/lib/auth'
-import { logAudit } from '@/lib/audit'
 import { getDispenseById, createChargeForDispense } from '@/lib/queries/medication-dispenses'
 import { MAX_AMOUNT_PAISE } from '@/lib/tariff/validation'
 
@@ -73,10 +72,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       chargeCents: parsed.data.unitChargeCents,
     },
     amountCents,
-  })
+  }, session)
 
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 })
 
-  await logAudit(session, 'logged a bill for a dispensed medication', dispense.patientId, `charge=${result.chargeId} line=${result.lineId}`)
+  // The audit row was written on the billing transaction.
   return NextResponse.json({ chargeId: result.chargeId }, { status: 201 })
 }

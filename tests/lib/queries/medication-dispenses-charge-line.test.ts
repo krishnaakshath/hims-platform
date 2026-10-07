@@ -118,4 +118,23 @@ describe.skipIf(!process.env.DATABASE_URL)('pharmacy dispense charge line (DB)',
     expect(r).toEqual({ ok: false, error: 'This dispense is too large to bill as one line (more than 1000 units)' })
     expect(await getDb().select().from(charges).where(eq(charges.patientId, PID))).toEqual([])
   })
+
+  it('writes its audit row on the same transaction, only when the bill is created', async () => {
+    const { getDb, auditLog, eq, asc } = await m()
+    const session = { userId: null, name: 'Test Pharmacist', role: 'pharmacy' as const }
+    const d = await dispense()
+    const { md } = await m()
+    const input = {
+      dispenseId: d.id, patientId: PID, providerName: 'Dr Test', dateOfService: '2099-06-01', serviceDate: '2099-06-01', createdByName: 'Test Pharmacist',
+      diagnosisCode: { code: 'I10', description: 'Hypertension' },
+      procedureCode: { code: 'J3490', description: 'Unclassified drugs', units: d.quantity, chargeCents: 250 },
+      amountCents: d.quantity * 250,
+    }
+    const r = await md.createChargeForDispense(input, session)
+    if (r.ok && r.chargeId) fx.charges.push(r.chargeId)
+    expect(await md.createChargeForDispense(input, session)).toMatchObject({ ok: false })
+    const rows = await getDb().select().from(auditLog).where(eq(auditLog.patientId, PID)).orderBy(asc(auditLog.id))
+    expect(rows.map((a) => `${a.action}|${a.details}`)).toEqual([`logged a bill for a dispensed medication|charge=${r.chargeId} line=${r.lineId}`])
+    await getDb().delete(auditLog).where(eq(auditLog.patientId, PID))
+  })
 })
