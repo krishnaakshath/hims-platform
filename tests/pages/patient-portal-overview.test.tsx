@@ -2,9 +2,11 @@ import { describe, it, expect, vi } from 'vitest'
 import PatientPortalOverviewPage from '@/app/patient-portal/(authenticated)/page'
 import { render, screen } from '@testing-library/react'
 import { getPatientPortalData } from '@/lib/queries/patient-portal'
+import { getPortalFollowUps } from '@/lib/queries/follow-ups'
 
 vi.mock('@/lib/patient-session', () => ({ requirePatientSessionOrRedirect: vi.fn(async () => ({ patientId: 'RD-0001' })) }))
 vi.mock('@/lib/patient-portal-audit', () => ({ logPatientPortalAction: vi.fn(async () => undefined) }))
+vi.mock('@/lib/queries/follow-ups', () => ({ getPortalFollowUps: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/broadcasts', () => ({ listBroadcastsForPatient: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/patient-portal', () => ({
   getPatientPortalData: vi.fn(async () => ({
@@ -93,5 +95,33 @@ describe('Patient dashboard (patient-portal overview)', () => {
     const jsx = await PatientPortalOverviewPage()
     const { container } = render(jsx)
     expect(container.querySelector('section[aria-labelledby="your-details-heading"]')!.textContent).toMatch(/Aadhaar\s*Not on file/)
+  })
+
+  it('renders Your follow-up among the action items when one is open', async () => {
+    vi.mocked(getPortalFollowUps).mockResolvedValueOnce([
+      { dueDate: '2026-10-21', windowStart: '2026-10-18', windowEnd: '2026-10-28', status: 'scheduled', appointmentStartsAt: new Date('2026-10-21T19:00:00Z'), doctorName: 'Dr. K' },
+    ])
+    const jsx = await PatientPortalOverviewPage()
+    const { container } = render(jsx)
+    const nudge = container.querySelector('[data-testid="patient-action-items"]')!
+    expect(nudge.textContent).toContain('Your follow-up')
+    expect(nudge.textContent).toContain('22 Oct 2026, 12:30 am with Dr. K')
+  })
+
+  it('shows the card as the only action item when nothing else needs attention', async () => {
+    const base = await vi.mocked(getPatientPortalData)('RD-0001')
+    vi.mocked(getPatientPortalData).mockResolvedValueOnce({ ...base!, upcomingAppointments: [], forms: [] })
+    vi.mocked(getPortalFollowUps).mockResolvedValueOnce([
+      { dueDate: '2026-10-21', windowStart: '2026-10-18', windowEnd: '2026-10-28', status: 'planned', appointmentStartsAt: null, doctorName: 'Dr. K' },
+    ])
+    const jsx = await PatientPortalOverviewPage()
+    const { container } = render(jsx)
+    expect(container.querySelector('[data-testid="patient-action-items"]')!.textContent).toContain('Your follow-up')
+  })
+
+  it('has no follow-up card when none is open', async () => {
+    const jsx = await PatientPortalOverviewPage()
+    render(jsx)
+    expect(screen.queryByText('Your follow-up')).toBeNull()
   })
 })
