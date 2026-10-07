@@ -10,7 +10,7 @@ import {
   EMPTY_REGISTRATION_FORM, serverFieldErrors, type RegistrationFormState, type ContactDraft,
 } from '@/components/registration/registration-form-state'
 import { formatAbhaNumber, normalizeAbhaNumber } from '@/lib/india/abha'
-import { GENDERS, MARITAL_STATUSES, BLOOD_GROUPS, LANGUAGES } from '@/lib/india/reference'
+import { GENDERS, MARITAL_STATUSES, BLOOD_GROUPS, LANGUAGES, ABHA_UNAVAILABLE_REASONS } from '@/lib/india/reference'
 import type { ProfileView } from './PatientProfilePanel'
 
 const opt = (s: string) => (s.trim() === '' ? undefined : s)
@@ -49,13 +49,57 @@ const contactsPayload = (cs: ContactDraft[]) => cs.map((c) => ({
   kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, ...(opt(c.addressText) ? { addressText: c.addressText } : {}),
 }))
 
+// Optional-at-registration fields may be cleared (sent as null); the required
+// ones are sent as typed so the server reports an empty value on the field.
+const CLEARABLE = ['maritalStatus', 'bloodGroup', 'occupation', 'religion', 'preferredLanguage', 'email', 'phone', 'addressLine2', 'mlcNumber'] as const
+const REQUIRED = ['gender', 'nationality', 'addressLine1', 'city', 'district', 'stateCode', 'pinCode'] as const
+
+type Baseline = RegistrationFormState & { abhaMode: 'provided' | 'unavailable' }
+
+function initialAbhaMode(p: ProfileView): 'provided' | 'unavailable' {
+  return p.abhaUnavailableReason && !p.abhaNumber && !p.abhaAddress ? 'unavailable' : 'provided'
+}
+
+/** Only the fields that differ from what is on file -- phone and legacy values are never rewritten unless edited. */
+function changedProfileFields(form: RegistrationFormState, base: Baseline): { body: Record<string, unknown>; abhaProblem: string | null } {
+  const body: Record<string, unknown> = {}
+  for (const k of REQUIRED) if (form[k].trim() !== base[k].trim()) body[k] = form[k].trim()
+  for (const k of CLEARABLE) if (form[k].trim() !== base[k].trim()) body[k] = form[k].trim() === '' ? null : form[k].trim()
+  if (form.isMlc !== base.isMlc) {
+    body.isMlc = form.isMlc
+    if (form.isMlc && form.mlcNumber.trim() !== '') body.mlcNumber = form.mlcNumber.trim()
+  }
+  let abhaProblem: string | null = null
+  const abhaChanged = form.abhaMode !== base.abhaMode
+    || (form.abhaMode === 'provided'
+      ? form.abhaNumber !== base.abhaNumber || form.abhaAddress !== base.abhaAddress
+      : form.abhaUnavailableReason !== base.abhaUnavailableReason || form.abhaUnavailableNote !== base.abhaUnavailableNote)
+  if (abhaChanged) {
+    if (form.abhaMode === 'unavailable') {
+      if (!form.abhaUnavailableReason) abhaProblem = 'Select a reason ABHA is not available.'
+      else body.abha = { status: 'unavailable', reason: form.abhaUnavailableReason, ...(opt(form.abhaUnavailableNote.trim()) ? { note: form.abhaUnavailableNote.trim() } : {}) }
+    } else {
+      const number = opt(form.abhaNumber.trim()), address = opt(form.abhaAddress.trim())
+      if (!number && !address) abhaProblem = 'Enter an ABHA number or address, or mark ABHA as not available.'
+      else body.abha = { status: 'provided', ...(number ? { abhaNumber: normalizeAbhaNumber(number) } : {}), ...(address ? { abhaAddress: address } : {}) }
+    }
+  }
+  return { body, abhaProblem }
+}
+
+async function errorOf(res: Response, fallback: string): Promise<{ message: string; data: unknown }> {
+  const data = (await res.json().catch(() => null)) as { error?: string } | null
+  return { message: data?.error ?? fallback, data }
+}
+
 // Edits what staff may change after registration: demographics, address,
 // ABHA, the MLC flag and contacts. Aadhaar has its own panel/route; name and
-// date of birth are not editable here.
+// date of birth are not editable here. Profile and contacts are two
+// independent requests; the outcome message says which of them was saved.
 export function EditPatientProfileModal({ patient, onClose }: { patient: ProfileView; onClose: () => void }) {
   const router = useRouter()
-  const [initial] = useState(() => initialForm(patient))
-  const [form, setForm] = useState(initial)
+  const [baseline, setBaseline] = useState<Baseline>(() => ({ ...initialForm(patient), abhaMode: initialAbhaMode(patient) }))
+  const [form, setForm] = useState<RegistrationFormState>(() => ({ ...initialForm(patient), abhaMode: initialAbhaMode(patient) }))
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [message, setMessage] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -63,46 +107,53 @@ export function EditPatientProfileModal({ patient, onClose }: { patient: Profile
   const update = <K extends keyof RegistrationFormState>(k: K, v: RegistrationFormState[K]) => setForm((f) => ({ ...f, [k]: v }))
 
   async function save() {
-    setSaving(true)
     setMessage(null)
     setErrors({})
-    const abhaChanged = form.abhaNumber !== initial.abhaNumber || form.abhaAddress !== initial.abhaAddress
-    const abhaNumber = opt(form.abhaNumber), abhaAddress = opt(form.abhaAddress)
-    const profile: Record<string, unknown> = {
-      gender: opt(form.gender), maritalStatus: opt(form.maritalStatus), bloodGroup: opt(form.bloodGroup),
-      occupation: opt(form.occupation), nationality: opt(form.nationality), religion: opt(form.religion),
-      preferredLanguage: opt(form.preferredLanguage), email: opt(form.email), phone: opt(form.phone),
-      addressLine1: opt(form.addressLine1), addressLine2: opt(form.addressLine2), city: opt(form.city),
-      district: opt(form.district), stateCode: opt(form.stateCode), pinCode: opt(form.pinCode),
-      isMlc: form.isMlc, mlcNumber: form.isMlc ? opt(form.mlcNumber) : undefined,
-      abha: abhaChanged && (abhaNumber || abhaAddress)
-        ? { status: 'provided', ...(abhaNumber ? { abhaNumber: normalizeAbhaNumber(abhaNumber) } : {}), ...(abhaAddress ? { abhaAddress } : {}) }
-        : undefined,
-    }
-    const body = Object.fromEntries(Object.entries(profile).filter(([, v]) => v !== undefined))
-    const contactsChanged = JSON.stringify(contactsPayload(form.contacts)) !== JSON.stringify(contactsPayload(initial.contacts))
+    const { body, abhaProblem } = changedProfileFields(form, baseline)
+    if (abhaProblem) { setErrors({ abha: abhaProblem }); return }
+    const contactsChanged = JSON.stringify(contactsPayload(form.contacts)) !== JSON.stringify(contactsPayload(baseline.contacts))
+    const profileChanged = Object.keys(body).length > 0
+    if (!profileChanged && !contactsChanged) { onClose(); return }
+
+    setSaving(true)
     const headers = { 'Content-Type': 'application/json' }
+    const call = async (url: string, method: string, payload: unknown): Promise<Response | null> => {
+      try { return await fetch(url, { method, headers, body: JSON.stringify(payload) }) } catch { return null }
+    }
     try {
-      const res = await fetch(`/api/patients/${patient.id}/profile`, { method: 'PATCH', headers, body: JSON.stringify(body) })
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null
-        setErrors(serverFieldErrors(data))
-        setMessage(data?.error ?? 'Could not save the profile. Please try again.')
+      const [pres, cres] = await Promise.all([
+        profileChanged ? call(`/api/patients/${patient.id}/profile`, 'PATCH', body) : Promise.resolve(undefined),
+        contactsChanged ? call(`/api/patients/${patient.id}/contacts`, 'PUT', { contacts: contactsPayload(form.contacts) }) : Promise.resolve(undefined),
+      ])
+      const profileOk = pres === undefined ? null : pres?.ok === true
+      const contactsOk = cres === undefined ? null : cres?.ok === true
+      let profileFailure: string | null = null, contactsFailure: string | null = null
+      if (profileOk === false) {
+        const e = pres ? await errorOf(pres, 'Could not save the profile.') : { message: 'Could not save the profile. Please try again.', data: null }
+        setErrors(serverFieldErrors(e.data)); profileFailure = e.message
+      }
+      if (contactsOk === false) {
+        const e = cres ? await errorOf(cres, 'Could not save the contacts.') : { message: 'Could not save the contacts. Please try again.', data: null }
+        contactsFailure = e.message
+      }
+
+      // Remember what is now on file so a retry resends only what failed.
+      setBaseline((b) => ({
+        ...b,
+        ...(profileOk ? { ...form, contacts: b.contacts } : {}),
+        ...(contactsOk ? { contacts: form.contacts } : {}),
+      }))
+
+      if (!profileFailure && !contactsFailure) { onClose(); router.refresh(); return }
+      if (profileFailure && contactsFailure) {
+        setMessage(`Nothing was saved. Profile: ${profileFailure} Contacts: ${contactsFailure}`)
         return
       }
-      if (contactsChanged) {
-        const cres = await fetch(`/api/patients/${patient.id}/contacts`, { method: 'PUT', headers, body: JSON.stringify({ contacts: contactsPayload(form.contacts) }) })
-        if (!cres.ok) {
-          const data = (await cres.json().catch(() => null)) as { error?: string } | null
-          setMessage(`Profile saved, but contacts were not: ${data?.error ?? 'please try again.'}`)
-          router.refresh()
-          return
-        }
-      }
-      onClose()
+      if (profileOk === null) { setMessage(contactsFailure); return }
+      if (contactsOk === null) { setMessage(profileFailure); return }
+      if (contactsFailure) setMessage(`Profile changes were saved. Contacts were not saved: ${contactsFailure}`)
+      else setMessage(`Contacts were saved. Profile changes were not saved: ${profileFailure}`)
       router.refresh()
-    } catch {
-      setMessage('Could not save the profile. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -138,13 +189,28 @@ export function EditPatientProfileModal({ patient, onClose }: { patient: Profile
           <section aria-label="ABHA" className="space-y-3">
             <SectionHeading>ABHA</SectionHeading>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="ABHA number" error={errors.abha}>
-                {(p) => <input {...p} inputMode="numeric" autoComplete="off" value={form.abhaNumber} onChange={(e) => update('abhaNumber', e.target.value.replace(/[^\d\s-]/g, '').slice(0, 17))} className={INPUT_CLASS} />}
-              </Field>
-              <Field label="ABHA address">
-                {(p) => <input {...p} autoComplete="off" autoCapitalize="none" placeholder="name@abdm" value={form.abhaAddress} onChange={(e) => update('abhaAddress', e.target.value)} className={INPUT_CLASS} />}
-              </Field>
+              {form.abhaMode === 'provided' ? (
+                <>
+                  <Field label="ABHA number" error={errors.abha}>
+                    {(p) => <input {...p} inputMode="numeric" autoComplete="off" value={form.abhaNumber} onChange={(e) => update('abhaNumber', e.target.value.replace(/[^\d\s-]/g, '').slice(0, 17))} className={INPUT_CLASS} />}
+                  </Field>
+                  <Field label="ABHA address">
+                    {(p) => <input {...p} autoComplete="off" autoCapitalize="none" placeholder="name@abdm" value={form.abhaAddress} onChange={(e) => update('abhaAddress', e.target.value)} className={INPUT_CLASS} />}
+                  </Field>
+                </>
+              ) : (
+                <>
+                  <SelectField label="Reason ABHA is not available" value={form.abhaUnavailableReason} onChange={(v) => update('abhaUnavailableReason', v)} options={ABHA_UNAVAILABLE_REASONS} error={errors.abha} />
+                  <Field label={form.abhaUnavailableReason === 'other' ? 'Note (required)' : 'Note (optional)'}>
+                    {(p) => <input {...p} autoComplete="off" value={form.abhaUnavailableNote} onChange={(e) => update('abhaUnavailableNote', e.target.value)} className={INPUT_CLASS} />}
+                  </Field>
+                </>
+              )}
             </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.abhaMode === 'unavailable'} onChange={(e) => update('abhaMode', e.target.checked ? 'unavailable' : 'provided')} />
+              ABHA not available
+            </label>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.isMlc} onChange={(e) => update('isMlc', e.target.checked)} />
               Medico-legal case (MLC)

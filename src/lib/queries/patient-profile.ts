@@ -102,7 +102,9 @@ export async function updatePatientProfile(anonId: string, input: PatientProfile
       abhaUnavailableReason: set.abhaUnavailableReason !== undefined ? set.abhaUnavailableReason : before.snapshot.abhaUnavailableReason,
       isMlc: input.isMlc ?? before.snapshot.isMlc,
     }
-    await logAudit(session, 'updated patient profile', anonId, null, tx)
+    // Field NAMES only -- never values (phone, address, ABHA are PHI).
+    const changed = Object.entries(input).filter(([, v]) => v !== undefined).map(([k]) => k)
+    await logAudit(session, `updated patient profile: ${changed.join(', ')}`, anonId, null, tx)
     for (const e of identityAuditEntries(before.snapshot, after, false)) await logAudit(session, e.action, anonId, e.details, tx)
     return true
   })

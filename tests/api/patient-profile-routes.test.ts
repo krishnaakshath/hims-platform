@@ -22,6 +22,10 @@ vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
 vi.mock('@/lib/cache', () => ({
   invalidateCache: vi.fn(async () => undefined),
   patientDetailCacheKey: vi.fn((id: string) => `patients:detail:${id}`),
+  patientListCacheKey: vi.fn((t: string | null) => `patients:list:${t ?? 'all'}`),
+  patientListCachePrefix: vi.fn(() => 'patients:list:'),
+  workbookListCacheKey: vi.fn(() => 'workbook:list'),
+  invalidateCacheByPrefix: vi.fn(async () => undefined),
 }))
 const dbInserts: unknown[] = []
 vi.mock('@/db/client', () => ({
@@ -38,7 +42,7 @@ import { PUT as putContacts } from '@/app/api/patients/[anonId]/contacts/route'
 import { PUT as putAadhaar } from '@/app/api/patients/[anonId]/aadhaar/route'
 import { PUT as putIdentity } from '@/app/api/patients/[anonId]/identity/route'
 import { getIdentitySnapshot, updatePatientProfile, replacePatientContacts, upsertPatientAadhaar } from '@/lib/queries/patient-profile'
-import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
+import { invalidateCache, invalidateCacheByPrefix, patientDetailCacheKey, patientListCacheKey, workbookListCacheKey } from '@/lib/cache'
 
 const AADHAAR_DIGITS = /2345|6789|0124/
 const ANON = 'RD-0001'
@@ -150,6 +154,26 @@ describe('PATCH /api/patients/[anonId]/profile', () => {
     expect(await res.json()).toEqual({ ok: true })
     expect(updatePatientProfile).toHaveBeenCalledWith(ANON, { city: 'Pune', isMlc: true, mlcNumber: 'MLC-1' }, expect.objectContaining({ role: 'frontdesk' }))
     expect(invalidateCache).toHaveBeenCalledWith(patientDetailCacheKey('RD-0001'))
+  })
+
+  it('PATCH profile also invalidates every patient list cache (name/phone are cached there) and the workbook list', async () => {
+    await patchProfile(req('PATCH', 'profile', { phone: '9876543210' }), ctx)
+    expect(invalidateCache).toHaveBeenCalledWith(patientListCacheKey(null))
+    expect(invalidateCacheByPrefix).toHaveBeenCalledWith('patients:list:')
+    expect(invalidateCache).toHaveBeenCalledWith(workbookListCacheKey())
+  })
+
+  it('rejects name and dob (not editable after registration)', async () => {
+    for (const body of [{ name: 'New Name' }, { dob: '1980-01-01' }]) {
+      expect((await patchProfile(req('PATCH', 'profile', body), ctx)).status).toBe(400)
+    }
+    expect(updatePatientProfile).not.toHaveBeenCalled()
+  })
+
+  it('accepts null to clear optional fields, including a null MLC number for a non-MLC patient', async () => {
+    const res = await patchProfile(req('PATCH', 'profile', { occupation: null, mlcNumber: null }), ctx)
+    expect(res.status).toBe(200)
+    expect(updatePatientProfile).toHaveBeenCalledWith(ANON, { occupation: null, mlcNumber: null }, expect.anything())
   })
 
   it('lets crc and admin edit the profile', async () => {

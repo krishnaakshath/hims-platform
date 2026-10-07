@@ -82,11 +82,21 @@ describe.skipIf(!process.env.DATABASE_URL)('patient profile queries (DB)', () =>
 
     const audit = await auditFor(id)
     expect(audit).toEqual([
-      { action: 'updated patient profile', details: null },
+      { action: 'updated patient profile: city, isMlc, mlcNumber, abha', details: null },
       { action: 'set ABHA number', details: null },
       { action: 'set ABHA address', details: null },
       { action: 'set MLC flag', details: null },
     ])
+  })
+
+  it('updatePatientProfile clears optional fields with null and audits field names, never values', async () => {
+    const id = await fixturePatient({ occupation: 'Teacher', email: 'secret.person@example.org', phone: '+919812345678' })
+    await updatePatientProfile(id, patientProfileUpdateSchema.parse({ occupation: null, email: null, phone: null }), SESSION)
+    const [p] = await getDb().select().from(patients).where(eq(patients.id, id))
+    expect(p).toMatchObject({ occupation: null, email: null, phone: null })
+    const audit = await auditFor(id)
+    expect(audit[0].action).toBe('updated patient profile: occupation, email, phone')
+    expect(JSON.stringify(audit)).not.toMatch(/Teacher|secret\.person|9812345678/)
   })
 
   it('updatePatientProfile with ABHA unavailable nulls number/address; clearing MLC nulls its number', async () => {
@@ -94,7 +104,7 @@ describe.skipIf(!process.env.DATABASE_URL)('patient profile queries (DB)', () =>
     await updatePatientProfile(id, patientProfileUpdateSchema.parse({ isMlc: false, abha: { status: 'unavailable', reason: 'other', note: 'no phone' } }), SESSION)
     const [p] = await getDb().select().from(patients).where(eq(patients.id, id))
     expect(p).toMatchObject({ abhaNumber: null, abhaAddress: null, abhaUnavailableReason: 'other', abhaUnavailableNote: 'no phone', isMlc: false, mlcNumber: null })
-    expect((await auditFor(id)).map((a) => a.action)).toEqual(['updated patient profile', 'removed ABHA number', 'removed ABHA address', 'recorded ABHA unavailable', 'cleared MLC flag'])
+    expect((await auditFor(id)).map((a) => a.action)).toEqual(['updated patient profile: isMlc, abha', 'removed ABHA number', 'removed ABHA address', 'recorded ABHA unavailable', 'cleared MLC flag'])
   })
 
   it('a duplicate ABHA address on another patient is a unique violation and rolls back the profile change and its audit', async () => {

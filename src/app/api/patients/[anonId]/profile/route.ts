@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
 import { PATIENT_PROFILE_EDIT_ROLES } from '@/lib/role-policy'
-import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
+import { invalidateCache, invalidateCacheByPrefix, patientDetailCacheKey, patientListCacheKey, patientListCachePrefix, workbookListCacheKey } from '@/lib/cache'
 import { getIdentitySnapshot, updatePatientProfile } from '@/lib/queries/patient-profile'
 import { patientProfileUpdateSchema } from '@/lib/validation/patient-registration'
 import { isUniqueViolation, pgConstraint, pgErrorCode } from '@/lib/db-errors'
@@ -30,7 +30,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   // Same rule as registration: an MLC number needs the MLC flag (as it will
   // stand after this update).
-  if (input.mlcNumber !== undefined && !(input.isMlc ?? current.snapshot.isMlc)) {
+  if (input.mlcNumber != null && !(input.isMlc ?? current.snapshot.isMlc)) {
     return NextResponse.json({ error: 'MLC number requires the MLC flag' }, { status: 400 })
   }
 
@@ -50,9 +50,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   try {
+    // The list/search/workbook caches hold phone and address fields too.
     await invalidateCache(patientDetailCacheKey(anonId))
+    await invalidateCache(patientListCacheKey(null))
+    await invalidateCacheByPrefix(patientListCachePrefix())
+    await invalidateCache(workbookListCacheKey())
   } catch (err) {
-    console.error(`[patients] detail cache invalidation failed (${err instanceof Error ? err.name : typeof err})`)
+    console.error(`[patients] cache invalidation failed (${err instanceof Error ? err.name : typeof err})`)
   }
   return NextResponse.json({ ok: true })
 }
