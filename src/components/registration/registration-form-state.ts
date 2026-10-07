@@ -6,6 +6,9 @@ export interface ContactDraft {
   relationship: string
   phone: string
   addressText: string
+  // Wave C P2-11: carried through a profile edit so saving contacts never
+  // wipes the primary flag already on file (registration does not set it).
+  isPrimary?: boolean
 }
 
 export interface RegistrationFormState {

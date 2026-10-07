@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import type { BookingRequestRow } from '@/lib/queries/booking-requests'
 import { normalizeVisitReason, VISIT_REASON_MAX_LENGTH } from '@/lib/notification-templates'
+import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
 import { istSlotString } from '@/lib/india-time'
 
 interface ProviderOption {
@@ -18,7 +19,9 @@ export function ConfirmBookingRequestModal({ request, providers, onClose }: {
   onClose: () => void
 }) {
   const router = useRouter()
-  const [patientId, setPatientId] = useState('')
+  // Wave C P0-04: found by name, UHID or mobile; the route gets the chart id.
+  const [patient, setPatient] = useState<PickedPatient | null>(null)
+  const patientId = patient?.id ?? ''
   const [providerId, setProviderId] = useState<number | ''>(request.preferredProviderId ?? '')
   const [date, setDate] = useState(request.preferredDateRangeStart)
   const [startTime, setStartTime] = useState('09:00')
@@ -61,8 +64,8 @@ export function ConfirmBookingRequestModal({ request, providers, onClose }: {
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">{request.requesterName} · requested {request.preferredDateRangeStart} to {request.preferredDateRangeEnd}</p>
-          <input value={patientId} onChange={(e) => setPatientId(e.target.value)} placeholder="Anonymous #, e.g. RD-0001" aria-label="Patient ID" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          <p className="text-xs text-muted-foreground">If {request.requesterName} is a genuinely new patient, add them via the Add Client flow first, then confirm this request against their new patient ID.</p>
+          <PatientPicker value={patient} onChange={setPatient} />
+          <p className="text-xs text-muted-foreground">If {request.requesterName} is a genuinely new patient, register them with Add Patient first, then find them here by name, UHID or mobile.</p>
           <select value={providerId} onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))} aria-label="Provider" className="w-full rounded-md border border-border px-3 py-2 text-sm">
             <option value="">Select a provider…</option>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}

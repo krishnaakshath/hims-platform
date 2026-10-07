@@ -320,4 +320,18 @@ export const PAGE_GATES: PageGateCase[] = [
     props: { searchParams: Promise.resolve({ ids: '1' }) },
     allowed: ['admin', 'crc', 'pi'],
   },
+  // Wave C P1-14: OPD token slip -- CHECK_IN_ROLES (whoever may check in prints the token).
+  {
+    route: '/print/token/[encounterId]',
+    load: () => import('@/app/print/token/[encounterId]/page'),
+    props: { params: Promise.resolve({ encounterId: '1' }) },
+    allowed: ['frontdesk', 'admin', 'crc'],
+  },
+  // Wave C: registration slip / UHID card -- REGISTRATION_ROLES.
+  {
+    route: '/print/registration/[anonId]',
+    load: () => import('@/app/print/registration/[anonId]/page'),
+    props: { params: Promise.resolve({ anonId: 'RD-0001' }) },
+    allowed: ['admin', 'frontdesk'],
+  },
 ]

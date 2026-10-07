@@ -25,8 +25,10 @@ function initialForm(p: ProfileView): RegistrationFormState {
     stateCode: p.stateCode ?? '', pinCode: p.pinCode ?? '',
     abhaNumber: p.abhaNumber && /^\d{14}$/.test(p.abhaNumber) ? formatAbhaNumber(p.abhaNumber) : p.abhaNumber ?? '',
     abhaAddress: p.abhaAddress ?? '',
+    // Wave C P2-11: the unavailable reason/note on file are prefilled.
+    abhaUnavailableReason: p.abhaUnavailableReason ?? '', abhaUnavailableNote: p.abhaUnavailableNote ?? '',
     isMlc: p.isMlc, mlcNumber: p.mlcNumber ?? '',
-    contacts: p.contacts.map((c) => ({ kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, addressText: c.addressText ?? '' })),
+    contacts: p.contacts.map((c) => ({ kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, addressText: c.addressText ?? '', isPrimary: c.isPrimary })),
   }
 }
 
@@ -45,8 +47,10 @@ function SelectField({ label, value, onChange, options, error }: {
   )
 }
 
+// Wave C P2-11: isPrimary is sent back so a contacts save keeps the flag on file.
 const contactsPayload = (cs: ContactDraft[]) => cs.map((c) => ({
   kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, ...(opt(c.addressText) ? { addressText: c.addressText } : {}),
+  ...(c.isPrimary ? { isPrimary: true } : {}),
 }))
 
 // Optional-at-registration fields may be cleared (sent as null); the required
@@ -63,12 +67,14 @@ function initialAbhaMode(p: ProfileView): 'provided' | 'unavailable' {
 /** Only the fields that differ from what is on file -- phone and legacy values are never rewritten unless edited. */
 function changedProfileFields(form: RegistrationFormState, base: Baseline): { body: Record<string, unknown>; abhaProblem: string | null } {
   const body: Record<string, unknown> = {}
-  for (const k of REQUIRED) if (form[k].trim() !== base[k].trim()) body[k] = form[k].trim()
+  for (const k of REQUIRED) if (form[k].trim() !== base[k].trim()) body[k] = k === 'nationality' ? form[k].trim().toUpperCase() : form[k].trim()
   for (const k of CLEARABLE) if (form[k].trim() !== base[k].trim()) body[k] = form[k].trim() === '' ? null : form[k].trim()
   if (form.isMlc !== base.isMlc) {
     body.isMlc = form.isMlc
     if (form.isMlc && form.mlcNumber.trim() !== '') body.mlcNumber = form.mlcNumber.trim()
   }
+  // Wave C P2-11: un-flagging MLC clears its number server-side; never send one with it.
+  if (!form.isMlc) delete body.mlcNumber
   let abhaProblem: string | null = null
   const abhaChanged = form.abhaMode !== base.abhaMode
     || (form.abhaMode === 'provided'
@@ -96,7 +102,7 @@ async function errorOf(res: Response, fallback: string): Promise<{ message: stri
 // ABHA, the MLC flag and contacts. Aadhaar has its own panel/route; name and
 // date of birth are not editable here. Profile and contacts are two
 // independent requests; the outcome message says which of them was saved.
-export function EditPatientProfileModal({ patient, onClose }: { patient: ProfileView; onClose: () => void }) {
+export function EditPatientProfileModal({ patient, onClose, canUnflagMlc = false }: { patient: ProfileView; onClose: () => void; canUnflagMlc?: boolean }) {
   const router = useRouter()
   const [baseline, setBaseline] = useState<Baseline>(() => ({ ...initialForm(patient), abhaMode: initialAbhaMode(patient) }))
   const [form, setForm] = useState<RegistrationFormState>(() => ({ ...initialForm(patient), abhaMode: initialAbhaMode(patient) }))
@@ -174,6 +180,9 @@ export function EditPatientProfileModal({ patient, onClose }: { patient: Profile
               <Field label="Occupation" error={errors.occupation}>
                 {(p) => <input {...p} value={form.occupation} onChange={(e) => update('occupation', e.target.value)} className={INPUT_CLASS} />}
               </Field>
+              <Field label="Nationality (country code)" error={errors.nationality}>
+                {(p) => <input {...p} autoComplete="off" maxLength={2} value={form.nationality} onChange={(e) => update('nationality', e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase())} className={INPUT_CLASS} />}
+              </Field>
               <Field label="Religion" error={errors.religion}>
                 {(p) => <input {...p} value={form.religion} onChange={(e) => update('religion', e.target.value)} className={INPUT_CLASS} />}
               </Field>
@@ -212,9 +221,22 @@ export function EditPatientProfileModal({ patient, onClose }: { patient: Profile
               ABHA not available
             </label>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={form.isMlc} onChange={(e) => update('isMlc', e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={form.isMlc}
+                disabled={baseline.isMlc && !canUnflagMlc}
+                aria-describedby={baseline.isMlc && !canUnflagMlc ? 'mlc-unflag-hint' : undefined}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  // Unticking discards the number (the server clears it too).
+                  setForm((f) => ({ ...f, isMlc: on, mlcNumber: on ? f.mlcNumber : '' }))
+                }}
+              />
               Medico-legal case (MLC)
             </label>
+            {baseline.isMlc && !canUnflagMlc && (
+              <p id="mlc-unflag-hint" className="text-xs text-muted-foreground">Only an administrator can clear the MLC flag.</p>
+            )}
             {form.isMlc && (
               <Field label="MLC number" error={errors.mlcNumber}>
                 {(p) => <input {...p} autoComplete="off" value={form.mlcNumber} onChange={(e) => update('mlcNumber', e.target.value)} className={INPUT_CLASS} />}

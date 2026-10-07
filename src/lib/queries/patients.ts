@@ -8,7 +8,7 @@ import {
   // SP3
   encounters, followUpOrders,
 } from '@/db/schema'
-import { desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { desc, eq, inArray, sql } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
@@ -199,6 +199,8 @@ export interface PharmacyEpisode {
 export interface PharmacyPatientView {
   id: string
   name: string
+  // Wave C: the counter identifies a patient by UHID, not the chart id.
+  uhid: string | null
   dob: string
   currentProvider: string | null
   diagnoses: { id: number; code: string; description: string }[]
@@ -275,11 +277,15 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
     .select({
       id: patients.id,
       name: sql<string>`patients.name`,
+      uhid: patients.uhid,
       dob: sql<string>`patients.dob::text`,
       currentProvider: patients.currentProvider,
     })
     .from(patients)
-    .where(sql`lower(trim(${patients.id})) = lower(trim(${trimmed}))`)
+    // Wave C: chart id or UHID, both case-insensitive; a chart-id match wins.
+    .where(sql`lower(trim(${patients.id})) = lower(trim(${trimmed})) or lower(${patients.uhid}) = lower(${trimmed})`)
+    .orderBy(sql`(lower(trim(${patients.id})) = lower(trim(${trimmed}))) desc`)
+    .limit(1)
   if (!patientRow) return null
 
   const dx = await db
@@ -339,6 +345,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
   return {
     id: patientRow.id,
     name: patientRow.name,
+    uhid: patientRow.uhid ?? null,
     dob: patientRow.dob,
     currentProvider: patientRow.currentProvider,
     diagnoses: dx,
