@@ -9,6 +9,7 @@ import {
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
+  House, // SP5
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
@@ -23,7 +24,7 @@ type Icon = React.ComponentType<{ className?: string }>
 // a matching PAGE_GATES row will fail that suite.
 //
 // Per RBAC spec:
-//  frontdesk  — check-in, assignments, beds, booking; NO billing, NO labs, NO messages, NO trials, NO staff
+//  frontdesk  — check-in, assignments, beds, booking, home-collection booking (no lab results); NO billing, NO labs, NO messages, NO trials, NO staff
 //  billing    — billing section only; NO clinical routes whatsoever
 //  pharmacy   — pharmacy routes + Messages (to confirm a dispense with the prescriber); NO patients page, NO labs, NO staff
 //  pi/doctor  — clinical workflow: My Patients, Patients, Calendar, Client Forms, Labs, Staff directory (view-only); NO billing
@@ -74,6 +75,9 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   // NOT frontdesk -- front desk's job is registration/check-in, not lab
   // results; explicit product direction removed their prior worklist access).
   { href: '/labs', label: 'Labs', icon: TestTube2, roles: ['admin', 'crc', 'pi', 'labs'] as Role[] },
+  // SP5: home-collection day board (HOME_COLLECTION_BOOKING_ROLES): booking logistics, no lab results.
+  { href: '/home-collections', label: 'Home Collection', icon: House, roles: ['admin', 'frontdesk', 'labs'] as Role[] },
+  // end SP5
 
   // Staff directory — admin/crc/pi (pi view-only; NOT frontdesk, NOT billing, NOT pharmacy, NOT labs)
   { href: '/staff', label: 'Staff', icon: IdCard, roles: ['crc', 'admin', 'pi'] as Role[] },
