@@ -308,6 +308,8 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/tariffs/room-categories', load: () => import('@/app/(dashboard)/tariffs/room-categories/page'), allowed: ['admin', 'billing'] },
   { route: '/tariffs/import', load: () => import('@/app/(dashboard)/tariffs/import/page'), allowed: ['admin', 'billing'] },
   { route: '/settings', load: () => import('@/app/(dashboard)/settings/page'), allowed: ['admin', 'pi'] },
+  // Wave B P1-05: price lookup -- TARIFF_LOOKUP_ROLES (LeftNav NAV_TRAILING_ITEMS /price-lookup).
+  { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
   // Wave B P1-01: own account (MFA method, self-reset, capabilities) -- ACCOUNT_ROLES = every staff role.
   { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs'] },
   // Outside (dashboard), so the page-file walk does not require it: the

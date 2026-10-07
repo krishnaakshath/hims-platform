@@ -127,6 +127,19 @@ describe('LeftNav', () => {
     expect(screen.getByRole('link', { name: /experience surveys.*demo/i })).toHaveAttribute('href', '/experience-surveys')
   })
 
+  it('shows Price Lookup to admin, billing, crc and frontdesk only', () => {
+    for (const role of ['admin', 'billing', 'crc', 'frontdesk'] as const) {
+      const { unmount } = render(<LeftNav role={role} />)
+      expect(screen.getByRole('link', { name: /price lookup/i })).toHaveAttribute('href', '/price-lookup')
+      unmount()
+    }
+    for (const role of ['pi', 'pharmacy', 'labs'] as const) {
+      const { unmount } = render(<LeftNav role={role} />)
+      expect(screen.queryByRole('link', { name: /price lookup/i })).not.toBeInTheDocument()
+      unmount()
+    }
+  })
+
   it('shows the decline pill on Assignments for frontdesk', () => {
     render(<LeftNav role="frontdesk" badges={{ '/front-desk/assignments': 2 }} />)
     expect(within(screen.getByRole('link', { name: /assignments/i })).getByText('2')).toBeInTheDocument()
