@@ -38,13 +38,13 @@ export interface FollowUpWorklistProps {
   departments: { id: number; name: string }[]
   todayIso: string
   canAct: boolean
-  /** True when the query hit its row cap, so the list may be incomplete. */
+  /** The live query hit its row cap (raw count), so the live buckets may be incomplete. */
   capped: boolean
   /** True when the separate missed list hit its own cap (only the most recent missed are shown). */
-  missedCapped?: boolean
+  missedCapped: boolean
 }
 
-export function FollowUpWorklist({ rows, counts, filters, providers, departments, todayIso, canAct, capped, missedCapped = false }: FollowUpWorklistProps) {
+export function FollowUpWorklist({ rows, counts, filters, providers, departments, todayIso, canAct, capped, missedCapped }: FollowUpWorklistProps) {
   const router = useRouter()
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const close = () => setDialog(null)

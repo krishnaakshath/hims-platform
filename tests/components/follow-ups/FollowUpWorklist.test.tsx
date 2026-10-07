@@ -16,6 +16,7 @@ const BASE = {
   todayIso: '2026-10-20',
   canAct: true,
   capped: false,
+  missedCapped: false,
 }
 
 describe('FollowUpWorklist', () => {
@@ -55,6 +56,7 @@ describe('FollowUpWorklist', () => {
   it('shows the cap notice and the empty state', () => {
     render(<FollowUpWorklist {...BASE} capped rows={[]} />)
     expect(screen.getByText(/showing first 500/i)).toBeInTheDocument()
+    expect(screen.queryByText(/showing first 200/i)).toBeNull()
     expect(screen.getByText('No follow-ups in this list.')).toBeInTheDocument()
   })
 
@@ -88,5 +90,19 @@ describe('FollowUpWorklist', () => {
     const dialog = within(screen.getByRole('dialog'))
     expect(dialog.getByLabelText(/^date/i)).toHaveValue('2026-10-20')
     expect(dialog.getByLabelText(/doctor/i)).toHaveValue('7')
+  })
+
+  it('the Missed list has its own 200-row notice, driven by missedCapped', () => {
+    render(<FollowUpWorklist {...BASE} filters={{ ...BASE.filters, bucket: 'missed' }} missedCapped />)
+    expect(screen.getByText(/showing first 200/i)).toBeInTheDocument()
+    expect(screen.queryByText(/showing first 500/i)).toBeNull()
+    cleanup()
+    render(<FollowUpWorklist {...BASE} filters={{ ...BASE.filters, bucket: 'missed' }} />)
+    expect(screen.queryByText(/showing first/i)).toBeNull()
+  })
+
+  it('the live 500 notice is not driven by the missed flag', () => {
+    render(<FollowUpWorklist {...BASE} missedCapped />)
+    expect(screen.queryByText(/showing first/i)).toBeNull()
   })
 })
