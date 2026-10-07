@@ -52,6 +52,11 @@ const NAV_GAPS: Record<string, string> = {}
 
 // Every gap tag was removed by the task that closed it. A row re-tagged
 // later would silently run as `it.fails`; this keeps the tables honest.
+it('PAGE_GATES has one row per route (a duplicate would run the same gate twice and hide a missing row)', () => {
+  const routes = PAGE_GATES.map((r) => r.route)
+  expect(routes.filter((r, i) => routes.indexOf(r) !== i)).toEqual([])
+})
+
 it('no PAGE_GATES row or nav entry still carries a gap tag', () => {
   expect(PAGE_GATES.filter((r) => r.gap).map((r) => r.route)).toEqual([])
   expect(NAV_GAPS).toEqual({})

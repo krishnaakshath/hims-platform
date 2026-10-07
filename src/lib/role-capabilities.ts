@@ -23,6 +23,7 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Log and manage a trial\'s adverse events, drug accountability entries, and regulatory binder documents',
       'Transfer an admitted patient between rooms',
       'Record or update a patient\'s Aadhaar with consent, seeing only its last 4 digits',
+      'Look up the current price of a service',
     ],
   },
   pi: {
@@ -74,6 +75,7 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Transfer an admitted patient between rooms',
       'Discharge an admitted patient and sign the discharge summary',
       'Manage the department master and the UHID prefix',
+      'Manage the service catalogue, tariffs, packages and room categories, including CSV tariff import',
     ],
   },
   frontdesk: {
@@ -88,6 +90,7 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Confirm or decline public booking requests into real appointments',
       'Transfer an admitted patient between rooms',
       'Record a patient\'s Aadhaar with consent or the reason it was declined (the number is never shown back)',
+      'Look up the current price of a service',
     ],
   },
   pharmacy: {
@@ -110,7 +113,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Manage Patient Collections',
       'Manage Insurance Collections',
       'Verify patient insurance eligibility',
-      'View Charges and Payments'
+      'View Charges and Payments',
+      'Manage the service catalogue, tariffs, packages and room categories, including CSV tariff import',
     ],
   },
   labs: {

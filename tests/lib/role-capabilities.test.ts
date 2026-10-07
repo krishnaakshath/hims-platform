@@ -84,4 +84,14 @@ describe('ROLE_CAPABILITIES', () => {
     // settings/uhid-prefix (MASTER_DATA_ADMIN_ROLES) and the department master
     expect(has('admin', /department master and the UHID prefix/)).toBe(true)
   })
+
+  it('states the SP2 tariff capabilities exactly for the roles the tariff gates admit', () => {
+    // role-policy.ts TARIFF_MANAGE_ROLES / TARIFF_LOOKUP_ROLES
+    for (const role of ['admin', 'billing'] as Role[]) expect(has(role, /service catalogue, tariffs, packages and room categories/)).toBe(true)
+    for (const role of ['crc', 'frontdesk'] as Role[]) {
+      expect(has(role, /Look up the current price of a service/)).toBe(true)
+      expect(has(role, /Manage the service catalogue/)).toBe(false)
+    }
+    for (const role of ['pi', 'pharmacy', 'labs'] as Role[]) expect(has(role, /tariff|price of a service/i)).toBe(false)
+  })
 })

@@ -16,6 +16,8 @@ import {
   PATIENT_PROFILE_EDIT_ROLES,
   REGISTRATION_ROLES,
   SCHEDULING_ROLES,
+  TARIFF_LOOKUP_ROLES,
+  TARIFF_MANAGE_ROLES,
   TRIAL_CRITERIA_EDIT_ROLES,
   hasSearchScope,
 } from '@/lib/role-policy'
@@ -379,6 +381,17 @@ import { GET as listDepartmentsRoute, POST as postDepartment } from '@/app/api/d
 import { PATCH as patchDepartment } from '@/app/api/departments/[id]/route'
 import { PUT as putProvider } from '@/app/api/providers/[id]/route'
 import { GET as search } from '@/app/api/search/route'
+import { GET as listTariffServices, POST as postTariffService } from '@/app/api/tariff/services/route'
+import { PATCH as patchTariffService } from '@/app/api/tariff/services/[id]/route'
+import { GET as listRoomCategoriesRoute, POST as postRoomCategory } from '@/app/api/tariff/room-categories/route'
+import { PATCH as patchRoomCategory } from '@/app/api/tariff/room-categories/[id]/route'
+import { PUT as putRoomCategory } from '@/app/api/tariff/rooms/[id]/category/route'
+import { POST as postTariffRate } from '@/app/api/tariff/rates/route'
+import { PATCH as patchTariffRate } from '@/app/api/tariff/rates/[id]/route'
+import { POST as reviseTariffRate } from '@/app/api/tariff/rates/[id]/revise/route'
+import { PUT as putPackageItems } from '@/app/api/tariff/packages/[id]/items/route'
+import { GET as resolveTariff } from '@/app/api/tariff/resolve/route'
+import { POST as postTariffImport } from '@/app/api/tariff/import/route'
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -542,6 +555,21 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PATCH /api/departments/[id]', call: () => settle(() => patchDepartment(send('PATCH', `/api/departments/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
   // Provider profile (NMC/SMC, fee, department): MASTER_DATA_ADMIN_ROLES
   { name: 'PUT /api/providers/[id]', call: () => settle(() => putProvider(send('PUT', `/api/providers/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
+  // SP2 tariff master: TARIFF_LOOKUP_ROLES read the service search and room
+  // categories; every write is TARIFF_MANAGE_ROLES.
+  { name: 'GET /api/tariff/services', call: () => settle(() => listTariffServices(get('/api/tariff/services'))), allowed: [...TARIFF_LOOKUP_ROLES] },
+  { name: 'POST /api/tariff/services', call: () => settle(() => postTariffService(send('POST', '/api/tariff/services'))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'PATCH /api/tariff/services/[id]', call: () => settle(() => patchTariffService(send('PATCH', `/api/tariff/services/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'GET /api/tariff/room-categories', call: () => settle(() => listRoomCategoriesRoute(get('/api/tariff/room-categories'))), allowed: [...TARIFF_LOOKUP_ROLES] },
+  { name: 'POST /api/tariff/room-categories', call: () => settle(() => postRoomCategory(send('POST', '/api/tariff/room-categories'))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'PATCH /api/tariff/room-categories/[id]', call: () => settle(() => patchRoomCategory(send('PATCH', `/api/tariff/room-categories/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'PUT /api/tariff/rooms/[id]/category', call: () => settle(() => putRoomCategory(send('PUT', `/api/tariff/rooms/${BOGUS_ID}/category`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'POST /api/tariff/rates', call: () => settle(() => postTariffRate(send('POST', '/api/tariff/rates'))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'POST /api/tariff/rates/[id]/revise', call: () => settle(() => reviseTariffRate(send('POST', `/api/tariff/rates/${BOGUS_ID}/revise`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'PATCH /api/tariff/rates/[id]', call: () => settle(() => patchTariffRate(send('PATCH', `/api/tariff/rates/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'PUT /api/tariff/packages/[id]/items', call: () => settle(() => putPackageItems(send('PUT', `/api/tariff/packages/${BOGUS_ID}/items`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'GET /api/tariff/resolve', call: () => settle(() => resolveTariff(get('/api/tariff/resolve'))), allowed: [...TARIFF_LOOKUP_ROLES] },
+  { name: 'POST /api/tariff/import', call: () => settle(() => postTariffImport(send('POST', '/api/tariff/import'))), allowed: [...TARIFF_MANAGE_ROLES] },
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
@@ -559,7 +587,21 @@ const SP1_WRITE_GATES: { name: string; call: () => Promise<Response>; allowed: r
   { name: 'PUT /api/providers/[id]', call: () => putProvider(send('PUT', `/api/providers/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MASTER_DATA_ADMIN_ROLES },
   { name: 'PUT /api/settings/uhid-prefix', call: () => putUhidPrefix(send('PUT', '/api/settings/uhid-prefix', NOT_JSON)), allowed: MASTER_DATA_ADMIN_ROLES },
 ]
-describe.each(SP1_WRITE_GATES)('$name (deny before parse)', (c) => {
+// SP2 tariff writes: the same deny-before-parse contract.
+const SP2_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'POST /api/tariff/services', call: () => postTariffService(send('POST', '/api/tariff/services', NOT_JSON)), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'PATCH /api/tariff/services/[id]', call: () => patchTariffService(send('PATCH', `/api/tariff/services/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'POST /api/tariff/room-categories', call: () => postRoomCategory(send('POST', '/api/tariff/room-categories', NOT_JSON)), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'PATCH /api/tariff/room-categories/[id]', call: () => patchRoomCategory(send('PATCH', `/api/tariff/room-categories/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'PUT /api/tariff/rooms/[id]/category', call: () => putRoomCategory(send('PUT', `/api/tariff/rooms/${BOGUS_ID}/category`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'POST /api/tariff/rates', call: () => postTariffRate(send('POST', '/api/tariff/rates', NOT_JSON)), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'POST /api/tariff/rates/[id]/revise', call: () => reviseTariffRate(send('POST', `/api/tariff/rates/${BOGUS_ID}/revise`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'PATCH /api/tariff/rates/[id]', call: () => patchTariffRate(send('PATCH', `/api/tariff/rates/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'PUT /api/tariff/packages/[id]/items', call: () => putPackageItems(send('PUT', `/api/tariff/packages/${BOGUS_ID}/items`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
+  // The import route 415s anything but application/json, so this row declares it: the 400 then proves the body was parsed only after the gate.
+  { name: 'POST /api/tariff/import', call: () => postTariffImport(new NextRequest(url('/api/tariff/import'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: NOT_JSON })), allowed: TARIFF_MANAGE_ROLES },
+]
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role
