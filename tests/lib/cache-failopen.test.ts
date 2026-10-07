@@ -17,10 +17,12 @@ describe('cache fails open', () => {
   let err: ReturnType<typeof vi.spyOn>
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubEnv('KV_REST_API_URL', 'https://redis.example.test')
+    vi.stubEnv('KV_REST_API_TOKEN', 'dummy')
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     err = vi.spyOn(console, 'error').mockImplementation(() => {})
   })
-  afterEach(() => { warn.mockRestore(); err.mockRestore() })
+  afterEach(() => { warn.mockRestore(); err.mockRestore(); vi.unstubAllEnvs() })
 
   const logged = () => [...warn.mock.calls, ...err.mock.calls].flat().map(String).join(' ')
 
@@ -62,5 +64,19 @@ describe('cache fails open', () => {
     redis.del.mockRejectedValue(new Error('timeout'))
     await expect(invalidateCacheByPrefix('p:')).resolves.toBeUndefined()
     expect(err).toHaveBeenCalledTimes(2)
+  })
+
+  it('with no Redis configured: loads straight from the loader and never touches Redis', async () => {
+    vi.stubEnv('KV_REST_API_URL', '')
+    vi.stubEnv('KV_REST_API_TOKEN', '')
+    const loader = vi.fn().mockResolvedValue('db')
+    await expect(getOrSetCache('k', 60, loader)).resolves.toBe('db')
+    await invalidateCache('k')
+    await invalidateCacheByPrefix('p:')
+    expect(loader).toHaveBeenCalledTimes(1)
+    expect(redis.get).not.toHaveBeenCalled()
+    expect(redis.set).not.toHaveBeenCalled()
+    expect(redis.del).not.toHaveBeenCalled()
+    expect(redis.keys).not.toHaveBeenCalled()
   })
 })

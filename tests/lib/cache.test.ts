@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const store = new Map<string, unknown>()
 
@@ -13,7 +13,13 @@ vi.mock('@upstash/redis', () => ({
 import { getOrSetCache, invalidateCache } from '@/lib/cache'
 
 describe('getOrSetCache', () => {
-  beforeEach(() => store.clear())
+  beforeEach(() => {
+    store.clear()
+    // the cache is only active when Redis is configured
+    vi.stubEnv('KV_REST_API_URL', 'https://redis.example.test')
+    vi.stubEnv('KV_REST_API_TOKEN', 'dummy')
+  })
+  afterEach(() => vi.unstubAllEnvs())
 
   it('calls the loader and caches the result on a miss', async () => {
     const loader = vi.fn().mockResolvedValue({ hello: 'world' })
