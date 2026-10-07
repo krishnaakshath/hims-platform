@@ -82,7 +82,16 @@ export async function getAppointment(id: number): Promise<AppointmentWithDetails
   return row ? mapAppointmentRow(row) : null
 }
 
-export async function hasSchedulingConflict(providerId: number, startsAt: Date, endsAt: Date, excludeAppointmentId?: number): Promise<boolean> {
+// `executor` lets a caller run the check inside its own transaction (after
+// taking the per-provider advisory lock, as bookFollowUp does); omitted ->
+// the shared db, so existing callers are unchanged.
+export async function hasSchedulingConflict(
+  providerId: number,
+  startsAt: Date,
+  endsAt: Date,
+  excludeAppointmentId?: number,
+  executor: Pick<ReturnType<typeof getDb>, 'select'> = getDb(),
+): Promise<boolean> {
   const conditions = [
     eq(appointments.providerId, providerId),
     ne(appointments.status, 'cancelled'),
@@ -94,7 +103,7 @@ export async function hasSchedulingConflict(providerId: number, startsAt: Date, 
   // reject every reschedule as a "conflict" with the pre-change row.
   if (excludeAppointmentId !== undefined) conditions.push(ne(appointments.id, excludeAppointmentId))
 
-  const rows = await getDb()
+  const rows = await executor
     .select({ id: appointments.id })
     .from(appointments)
     .where(and(...conditions))
