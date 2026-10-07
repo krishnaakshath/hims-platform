@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { demoFeaturesEnabled, DEMO_NOT_CONFIGURED_BODY, DEMO_NOT_CONFIGURED_STATUS } from '@/lib/demo-features'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
@@ -23,7 +24,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // LeftNav.tsx:63 — { href: '/experience-surveys', roles: ['admin', 'crc'] }
   if (!['admin', 'crc'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
-  const review = await getReview(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const review = await getReview(numericId)
   if (!review) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   await logAudit(session, `viewed experience survey ${id}`, review.patientId)
   return NextResponse.json(review)
@@ -40,17 +43,21 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!demoFeaturesEnabled()) return NextResponse.json(DEMO_NOT_CONFIGURED_BODY, { status: DEMO_NOT_CONFIGURED_STATUS })
   const { id } = await params
 
-  const parsed = recordResponseSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = recordResponseSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid survey response payload', details: parsed.error.flatten() }, { status: 400 })
 
-  const existing = await getReview(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const existing = await getReview(numericId)
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (existing.status === 'completed') return NextResponse.json({ error: 'This survey response has already been recorded' }, { status: 409 })
 
   await getDb()
     .update(reviews)
     .set({ ratingOverall: parsed.data.ratingOverall, ratingFormsClarity: parsed.data.ratingFormsClarity, ratingCommunication: parsed.data.ratingCommunication, comments: parsed.data.comments ?? null, status: 'completed', respondedAt: new Date() })
-    .where(eq(reviews.id, Number(id)))
+    .where(eq(reviews.id, numericId))
 
   await invalidateReviewsList()
   await logAudit(session, 'recorded pre-screening experience survey response', existing.patientId)

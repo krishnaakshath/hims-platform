@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { formTemplates } from '@/db/schema'
@@ -34,7 +35,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (session instanceof NextResponse) return session
   if (!CLINICAL_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
-  const template = await getFormTemplate(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const template = await getFormTemplate(numericId)
   if (!template) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   await logAudit(session, `viewed form template ${id}`, null)
   return NextResponse.json(template)
@@ -46,7 +49,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!CLINICAL_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
 
-  const parsed = updateTemplateSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = updateTemplateSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid template payload', details: parsed.error.flatten() }, { status: 400 })
 
   // A raw FK violation on a bad folderId would surface as an opaque 500;
@@ -56,7 +61,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'No such folder' }, { status: 400 })
   }
 
-  await getDb().update(formTemplates).set(parsed.data).where(eq(formTemplates.id, Number(id)))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  await getDb().update(formTemplates).set(parsed.data).where(eq(formTemplates.id, numericId))
   await invalidateFormTemplatesList()
   await logAudit(session, `updated form template ${id}`, null)
   return NextResponse.json({ ok: true })

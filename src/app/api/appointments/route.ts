@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { SCHEDULING_ROLES } from '@/lib/role-policy'
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
 
   const providerIdsParam = url.searchParams.get('providerIds')
   const providerIds = providerIdsParam !== null
-    ? (providerIdsParam === '' ? [] : providerIdsParam.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))
+    ? (providerIdsParam === '' ? [] : providerIdsParam.split(',').map(parseId).filter((n): n is number => n !== null))
     : undefined
 
   const results = await listAppointmentsInRange(new Date(from), new Date(to), providerIds)
@@ -40,7 +41,9 @@ export async function POST(request: NextRequest) {
   if (session instanceof NextResponse) return session
   if (!SCHEDULING_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const parsed = createAppointmentSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = createAppointmentSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid appointment payload', details: parsed.error.flatten() }, { status: 400 })
 
   const startsAt = new Date(parsed.data.startsAt)

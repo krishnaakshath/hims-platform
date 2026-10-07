@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId } from '@/lib/http'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
@@ -11,8 +12,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!['admin', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const appointmentId = Number(id)
-  if (!Number.isInteger(appointmentId)) return NextResponse.json({ error: 'Invalid appointment id' }, { status: 400 })
+  const appointmentId = parseId(id)
+  if (appointmentId === null) return NextResponse.json({ error: 'Invalid appointment id' }, { status: 400 })
 
   const appointment = await getAppointment(appointmentId)
   if (!appointment) return NextResponse.json({ error: 'Appointment not found' }, { status: 404 })

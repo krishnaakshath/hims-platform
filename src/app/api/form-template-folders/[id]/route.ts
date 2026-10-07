@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -17,10 +18,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
   const { id } = await params
 
-  const parsed = renameFolderSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = renameFolderSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid folder payload', details: parsed.error.flatten() }, { status: 400 })
 
-  const renamed = await renameFormTemplateFolder(Number(id), parsed.data.name)
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const renamed = await renameFormTemplateFolder(numericId, parsed.data.name)
   if (!renamed) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   await invalidateFormTemplatesList()
@@ -36,7 +41,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   }
   const { id } = await params
 
-  const deleted = await deleteFormTemplateFolder(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const deleted = await deleteFormTemplateFolder(numericId)
   if (!deleted) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   await invalidateFormTemplatesList()
