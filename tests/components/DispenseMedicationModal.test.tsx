@@ -29,7 +29,7 @@ describe('DispenseMedicationModal', () => {
 
   it('keeps a patient fixed by the lookup screen read-only', () => {
     render(<DispenseMedicationModal medication={MED} initialPatientId="RD-0001" onClose={vi.fn()} />)
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: /patient/i })).not.toBeInTheDocument()
     expect(screen.getByLabelText(/patient/i)).toHaveAttribute('readonly')
   })
 })

@@ -6,7 +6,7 @@ const { mockRedirect } = vi.hoisted(() => ({ mockRedirect: vi.fn((url: string) =
 vi.mock('next/navigation', () => ({ redirect: mockRedirect }))
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => {}) }))
 
-const listAppointmentsInRange = vi.fn(async (_start: Date, _end: Date, _providerIds?: number[]) => [])
+const listAppointmentsInRange = vi.fn<(start: Date, end: Date, providerIds?: number[]) => Promise<never[]>>(async () => [])
 vi.mock('@/lib/queries/appointments', () => ({ listAppointmentsInRange }))
 
 const listActiveProviders = vi.fn(async () => [
@@ -19,6 +19,12 @@ const listPatientsWithStatus = vi.fn(async () => [
   { id: 'RD-0001', name: 'Maria Alvarez' },
 ])
 vi.mock('@/lib/queries/patients', () => ({ listPatientsWithStatus }))
+
+// Wave C: the calendar no longer ships the whole patient list to the client;
+// `?book=<chart id>` preselects one patient (minimal projection) for the
+// New Event modal (the patient page's "Book appointment" quick path).
+const getPickedPatient = vi.fn(async (id: string) => (id === 'RD-0001' ? { id: 'RD-0001', name: 'Maria Alvarez', uhid: 'UH1' } : null))
+vi.mock('@/lib/queries/search', () => ({ getPickedPatient }))
 
 beforeEach(() => { sessionRef.role = 'crc'; mockRedirect.mockClear() })
 
@@ -99,5 +105,29 @@ describe('/calendar page', () => {
 
     const [, , calledProviderIds] = listAppointmentsInRange.mock.calls[0]
     expect(calledProviderIds).toEqual([1, 2])
+  })
+})
+
+describe('/calendar page patient field (Wave C)', () => {
+  it('does not load the whole patient list', async () => {
+    listPatientsWithStatus.mockClear()
+    const { default: CalendarPage } = await import('@/app/(dashboard)/calendar/page')
+    await CalendarPage({ searchParams: Promise.resolve({}) })
+    expect(listPatientsWithStatus).not.toHaveBeenCalled()
+    expect(getPickedPatient).not.toHaveBeenCalled()
+  })
+
+  it('preselects the ?book= patient by chart id', async () => {
+    getPickedPatient.mockClear()
+    const { default: CalendarPage } = await import('@/app/(dashboard)/calendar/page')
+    await CalendarPage({ searchParams: Promise.resolve({ book: 'RD-0001' }) })
+    expect(getPickedPatient).toHaveBeenCalledWith('RD-0001')
+  })
+
+  it('ignores a malformed ?book= value without querying', async () => {
+    getPickedPatient.mockClear()
+    const { default: CalendarPage } = await import('@/app/(dashboard)/calendar/page')
+    await CalendarPage({ searchParams: Promise.resolve({ book: 'x'.repeat(80) }) })
+    expect(getPickedPatient).not.toHaveBeenCalled()
   })
 })

@@ -133,3 +133,12 @@ export async function lookupPatients(
   }))
   return { results, page, pageSize, hasMore: rows.length > pageSize }
 }
+
+/** A known chart id -> the picker's minimal { id, name, uhid } (quick paths that preselect a patient). */
+export async function getPickedPatient(anonId: string): Promise<{ id: string; name: string; uhid: string | null } | null> {
+  const [row] = await getDb()
+    .select({ id: patients.id, name: patients.name, uhid: patients.uhid })
+    .from(patients)
+    .where(sql`${patients.id} = ${anonId}`)
+  return row ? { id: row.id, name: row.name.trim(), uhid: row.uhid ?? null } : null
+}
