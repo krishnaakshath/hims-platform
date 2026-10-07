@@ -263,11 +263,19 @@ export async function updateService(id: number, patch: ServiceUpdateInput, audit
 
 // ---------- rates ----------
 
+const RATE_ORDER = [
+  asc(tariffRates.scope), asc(tariffRates.departmentId), asc(tariffRates.payerId), asc(tariffRates.roomCategoryId),
+  asc(tariffRates.ward), desc(tariffRates.validFrom), desc(tariffRates.id),
+]
+
 export async function listRatesForService(serviceId: number): Promise<RateRow[]> {
-  return rateSelect(getDb()).where(eq(tariffRates.serviceId, serviceId)).orderBy(
-    asc(tariffRates.scope), asc(tariffRates.departmentId), asc(tariffRates.payerId), asc(tariffRates.roomCategoryId),
-    asc(tariffRates.ward), desc(tariffRates.validFrom), desc(tariffRates.id),
-  )
+  return rateSelect(getDb()).where(eq(tariffRates.serviceId, serviceId)).orderBy(...RATE_ORDER)
+}
+
+/** Every rate of several services in one query: grouped by service id, then the per-service order. */
+export async function listRatesForServices(serviceIds: number[]): Promise<RateRow[]> {
+  if (serviceIds.length === 0) return []
+  return rateSelect(getDb()).where(inArray(tariffRates.serviceId, serviceIds)).orderBy(asc(tariffRates.serviceId), ...RATE_ORDER)
 }
 
 export async function getRate(id: number): Promise<RateRow | null> {

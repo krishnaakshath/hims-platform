@@ -6,7 +6,7 @@ import { isExclusionViolation } from '@/lib/db-errors'
 import { resolvePrice } from '@/lib/tariff/resolve'
 import type { Session } from '@/lib/auth'
 import {
-  TariffOverlapError, TariffPackageIntegrityError, commitRateImport, countServices, endRate, getImportLookups, updateService, commitServiceImport, createRate, getRate, getServiceByCode, listPackageItems,
+  TariffOverlapError, TariffPackageIntegrityError, commitRateImport, countServices, endRate, getImportLookups, listRatesForServices, updateService, commitServiceImport, createRate, getRate, getServiceByCode, listPackageItems,
   listRatesForService, listServices, listServicesWithCurrentPrices, loadPricingContext, replacePackageItems, reviseRate,
 } from '@/lib/queries/tariff'
 
@@ -359,5 +359,16 @@ describe.skipIf(!process.env.DATABASE_URL)('tariff query layer (DB)', () => {
     // Emptying the package makes the change allowed.
     await replacePackageItems(pkg, [])
     expect((await updateService(pkg, { category: 'procedure', hsnSac: '999311' }))?.category).toBe('procedure')
+  })
+
+  it('listRatesForServices loads several services in one query, in the per-service order', async () => {
+    const { deptId, serviceId } = await fixtures()
+    const s2 = await makeService('TEST_SP2_Q7_S2', deptId)
+    await createRate({ serviceId, scope: 'base', amountPaise: 1, validFrom: '2026-01-01', validTo: '2026-01-31' }, 'tester')
+    await createRate({ serviceId, scope: 'base', amountPaise: 2, validFrom: '2026-02-01' }, 'tester')
+    await createRate({ serviceId: s2, scope: 'base', amountPaise: 3, validFrom: '2026-01-01' }, 'tester')
+    const rows = await listRatesForServices([s2, serviceId])
+    expect(rows.map((r) => [r.serviceId, r.amountPaise])).toEqual([[serviceId, 2], [serviceId, 1], [s2, 3]])
+    expect(await listRatesForServices([])).toEqual([])
   })
 })

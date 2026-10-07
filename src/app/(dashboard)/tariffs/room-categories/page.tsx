@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
-import { listRatesForService, listRoomCategories, listRoomsWithCategory, listServices } from '@/lib/queries/tariff'
+import { listRatesForServices, listRoomCategories, listRoomsWithCategory, listServices } from '@/lib/queries/tariff'
 import { todayIsoIn } from '@/lib/india-time'
 import { RoomCategoriesPanel } from '@/components/tariff/RoomCategoriesPanel'
 import { RoomTariffMatrix } from '@/components/tariff/RoomTariffMatrix'
@@ -17,7 +17,7 @@ export default async function RoomCategoriesPage() {
     listRoomsWithCategory(),
     listServices({ category: 'room_rent', limit: 200 }),
   ])
-  const ratesPerService = await Promise.all(roomServices.map((s) => listRatesForService(s.id)))
+  const rates = await listRatesForServices(roomServices.map((s) => s.id)) // one query, not one per service
 
   return (
     <div className="space-y-8">
@@ -37,7 +37,7 @@ export default async function RoomCategoriesPage() {
           today={today}
           services={roomServices.map((s) => ({ id: s.id, code: s.code, name: s.name }))}
           categories={categories.filter((c) => c.isActive).map((c) => ({ id: c.id, code: c.code, name: c.name }))}
-          rates={ratesPerService.flat().map((r) => ({
+          rates={rates.map((r) => ({
             serviceId: r.serviceId, scope: r.scope, roomCategoryId: r.roomCategoryId, ward: r.ward,
             amountPaise: r.amountPaise, validFrom: r.validFrom, validTo: r.validTo, deactivated: r.deactivatedAt !== null,
           }))}
