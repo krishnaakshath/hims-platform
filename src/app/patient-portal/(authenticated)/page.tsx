@@ -36,6 +36,8 @@ function SummaryTile({ icon: Icon, value, label, color, href }: { icon: React.Co
   return href ? <Link href={href} className={`${className} hover:-translate-y-0.5`}>{content}</Link> : <div className={className}>{content}</div>
 }
 
+const ID_STATUS_LABEL = { on_file: 'On file', declined: 'Declined', not_recorded: 'Not on file' } as const
+
 function Detail({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="min-w-0">
@@ -134,7 +136,7 @@ export default async function PatientPortalOverviewPage() {
           <Detail label="ABHA number" value={data.profile.abhaNumberMasked} />
           <Detail label="Address" value={data.profile.addressSummary} />
           <Detail label="Emergency contact" value={data.profile.emergencyContactName} />
-          <Detail label="Aadhaar" value={data.profile.aadhaarOnFile ? 'On file' : 'Not on file'} />
+          <Detail label="Aadhaar" value={ID_STATUS_LABEL[data.profile.aadhaarStatus]} />
         </dl>
       </section>
     </div>

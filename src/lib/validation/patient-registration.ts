@@ -50,18 +50,27 @@ export const abhaInputSchema = z.discriminatedUnion('status', [
   }),
 ])
 
-const phoneField = z.string().transform((s, ctx) => {
-  const n = normalizePhone(s)
+const phoneWith = (opts: { allowLandline?: boolean }) => z.string().transform((s, ctx) => {
+  const n = normalizePhone(s, opts)
   if (n === null) { ctx.addIssue({ code: 'custom', message: 'Enter a valid phone number' }); return z.NEVER }
   return n
 })
+const phoneField = phoneWith({})
+// Contacts may be reached on an STD landline; the patient's own mobile may not.
+const contactPhoneField = phoneWith({ allowLandline: true })
+
+// Aadhaar must enter only through the consent flow, never free text (names,
+// addresses, notes, KYC document numbers). Fixed message; never echoes input.
+export const NO_AADHAAR_MESSAGE = 'Do not enter an Aadhaar number in this field'
+export const noAadhaar = (s: string) => !containsAadhaarLike(s)
+const safeText = (schema: z.ZodString) => schema.refine(noAadhaar, NO_AADHAAR_MESSAGE)
 
 export const contactInputSchema = z.object({
   kind: z.enum(['next_of_kin', 'guardian', 'emergency']),
-  name: z.string().trim().min(1).max(120),
+  name: safeText(z.string().trim().min(1).max(120)),
   relationship: z.enum(CONTACT_RELATIONSHIPS),
-  phone: phoneField,
-  addressText: z.string().max(300).optional(),
+  phone: contactPhoneField,
+  addressText: safeText(z.string().max(300)).optional(),
   isPrimary: z.boolean().optional(),
 })
 
@@ -74,25 +83,25 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a date as YYYY-MM
   .refine((s) => s <= todayIsoIn(), 'Date of birth cannot be in the future')
 
 export const demographicsShape = {
-  name: z.string().trim().min(1).max(200),
+  name: safeText(z.string().trim().min(1).max(200)),
   dob: isoDate,
   gender: z.enum(codes(GENDERS)),
   maritalStatus: z.enum(codes(MARITAL_STATUSES)).optional(),
   bloodGroup: z.enum(codes(BLOOD_GROUPS)).optional(),
-  occupation: z.string().max(100).optional(),
+  occupation: safeText(z.string().max(100)).optional(),
   nationality: z.string().regex(/^[A-Z]{2}$/, 'Use an ISO alpha-2 country code').default('IN'),
-  religion: z.string().max(60).optional(),
+  religion: safeText(z.string().max(60)).optional(),
   preferredLanguage: z.enum(codes(LANGUAGES)).optional(),
   email: z.email().optional(),
   phone: phoneField.optional(),
-  addressLine1: z.string().trim().min(1).max(200),
-  addressLine2: z.string().max(200).optional(),
-  city: z.string().trim().min(1).max(100),
-  district: z.string().trim().min(1).max(100),
+  addressLine1: safeText(z.string().trim().min(1).max(200)),
+  addressLine2: safeText(z.string().max(200)).optional(),
+  city: safeText(z.string().trim().min(1).max(100)),
+  district: safeText(z.string().trim().min(1).max(100)),
   stateCode: z.string().refine(isIndianStateCode, 'Select a valid state or union territory'),
   pinCode: z.string().refine(isValidPinCode, 'Enter a valid 6-digit PIN code'),
   isMlc: z.boolean().default(false),
-  mlcNumber: z.string().max(50).optional(),
+  mlcNumber: safeText(z.string().max(50)).optional(),
 }
 
 const GUARDIAN_MSG = 'A guardian contact is required for a patient under 18'
@@ -105,7 +114,7 @@ export const patientRegistrationSchema = z.object({
   ...demographicsShape,
   aadhaar: aadhaarInputSchema,
   abha: abhaInputSchema,
-  kyc: z.object({ docType: z.enum(KYC_DOC_TYPES), docNumber: z.string().trim().min(1).max(40) }).optional(),
+  kyc: z.object({ docType: z.enum(KYC_DOC_TYPES), docNumber: safeText(z.string().trim().min(1).max(40)) }).optional(),
   contacts: z.array(contactInputSchema).max(5).default([]),
   currentProvider: z.string().optional(),
   primaryPayerId: z.number().int().optional(),
@@ -120,10 +129,22 @@ export const patientRegistrationSchema = z.object({
   if (!v.isMlc && v.mlcNumber) ctx.addIssue({ code: 'custom', path: ['mlcNumber'], message: 'MLC number requires the MLC flag' })
 })
 
-// Partial updates must not inject defaults (nationality / isMlc).
+// Name and date of birth are fixed at registration; everything else is
+// optional here, and the optional-at-registration fields may be sent as null
+// to clear them. Partial updates must not inject defaults (nationality / isMlc).
+const NULLABLE_ON_UPDATE = ['maritalStatus', 'bloodGroup', 'occupation', 'religion', 'preferredLanguage', 'email', 'phone', 'addressLine2', 'mlcNumber'] as const
+const { name: _name, dob: _dob, ...editableDemographics } = demographicsShape // eslint-disable-line @typescript-eslint/no-unused-vars
 const partialDemographics = Object.fromEntries(
-  Object.entries(demographicsShape).map(([k, v]) => [k, (v instanceof z.ZodDefault ? v.unwrap() : v).optional()]),
-) as unknown as { [K in keyof typeof demographicsShape]: z.ZodOptional<z.ZodType<z.output<(typeof demographicsShape)[K]>>> }
+  Object.entries(editableDemographics).map(([k, v]) => {
+    const base = (v instanceof z.ZodDefault ? v.unwrap() : v) as z.ZodType
+    const unwrapped = base instanceof z.ZodOptional ? (base.unwrap() as z.ZodType) : base
+    return [k, ((NULLABLE_ON_UPDATE as readonly string[]).includes(k) ? unwrapped.nullable() : unwrapped).optional()]
+  }),
+) as unknown as {
+  [K in keyof typeof editableDemographics]: K extends (typeof NULLABLE_ON_UPDATE)[number]
+    ? z.ZodOptional<z.ZodNullable<z.ZodType<NonNullable<z.output<(typeof editableDemographics)[K]>>>>>
+    : z.ZodOptional<z.ZodType<z.output<(typeof editableDemographics)[K]>>>
+}
 
 export const patientProfileUpdateSchema = z.object({
   ...partialDemographics,

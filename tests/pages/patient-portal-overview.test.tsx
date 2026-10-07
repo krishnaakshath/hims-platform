@@ -16,7 +16,7 @@ vi.mock('@/lib/queries/patient-portal', () => ({
     unreadMessageCount: 2,
     profile: {
       uhid: 'UH-000042', abhaAddress: 'asha.rao@abdm', abhaNumberMasked: 'XX-XXXX-XXXX-1234',
-      addressSummary: 'Pune, Pune, Maharashtra 411001', emergencyContactName: 'Ravi Rao', aadhaarOnFile: true,
+      addressSummary: 'Pune, Pune, Maharashtra 411001', emergencyContactName: 'Ravi Rao', aadhaarStatus: 'on_file',
     },
   })),
 }))
@@ -79,9 +79,17 @@ describe('Patient dashboard (patient-portal overview)', () => {
     expect(section.textContent).not.toMatch(/\b\d{4}\s?\d{4}\s?\d{4}\b/)
   })
 
+  it('says Declined for a declined Aadhaar, never the reason', async () => {
+    const base = await vi.mocked(getPatientPortalData)('RD-0001')
+    vi.mocked(getPatientPortalData).mockResolvedValueOnce({ ...base!, profile: { ...base!.profile, aadhaarStatus: 'declined' } })
+    const jsx = await PatientPortalOverviewPage()
+    const { container } = render(jsx)
+    expect(container.querySelector('section[aria-labelledby="your-details-heading"]')!.textContent).toMatch(/Aadhaar\s*Declined/)
+  })
+
   it('says Not on file for Aadhaar when none is recorded', async () => {
     const base = await vi.mocked(getPatientPortalData)('RD-0001')
-    vi.mocked(getPatientPortalData).mockResolvedValueOnce({ ...base!, profile: { ...base!.profile, aadhaarOnFile: false } })
+    vi.mocked(getPatientPortalData).mockResolvedValueOnce({ ...base!, profile: { ...base!.profile, aadhaarStatus: 'not_recorded' } })
     const jsx = await PatientPortalOverviewPage()
     const { container } = render(jsx)
     expect(container.querySelector('section[aria-labelledby="your-details-heading"]')!.textContent).toMatch(/Aadhaar\s*Not on file/)

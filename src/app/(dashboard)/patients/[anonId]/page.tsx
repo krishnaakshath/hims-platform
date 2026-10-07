@@ -200,8 +200,9 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
           <div>
             <h1 className="text-xl font-bold text-foreground">{name}</h1>
             <p className="flex items-center gap-1 font-mono text-xs text-muted-foreground">
-              <span>{patient.uhid ?? patient.id} · DOB {patient.dob}</span>
+              {patient.uhid && <span>UHID {patient.uhid}</span>}
               {patient.uhid && <CopyUhidButton uhid={patient.uhid} />}
+              <span>{patient.uhid ? '· ' : ''}Chart ID {patient.id} · DOB {patient.dob}</span>
             </p>
           </div>
         </div>

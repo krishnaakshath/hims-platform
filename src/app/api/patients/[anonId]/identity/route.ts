@@ -9,12 +9,13 @@ import { logAudit } from '@/lib/audit'
 import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
 import { encryptSensitive } from '@/lib/crypto'
 import { KYC_DOC_TYPES } from '@/lib/india/reference'
+import { noAadhaar, NO_AADHAAR_MESSAGE } from '@/lib/validation/patient-registration'
 
 const verifySchema = z.object({
   // Indian KYC documents (Aadhaar is never a KYC type). Existing 'state_id'
   // rows stay readable: the DB enum value still exists.
   idType: z.enum(KYC_DOC_TYPES),
-  idNumber: z.string().min(1),
+  idNumber: z.string().min(1).refine(noAadhaar, NO_AADHAAR_MESSAGE),
 }).strict()
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
@@ -23,7 +24,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!IDENTITY_VERIFY_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { anonId } = await params
 
-  const parsed = verifySchema.safeParse(await request.json())
+  const parsed = verifySchema.safeParse(await request.json().catch(() => null))
   if (!parsed.success) return NextResponse.json({ error: 'Invalid identity verification payload', details: parsed.error.flatten() }, { status: 400 })
 
   const [existing] = await getDb().select().from(identityVerifications).where(eq(identityVerifications.patientId, anonId))

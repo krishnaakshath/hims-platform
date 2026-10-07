@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
+import { REGISTRATION_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { listAvailableRooms } from '@/lib/queries/rooms'
@@ -28,7 +29,7 @@ export default async function FrontDeskCheckInPage() {
             POST /api/patients gate (admin/frontdesk), surfaced right here
             instead of only on /patients, so front desk doesn't have to
             leave their main workflow screen to do it. */}
-        {['admin', 'frontdesk'].includes(session.role) && <AddPatientButton />}
+        {REGISTRATION_ROLES.includes(session.role) && <AddPatientButton />}
       </div>
     </div>
   )

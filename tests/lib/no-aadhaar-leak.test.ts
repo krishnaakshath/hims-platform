@@ -135,11 +135,11 @@ describe('no Aadhaar leak (static)', () => {
     }
   })
 
-  it('the patient portal sees only the on-file flag', () => {
+  it('the patient portal sees only the status', () => {
     const portal = [...walk('src/app/patient-portal'), ...walk('src/app/api/patient-portal'), 'src/lib/queries/patient-portal.ts']
     for (const f of portal) {
       const tokens = read(f).match(/\w*aadhaar\w*/gi) ?? []
-      for (const t of tokens) expect(['aadhaarOnFile', 'isAadhaarOnFile', 'Aadhaar'], `${f}: ${t}`).toContain(t)
+      for (const t of tokens) expect(['aadhaarStatus', 'getAadhaarStatus', 'Aadhaar'], `${f}: ${t}`).toContain(t)
     }
   })
 

@@ -27,6 +27,22 @@ describe('reference data', () => {
   })
 })
 
+describe('normalizePhone strictness', () => {
+  it.each([
+    ['+91 98765 4321', null], ['+91987654321012', null], ['+915876543210', null], ['+91', null],
+    ['00919876543210', '+919876543210'], ['0091 98765 43210', '+919876543210'], ['0044 7700 900123', '+447700900123'],
+    ['+12025550123', '+12025550123'], ['+1234567', null], ['+1234567890123456', null],
+  ])('mobile %s', (i, o) => expect(normalizePhone(i)).toBe(o))
+  it('rejects a landline for a mobile but accepts STD landlines when allowed', () => {
+    expect(normalizePhone('022 2345 6789')).toBeNull()
+    expect(normalizePhone('02223456789', { allowLandline: true })).toBe('+912223456789')
+    expect(normalizePhone('+91 22 2345 6789', { allowLandline: true })).toBe('+912223456789')
+    expect(normalizePhone('011-2345-6789', { allowLandline: true })).toBe('+911123456789')
+    expect(normalizePhone('+91 22 2345 678', { allowLandline: true })).toBeNull()
+    expect(normalizePhone('+912223456789')).toBeNull()
+  })
+})
+
 describe('normalizePhone', () => {
   it.each([['9876543210', '+919876543210'], ['+91 98765 43210', '+919876543210'], ['09876543210', '+919876543210'], ['919876543210', '+919876543210'], ['+447700900123', '+447700900123'], ['5876543210', null], ['12345', null], ['', null], ['abc', null]])('phone %s', (i, o) => expect(normalizePhone(i)).toBe(o))
 })

@@ -108,18 +108,18 @@ describe.skipIf(!process.env.DATABASE_URL)('patient read model never carries Aad
       abhaNumberMasked: `XX-XXXX-XXXX-${RUN.slice(-4)}`,
       addressSummary: 'Pune, Pune, Maharashtra 411001',
       emergencyContactName: 'Sita Kumar',
-      aadhaarOnFile: true,
+      aadhaarStatus: 'on_file',
     })
     const json = JSON.stringify(data)
     expect(json).not.toMatch(/0124|last4|masked"|aadhaarEncrypted|declineReason/)
     expect(json).not.toContain(ciphertext)
   })
 
-  it('the portal profile for a sparse record: nulls, and Aadhaar not on file (declined)', async () => {
+  it('the portal profile for a sparse record: nulls, and Aadhaar declined', async () => {
     const id = await fixturePatient({ district: null })
     await recordDecline(id)
     const data = await getPatientPortalData(id)
-    expect(data?.profile).toEqual({ uhid: null, abhaAddress: null, abhaNumberMasked: null, addressSummary: null, emergencyContactName: null, aadhaarOnFile: false })
+    expect(data?.profile).toEqual({ uhid: null, abhaAddress: null, abhaNumberMasked: null, addressSummary: null, emergencyContactName: null, aadhaarStatus: 'declined' })
     expect(JSON.stringify(data)).not.toMatch(/secretnote-rm|other/)
   })
 })

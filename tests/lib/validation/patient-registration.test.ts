@@ -94,7 +94,55 @@ describe('patientRegistrationSchema', () => {
   })
 })
 
+describe('Aadhaar-shaped input screening', () => {
+  const AADHAAR = '2345 6789 0124'
+  const bad = (over: Record<string, unknown>) => {
+    const r = patientRegistrationSchema.safeParse(valid(over))
+    expect(r.success).toBe(false)
+    expect(JSON.stringify(r.error!.issues)).not.toMatch(/2345|6789|0124/)
+    expect(JSON.stringify(r.error!.issues)).toContain('Do not enter an Aadhaar number in this field')
+  }
+  it('rejects an Aadhaar number in free-text fields without echoing it', () => {
+    bad({ name: `Asha ${AADHAAR}` })
+    bad({ addressLine1: AADHAAR })
+    bad({ addressLine2: AADHAAR })
+    bad({ occupation: AADHAAR })
+    bad({ religion: AADHAAR })
+    bad({ isMlc: true, mlcNumber: AADHAAR })
+    bad({ kyc: { docType: 'pan', docNumber: AADHAAR } })
+    bad({ contacts: [{ ...guardian, name: AADHAAR }] })
+    bad({ contacts: [{ ...guardian, addressText: `near ${AADHAAR}` }] })
+  })
+  it('accepts ordinary values', () => {
+    expect(patientRegistrationSchema.safeParse(valid({ addressLine2: 'Flat 12, Block 3' })).success).toBe(true)
+  })
+})
+
+describe('contact phones', () => {
+  it('accepts an STD landline for a contact but not for the patient mobile', () => {
+    expect(contactsReplaceSchema.safeParse({ contacts: [{ ...guardian, phone: '022 2345 6789' }] }).success).toBe(true)
+    expect(patientRegistrationSchema.safeParse(valid({ phone: '022 2345 6789' })).success).toBe(false)
+  })
+  it('rejects +91 with a wrong digit count', () => {
+    expect(contactsReplaceSchema.safeParse({ contacts: [{ ...guardian, phone: '+91 98765 4321' }] }).success).toBe(false)
+  })
+})
+
 describe('patientProfileUpdateSchema', () => {
+  it('does not allow name or dob after registration', () => {
+    expect(patientProfileUpdateSchema.safeParse({ name: 'New' }).success).toBe(false)
+    expect(patientProfileUpdateSchema.safeParse({ dob: '1980-01-01' }).success).toBe(false)
+  })
+  it('accepts null to clear the optional fields only', () => {
+    const cleared = { maritalStatus: null, bloodGroup: null, occupation: null, religion: null, preferredLanguage: null, email: null, phone: null, addressLine2: null, mlcNumber: null }
+    expect(patientProfileUpdateSchema.parse(cleared)).toEqual(cleared)
+    for (const k of ['gender', 'addressLine1', 'city', 'district', 'stateCode', 'pinCode', 'nationality', 'isMlc']) {
+      expect(patientProfileUpdateSchema.safeParse({ [k]: null }).success, k).toBe(false)
+    }
+  })
+  it('screens Aadhaar-shaped free text', () => {
+    expect(patientProfileUpdateSchema.safeParse({ occupation: '2345 6789 0124' }).success).toBe(false)
+  })
   it('rejects an aadhaar key', () => { expect(patientProfileUpdateSchema.safeParse({ aadhaar: { status: 'declined', reason: 'emergency' } }).success).toBe(false) })
   it('rejects uhid, contacts and kyc', () => {
     for (const k of [{ uhid: 'X' }, { contacts: [] }, { kyc: { docType: 'pan', docNumber: '1' } }]) expect(patientProfileUpdateSchema.safeParse(k).success).toBe(false)

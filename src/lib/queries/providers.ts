@@ -39,8 +39,3 @@ export async function updateProviderProfile(id: number, patch: ProviderProfileIn
   await invalidateCache(providersListCacheKey())
   return updated ?? null
 }
-
-/** Name-only edit, kept for existing callers. */
-export async function updateProviderName(id: number, name: string) {
-  return updateProviderProfile(id, { name })
-}

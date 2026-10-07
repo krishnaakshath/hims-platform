@@ -3,13 +3,13 @@ import { patients, patientContacts, diagnoses, medicationEpisodes, appointments,
 import { eq, desc, asc, gte, lt, and, sql } from 'drizzle-orm'
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { getUnreadCountForPatient } from '@/lib/queries/messages'
-import { isAadhaarOnFile } from '@/lib/queries/patient-profile'
+import { getAadhaarStatus } from '@/lib/queries/patient-profile'
 import { stateName } from '@/lib/india/reference'
 import { publicPatientColumns, patientPortalConfiguredSql } from '@/lib/queries/patient-columns'
 
 /**
  * The patient's own identity details for the portal's "Your details"
- * section. Aadhaar is a bare on-file flag -- the portal never sees last4,
+ * section. Aadhaar is a bare status (on file / declined / not recorded) -- the portal never sees last4,
  * the decline reason or anything else from the Aadhaar record (spec §3).
  * The ABHA number is masked to its last 4.
  */
@@ -19,7 +19,7 @@ export interface PortalProfile {
   abhaNumberMasked: string | null
   addressSummary: string | null
   emergencyContactName: string | null
-  aadhaarOnFile: boolean
+  aadhaarStatus: 'on_file' | 'declined' | 'not_recorded'
 }
 
 type ProfileSource = Pick<typeof patients.$inferSelect, 'uhid' | 'abhaAddress' | 'abhaNumber' | 'city' | 'district' | 'stateCode' | 'pinCode'>
@@ -43,7 +43,7 @@ async function getPortalProfile(patient: ProfileSource, patientId: string): Prom
     abhaNumberMasked: patient.abhaNumber && /^\d{14}$/.test(patient.abhaNumber) ? `XX-XXXX-XXXX-${patient.abhaNumber.slice(-4)}` : null,
     addressSummary: addressSummary(patient),
     emergencyContactName: emergency?.name ?? null,
-    aadhaarOnFile: await isAadhaarOnFile(patientId),
+    aadhaarStatus: await getAadhaarStatus(patientId),
   }
 }
 

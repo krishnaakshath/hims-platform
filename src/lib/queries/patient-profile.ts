@@ -3,7 +3,7 @@ import { getDb } from '@/db/client'
 import { patients, patientContacts, patientAadhaar } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
-import { aadhaarConflictSet, identityAuditEntries, toAadhaarSummary, type IdentitySnapshot, type NewPatientAadhaarRow } from '@/lib/patient-identity'
+import { aadhaarConflictSet, identityAuditEntries, toAadhaarSummary, type AadhaarStatus, type IdentitySnapshot, type NewPatientAadhaarRow } from '@/lib/patient-identity'
 import type { ContactInput, PatientProfileUpdateInput } from '@/lib/validation/patient-registration'
 
 // Post-registration writes to the patient master (SP1). Each write runs in
@@ -54,11 +54,15 @@ export async function getIdentitySnapshot(anonId: string): Promise<{ dob: string
   return readIdentity(getDb(), anonId, false)
 }
 
-// Status-only probe for viewers that may know nothing more than "on file"
-// (the patient portal). Selects last4 solely to test presence; returns a bool.
-export async function isAadhaarOnFile(anonId: string): Promise<boolean> {
-  const [a] = await getDb().select({ aadhaarLast4: patientAadhaar.aadhaarLast4 }).from(patientAadhaar).where(eq(patientAadhaar.patientId, anonId))
-  return a?.aadhaarLast4 != null
+// Status-only probe for viewers that may know nothing more than the status
+// (the patient portal). Selects last4/declineReason solely to derive the
+// status; returns that status and nothing else.
+export async function getAadhaarStatus(anonId: string): Promise<AadhaarStatus> {
+  const [a] = await getDb().select({
+    aadhaarLast4: patientAadhaar.aadhaarLast4,
+    declineReason: patientAadhaar.declineReason,
+  }).from(patientAadhaar).where(eq(patientAadhaar.patientId, anonId))
+  return a?.aadhaarLast4 != null ? 'on_file' : a?.declineReason != null ? 'declined' : 'not_recorded'
 }
 
 // false = no such patient (nothing written, nothing audited). Only keys

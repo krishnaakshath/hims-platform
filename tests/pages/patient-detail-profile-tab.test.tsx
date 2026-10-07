@@ -55,11 +55,12 @@ describe('Patient detail — Profile tab', () => {
 
   it('shows the UHID on the header with a copy button, falling back to the id', async () => {
     const { screen } = await renderAs('admin')
-    expect(screen.getByText(/UH-000042 · DOB 1990-01-01/)).toBeInTheDocument()
+    expect(screen.getByText(/UHID UH-000042/)).toBeInTheDocument()
+    expect(screen.getByText(/Chart ID RD-0001 · DOB 1990-01-01/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /copy uhid/i })).toBeInTheDocument()
     cleanup()
     const r = await renderAs('admin', { ...DETAIL, uhid: null })
-    expect(r.screen.getByText(/RD-0001 · DOB/)).toBeInTheDocument()
+    expect(r.screen.getByText(/Chart ID RD-0001 · DOB/)).toBeInTheDocument()
     expect(r.screen.queryByRole('button', { name: /copy uhid/i })).not.toBeInTheDocument()
   })
 
