@@ -1,9 +1,9 @@
 // SP6 Task 13: the chart's "Visit coding" panel. Per recent visit: date, type and doctor, the
 // encounter coding status, its diagnoses and procedures with their coding chips, and its open
-// coding queries. Doctors (CODE_PROPOSE_ROLES) may propose while coding is open
+// coding queries. Doctors (CODE_PROPOSE_ROLES, pi only) may propose while coding is open
 // (`doctorMayPropose`: uncoded / in progress / queried); once the visit is coded or finalised they
 // are pointed at the query reply instead. CODING_QUERY_RESPOND_ROLES get a reply box. Everyone else
-// on the chart (crc) sees it read-only. Renders on the server (dates are formatted here with the
+// on the chart (crc, and admin apart from replies) sees it read-only. Renders on the server (dates are formatted here with the
 // fixed-zone IST formatters); only the forms are client components.
 import { CODE_SYSTEM_LABEL } from '@/lib/coding/code-systems'
 import { doctorMayPropose, type CodeEntryStatus } from '@/lib/coding/status'

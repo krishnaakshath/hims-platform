@@ -1,4 +1,4 @@
-// SP6 Task 13: the chart's "Visit coding" panel. Doctors (pi/admin) propose codes while coding is
+// SP6 Task 13: the chart's "Visit coding" panel. Doctors (pi) propose codes while coding is
 // open, answer coding queries, and crc sees everything read-only.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'

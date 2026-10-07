@@ -31,7 +31,7 @@ describe('SP6 coder role', () => {
   it('SP6 role constants match the plan table', () => {
     expect([...CODING_ROLES]).toEqual(['admin', 'coder'])
     expect([...CODING_ENTRY_ROLES]).toEqual(['admin', 'coder', 'pi'])
-    expect([...CODE_PROPOSE_ROLES]).toEqual(['admin', 'pi'])
+    expect([...CODE_PROPOSE_ROLES]).toEqual(['pi'])
     expect([...CODING_QUERY_RESPOND_ROLES]).toEqual(['admin', 'pi', 'coder'])
     expect([...CODE_LOOKUP_ROLES]).toEqual(['admin', 'coder', 'pi', 'crc', 'billing'])
     expect([...CODE_SYSTEM_ADMIN_ROLES]).toEqual(['admin'])

@@ -167,4 +167,12 @@ describe('a pi reaches the whole chart', () => {
     expect(crc.screen.getByRole('heading', { name: /visit coding/i })).toBeInTheDocument()
     expect(crc.screen.queryByRole('button', { name: /propose diagnosis/i })).toBeNull()
   })
+
+  it('gives admin a reply box but no propose controls (admin codes in the coding workspace)', async () => {
+    const query = { id: 9, status: 'open', question: 'Which side?', addressedToProviderId: 1, addressedToName: 'Dr. Asha Rao', raisedByName: 'Coder', raisedAt: new Date('2026-03-02T05:00:00Z'), responses: [] }
+    const admin = await renderChart('admin', [], [{ ...visit, openQueries: [query] }])
+    expect(admin.screen.queryByRole('button', { name: /propose diagnosis/i })).toBeNull()
+    expect(admin.screen.queryByRole('button', { name: /add procedure/i })).toBeNull()
+    expect(admin.screen.getByRole('button', { name: /send reply/i })).toBeInTheDocument()
+  })
 })

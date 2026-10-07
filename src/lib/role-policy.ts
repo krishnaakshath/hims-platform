@@ -89,7 +89,9 @@ export const DISCHARGE_ROLES: readonly Role[] = ['admin', 'pi']
 // global search. Per-action status roles live in src/lib/coding/status.ts.
 export const CODING_ROLES: readonly Role[] = ['admin', 'coder']
 export const CODING_ENTRY_ROLES: readonly Role[] = ['admin', 'coder', 'pi']
-export const CODE_PROPOSE_ROLES: readonly Role[] = ['admin', 'pi']
+// Propose is pi only: the write routes treat admin as a coder (codes directly, code required,
+// completed visits only), so admin codes from the coding workspace, not the chart.
+export const CODE_PROPOSE_ROLES: readonly Role[] = ['pi']
 export const CODING_QUERY_RESPOND_ROLES: readonly Role[] = ['admin', 'pi', 'coder']
 export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc', 'billing']
 export const CODE_SYSTEM_ADMIN_ROLES: readonly Role[] = ['admin']
