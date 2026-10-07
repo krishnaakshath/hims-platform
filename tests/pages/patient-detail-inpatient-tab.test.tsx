@@ -29,6 +29,10 @@ describe('Patient Detail page — Inpatient History tab', () => {
     vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'admin', name: 'Test Admin' })) }))
     vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
     vi.doMock('@/lib/queries/rooms', () => ({ listAvailableRooms: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/follow-ups', () => ({ listFollowUpsForPatient: async () => [] }))
+    vi.doMock('@/lib/queries/encounters', () => ({ listEncountersForPatient: async () => [] }))
+    vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: async () => [] }))
+    vi.doMock('@/lib/queries/departments', () => ({ listDepartments: async () => [] }))
     vi.doMock('@/lib/queries/patients', () => ({ getPatientDetail: vi.fn(async () => basePatient) }))
     vi.doMock('@/lib/queries/admissions', () => ({ listAdmissionsForPatient: vi.fn(async () => []) }))
     vi.doMock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }), notFound: vi.fn(), redirect: vi.fn() }))
@@ -44,6 +48,10 @@ describe('Patient Detail page — Inpatient History tab', () => {
     vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'admin', name: 'Test Admin' })) }))
     vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
     vi.doMock('@/lib/queries/rooms', () => ({ listAvailableRooms: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/follow-ups', () => ({ listFollowUpsForPatient: async () => [] }))
+    vi.doMock('@/lib/queries/encounters', () => ({ listEncountersForPatient: async () => [] }))
+    vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: async () => [] }))
+    vi.doMock('@/lib/queries/departments', () => ({ listDepartments: async () => [] }))
     vi.doMock('@/lib/queries/patients', () => ({ getPatientDetail: vi.fn(async () => basePatient) }))
     vi.doMock('@/lib/queries/admissions', () => ({ listAdmissionsForPatient: vi.fn(async () => [{
       id: 1, patientId: 'RD-0001', currentRoomId: null, attendingProviderId: 1, admissionType: 'elective', status: 'admitted',
