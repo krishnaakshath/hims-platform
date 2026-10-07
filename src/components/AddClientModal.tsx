@@ -4,28 +4,13 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useBrand } from '@/components/BrandProvider'
-
-interface NewPatientForm {
-  name: string
-  dob: string
-  email: string
-  phone: string
-  city: string
-  zip: string
-  currentProvider: string
-  primaryPayerId: string
-  primaryMemberId: string
-  primaryGroupNumber: string
-  primaryPlanType: string
-  primarySubscriberName: string
-  primarySubscriberRelationship: string
-}
-
-const EMPTY_FORM: NewPatientForm = {
-  name: '', dob: '', email: '', phone: '', city: '', zip: '', currentProvider: '',
-  primaryPayerId: '', primaryMemberId: '', primaryGroupNumber: '', primaryPlanType: '',
-  primarySubscriberName: '', primarySubscriberRelationship: '',
-}
+import { DemographicsSection } from '@/components/registration/DemographicsSection'
+import { AddressSection } from '@/components/registration/AddressSection'
+import { NationalIdSection } from '@/components/registration/NationalIdSection'
+import { ContactsSection } from '@/components/registration/ContactsSection'
+import {
+  EMPTY_REGISTRATION_FORM, toRegistrationPayload, fieldErrors, serverFieldErrors, type RegistrationFormState,
+} from '@/components/registration/registration-form-state'
 
 interface PayerOption {
   id: number
@@ -35,9 +20,10 @@ interface PayerOption {
 export function AddClientModal({ onClose }: { onClose: () => void }) {
   const { name: brandName } = useBrand()
   const router = useRouter()
-  const [form, setForm] = useState<NewPatientForm>(EMPTY_FORM)
+  const [form, setForm] = useState<RegistrationFormState>(EMPTY_REGISTRATION_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [payerOptions, setPayerOptions] = useState<PayerOption[]>([])
 
   useEffect(() => {
@@ -47,7 +33,7 @@ export function AddClientModal({ onClose }: { onClose: () => void }) {
       .catch(() => setPayerOptions([]))
   }, [])
 
-  function update<K extends keyof NewPatientForm>(key: K, value: NewPatientForm[K]) {
+  function update<K extends keyof RegistrationFormState>(key: K, value: RegistrationFormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
   }
 
@@ -64,43 +50,49 @@ export function AddClientModal({ onClose }: { onClose: () => void }) {
   }
 
   async function submit() {
-    setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/patients', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: form.name,
-        dob: form.dob,
-        email: form.email || undefined,
-        phone: form.phone || undefined,
-        city: form.city || undefined,
-        zip: form.zip || undefined,
-        currentProvider: form.currentProvider || undefined,
-        primaryPayerId: form.primaryPayerId ? Number(form.primaryPayerId) : undefined,
-        primaryMemberId: form.primaryPayerId ? (form.primaryMemberId || undefined) : undefined,
-        primaryGroupNumber: form.primaryPayerId ? (form.primaryGroupNumber || undefined) : undefined,
-        primaryPlanType: form.primaryPayerId ? (form.primaryPlanType || undefined) : undefined,
-        primarySubscriberName: form.primaryPayerId ? (form.primarySubscriberName || undefined) : undefined,
-        primarySubscriberRelationship: form.primaryPayerId ? (form.primarySubscriberRelationship || undefined) : undefined,
-      }),
-    })
-    setSubmitting(false)
-    if (!res.ok) {
-      setError('Could not add this patient. Please check the details and try again.')
+    const payload = toRegistrationPayload(form)
+    const local = fieldErrors(payload)
+    setErrors(local)
+    if (Object.keys(local).length > 0) {
+      setError('Please correct the highlighted fields.')
       return
     }
-    // Navigate straight to the new patient's detail page rather than just
-    // refreshing the current page -- an admin who just added a patient
-    // wants to see it, not go find it themselves in the list.
-    const created = await res.json()
-    onClose()
-    router.push(`/patients/${created.id}`)
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/patients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (res.status === 201) {
+        const created = await res.json()
+        onClose()
+        // Navigate straight to the new patient's page so the front desk sees it.
+        router.push(`/patients/${created.id}`)
+        return
+      }
+      const body = await res.json().catch(() => null)
+      if (res.status === 400) {
+        setErrors(serverFieldErrors(body))
+        setError('Please correct the highlighted fields.')
+      } else if (res.status === 409 && typeof body?.error === 'string') {
+        setError(body.error)
+      } else {
+        setError('Could not add this patient. Please try again.')
+      }
+    } catch {
+      setError('Could not add this patient. Please try again.')
+    } finally {
+      // The Aadhaar number never outlives the attempt, success or failure.
+      setForm((f) => ({ ...f, aadhaarNumber: '' }))
+      setSubmitting(false)
+    }
   }
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add New Patient</DialogTitle>
         </DialogHeader>
@@ -108,21 +100,14 @@ export function AddClientModal({ onClose }: { onClose: () => void }) {
           This creates a new patient chart in {brandName}.
         </p>
 
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Basic info</p>
-          <input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="Full name" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          <input value={form.dob} onChange={(e) => update('dob', e.target.value)} type="date" aria-label="Date of birth" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          <div className="grid grid-cols-2 gap-3">
-            <input value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="Email (optional)" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-            <input value={form.phone} onChange={(e) => update('phone', e.target.value)} placeholder="Phone (optional)" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <input value={form.city} onChange={(e) => update('city', e.target.value)} placeholder="City (optional)" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-            <input value={form.zip} onChange={(e) => update('zip', e.target.value)} placeholder="Zip (optional)" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          </div>
+        <div className="space-y-4">
+          <DemographicsSection form={form} update={update} errors={errors} />
+          <AddressSection form={form} update={update} errors={errors} />
+          <NationalIdSection form={form} update={update} errors={errors} />
+          <ContactsSection form={form} update={update} errors={errors} />
 
           <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Care details</p>
-          <input value={form.currentProvider} onChange={(e) => update('currentProvider', e.target.value)} placeholder="Current provider (optional)" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+          <input value={form.currentProvider} onChange={(e) => update('currentProvider', e.target.value)} aria-label="Current provider (optional)" placeholder="Current provider (optional)" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
 
           <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Insurance (optional)</p>
           <select value={form.primaryPayerId} onChange={(e) => selectPayer(e.target.value)} className="w-full rounded-md border border-border px-3 py-2 text-sm">
@@ -152,7 +137,7 @@ export function AddClientModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={submit} disabled={submitting || !form.name || !form.dob}>Save</Button>
