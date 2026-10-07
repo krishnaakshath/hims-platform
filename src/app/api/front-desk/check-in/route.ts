@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { eq } from 'drizzle-orm'
 import { requireSession } from '@/lib/auth'
-import { logAudit } from '@/lib/audit'
 import { getDb } from '@/db/client'
 import { patients, providers } from '@/db/schema'
 import { assignRoomToPatient } from '@/lib/queries/rooms'
-import { createDoctorAssignment } from '@/lib/queries/doctor-assignments'
-import { createAdmission, getActiveAdmissionForPatient } from '@/lib/queries/admissions'
+import { getActiveAdmissionForPatient } from '@/lib/queries/admissions'
+import { checkInVisit, type CheckInVisitError } from '@/lib/queries/encounters'
+import { CHECK_IN_ROLES } from '@/lib/role-policy'
+import { pgConstraint, pgErrorCode } from '@/lib/db-errors'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
 
 const checkInSchema = z.object({
@@ -18,22 +19,41 @@ const checkInSchema = z.object({
   // Shown to the patient in their visit confirmation -- see visitReasonSchema.
   reason: visitReasonSchema,
   roomId: z.number().int().positive().optional(),
+  // SP3: check in against a booked appointment (e.g. a follow-up) -- outpatient only.
+  appointmentId: z.number().int().positive().optional(),
 }).strict()
+
+const CHECK_IN_ERRORS: Record<CheckInVisitError, { status: number; error: string }> = {
+  appointment_not_found: { status: 404, error: 'Appointment not found' },
+  appointment_mismatch: { status: 409, error: 'That appointment is for a different patient or doctor.' },
+  appointment_not_scheduled: { status: 409, error: 'That appointment is not in a bookable state.' },
+  appointment_not_today: { status: 409, error: 'That appointment is not today.' },
+  appointment_already_checked_in: { status: 409, error: 'This appointment has already been checked in.' },
+}
 
 export async function POST(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
-  if (!['frontdesk', 'admin', 'crc'].includes(session.role)) {
+  if (!CHECK_IN_ROLES.includes(session.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const parsed = checkInSchema.safeParse(await request.json())
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+  const parsed = checkInSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid check-in payload', details: parsed.error.flatten() }, { status: 400 })
 
-  const { patientId, providerId, visitType, urgency, reason, roomId } = parsed.data
+  const { patientId, providerId, visitType, urgency, reason, roomId, appointmentId } = parsed.data
 
   if (visitType === 'outpatient' && roomId) {
     return NextResponse.json({ error: 'roomId is only valid for an inpatient check-in' }, { status: 400 })
+  }
+  if (visitType !== 'outpatient' && appointmentId !== undefined) {
+    return NextResponse.json({ error: 'appointmentId is only valid for an outpatient check-in' }, { status: 400 })
   }
 
   // Verify the patient and provider actually exist BEFORE touching a room --
@@ -72,26 +92,28 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const created = await createDoctorAssignment({
-    patientId,
-    providerId,
-    visitType,
-    urgency,
-    reason,
-    roomId: roomId ?? null,
-    assignedByName: session.name,
-  })
-
-  if (visitType === 'inpatient' && !existingActive) {
-    await createAdmission({
+  // SP3: the assignment, its OPD token/lobby ticket, the admission, the
+  // encounter, a booked follow-up's completion and the audit rows are one
+  // transaction. (A room claimed above is not released if it throws -- a
+  // pre-existing hazard flagged in the SP3 plan.)
+  try {
+    const result = await checkInVisit({
       patientId,
+      providerId,
+      visitType,
+      urgency,
+      reason,
       roomId: roomId ?? null,
-      attendingProviderId: providerId,
-      admissionType: 'elective',
-      createdFromAssignmentId: created.id,
-    })
+      appointmentId: appointmentId ?? null,
+      createAdmission: visitType === 'inpatient' && !existingActive,
+    }, session)
+    if (!result.ok) {
+      const mapped = CHECK_IN_ERRORS[result.error]
+      return NextResponse.json({ error: mapped.error }, { status: mapped.status })
+    }
+    return NextResponse.json({ ...result.assignment, encounterId: result.encounter.id, opdToken: result.encounter.opdToken }, { status: 201 })
+  } catch (err) {
+    console.error(`[check-in] failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
+    return NextResponse.json({ error: 'Could not check in the patient' }, { status: 500 })
   }
-
-  await logAudit(session, `checked in patient (${visitType})`, patientId)
-  return NextResponse.json(created, { status: 201 })
 }

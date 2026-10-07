@@ -1,5 +1,5 @@
 import { getDb } from '@/db/client'
-import { doctorAssignments, appointments, admissions } from '@/db/schema'
+import { doctorAssignments, appointments, admissions, encounters } from '@/db/schema'
 import { and, eq, gte, ne } from 'drizzle-orm'
 
 export type QueueDisplayStage = 'waiting' | 'ready'
@@ -26,12 +26,15 @@ export async function getQueueDisplayRows(): Promise<QueueDisplayRow[]> {
       urgency: doctorAssignments.urgency,
       status: doctorAssignments.status,
       roomId: doctorAssignments.roomId,
+      appointmentId: doctorAssignments.appointmentId,
       appointmentStatus: appointments.status,
       admissionId: admissions.id,
+      encounterStatus: encounters.status, // SP3
     })
     .from(doctorAssignments)
     .leftJoin(appointments, eq(doctorAssignments.appointmentId, appointments.id))
     .leftJoin(admissions, eq(admissions.createdFromAssignmentId, doctorAssignments.id))
+    .leftJoin(encounters, eq(encounters.doctorAssignmentId, doctorAssignments.id)) // SP3
     .where(and(gte(doctorAssignments.createdAt, startOfToday()), ne(doctorAssignments.status, 'declined')))
 
   const result: QueueDisplayRow[] = []
@@ -49,12 +52,18 @@ export async function getQueueDisplayRows(): Promise<QueueDisplayRow[]> {
     // lobby board's point of view -- none of the three should keep a ticket
     // showing as perpetually "Ready".
     if (row.appointmentStatus === 'completed' || row.appointmentStatus === 'cancelled' || row.appointmentStatus === 'no_show') continue
+    // SP3: a finished or cancelled visit leaves the lobby board.
+    if (row.encounterStatus === 'completed' || row.encounterStatus === 'cancelled') continue
     if (row.status === 'pending') {
       result.push({ ticketNumber: row.queueTicketNumber, urgency: row.urgency, stage: 'waiting' })
     } else if (row.status === 'scheduled' && row.roomId !== null) {
       result.push({ ticketNumber: row.queueTicketNumber, urgency: row.urgency, stage: 'ready' })
+    } else if (row.status === 'scheduled' && row.roomId === null && row.appointmentId !== null && row.encounterStatus === 'checked_in') {
+      // SP3: checked in against a booked appointment (e.g. a follow-up) -- the
+      // assignment is born 'scheduled', and the patient waits in the lobby.
+      result.push({ ticketNumber: row.queueTicketNumber, urgency: row.urgency, stage: 'waiting' })
     }
-    // 'scheduled' with no roomId has no bucket here -- see "Scope decisions" #3.
+    // Any other 'scheduled' with no roomId has no bucket here -- see "Scope decisions" #3.
   }
   return result.sort((a, b) => a.ticketNumber - b.ticketNumber)
 }
