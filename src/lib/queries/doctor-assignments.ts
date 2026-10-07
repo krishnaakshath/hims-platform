@@ -1,28 +1,13 @@
 import { getDb } from '@/db/client'
 import { appointments, doctorAssignments, patients } from '@/db/schema'
 import { and, asc, desc, eq, getTableColumns, gte, isNull, sql } from 'drizzle-orm'
-import { getNextQueueTicketNumberForToday } from './queue-tickets'
 import { sendMessage } from './messages'
 import { SYSTEM_SENDER_NAME } from './eligibility'
 import { buildVisitConfirmationBody } from '@/lib/notification-templates'
 
-export interface CreateDoctorAssignmentInput {
-  patientId: string
-  providerId: number
-  visitType: 'inpatient' | 'outpatient'
-  urgency: 'routine' | 'urgent' | 'emergency'
-  reason: string
-  roomId: number | null
-  assignedByName: string
-}
-
+// Assignments are created only by checkInVisit (src/lib/queries/encounters.ts),
+// in one transaction with the OPD token that is also the lobby ticket.
 export type DoctorAssignmentRow = typeof doctorAssignments.$inferSelect
-
-export async function createDoctorAssignment(input: CreateDoctorAssignmentInput): Promise<DoctorAssignmentRow> {
-  const queueTicketNumber = await getNextQueueTicketNumberForToday()
-  const [created] = await getDb().insert(doctorAssignments).values({ ...input, queueTicketNumber }).returning()
-  return created
-}
 
 export type PendingAssignmentRow = DoctorAssignmentRow & { patientName: string }
 
