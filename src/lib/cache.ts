@@ -58,6 +58,7 @@ export async function getOrSetCache<T>(
   // MISS returns a real Date -- a latent `.getTime()` crash. Loaders must
   // normalise with datesToIso(); a value type containing Date makes this
   // call fail to type-check.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- type-level guard only
   ..._noDates: true extends HasDate<T> ? [cachedValueMustNotContainDate: never] : []
 ): Promise<T> {
   if (!isCacheConfigured()) return loader()
