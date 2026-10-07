@@ -1,11 +1,12 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useRouter } from 'next/navigation'
 import { LogOut } from 'lucide-react'
 
 export function PatientPortalSignOutButton() {
   const router = useRouter()
   async function signOut() {
-    await fetch('/api/patient-portal/logout', { method: 'POST' })
+    await sendJson('/api/patient-portal/logout', 'POST')
     router.push('/patient-portal/login')
   }
   return (

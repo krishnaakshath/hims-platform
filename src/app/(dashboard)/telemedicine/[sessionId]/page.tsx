@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getSessionById } from '@/lib/queries/telemedicine-sessions'
@@ -13,8 +14,8 @@ export default async function TelemedicineCallPage({ params }: { params: Promise
   if (!['admin', 'pi'].includes(session.role)) redirect('/')
 
   const { sessionId } = await params
-  const id = Number(sessionId)
-  if (!Number.isInteger(id)) notFound()
+  const id = parseId(sessionId)
+  if (id === null) notFound()
 
   const telemedicineSession = await getSessionById(id)
   if (!telemedicineSession) notFound()

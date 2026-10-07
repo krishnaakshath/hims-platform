@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
@@ -25,8 +26,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!CLINICAL_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const admissionId = Number(id)
-  if (!Number.isInteger(admissionId)) return NextResponse.json({ error: 'Invalid admission id' }, { status: 400 })
+  const admissionId = parseId(id)
+  if (admissionId === null) return NextResponse.json({ error: 'Invalid admission id' }, { status: 400 })
 
   const admission = await getAdmissionById(admissionId)
   if (!admission) return NextResponse.json({ error: 'Admission not found' }, { status: 404 })
@@ -41,13 +42,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!['pi', 'admin'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const admissionId = Number(id)
-  if (!Number.isInteger(admissionId)) return NextResponse.json({ error: 'Invalid admission id' }, { status: 400 })
+  const admissionId = parseId(id)
+  if (admissionId === null) return NextResponse.json({ error: 'Invalid admission id' }, { status: 400 })
 
   const admission = await getAdmissionById(admissionId)
   if (!admission) return NextResponse.json({ error: 'Admission not found' }, { status: 404 })
 
-  const parsed = orderSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = orderSchema.safeParse(json.body)
   if (!parsed.success && isTimeFieldError(parsed.error, ['scheduledFor'])) {
     return NextResponse.json({ error: 'Invalid scheduled time. Send it with a UTC offset (e.g. +05:30).' }, { status: 400 })
   }

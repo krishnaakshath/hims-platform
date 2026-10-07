@@ -18,6 +18,8 @@ import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
 import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
 import { publicPatientColumns, patientPortalConfiguredSql, type PublicPatientRow } from '@/lib/queries/patient-columns'
+import { logAudit } from '@/lib/audit'
+import type { Session } from '@/lib/auth'
 
 export interface CriteriaSummary {
   inclusionMet: number
@@ -416,10 +418,41 @@ export async function listPharmacyPatientRoster(): Promise<PharmacyRosterRow[]> 
  * `patients` with a foreign-key violation. Returns false if the patient
  * doesn't exist, true once every row is gone.
  */
-export async function deletePatient(anonId: string): Promise<boolean> {
-  const db = getDb()
-  const [patient] = await db.select({ id: patients.id }).from(patients).where(eq(patients.id, anonId))
-  if (!patient) return false
+type DeleteTx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
+
+/**
+ * Permanently removes a patient and every row that references them, as ONE
+ * transaction: either the whole chart goes or (on any error) nothing does --
+ * never a half-deleted patient. When `audit` is given, the audit row is
+ * written inside the same transaction, so it commits or rolls back with the
+ * delete. Caches are invalidated only after commit. Returns false (writing
+ * nothing) when the patient does not exist.
+ *
+ * Covers every table with a live FK to patients(id) as of SP1-SP3
+ * (tests/lib/queries/delete-patient-fk-guard.test.ts). SP4-SP7 add
+ * patient-linked tables: extend deletePatientRows (inside the transaction),
+ * never add deletes outside it.
+ */
+export async function deletePatient(anonId: string, audit?: { session: Session; action?: string }): Promise<boolean> {
+  const outcome = await getDb().transaction((db) => deletePatientRows(db, anonId, audit))
+  if (!outcome) return false
+  const { screenings } = outcome
+
+  await invalidateCache(patientDetailCacheKey(anonId))
+  await invalidateCache(patientListCacheKey(null))
+  await invalidateCache(dashboardCacheKey())
+  await invalidateCache(workbookListCacheKey())
+  for (const s of screenings) {
+    await invalidateCache(patientListCacheKey(s.trialId))
+  }
+
+  return true
+}
+
+// The body of deletePatient's transaction: `db` here IS the transaction.
+async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session: Session; action?: string } | undefined) {
+  const [patient] = await db.select({ id: patients.id }).from(patients).where(eq(patients.id, anonId)).for('update')
+  if (!patient) return null
 
   const screenings = await db.select({ id: patientTrialScreenings.id, trialId: patientTrialScreenings.trialId }).from(patientTrialScreenings).where(eq(patientTrialScreenings.patientId, anonId))
   const screeningIds = screenings.map((s) => s.id)
@@ -565,16 +598,9 @@ export async function deletePatient(anonId: string): Promise<boolean> {
   await db.delete(signatures).where(eq(signatures.patientId, anonId))
 
   await db.delete(patients).where(eq(patients.id, anonId))
+  if (audit) await logAudit(audit.session, audit.action ?? 'deleted patient record', anonId, null, db)
 
-  await invalidateCache(patientDetailCacheKey(anonId))
-  await invalidateCache(patientListCacheKey(null))
-  await invalidateCache(dashboardCacheKey())
-  await invalidateCache(workbookListCacheKey())
-  for (const s of screenings) {
-    await invalidateCache(patientListCacheKey(s.trialId))
-  }
-
-  return true
+  return { screenings }
 }
 
 export interface PatientPrintIdentity {

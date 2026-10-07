@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import type { ZodError } from 'zod'
 import { RETRY_MESSAGE, isExclusionViolation, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 import { TariffOverlapError } from '@/lib/queries/tariff'
+import { parseId } from '@/lib/http'
 
 export const forbidden = () => NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 export const badRequest = (error: string) => NextResponse.json({ error }, { status: 400 })
@@ -41,12 +42,8 @@ export function invalid(error: ZodError, fallback: string) {
   return badRequest(authored ? issue.message : fallback)
 }
 
-/** Positive integer path id, or null. */
-export function parseId(raw: string): number | null {
-  if (!/^\d{1,10}$/.test(raw)) return null
-  const id = Number(raw)
-  return id > 0 && id <= 2_147_483_647 ? id : null
-}
+/** Positive integer path id, or null. (Shared: src/lib/http.ts.) */
+export { parseId }
 
 /**
  * Fallback for an unexpected error: a 409 asking to try again for a deadlock/serialization failure,

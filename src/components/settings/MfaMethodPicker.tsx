@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 
 export function MfaMethodPicker({ email, currentMethod, currentPhone }: { email: string; currentMethod: 'totp' | 'sms' | 'email'; currentPhone: string | null }) {
@@ -13,15 +14,10 @@ export function MfaMethodPicker({ email, currentMethod, currentPhone }: { email:
     setSaving(true)
     setError(null)
     setSaved(false)
-    const res = await fetch('/api/account/mfa-method', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ method, email, password, ...(method === 'sms' && phone ? { phone } : {}) }),
-    })
+    const res = await sendJson('/api/account/mfa-method', 'PUT', { method, email, password, ...(method === 'sms' && phone ? { phone } : {}) }, { passThrough: [401] })
     setSaving(false)
     if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not switch your MFA method.')
+      setError(res.error)
       return
     }
     setSaved(true)
@@ -53,7 +49,7 @@ export function MfaMethodPicker({ email, currentMethod, currentPhone }: { email:
         aria-label="Confirm your password"
         className="w-full rounded-md border border-border px-2 py-1.5 text-sm"
       />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {saved && <p className="text-xs text-success">Saved — you&apos;ll use this method next time you sign in.</p>}
       <button onClick={save} disabled={saving || !password} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-secondary disabled:opacity-50">
         {saving ? 'Saving…' : 'Save'}

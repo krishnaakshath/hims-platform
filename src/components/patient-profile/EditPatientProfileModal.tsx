@@ -1,4 +1,5 @@
 'use client'
+import { messageForStatus, readError } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -93,9 +94,13 @@ function changedProfileFields(form: RegistrationFormState, base: Baseline): { bo
   return { body, abhaProblem }
 }
 
+// The route's own message for a 400/404/409; a fixed one otherwise (a 5xx
+// body is never shown -- see src/lib/client-fetch.ts). `fallback` is kept for
+// the call sites' wording when the message is the generic one.
 async function errorOf(res: Response, fallback: string): Promise<{ message: string; data: unknown }> {
-  const data = (await res.json().catch(() => null)) as { error?: string } | null
-  return { message: data?.error ?? fallback, data }
+  const data = (await res.clone().json().catch(() => null)) as { error?: string } | null
+  const message = await readError(res)
+  return { message: message === messageForStatus(res.status) ? `${fallback} ${message}` : message, data }
 }
 
 // Edits what staff may change after registration: demographics, address,

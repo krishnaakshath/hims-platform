@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -14,7 +15,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (session instanceof NextResponse) return session
   if (!CHARGES_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
-  const charge = await getCharge(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const charge = await getCharge(numericId)
   if (!charge) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   await logAudit(session, `viewed charge ${id}`, charge.patientId)
   return NextResponse.json(charge)
@@ -32,10 +35,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const { id } = await params
 
-  const parsed = statusUpdateSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = statusUpdateSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid status payload', details: parsed.error.flatten() }, { status: 400 })
 
-  const existing = await getCharge(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const existing = await getCharge(numericId)
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const nextStatus = parsed.data.status as ChargeStatus
@@ -43,7 +50,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: `Cannot move a charge from '${existing.status}' to '${nextStatus}'` }, { status: 400 })
   }
 
-  await updateChargeStatus(Number(id), nextStatus)
+  await updateChargeStatus(numericId, nextStatus)
   await logAudit(session, `updated charge ${id} status to ${nextStatus}`, existing.patientId)
   return NextResponse.json({ ok: true })
 }

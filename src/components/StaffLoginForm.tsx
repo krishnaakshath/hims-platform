@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react'
 import { BrandLogo } from '@/components/BrandLogo'
 import { MfaCodeStep } from '@/components/mfa/MfaCodeStep'
 import { MfaEnrollStep } from '@/components/mfa/MfaEnrollStep'
+import { sendJson } from '@/lib/client-fetch'
 
 type Step =
   | { kind: 'password' }
@@ -40,39 +41,30 @@ export function StaffLoginForm({ portal }: { portal: StaffPortal }) {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
+    const result = await sendJson<{ ok?: boolean; mode?: string; qrDataUrl?: string; manualKey?: string }>('/api/login', 'POST', { email, password })
     setSubmitting(false)
-    if (!res.ok) {
-      setError('Invalid email or password.')
+    if (!result.ok) {
+      // Wrong credentials stay one generic message (no account probing);
+      // rate limiting, server and network failures say what happened.
+      setError(result.status === 400 || result.status === 401 ? 'Invalid email or password.' : result.error)
       return
     }
-    const body = await res.json()
+    const body = result.data ?? {}
     if (body.ok) {
       router.push('/')
       router.refresh()
       return
     }
     if (body.mode === 'enroll') {
-      setStep({ kind: 'enroll', qrDataUrl: body.qrDataUrl, manualKey: body.manualKey })
+      setStep({ kind: 'enroll', qrDataUrl: body.qrDataUrl ?? '', manualKey: body.manualKey ?? '' })
     } else {
       setStep({ kind: 'verify', method: body.mode as 'totp' | 'sms' | 'email' })
     }
   }
 
   async function submitMfaCode(code: string): Promise<string | null> {
-    const res = await fetch('/api/login/mfa', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    })
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      return body?.error ?? 'Could not verify that code.'
-    }
+    const result = await sendJson('/api/login/mfa', 'POST', { code }, { passThrough: [401] })
+    if (!result.ok) return result.error
     router.push('/')
     router.refresh()
     return null
@@ -137,7 +129,7 @@ export function StaffLoginForm({ portal }: { portal: StaffPortal }) {
                   />
                 </div>
                 {error && (
-                  <div className="rounded-md bg-destructive/10 p-3 text-sm font-medium text-destructive">
+                  <div role="alert" className="rounded-md bg-destructive/10 p-3 text-sm font-medium text-destructive">
                     {error}
                   </div>
                 )}

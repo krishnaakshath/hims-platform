@@ -1,5 +1,6 @@
 import { istDateOf } from '@/lib/india-time'
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from '@/lib/queries/diagnoses' // SP6
@@ -22,8 +23,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!['pharmacy', 'admin'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { dispenseId } = await params
-  const id = Number(dispenseId)
-  if (!Number.isInteger(id)) return NextResponse.json({ error: 'Invalid dispenseId' }, { status: 400 })
+  const id = parseId(dispenseId)
+  if (id === null) return NextResponse.json({ error: 'Invalid dispenseId' }, { status: 400 })
 
   const dispense = await getDispenseById(id)
   if (!dispense) return NextResponse.json({ error: 'Dispense not found' }, { status: 404 })
@@ -32,7 +33,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'This dispense has already been billed' }, { status: 409 })
   }
 
-  const parsed = dispenseChargeSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = dispenseChargeSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid charge payload', details: parsed.error.flatten() }, { status: 400 })
 
   // Scoped column selects -- not `.select()` -- on both diagnoses and

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ShieldCheck } from 'lucide-react'
@@ -14,15 +15,10 @@ export function PatientConsentForm({ nppBody, tosBody }: { nppBody: string; tosB
     e.preventDefault()
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/patient-portal/consent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ acceptedNpp, acceptedTos }),
-    })
+    const res = await sendJson('/api/patient-portal/consent', 'POST', { acceptedNpp, acceptedTos })
     setSubmitting(false)
     if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not record your acceptance.')
+      setError(res.error)
       return
     }
     router.push('/patient-portal')
@@ -46,7 +42,7 @@ export function PatientConsentForm({ nppBody, tosBody }: { nppBody: string; tosB
           <div className="my-5 border-t border-border" />
           <ConsentSection label="Terms of Service" body={tosBody} checked={acceptedTos} onChange={setAcceptedTos} checkboxId="tos" />
 
-          {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
 
           <button
             type="submit"

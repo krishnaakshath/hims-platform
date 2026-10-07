@@ -1,4 +1,5 @@
 'use client'
+import { CLIENT_ERROR_MESSAGES, fetchJson, sendJson } from '@/lib/client-fetch'
 import { formatIstDateTime } from '@/lib/india-time'
 import { formatPaise } from '@/lib/format'
 import { useState } from 'react'
@@ -77,26 +78,21 @@ function ContactDoctorComposer({ patientId, onSent }: { patientId: string; onSen
   const [error, setError] = useState<string | null>(null)
 
   async function send() {
-    if (!body.trim()) return
+    if (!body.trim() || sending) return
     setSending(true)
     setError(null)
-    const res = await fetch(`/api/messages/${encodeURIComponent(patientId)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // internal: true -- pharmacy talks to the prescriber about this
-      // patient, never to the patient. Kept out of the patient portal's
-      // view of this same thread (see messages.internal on schema.ts).
-      body: JSON.stringify({ body, actingAs: 'provider', internal: true }),
-    })
+    // internal: true -- pharmacy talks to the prescriber about this
+    // patient, never to the patient. Kept out of the patient portal's
+    // view of this same thread (see messages.internal on schema.ts).
+    const res = await sendJson(`/api/messages/${encodeURIComponent(patientId)}`, 'POST', { body, actingAs: 'provider', internal: true })
     setSending(false)
     if (res.ok) { setBody(''); onSent(); return }
-    const data = await res.json().catch(() => null)
-    setError(data?.error ?? 'Could not send this message.')
+    setError(res.error)
   }
 
   return (
     <div>
-      {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="mb-2 text-xs text-destructive">{error}</p>}
       <div className="flex items-end gap-2">
         <textarea
           value={body}
@@ -141,19 +137,16 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
     setError(null)
     setView(null)
     setMessages([])
-    const res = await fetch(`/api/pharmacy/patients/${encodeURIComponent(id)}`)
+    const res = await fetchJson<PharmacyPatientViewClient>(`/api/pharmacy/patients/${encodeURIComponent(id)}`)
     setLoading(false)
     if (res.ok) {
-      const v: PharmacyPatientViewClient = await res.json()
+      const v = res.data
       setView(v)
       setPicked({ id: v.id, name: v.name, uhid: v.uhid ?? null })
       refreshMessages(id)
       return
     }
-    const body = await res.json().catch(() => null)
-    if (res.status === 404) { setError(body?.error ?? 'No patient with that ID'); return }
-    if (res.status === 403) { setError(body?.error ?? 'You do not have permission to look up this patient.'); return }
-    setError(body?.error ?? 'Could not look up this patient.')
+    setError(res.status === 404 && res.error === CLIENT_ERROR_MESSAGES.notFound ? 'No patient with that ID' : res.error)
   }
 
   // Re-fetches the same chart after a dispense or a bill is logged, so the
@@ -204,7 +197,7 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
         {loading && <p role="status" className="mt-1 text-xs text-muted-foreground">Looking up…</p>}
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       {view && (
         <div className="space-y-5">

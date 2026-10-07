@@ -123,7 +123,7 @@ describe('POST /api/webhooks/fhir-labs', () => {
     const raw = (auth: string) => POST(new Request('http://localhost/api/webhooks/fhir-labs', { method: 'POST', headers: { authorization: auth }, body: 'not json' }) as never)
     const ok = await raw(`Bearer ${TOKEN}`)
     expect(ok.status).toBe(400)
-    expect(await ok.json()).toEqual({ error: 'Invalid JSON body' })
+    expect(await ok.json()).toEqual({ error: 'Invalid JSON' })
     expect((await raw('Bearer nope')).status).toBe(401)
     expect(enterResult).not.toHaveBeenCalled()
   })

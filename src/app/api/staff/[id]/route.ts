@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -22,8 +23,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!CLINICAL_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const staffId = Number(id)
-  if (!Number.isInteger(staffId)) return NextResponse.json({ error: 'Invalid staff id' }, { status: 400 })
+  const staffId = parseId(id)
+  if (staffId === null) return NextResponse.json({ error: 'Invalid staff id' }, { status: 400 })
 
   const detail = await getStaffMemberDetail(staffId)
   if (!detail) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -38,10 +39,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
 
   const { id } = await params
-  const staffId = Number(id)
-  if (!Number.isInteger(staffId)) return NextResponse.json({ error: 'Invalid staff id' }, { status: 400 })
+  const staffId = parseId(id)
+  if (staffId === null) return NextResponse.json({ error: 'Invalid staff id' }, { status: 400 })
 
-  const parsed = updateStaffSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = updateStaffSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
 
   const result = await updateStaffMember(staffId, parsed.data)

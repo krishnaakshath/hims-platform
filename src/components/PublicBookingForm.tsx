@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 
 interface ProviderOption {
@@ -69,23 +70,19 @@ export function PublicBookingForm({ providers, providerAppointmentCounts }: {
     setError(null)
     setFieldErrors({})
 
-    const res = await fetch('/api/public/booking-requests', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        requesterName,
-        requesterDob,
-        ...(requesterEmail ? { requesterEmail } : {}),
-        ...(requesterPhone ? { requesterPhone } : {}),
-        ...(preferredProviderId !== '' ? { preferredProviderId } : {}),
-        preferredDateRangeStart,
-        preferredDateRangeEnd,
-        reason,
-      }),
+    const res = await sendJson('/api/public/booking-requests', 'POST', {
+      requesterName,
+      requesterDob,
+      ...(requesterEmail ? { requesterEmail } : {}),
+      ...(requesterPhone ? { requesterPhone } : {}),
+      ...(preferredProviderId !== '' ? { preferredProviderId } : {}),
+      preferredDateRangeStart,
+      preferredDateRangeEnd,
+      reason,
     })
     setSubmitting(false)
 
-    if (res.status === 201) { setSubmitted(true); return }
+    if (res.ok) { setSubmitted(true); return }
 
     if (res.status === 429) {
       setError('Too many requests, please try again later.')
@@ -93,14 +90,13 @@ export function PublicBookingForm({ providers, providerAppointmentCounts }: {
     }
 
     if (res.status === 400) {
-      const body = await res.json().catch(() => null)
+      const body = res.body as { error?: string; details?: unknown } | null
       setFieldErrors(mapFieldErrors(body?.details))
       setError(body?.error ?? 'Please check the highlighted fields and try again.')
       return
     }
 
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not submit your request. Please try again.')
+    setError(res.error)
   }
 
   if (submitted) {
@@ -225,7 +221,7 @@ export function PublicBookingForm({ providers, providerAppointmentCounts }: {
         {fieldErrors.reason && <p className="mt-1 text-xs text-destructive">{fieldErrors.reason}</p>}
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       <button
         type="submit"

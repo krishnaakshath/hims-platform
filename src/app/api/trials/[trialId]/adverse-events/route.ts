@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -40,7 +41,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!ALLOWED_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { trialId } = await params
-  const parsed = createSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = createSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid adverse event payload', details: parsed.error.flatten() }, { status: 400 })
 
   const created = await createAdverseEvent({ trialId, reportedByName: session.name, ...parsed.data })
@@ -53,11 +56,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (session instanceof NextResponse) return session
   if (!ALLOWED_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  await params
-  const parsed = notifySchema.safeParse(await request.json())
+  const { trialId } = await params
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = notifySchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
 
-  await markAdverseEventNotified(parsed.data.id, parsed.data.which)
+  // Scoped to this trial: an event id from another trial is a 404, and an
+  // already-recorded notification is a 409 rather than a silent overwrite.
+  const outcome = await markAdverseEventNotified(parsed.data.id, parsed.data.which, trialId)
+  if (outcome === 'not_found') return NextResponse.json({ error: 'Adverse event not found' }, { status: 404 })
+  if (outcome === 'already_notified') return NextResponse.json({ error: 'This notification has already been recorded.' }, { status: 409 })
   await logAudit(session, `recorded ${parsed.data.which} notification for adverse event ${parsed.data.id}`, null)
   return NextResponse.json({ ok: true })
 }

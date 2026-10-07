@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Department } from '@/db/schema'
@@ -17,11 +18,7 @@ export function DepartmentsPanel({ departments, isAdmin }: { departments: Depart
   async function add() {
     setBusy(true)
     setError(null)
-    const res = await fetch('/api/departments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, name, kind }),
-    })
+    const res = await sendJson('/api/departments', 'POST', { code, name, kind })
     setBusy(false)
     if (res.status === 409) { setError('Department code already exists.'); return }
     if (!res.ok) { setError('Could not add department.'); return }
@@ -31,11 +28,7 @@ export function DepartmentsPanel({ departments, isAdmin }: { departments: Depart
 
   async function toggle(d: Department) {
     setError(null)
-    const res = await fetch(`/api/departments/${d.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: !d.isActive }),
-    })
+    const res = await sendJson(`/api/departments/${d.id}`, 'PATCH', { isActive: !d.isActive })
     if (!res.ok) { setError('Could not update department.'); return }
     router.refresh()
   }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { providers } from '@/db/schema'
@@ -46,8 +47,9 @@ export async function POST(request: NextRequest) {
   const { allowed } = await checkBookingRequestRateLimit(ip)
   if (!allowed) return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 })
 
-  let body: unknown
-  try { body = await request.json() } catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }) }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body: unknown = json.body
 
   const parsed = bookingRequestSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid booking request payload', details: parsed.error.flatten() }, { status: 400 })

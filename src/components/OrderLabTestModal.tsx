@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -27,15 +28,10 @@ export function OrderLabTestModal({ patientId, labTests, onClose }: { patientId:
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/patients/${patientId}/lab-orders`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ labTestId }),
-    })
+    const res = await sendJson(`/api/patients/${patientId}/lab-orders`, 'POST', { labTestId })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not order this test.')
+    setError(res.error)
   }
 
   const canSubmit = labTestId !== '' && !submitting
@@ -63,7 +59,7 @@ export function OrderLabTestModal({ patientId, labTests, onClose }: { patientId:
             )}
           </select>
           {labTests.length === 0 && <p className="text-sm text-warning">No lab tests are available in the catalog.</p>}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

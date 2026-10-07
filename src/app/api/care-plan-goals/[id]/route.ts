@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -14,10 +15,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!['pi', 'admin'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const goalId = Number(id)
-  if (!Number.isInteger(goalId)) return NextResponse.json({ error: 'Invalid goal id' }, { status: 400 })
+  const goalId = parseId(id)
+  if (goalId === null) return NextResponse.json({ error: 'Invalid goal id' }, { status: 400 })
 
-  const parsed = goalStatusSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = goalStatusSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid goal status payload', details: parsed.error.flatten() }, { status: 400 })
 
   const result = await updateGoalStatus(goalId, parsed.data.status, session.name)

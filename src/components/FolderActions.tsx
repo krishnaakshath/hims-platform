@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pencil, Trash2 } from 'lucide-react'
@@ -17,11 +18,7 @@ export function FolderActions({ folder, templateCount }: { folder: { id: number;
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch(`/api/form-template-folders/${folder.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
-      })
+      const res = await sendJson(`/api/form-template-folders/${folder.id}`, 'PUT', { name: name.trim() })
       if (res.ok) {
         setRenaming(false)
         router.refresh()
@@ -43,7 +40,7 @@ export function FolderActions({ folder, templateCount }: { folder: { id: number;
     setDeleting(true)
     setError(null)
     try {
-      const res = await fetch(`/api/form-template-folders/${folder.id}`, { method: 'DELETE' })
+      const res = await sendJson(`/api/form-template-folders/${folder.id}`, 'DELETE')
       if (res.ok) {
         router.push('/forms')
       } else {
@@ -87,7 +84,7 @@ export function FolderActions({ folder, templateCount }: { folder: { id: number;
             Cancel
           </button>
         </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
     )
   }
@@ -111,7 +108,7 @@ export function FolderActions({ folder, templateCount }: { folder: { id: number;
           {deleting ? 'Deleting…' : 'Delete'}
         </button>
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }

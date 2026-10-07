@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { requireSession } from '@/lib/auth'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
 import { getRate, getService, reviseRate } from '@/lib/queries/tariff'
@@ -13,7 +14,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (session instanceof NextResponse) return session
   if (!TARIFF_MANAGE_ROLES.includes(session.role)) return forbidden()
 
-  const body = await request.json().catch(() => null)
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body = json.body
   const parsed = rateRevisionSchema.safeParse(body)
   if (!parsed.success) return invalid(parsed.error, 'Invalid rate revision')
 

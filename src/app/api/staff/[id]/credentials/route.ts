@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -16,10 +17,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
 
   const { id } = await params
-  const staffId = Number(id)
-  if (!Number.isInteger(staffId)) return NextResponse.json({ error: 'Invalid staff id' }, { status: 400 })
+  const staffId = parseId(id)
+  if (staffId === null) return NextResponse.json({ error: 'Invalid staff id' }, { status: 400 })
 
-  const parsed = addCredentialSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = addCredentialSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
 
   const result = await addCredential({

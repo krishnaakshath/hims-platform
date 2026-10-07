@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
+import { patientExists } from '@/lib/queries/patient-exists'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -16,8 +18,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!['admin', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { anonId } = await params
-  const parsed = createLabOrderSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = createLabOrderSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid lab order payload', details: parsed.error.flatten() }, { status: 400 })
+
+  if (!(await patientExists(anonId))) return NextResponse.json({ error: 'Patient not found' }, { status: 404 })
 
   // Resolves who ordered this test with the shared acting-provider resolver
   // (resolveDoctorQueueProvider: the users -> staff -> provider FK link

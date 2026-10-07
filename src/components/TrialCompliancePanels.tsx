@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { AlertTriangle } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { sendJson } from '@/lib/client-fetch'
 import type { PatientNameOption } from '@/lib/queries/patients'
 import type { AdverseEventRow, DrugAccountabilityRow, RegulatoryDocumentRow } from '@/lib/queries/trial-compliance'
 
@@ -60,15 +61,10 @@ function AddAdverseEventModal({ trialId, patients, onClose }: { trialId: string;
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/trials/${trialId}/adverse-events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patientId, description: description.trim(), severity, serious, causality, onsetDate, reportedDate }),
-    })
+    const result = await sendJson(`/api/trials/${trialId}/adverse-events`, 'POST', { patientId, description: description.trim(), severity, serious, causality, onsetDate, reportedDate })
     setSubmitting(false)
-    if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not log this adverse event.')
+    if (result.ok) { router.refresh(); onClose(); return }
+    setError(result.error)
   }
 
   return (
@@ -106,7 +102,7 @@ function AddAdverseEventModal({ trialId, patients, onClose }: { trialId: string;
             <input type="checkbox" checked={serious} onChange={(e) => setSerious(e.target.checked)} />
             This is a Serious Adverse Event (SAE) — requires sponsor/IRB notification
           </label>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -126,12 +122,15 @@ export function AdverseEventsPanel({ trialId, events, patients, canWrite }: { tr
   // same-render overdue-badge computation, not stored as state.
   const [nowMs] = useState(() => Date.now())
 
+  const [notifying, setNotifying] = useState(false)
+  const [notifyError, setNotifyError] = useState<string | null>(null)
+
   async function notify(id: number, which: 'sponsor' | 'irb') {
-    await fetch(`/api/trials/${trialId}/adverse-events`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, which }),
-    })
+    setNotifying(true)
+    setNotifyError(null)
+    const result = await sendJson(`/api/trials/${trialId}/adverse-events`, 'PATCH', { id, which })
+    setNotifying(false)
+    if (!result.ok) { setNotifyError(result.error); return }
     router.refresh()
   }
 
@@ -142,6 +141,7 @@ export function AdverseEventsPanel({ trialId, events, patients, canWrite }: { tr
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Adverse Events ({events.length})</h3>
           {canWrite && <Button size="sm" onClick={() => setAdding(true)}>Log Adverse Event</Button>}
         </div>
+        {notifyError && <p role="alert" className="mb-3 text-sm text-destructive">{notifyError}</p>}
         {events.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No adverse events logged for this trial.</p>
         ) : (
@@ -170,10 +170,10 @@ export function AdverseEventsPanel({ trialId, events, patients, canWrite }: { tr
                         </span>
                       )}
                       {canWrite && !e.sponsorNotifiedAt && (
-                        <Button size="sm" variant="outline" onClick={() => notify(e.id, 'sponsor')}>Mark sponsor notified</Button>
+                        <Button size="sm" variant="outline" disabled={notifying} onClick={() => notify(e.id, 'sponsor')}>Mark sponsor notified</Button>
                       )}
                       {canWrite && !e.irbNotifiedAt && (
-                        <Button size="sm" variant="outline" onClick={() => notify(e.id, 'irb')}>Mark IRB notified</Button>
+                        <Button size="sm" variant="outline" disabled={notifying} onClick={() => notify(e.id, 'irb')}>Mark IRB notified</Button>
                       )}
                       {e.sponsorNotifiedAt && <span className="text-xs text-muted-foreground">Sponsor notified {formatIstDate(e.sponsorNotifiedAt)}</span>}
                       {e.irbNotifiedAt && <span className="text-xs text-muted-foreground">IRB notified {formatIstDate(e.irbNotifiedAt)}</span>}
@@ -218,18 +218,13 @@ function AddDrugAccountabilityModal({ trialId, patients, onClose }: { trialId: s
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/trials/${trialId}/drug-accountability`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const result = await sendJson(`/api/trials/${trialId}/drug-accountability`, 'POST', {
         patientId: patientId || null, lotNumber: lotNumber.trim(), expirationDate, action,
         quantity: Number(quantity), date, notes: notes.trim() || undefined,
-      }),
-    })
+      })
     setSubmitting(false)
-    if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not log this entry.')
+    if (result.ok) { router.refresh(); onClose(); return }
+    setError(result.error)
   }
 
   return (
@@ -258,7 +253,7 @@ function AddDrugAccountabilityModal({ trialId, patients, onClose }: { trialId: s
             <div><label className={LABEL}>Date</label><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={FIELD} /></div>
           </div>
           <div><label className={LABEL}>Notes (optional)</label><input value={notes} onChange={(e) => setNotes(e.target.value)} className={FIELD} /></div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -353,18 +348,13 @@ function AddRegulatoryDocumentModal({ trialId, onClose }: { trialId: string; onC
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/trials/${trialId}/regulatory-documents`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const result = await sendJson(`/api/trials/${trialId}/regulatory-documents`, 'POST', {
         documentType, title: title.trim(), version: version.trim() || undefined,
         effectiveDate, expirationDate: expirationDate || undefined,
-      }),
-    })
+      })
     setSubmitting(false)
-    if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not add this document.')
+    if (result.ok) { router.refresh(); onClose(); return }
+    setError(result.error)
   }
 
   return (
@@ -384,7 +374,7 @@ function AddRegulatoryDocumentModal({ trialId, onClose }: { trialId: string; onC
             <div><label className={LABEL}>Effective date</label><input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} className={FIELD} /></div>
           </div>
           <div><label className={LABEL}>Expiration date (optional)</label><input type="date" value={expirationDate} onChange={(e) => setExpirationDate(e.target.value)} className={FIELD} /></div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

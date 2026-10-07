@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -71,11 +72,10 @@ function MedicationRow({
   async function stop() {
     setStopping(true)
     setError(null)
-    const res = await fetch(`/api/patients/${patientId}/prescriptions/${m.id}`, { method: 'PATCH' })
+    const res = await sendJson(`/api/patients/${patientId}/prescriptions/${m.id}`, 'PATCH')
     setStopping(false)
     if (res.ok) { router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not stop this prescription.')
+    setError(res.error)
   }
 
   return (
@@ -109,7 +109,7 @@ function MedicationRow({
             )}
           </div>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
     </li>
   )

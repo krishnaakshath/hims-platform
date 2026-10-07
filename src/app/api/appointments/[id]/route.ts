@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { appointments } from '@/db/schema'
@@ -24,11 +25,15 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!SCHEDULING_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
 
-  const parsed = updateAppointmentSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = updateAppointmentSchema.safeParse(json.body)
   if (!parsed.success && isTimeFieldError(parsed.error)) return invalidAppointmentTime()
   if (!parsed.success) return NextResponse.json({ error: 'Invalid appointment update', details: parsed.error.flatten() }, { status: 400 })
 
-  const existing = await getAppointment(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const existing = await getAppointment(numericId)
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const patch: Record<string, unknown> = { ...parsed.data }
@@ -55,7 +60,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'This provider already has an appointment during that time.' }, { status: 409 })
     }
   } else {
-    await getDb().update(appointments).set(patch).where(eq(appointments.id, Number(id)))
+    await getDb().update(appointments).set(patch).where(eq(appointments.id, numericId))
   }
 
   const action = parsed.data.status ? `marked appointment ${id} as ${parsed.data.status}` : `updated appointment ${id}`

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -36,21 +37,16 @@ export function DispenseMedicationModal({
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/pharmacy/dispense', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        patientId,
-        medicationId: medication.id,
-        quantity: Number(quantity),
-        ...(notes ? { notes } : {}),
-        ...(medicationEpisodeId !== undefined ? { medicationEpisodeId } : {}),
-      }),
+    const res = await sendJson('/api/pharmacy/dispense', 'POST', {
+      patientId,
+      medicationId: medication.id,
+      quantity: Number(quantity),
+      ...(notes ? { notes } : {}),
+      ...(medicationEpisodeId !== undefined ? { medicationEpisodeId } : {}),
     })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onDispensed?.(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not dispense this medication.')
+    setError(res.error)
   }
 
   const parsedQuantity = Number(quantity)
@@ -71,7 +67,7 @@ export function DispenseMedicationModal({
           )}
           <input type="number" min={1} step={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder={`Quantity (${medication.unit})`} aria-label="Quantity" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" aria-label="Notes" rows={2} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
