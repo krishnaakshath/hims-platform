@@ -17,7 +17,12 @@ export interface ServiceFormValues {
   category: ServiceCategory
   hsnSac: string
   gstRateBp: number
+  // SP4 billing flags.
+  requiresPreauth?: boolean
+  maxQuantity?: number | null
 }
+
+const MAX_QUANTITY_MESSAGE = 'Max quantity must be a whole number from 1 to 1000'
 
 type Props =
   | { mode: 'create'; departments: DepartmentOption[]; onClose: () => void; service?: undefined }
@@ -44,6 +49,8 @@ export function ServiceFormModal(props: Props) {
   const [category, setCategory] = useState<string>(s?.category ?? '')
   const [hsnSac, setHsnSac] = useState(s?.hsnSac ?? '')
   const [gstRateBp, setGstRateBp] = useState(s ? String(s.gstRateBp) : '')
+  const [requiresPreauth, setRequiresPreauth] = useState(s?.requiresPreauth ?? false)
+  const [maxQuantity, setMaxQuantity] = useState(s?.maxQuantity != null ? String(s.maxQuantity) : '')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [serverError, setServerError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -57,6 +64,8 @@ export function ServiceFormModal(props: Props) {
       category: category || undefined,
       hsnSac,
       gstRateBp: gstRateBp === '' ? undefined : Number(gstRateBp),
+      requiresPreauth,
+      maxQuantity: maxQuantity.trim() === '' ? null : Number(maxQuantity),
     }
     const parsed = mode === 'create' ? serviceCreateSchema.safeParse(payload) : serviceUpdateSchema.safeParse(payload)
     if (!parsed.success) {
@@ -64,7 +73,8 @@ export function ServiceFormModal(props: Props) {
       for (const issue of parsed.error.issues) {
         const key = String(issue.path[0] ?? 'form')
         // Required-field type errors read as "expected number/string"; say it plainly instead.
-        errs[key] ??= issue.code === 'invalid_type' || issue.code === 'invalid_value' ? 'This field is required' : issue.message
+        errs[key] ??= key === 'maxQuantity' ? MAX_QUANTITY_MESSAGE
+          : issue.code === 'invalid_type' || issue.code === 'invalid_value' ? 'This field is required' : issue.message
       }
       setFieldErrors(errs)
       return
@@ -122,6 +132,18 @@ export function ServiceFormModal(props: Props) {
                 {GST_RATES_BP.map((bp) => <option key={bp} value={bp}>{bp / 100}%</option>)}
               </select>
             </Field>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field id={id('maxqty')} label="Max quantity per line" error={fieldErrors.maxQuantity}>
+              <input id={id('maxqty')} value={maxQuantity} onChange={(e) => setMaxQuantity(e.target.value)} inputMode="numeric" placeholder="No limit"
+                aria-invalid={invalid('maxQuantity')} aria-describedby={fieldErrors.maxQuantity ? `${id('maxqty')}-error` : undefined} className={FIELD_CLASS} />
+            </Field>
+            <div className="flex items-end pb-2">
+              <label htmlFor={id('preauth')} className="flex items-center gap-2 text-sm">
+                <input id={id('preauth')} type="checkbox" checked={requiresPreauth} onChange={(e) => setRequiresPreauth(e.target.checked)} />
+                Needs pre-authorisation
+              </label>
+            </div>
           </div>
           {serverError && <p role="alert" className="text-sm text-destructive">{serverError}</p>}
           <DialogFooter>

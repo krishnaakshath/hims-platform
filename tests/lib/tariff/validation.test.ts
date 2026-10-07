@@ -104,3 +104,21 @@ describe('tariff validation', () => {
     expect(packageItemsSchema.safeParse({ items: Array.from({ length: 101 }, (_, i) => ({ serviceId: i + 1, quantity: 1 })) }).success).toBe(false)
   })
 })
+
+// SP4: service billing flags.
+describe('service billing flags (SP4)', () => {
+  it('service update accepts requiresPreauth and a maxQuantity of 1..1000', () => {
+    expect(serviceUpdateSchema.safeParse({ requiresPreauth: true }).success).toBe(true)
+    expect(serviceUpdateSchema.safeParse({ maxQuantity: 1 }).success).toBe(true)
+    expect(serviceUpdateSchema.safeParse({ maxQuantity: 1000 }).success).toBe(true)
+    expect(serviceUpdateSchema.safeParse({ maxQuantity: null }).success).toBe(true)
+    expect(serviceUpdateSchema.safeParse({ maxQuantity: 0 }).success).toBe(false)
+    expect(serviceUpdateSchema.safeParse({ maxQuantity: 1001 }).success).toBe(false)
+    expect(serviceUpdateSchema.safeParse({ maxQuantity: 2.5 }).success).toBe(false)
+    expect(serviceUpdateSchema.safeParse({ requiresPreauth: 'yes' }).success).toBe(false)
+  })
+  it('service create accepts the flags too and leaves them optional', () => {
+    expect(serviceCreateSchema.safeParse({ ...svc, requiresPreauth: true, maxQuantity: 5 }).success).toBe(true)
+    expect(serviceCreateSchema.safeParse(svc).success).toBe(true)
+  })
+})

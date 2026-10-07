@@ -134,9 +134,15 @@ describe('billing settings schema', () => {
     const r = billingSettingsSchema.safeParse({ ...settings, stateCode: 'IN-TN' })
     expect(r.success).toBe(false); expect(msgs(r)).toEqual(['The GSTIN does not belong to the selected state'])
   })
-  it('refuses a bad GSTIN, lowercase GSTIN, bad state, rate and HSN', () => {
+  it('accepts a lowercase or padded GSTIN and stores it uppercase', () => {
+    const r = billingSettingsSchema.safeParse({ ...settings, gstin: ' 29aagcb7383j1z4 ' })
+    expect(r.success && r.data.gstin).toBe('29AAGCB7383J1Z4')
+    const p = payerBillingFlagsSchema.safeParse({ requiresPreauth: false, gstin: '27aapfu0939f1zv', stateCode: null })
+    expect(p.success && p.data.gstin).toBe('27AAPFU0939F1ZV')
+  })
+  it('refuses a bad GSTIN, bad state, rate and HSN', () => {
     expect(msgs(billingSettingsSchema.safeParse({ ...settings, gstin: '29AAGCB7383J1Z5' }))).toEqual(['Enter a valid 15-character GSTIN'])
-    expect(billingSettingsSchema.safeParse({ ...settings, gstin: '29aagcb7383j1z4' }).success).toBe(false)
+    // Ruling: a lowercase GSTIN is accepted and stored uppercase (see the next test).
     expect(billingSettingsSchema.safeParse({ ...settings, stateCode: 'KA' }).success).toBe(false)
     expect(billingSettingsSchema.safeParse({ ...settings, pharmacyGstRateBp: 700 }).success).toBe(false)
     expect(billingSettingsSchema.safeParse({ ...settings, pharmacyHsn: '123' }).success).toBe(false)

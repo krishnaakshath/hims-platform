@@ -97,7 +97,8 @@ export const refundSchema = z.object({
 })
 
 const GSTIN_MESSAGE = 'Enter a valid 15-character GSTIN'
-const gstinField = z.string().refine((g) => g === g.toUpperCase() && isValidGstin(g), GSTIN_MESSAGE)
+// Ruling: a lowercase or padded GSTIN is accepted and stored trimmed and uppercase.
+const gstinField = z.string().trim().toUpperCase().refine(isValidGstin, GSTIN_MESSAGE)
 const stateCodeField = z.string().refine(isIndianStateCode, 'Choose a state')
 
 export const billingSettingsSchema = z.object({

@@ -22,6 +22,7 @@ import {
   hasSearchScope,
 } from '@/lib/role-policy'
 import { CHECK_IN_ROLES, DISCHARGE_ROLES, ENCOUNTER_STATUS_ROLES, FOLLOW_UP_BOOKING_ROLES, FOLLOW_UP_PLAN_ROLES } from '@/lib/role-policy' // SP3
+import { BILLING_CONFIG_ROLES } from '@/lib/role-policy' // SP4
 import { gateIt } from '../pages/page-gates-harness'
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -403,6 +404,11 @@ import { PUT as putFollowUpBooking } from '@/app/api/follow-ups/[id]/booking/rou
 import { POST as unbookFollowUp } from '@/app/api/follow-ups/[id]/unbook/route'
 import { POST as postFollowUpContact } from '@/app/api/follow-ups/[id]/contact-attempts/route'
 import { POST as postDischarge } from '@/app/api/inpatient/admissions/[id]/discharge/route'
+// SP4
+import { PUT as putBillingSettings } from '@/app/api/billing/settings/route'
+import { PUT as putBillingRule } from '@/app/api/billing/rules/[code]/route'
+import { PUT as putPayerFlags } from '@/app/api/billing/payers/[id]/route'
+// end SP4
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -596,6 +602,11 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => settle(() => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_BOOKING_ROLES] },
   // SP3 discharge (DISCHARGE_ROLES): `{}` fails validation before any query.
   { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => settle(() => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`), ctx({ id: BOGUS_ID }))), allowed: [...DISCHARGE_ROLES] },
+  // SP4 billing configuration (BILLING_CONFIG_ROLES): `{}` fails validation before any query.
+  { name: 'PUT /api/billing/settings', call: () => settle(() => putBillingSettings(send('PUT', '/api/billing/settings'))), allowed: [...BILLING_CONFIG_ROLES] },
+  { name: 'PUT /api/billing/rules/[code]', call: () => settle(() => putBillingRule(send('PUT', '/api/billing/rules/duplicate_charge'), ctx({ code: 'duplicate_charge' }))), allowed: [...BILLING_CONFIG_ROLES] },
+  { name: 'PUT /api/billing/payers/[id]', call: () => settle(() => putPayerFlags(send('PUT', `/api/billing/payers/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...BILLING_CONFIG_ROLES] },
+  // end SP4
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
@@ -641,7 +652,14 @@ const SP3_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_BOOKING_ROLES },
   { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: DISCHARGE_ROLES },
 ]
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES])('$name (deny before parse)', (c) => {
+// SP4 billing writes: the same deny-before-parse contract.
+const SP4_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'PUT /api/billing/settings', call: () => putBillingSettings(send('PUT', '/api/billing/settings', NOT_JSON)), allowed: BILLING_CONFIG_ROLES },
+  { name: 'PUT /api/billing/rules/[code]', call: () => putBillingRule(send('PUT', '/api/billing/rules/duplicate_charge', NOT_JSON), ctx({ code: 'duplicate_charge' })), allowed: BILLING_CONFIG_ROLES },
+  { name: 'PUT /api/billing/payers/[id]', call: () => putPayerFlags(send('PUT', `/api/billing/payers/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: BILLING_CONFIG_ROLES },
+]
+// end SP4
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role

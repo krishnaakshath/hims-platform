@@ -225,6 +225,9 @@ export async function createService(input: ServiceCreateInput, audit?: TariffAud
     const [row] = await tx.insert(serviceCatalog).values({
       code: input.code, name: input.name, departmentId: input.departmentId, category: input.category,
       hsnSac: input.hsnSac, gstRateBp: input.gstRateBp,
+      // SP4
+      ...(input.requiresPreauth !== undefined ? { requiresPreauth: input.requiresPreauth } : {}),
+      ...(input.maxQuantity !== undefined ? { maxQuantity: input.maxQuantity } : {}),
     }).returning({ id: serviceCatalog.id })
     return (await serviceById(tx, row.id))!
   })

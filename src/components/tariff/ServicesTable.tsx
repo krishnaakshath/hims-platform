@@ -21,6 +21,9 @@ export interface ServiceListItem {
   isActive: boolean
   basePaise: number | null
   departmentPaise: number | null
+  // SP4 billing flags (optional so older callers and fixtures still type-check).
+  requiresPreauth?: boolean
+  maxQuantity?: number | null
 }
 
 export interface ServiceFilters { q?: string; departmentId?: string; category?: string; inactive?: string }
@@ -171,7 +174,7 @@ export function ServicesTable({ services, departments, filters, pagination }: {
         <ServiceFormModal
           mode="edit"
           departments={departments}
-          service={{ id: modal.service.id, code: modal.service.code, name: modal.service.name, departmentId: modal.service.departmentId, category: modal.service.category, hsnSac: modal.service.hsnSac, gstRateBp: modal.service.gstRateBp }}
+          service={{ id: modal.service.id, code: modal.service.code, name: modal.service.name, departmentId: modal.service.departmentId, category: modal.service.category, hsnSac: modal.service.hsnSac, gstRateBp: modal.service.gstRateBp, requiresPreauth: modal.service.requiresPreauth, maxQuantity: modal.service.maxQuantity }}
           onClose={() => setModal(null)}
         />
       )}

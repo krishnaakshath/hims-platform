@@ -37,7 +37,7 @@ describe('ServiceFormModal', () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/tariff/services')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body)).toEqual({ code: 'CONS1', name: 'OPD Consultation', departmentId: 1, category: 'consultation', hsnSac: '999311', gstRateBp: 1800 })
+    expect(JSON.parse(init.body)).toEqual({ code: 'CONS1', name: 'OPD Consultation', departmentId: 1, category: 'consultation', hsnSac: '999311', gstRateBp: 1800, requiresPreauth: false, maxQuantity: null })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(refresh).toHaveBeenCalled()
   })
@@ -70,5 +70,20 @@ describe('ServiceFormModal', () => {
     expect(init.method).toBe('PATCH')
     expect(JSON.parse(init.body)).not.toHaveProperty('code')
     expect(JSON.parse(init.body).name).toBe('OPD Consultation (new)')
+  })
+
+  // SP4 billing flags.
+  it('sends the pre-authorisation flag and a max quantity, and refuses a bad quantity', async () => {
+    const service = { id: 11, code: 'PROC1', name: 'Dressing', departmentId: 1, category: 'procedure' as const, hsnSac: '999311', gstRateBp: 0, requiresPreauth: false, maxQuantity: null }
+    render(<ServiceFormModal mode="edit" service={service} departments={departments} onClose={vi.fn()} />)
+    fill({ 'Max quantity per line': '0' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByText('Max quantity must be a whole number from 1 to 1000')).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+    fill({ 'Max quantity per line': '4' })
+    fireEvent.click(screen.getByLabelText('Needs pre-authorisation'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ requiresPreauth: true, maxQuantity: 4 })
   })
 })
