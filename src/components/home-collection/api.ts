@@ -53,3 +53,10 @@ export function assignVisitCollector(visitId: number, collectorUserId: number | 
 export function labelsHref(orderIds: number[]): string {
   return `/lab-labels?orders=${orderIds.join(',')}`
 }
+
+// SP5 Task 12: the collector marks a visit collected by the sample IDs of the tubes drawn.
+export function collectVisit(visitId: number, sampleIds: string[]) {
+  return call<{ ok: true; collectedOrderIds: number[]; notCollectedOrderIds: number[]; encounterId: number }>(
+    `/api/home-collections/${visitId}/collect`, json('POST', { sampleIds }), 'Could not save the collection.',
+  )
+}

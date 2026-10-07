@@ -52,7 +52,7 @@ describe('SP5 role policy', () => {
   })
 
   it('collector gets no global search scope', () => {
-    expect(searchScopesFor('collector')).toEqual({ patients: false, trials: false, formTemplates: false })
+    expect(searchScopesFor('collector')).toEqual({ patients: false, trials: false, formTemplates: false, services: false })
     expect(hasSearchScope('collector')).toBe(false)
   })
 })

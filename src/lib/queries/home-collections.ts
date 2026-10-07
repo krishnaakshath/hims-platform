@@ -1,5 +1,5 @@
 // SP5 home sample collection: booking context, window availability, book / reschedule / cancel,
-// collector dispatch and the day board.
+// collector dispatch, the day board, and the collector's route and mark-collected.
 //
 // Every write is ONE transaction with its audit row on the same `tx`. Audit details carry ids,
 // dates and reason codes only: never the address, the phone number or a free-text note.
@@ -14,24 +14,25 @@
 //   2. lab_orders rows, `for update`, by ascending id
 //   3. the slot advisory lock above, then the per-IST-date sample-sequence advisory lock
 //   4. home_collection_visits row, `for update`
-//   5. encounters (not taken here)
-// Booking and visit cancel lock the order rows before the visit row. Reschedule and assign touch
+//   5. encounters (collect inserts one, last)
+// Booking, visit cancel and collect lock the order rows before the visit row. Reschedule and assign touch
 // only the visit row (plus the slot lock), never order rows.
 import { and, asc, count, eq, inArray, ne, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import {
-  homeCollectionVisits, homeCollectionWindows, labOrders, labTests, patients, users,
+  encounters, homeCollectionVisits, homeCollectionWindows, labOrders, labTests, patients, providers, users,
   type HomeCollectionVisitRow,
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
-import { istDateOf } from '@/lib/india-time'
+import { ageOnDate, istDateOf } from '@/lib/india-time'
 import {
   COLLECTOR_CANCEL_REASONS, bookingDateProblem, windowClosed,
   type RescheduleReason, type VisitCancelReason,
 } from '@/lib/home-collection/rules'
 import { isLocalPin } from '@/lib/labs/service-area'
+import { parseSampleId } from '@/lib/labs/sample-id'
 import type { LabOrderStatus } from '@/lib/labs/status'
 import type { SampleContainer, SampleType } from '@/lib/labs/catalog'
 import type { BookHomeCollectionRequest } from '@/lib/labs/validation'
@@ -552,3 +553,215 @@ export async function listHomeCollectionBoard(
   return { windows, visits, totalVisits: Number(total.n) }
 }
 
+
+// ── Collector route (Task 12) ────────────────────────────────────────────────
+
+/**
+ * One stop on a collector's route. A minimal projection for field staff: the patient's first name
+ * and last initial, UHID (to match the tube labels), age and gender (never the DOB), the visit's
+ * contact phone and address snapshot, and the tubes to draw. No Aadhaar, ABHA or clinical history.
+ */
+export interface RouteStop {
+  visitId: number
+  status: HomeCollectionVisitRow['status']
+  windowLabel: string
+  windowStart: string
+  windowEnd: string
+  patient: { id: string; name: string; uhid: string | null; ageYears: number; gender: string | null }
+  contactPhone: string
+  address: { line1: string; line2: string | null; city: string; district: string | null; stateCode: string; pinCode: string; landmark: string | null }
+  notes: string | null
+  tests: { orderId: number; testName: string; sampleType: SampleType | null; container: SampleContainer | null; sampleId: string | null; status: LabOrderStatus }[]
+}
+
+/** "Asha Devi Rao" → "Asha R."; a single name is shown as is. */
+export function shortPatientName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length <= 1) return parts[0] ?? ''
+  return `${parts[0]} ${Array.from(parts[parts.length - 1])[0]}.`
+}
+
+/** At most this many stops are loaded for one day. */
+export const MAX_ROUTE_STOPS = 200
+
+/**
+ * The stops for one IST date, by window start then id, in every status (a collector also sees
+ * what they finished). `collectorUserId` filters to that collector's visits server-side; null
+ * is the admin view of every visit. The caller must never pass null for a collector session.
+ */
+export async function listCollectorRoute(collectorUserId: number | null, dateIso: string): Promise<RouteStop[]> {
+  const db = getDb()
+  const rows = await db
+    .select({
+      visitId: homeCollectionVisits.id,
+      status: homeCollectionVisits.status,
+      windowLabel: homeCollectionVisits.windowLabel,
+      windowStart: homeCollectionVisits.windowStart,
+      windowEnd: homeCollectionVisits.windowEnd,
+      patientId: patients.id,
+      patientName: patients.name,
+      uhid: patients.uhid,
+      dob: patients.dob,
+      gender: patients.gender,
+      contactPhone: homeCollectionVisits.contactPhone,
+      line1: homeCollectionVisits.addressLine1,
+      line2: homeCollectionVisits.addressLine2,
+      city: homeCollectionVisits.city,
+      district: homeCollectionVisits.district,
+      stateCode: homeCollectionVisits.stateCode,
+      pinCode: homeCollectionVisits.pinCode,
+      landmark: homeCollectionVisits.landmark,
+      notes: homeCollectionVisits.notes,
+    })
+    .from(homeCollectionVisits)
+    .innerJoin(patients, eq(patients.id, homeCollectionVisits.patientId))
+    .where(and(
+      eq(homeCollectionVisits.visitDate, dateIso),
+      collectorUserId === null ? undefined : eq(homeCollectionVisits.collectorUserId, collectorUserId),
+    ))
+    .orderBy(asc(homeCollectionVisits.windowStart), asc(homeCollectionVisits.id))
+    .limit(MAX_ROUTE_STOPS)
+  if (rows.length === 0) return []
+  const orders = await db
+    .select({
+      visitId: labOrders.homeCollectionVisitId,
+      orderId: labOrders.id,
+      testName: labTests.name,
+      sampleType: labTests.sampleType,
+      container: labTests.container,
+      sampleId: labOrders.sampleId,
+      status: labOrders.status,
+    })
+    .from(labOrders)
+    .innerJoin(labTests, eq(labTests.id, labOrders.labTestId))
+    .where(inArray(labOrders.homeCollectionVisitId, rows.map((r) => r.visitId)))
+    .orderBy(asc(labOrders.id))
+  const testsByVisit = new Map<number, RouteStop['tests']>()
+  for (const { visitId, ...t } of orders) {
+    if (visitId === null) continue
+    const list = testsByVisit.get(visitId) ?? []
+    list.push(t)
+    testsByVisit.set(visitId, list)
+  }
+  return rows.map((r) => ({
+    visitId: r.visitId,
+    status: r.status,
+    windowLabel: r.windowLabel,
+    windowStart: r.windowStart,
+    windowEnd: r.windowEnd,
+    patient: { id: r.patientId, name: shortPatientName(r.patientName), uhid: r.uhid, ageYears: ageOnDate(r.dob, dateIso), gender: r.gender },
+    contactPhone: r.contactPhone,
+    address: { line1: r.line1, line2: r.line2, city: r.city, district: r.district, stateCode: r.stateCode, pinCode: r.pinCode, landmark: r.landmark },
+    notes: r.notes,
+    tests: testsByVisit.get(r.visitId) ?? [],
+  }))
+}
+
+// ── Mark collected by sample ID (Task 12) ────────────────────────────────────
+
+export type CollectHomeVisitResult =
+  | { ok: true; collectedOrderIds: number[]; notCollectedOrderIds: number[]; encounterId: number }
+  | { ok: false; error: 'not_found' | 'not_collectable' | 'not_assigned' | 'invalid_sample_id' | 'sample_not_on_visit'; sampleId?: string }
+
+/**
+ * The collector at the door: the tubes drawn are identified by their scanned/typed sample IDs.
+ * Each input is check-digit validated (and de-duplicated) BEFORE any DB read. Then ONE
+ * transaction, in the module's lock order: the visit's scheduled order rows (ascending id), then
+ * the visit row, then the encounter insert. Matched orders become `collected`; the rest go back to
+ * `ordered` (visit link cleared, sample ID kept). A completed `lab` encounter is written and
+ * linked to the visit, and the audit row is on the same transaction. Every refusal writes nothing.
+ * A concurrent second collect waits on the order/visit locks and then sees `not_collectable`.
+ */
+export async function collectHomeVisit(visitId: number, sampleIds: string[], session: Session, now = new Date()): Promise<CollectHomeVisitResult> {
+  const canonical: string[] = []
+  for (const input of sampleIds) {
+    const parsed = parseSampleId(input)
+    if (!parsed || canonical.includes(parsed.canonical)) return { ok: false, error: 'invalid_sample_id', sampleId: input }
+    canonical.push(parsed.canonical)
+  }
+  if (canonical.length === 0) return { ok: false, error: 'invalid_sample_id', sampleId: '' }
+
+  return getDb().transaction(async (tx): Promise<CollectHomeVisitResult> => {
+    // Lock order 2: the visit's scheduled order rows, ascending id, before the visit row. No path
+    // adds an order to an existing visit, so this set can only shrink; it is re-read below.
+    const linked = await tx
+      .select({ id: labOrders.id })
+      .from(labOrders)
+      .where(and(eq(labOrders.homeCollectionVisitId, visitId), eq(labOrders.status, 'scheduled')))
+      .orderBy(asc(labOrders.id))
+    if (linked.length > 0) {
+      await tx.select({ id: labOrders.id }).from(labOrders).where(inArray(labOrders.id, linked.map((o) => o.id))).orderBy(asc(labOrders.id)).for('update')
+    }
+    // Lock order 4: the visit row.
+    const [visit] = await tx
+      .select({ id: homeCollectionVisits.id, patientId: homeCollectionVisits.patientId, status: homeCollectionVisits.status, collectorUserId: homeCollectionVisits.collectorUserId })
+      .from(homeCollectionVisits)
+      .where(eq(homeCollectionVisits.id, visitId))
+      .for('update')
+    if (!visit) return { ok: false, error: 'not_found' }
+    // A collector acts only on their own visits; checked before the status so a collector
+    // learns nothing about another collector's visit.
+    if (session.role === 'collector' && (session.userId === null || visit.collectorUserId !== session.userId)) {
+      return { ok: false, error: 'not_assigned' }
+    }
+    if (visit.status !== 'booked') return { ok: false, error: 'not_collectable' }
+
+    const scheduled = await tx
+      .select({ id: labOrders.id, sampleId: labOrders.sampleId, orderedByProviderId: labOrders.orderedByProviderId })
+      .from(labOrders)
+      .where(and(eq(labOrders.homeCollectionVisitId, visitId), eq(labOrders.status, 'scheduled')))
+      .orderBy(asc(labOrders.id))
+    const bySample = new Map(scheduled.filter((o) => o.sampleId !== null).map((o) => [o.sampleId as string, o]))
+    for (const sid of canonical) {
+      if (!bySample.has(sid)) return { ok: false, error: 'sample_not_on_visit', sampleId: sid }
+    }
+    const collected = scheduled.filter((o) => o.sampleId !== null && canonical.includes(o.sampleId))
+    const missed = scheduled.filter((o) => !collected.includes(o))
+    const collectedOrderIds = collected.map((o) => o.id)
+    const notCollectedOrderIds = missed.map((o) => o.id)
+
+    await tx
+      .update(labOrders)
+      .set({ status: 'collected', collectedAt: now, collectedByName: session.name, statusChangedAt: now })
+      .where(inArray(labOrders.id, collectedOrderIds))
+    if (notCollectedOrderIds.length > 0) {
+      await tx
+        .update(labOrders)
+        .set({ status: 'ordered', homeCollectionVisitId: null, statusChangedAt: now })
+        .where(inArray(labOrders.id, notCollectedOrderIds))
+    }
+
+    // Lock order 5: the encounter (Ruling 13), under the first collected order's prescriber.
+    const providerId = collected[0].orderedByProviderId
+    const [provider] = await tx.select({ departmentId: providers.departmentId }).from(providers).where(eq(providers.id, providerId))
+    const [encounter] = await tx
+      .insert(encounters)
+      .values({
+        patientId: visit.patientId,
+        encounterType: 'lab',
+        visitType: 'new',
+        status: 'completed',
+        encounterDate: istDateOf(now),
+        opdToken: null,
+        providerId,
+        departmentId: provider?.departmentId ?? null,
+        checkedInByName: session.name,
+        checkedInAt: now,
+        completedAt: now,
+        statusChangedAt: now,
+        statusChangedByName: session.name,
+      })
+      .returning({ id: encounters.id })
+
+    await tx
+      .update(homeCollectionVisits)
+      .set({ status: 'collected', collectedAt: now, collectedByName: session.name, encounterId: encounter.id, updatedAt: now })
+      .where(eq(homeCollectionVisits.id, visitId))
+
+    await logAudit(
+      session, 'collected home samples', visit.patientId,
+      `visit=${visitId} orders=${collectedOrderIds.join(',')} missed=${notCollectedOrderIds.join(',')} encounter=${encounter.id}`, tx,
+    )
+    return { ok: true, collectedOrderIds, notCollectedOrderIds, encounterId: encounter.id }
+  })
+}

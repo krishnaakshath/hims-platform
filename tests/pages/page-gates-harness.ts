@@ -324,5 +324,7 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/lab-labels', load: () => import('@/app/(dashboard)/lab-labels/page'), props: { searchParams: Promise.resolve({ orders: '1' }) }, allowed: ['admin', 'pi', 'labs', 'frontdesk'] },
   // LeftNav.tsx /home-collections -- HOME_COLLECTION_BOOKING_ROLES
   { route: '/home-collections', load: () => import('@/app/(dashboard)/home-collections/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'frontdesk', 'labs'] },
+  // LeftNav.tsx /collections -- COLLECTOR_ROUTE_ROLES
+  { route: '/collections', load: () => import('@/app/(dashboard)/collections/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'collector'] },
   // end SP5
 ]

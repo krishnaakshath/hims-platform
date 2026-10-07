@@ -428,6 +428,8 @@ import { GET as getHomeCollectionAvailability } from '@/app/api/home-collections
 import { PATCH as patchHomeCollection } from '@/app/api/home-collections/[id]/route'
 import { POST as cancelHomeCollectionRoute } from '@/app/api/home-collections/[id]/cancel/route'
 import { PUT as putHomeCollectionCollector } from '@/app/api/home-collections/[id]/collector/route'
+import { COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy'
+import { POST as collectHomeCollectionRoute } from '@/app/api/home-collections/[id]/collect/route'
 // end SP5
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
@@ -647,6 +649,8 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PATCH /api/home-collections/[id]', call: () => settle(() => patchHomeCollection(send('PATCH', `/api/home-collections/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...HOME_COLLECTION_BOOKING_ROLES] },
   { name: 'POST /api/home-collections/[id]/cancel', call: () => settle(() => cancelHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...HOME_COLLECTION_CANCEL_ROLES] },
   { name: 'PUT /api/home-collections/[id]/collector', call: () => settle(() => putHomeCollectionCollector(send('PUT', `/api/home-collections/${BOGUS_ID}/collector`), ctx({ id: BOGUS_ID }))), allowed: [...HOME_COLLECTION_DISPATCH_ROLES] },
+  // SP5 collector route (Task 12): `{}` fails validation before any query.
+  { name: 'POST /api/home-collections/[id]/collect', call: () => settle(() => collectHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/collect`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
   // end SP5
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
@@ -709,6 +713,7 @@ const SP5_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PATCH /api/home-collections/[id]', call: () => patchHomeCollection(send('PATCH', `/api/home-collections/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: HOME_COLLECTION_BOOKING_ROLES },
   { name: 'POST /api/home-collections/[id]/cancel', call: () => cancelHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: HOME_COLLECTION_CANCEL_ROLES },
   { name: 'PUT /api/home-collections/[id]/collector', call: () => putHomeCollectionCollector(send('PUT', `/api/home-collections/${BOGUS_ID}/collector`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: HOME_COLLECTION_DISPATCH_ROLES },
+  { name: 'POST /api/home-collections/[id]/collect', call: () => collectHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/collect`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: COLLECTOR_ROUTE_ROLES },
 ]
 // end SP5
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP5_WRITE_GATES])('$name (deny before parse)', (c) => {

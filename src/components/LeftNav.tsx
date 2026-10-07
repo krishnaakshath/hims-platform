@@ -9,12 +9,13 @@ import {
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
-  House, // SP5
+  House, Route, // SP5
   UserCircle2, Calculator,
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
 import { ACCOUNT_ROLES, TARIFF_LOOKUP_ROLES } from '@/lib/role-policy' // Wave B
+import { COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy' // SP5
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -79,6 +80,8 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   { href: '/labs', label: 'Labs', icon: TestTube2, roles: ['admin', 'crc', 'pi', 'labs'] as Role[] },
   // SP5: home-collection day board (HOME_COLLECTION_BOOKING_ROLES): booking logistics, no lab results.
   { href: '/home-collections', label: 'Home Collection', icon: House, roles: ['admin', 'frontdesk', 'labs'] as Role[] },
+  // SP5: the collector's own route for the day (COLLECTOR_ROUTE_ROLES).
+  { href: '/collections', label: 'My Route', icon: Route, roles: [...COLLECTOR_ROUTE_ROLES] },
   // end SP5
 
   // Staff directory — admin/crc/pi (pi view-only; NOT frontdesk, NOT billing, NOT pharmacy, NOT labs)
