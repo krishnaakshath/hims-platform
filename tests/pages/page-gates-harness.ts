@@ -297,6 +297,7 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/messages', load: () => import('@/app/(dashboard)/messages/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['crc', 'pi', 'admin', 'pharmacy'] },
   // LeftNav NAV_TRAILING_ITEMS /tariffs -- TARIFF_MANAGE_ROLES
   { route: '/tariffs', load: () => import('@/app/(dashboard)/tariffs/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'billing'] },
+  { route: '/tariffs/services/[id]', load: () => import('@/app/(dashboard)/tariffs/services/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'billing'] },
   { route: '/settings', load: () => import('@/app/(dashboard)/settings/page'), allowed: ['admin', 'pi'] },
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).
