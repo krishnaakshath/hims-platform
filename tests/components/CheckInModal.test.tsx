@@ -1,3 +1,4 @@
+import { formatIstDate } from '@/lib/india-time'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { CheckInModal } from '@/components/CheckInModal'
@@ -112,8 +113,9 @@ describe('CheckInModal', () => {
 
     it('shows the current date on the ticket', async () => {
       await checkInSuccessfully()
-      const today = new Date().toLocaleDateString()
-      await waitFor(() => expect(screen.getByText(new RegExp(today.replace(/[/\\-]/g, '[/\\\\-]')))).toBeInTheDocument())
+      // IST date with an explicit IST label (Wave A), e.g. "8 Oct 2026, 9:00 am IST".
+      const today = formatIstDate(new Date())
+      await waitFor(() => expect(screen.getByText(new RegExp(`${today}, .* IST`))).toBeInTheDocument())
     })
 
     it('shows a Print button on the ticket', async () => {

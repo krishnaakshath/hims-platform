@@ -47,7 +47,8 @@ region where the provider offers one) for latency and data-localisation.
 | `BRAND_NAME`, `BRAND_LEGAL_NAME`, `BRAND_TAGLINE`, `BRAND_SUPPORT_EMAIL`, `BRAND_LOGO_URL`, `BRAND_PRIMARY_COLOR`, `BRAND_COOKIE_PREFIX` | optional | See README, "White-label a client". Read at build time |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | optional | Admin Google SSO; routes answer 503 when unset |
 | `LIS_INTEGRATION_TOKEN` | optional | Bearer token for `/api/webhooks/fhir-labs`; unset = webhook disabled |
-| `DISABLE_STAFF_MFA` | never in production | Demo toggle that skips staff MFA |
+| `DEMO_FEATURES` | leave unset in production | `true` turns on simulated features (virtual card payment, broadcasts, experience surveys, insurance eligibility check, fax history), each labelled "Demo". Unset = off in production, on in development. When off they are hidden, their pages 404 and their routes answer 503 `Not configured` |
+| `DISABLE_STAFF_MFA` | never in production | Demo toggle that skips staff MFA; ignored unless `DEMO_FEATURES` is on |
 | `SEED_EMAIL_DOMAIN`, `SEED_DEMO_PASSWORD`, `ALLOW_PRODUCTION_SEED` | non-production only | See "Seeding" |
 
 Set secrets with `vercel env add NAME production` (or the dashboard); never

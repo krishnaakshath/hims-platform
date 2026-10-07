@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDate, todayIsoIn } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle } from 'lucide-react'
@@ -50,7 +51,7 @@ function AddAdverseEventModal({ trialId, patients, onClose }: { trialId: string;
   const [serious, setSerious] = useState(false)
   const [causality, setCausality] = useState<AdverseEventRow['causality']>('unlikely')
   const [onsetDate, setOnsetDate] = useState('')
-  const [reportedDate, setReportedDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [reportedDate, setReportedDate] = useState(() => todayIsoIn())
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -174,8 +175,8 @@ export function AdverseEventsPanel({ trialId, events, patients, canWrite }: { tr
                       {canWrite && !e.irbNotifiedAt && (
                         <Button size="sm" variant="outline" onClick={() => notify(e.id, 'irb')}>Mark IRB notified</Button>
                       )}
-                      {e.sponsorNotifiedAt && <span className="text-xs text-muted-foreground">Sponsor notified {new Date(e.sponsorNotifiedAt).toLocaleDateString()}</span>}
-                      {e.irbNotifiedAt && <span className="text-xs text-muted-foreground">IRB notified {new Date(e.irbNotifiedAt).toLocaleDateString()}</span>}
+                      {e.sponsorNotifiedAt && <span className="text-xs text-muted-foreground">Sponsor notified {formatIstDate(e.sponsorNotifiedAt)}</span>}
+                      {e.irbNotifiedAt && <span className="text-xs text-muted-foreground">IRB notified {formatIstDate(e.irbNotifiedAt)}</span>}
                     </div>
                   )}
                 </div>
@@ -206,7 +207,7 @@ function AddDrugAccountabilityModal({ trialId, patients, onClose }: { trialId: s
   const [expirationDate, setExpirationDate] = useState('')
   const [action, setAction] = useState<DrugAccountabilityRow['action']>('received')
   const [quantity, setQuantity] = useState('')
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(() => todayIsoIn())
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -342,7 +343,7 @@ function AddRegulatoryDocumentModal({ trialId, onClose }: { trialId: string; onC
   const [documentType, setDocumentType] = useState<RegulatoryDocumentRow['documentType']>('irb_approval')
   const [title, setTitle] = useState('')
   const [version, setVersion] = useState('')
-  const [effectiveDate, setEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [effectiveDate, setEffectiveDate] = useState(() => todayIsoIn())
   const [expirationDate, setExpirationDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)

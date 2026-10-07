@@ -1,4 +1,6 @@
+import { formatIstDateTime } from '@/lib/india-time'
 import Link from 'next/link'
+import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { notFound, redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -9,6 +11,8 @@ export default async function BroadcastDetailPage({ params }: { params: Promise<
   // LeftNav.tsx:62 — { href: '/broadcasts', roles: ['admin', 'crc'] }. Must
   // precede notFound() below, not follow it.
   if (!['admin', 'crc'].includes(session.role)) redirect('/')
+  // Wave B P1-21: demo-only page -- 404 unless DEMO_FEATURES is on (after the role gate, before any read).
+  if (!demoFeaturesEnabled()) notFound()
   const { id } = await params
   const broadcast = await getBroadcast(Number(id))
   if (!broadcast) notFound()
@@ -17,7 +21,7 @@ export default async function BroadcastDetailPage({ params }: { params: Promise<
   return (
     <div className="max-w-2xl">
       <h1 className="mb-1 text-2xl font-bold text-foreground">{broadcast.subject || 'Broadcast'}</h1>
-      <p className="mb-6 text-sm text-muted-foreground">{new Date(broadcast.sentAt).toLocaleString()} · {broadcast.trialCondition ?? 'All trials'} · Sent by {broadcast.sentBy}</p>
+      <p className="mb-6 text-sm text-muted-foreground">{formatIstDateTime(broadcast.sentAt)} · {broadcast.trialCondition ?? 'All trials'} · Sent by {broadcast.sentBy}</p>
       <div className="mb-6 rounded-lg border border-border bg-card p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message</p>
         <p className="mt-1 text-sm text-foreground">{broadcast.message}</p>

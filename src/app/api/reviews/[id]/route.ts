@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { demoFeaturesEnabled, DEMO_NOT_CONFIGURED_BODY, DEMO_NOT_CONFIGURED_STATUS } from '@/lib/demo-features'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { reviews } from '@/db/schema'
@@ -35,6 +36,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   if (!['admin', 'crc'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // Wave B P1-21: part of the simulated survey flow -- 503 unless DEMO_FEATURES is on.
+  if (!demoFeaturesEnabled()) return NextResponse.json(DEMO_NOT_CONFIGURED_BODY, { status: DEMO_NOT_CONFIGURED_STATUS })
   const { id } = await params
 
   const parsed = recordResponseSchema.safeParse(await request.json())

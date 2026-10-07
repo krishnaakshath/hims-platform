@@ -1,3 +1,4 @@
+import { formatIstDate } from '@/lib/india-time'
 import { Stethoscope, Calendar, FileCheck2, ShieldAlert } from 'lucide-react'
 
 const TILE_COLOR: Record<string, string> = {
@@ -30,7 +31,7 @@ export function PatientQuickGlance({ provider, chartDataAsOf, identityVerified, 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <Tile icon={Stethoscope} label="Provider" value={provider ?? 'Unassigned'} color="primary" />
-      <Tile icon={Calendar} label="Chart as of" value={new Date(chartDataAsOf).toLocaleDateString()} color="sky" />
+      <Tile icon={Calendar} label="Chart as of" value={formatIstDate(chartDataAsOf)} color="sky" />
       <Tile icon={FileCheck2} label="Criteria evaluated" value={String(criteriaCount)} color="accent" />
       <Tile icon={ShieldAlert} label="Identity" value={identityVerified ? 'Verified' : 'Pending'} color="amber" />
     </div>

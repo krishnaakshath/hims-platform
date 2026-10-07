@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDate, formatIstDateTime } from '@/lib/india-time'
 import { useState } from 'react'
 import { Beaker, Image as ImageIcon, Clock } from 'lucide-react'
 import { Card } from '@/components/ui/card'
@@ -72,7 +73,7 @@ function ReportCard({ order, onOpen }: { order: ReportOrder; onOpen: () => void 
         ) : (
           <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"><Clock className="h-3 w-3" aria-hidden="true" />{STATUS_LABEL[order.status]}</span>
         )}
-        <span className="text-[11px] text-muted-foreground">{new Date(order.orderedAt).toLocaleDateString()}</span>
+        <span className="text-[11px] text-muted-foreground">{formatIstDate(order.orderedAt)}</span>
       </div>
     </button>
   )
@@ -95,12 +96,12 @@ function ReportDetailDialog({ order, onClose }: { order: ReportOrder; onClose: (
                 <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${FLAG_STYLES[order.result.flag]}`}>{FLAG_LABEL[order.result.flag]}</span>
               </div>
               {order.result.referenceRange && <p className="text-xs text-muted-foreground">Reference range: {order.result.referenceRange}</p>}
-              <p className="text-xs text-muted-foreground">Resulted {new Date(order.result.resultedAt).toLocaleString()} by {order.result.resultedByName}</p>
+              <p className="text-xs text-muted-foreground">Resulted {formatIstDateTime(order.result.resultedAt)} by {order.result.resultedByName}</p>
               {order.result.notes && <p className="rounded-md bg-secondary/40 p-2 text-xs text-foreground">{order.result.notes}</p>}
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              {STATUS_LABEL[order.status]}{order.orderedAt ? ` on ${new Date(order.orderedAt).toLocaleDateString()}` : ''} — no result on file yet.
+              {STATUS_LABEL[order.status]}{order.orderedAt ? ` on ${formatIstDate(order.orderedAt)}` : ''} — no result on file yet.
             </p>
           )}
           {order.attachments.length > 0 && (

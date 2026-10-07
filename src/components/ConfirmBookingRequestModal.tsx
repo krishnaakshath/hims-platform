@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import type { BookingRequestRow } from '@/lib/queries/booking-requests'
 import { normalizeVisitReason, VISIT_REASON_MAX_LENGTH } from '@/lib/notification-templates'
+import { istSlotString } from '@/lib/india-time'
 
 interface ProviderOption {
   id: number
@@ -38,8 +39,9 @@ export function ConfirmBookingRequestModal({ request, providers, onClose }: {
       body: JSON.stringify({
         patientId,
         providerId,
-        startsAt: `${date}T${startTime}:00`,
-        endsAt: `${date}T${endTime}:00`,
+        // IST wall-clock time with an explicit offset; the server rejects naive times.
+        startsAt: istSlotString(date, startTime),
+        endsAt: istSlotString(date, endTime),
         visitReason,
       }),
     })

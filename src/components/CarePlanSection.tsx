@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Trash2 } from 'lucide-react'
@@ -15,7 +16,7 @@ const SECTION_HEADING = 'border-l-2 border-primary/40 pl-2.5 text-xs font-semibo
 
 function formatDate(value: string | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return formatIstDate(value)
 }
 
 // Same dot + plain-text-label convention as NoteStatusPill (never color

@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDateTime } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -104,8 +105,8 @@ function LabRow({
             {o.patientName} <span className="font-normal text-muted-foreground">— {o.testName} ({o.testCode})</span>
           </p>
           <p className="text-xs text-muted-foreground">
-            Ordered by {o.orderedByProviderName} on {o.orderedAt.toLocaleString()}
-            {o.collectedAt && ` · Collected ${o.collectedAt.toLocaleString()}`}
+            Ordered by {o.orderedByProviderName} on {formatIstDateTime(o.orderedAt)}
+            {o.collectedAt && ` · Collected ${formatIstDateTime(o.collectedAt)}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">

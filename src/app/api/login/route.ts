@@ -10,13 +10,16 @@ import { checkLoginRateLimit } from '@/lib/rate-limit'
 import { getAdminMfaState, setAdminMfaSecret } from '@/lib/queries/settings'
 import { findUserByEmail, getUserMfaState, setUserMfaSecret } from '@/lib/queries/users'
 import { logAudit } from '@/lib/audit'
+import { staffMfaBypassEnabled } from '@/lib/demo-features'
 
 // Demo/eval toggle: set DISABLE_STAFF_MFA=true in the environment to skip
 // the TOTP enroll/verify challenge entirely and complete login on password
 // alone. All the MFA code below is untouched and fully wired -- flipping
 // this back to unset (or "false") re-enables mandatory MFA with no other
 // changes needed.
-const staffMfaDisabled = process.env.DISABLE_STAFF_MFA === 'true'
+// Wave B P1-21: honoured only while DEMO_FEATURES is on (never in a plain
+// production deployment); read per request, see src/lib/demo-features.ts.
+const staffMfaDisabled = () => staffMfaBypassEnabled()
 
 const loginSchema = z.object({
   email: z.string().trim().email(),
@@ -63,14 +66,14 @@ export async function POST(request: NextRequest) {
   // password, or an account with no password set at all, so this endpoint
   // never confirms which part was wrong or whether an email exists.
   if (adminEmail && adminPasswordHash && email.toLowerCase() === adminEmail.toLowerCase() && verifyPassword(password, adminPasswordHash)) {
-    if (staffMfaDisabled) return completeLoginWithoutMfa('admin', adminName, null)
+    if (staffMfaDisabled()) return completeLoginWithoutMfa('admin', adminName, null)
     const adminMfaState = await getAdminMfaState()
     return startStaffMfaChallenge({ role: 'admin', name: adminName, userId: null, ip, mfaMethod: adminMfaState.mfaMethod, phone: adminMfaState.phone, email: adminEmail })
   }
 
   const user = await findUserByEmail(email)
   if (user?.passwordHash && verifyPassword(password, user.passwordHash)) {
-    if (staffMfaDisabled) return completeLoginWithoutMfa(user.role, user.name, user.id)
+    if (staffMfaDisabled()) return completeLoginWithoutMfa(user.role, user.name, user.id)
     return startStaffMfaChallenge({ role: user.role, name: user.name, userId: user.id, ip, mfaMethod: user.mfaMethod, phone: user.phone, email: user.email })
   }
 

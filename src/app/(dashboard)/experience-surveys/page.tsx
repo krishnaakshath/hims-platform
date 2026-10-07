@@ -1,10 +1,13 @@
+import { formatIstDate } from '@/lib/india-time'
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
+import { demoFeaturesEnabled } from '@/lib/demo-features'
+import { notFound, redirect } from 'next/navigation'
 import { Star, MessagesSquare, Send } from 'lucide-react'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { listReviews, listSurveyableSubmissions } from '@/lib/queries/reviews'
 import { SendSurveyButton } from '@/components/SendSurveyButton'
+import { DemoBadge } from '@/components/DemoBadge'
 
 const SECTION = 'rounded-md border border-border bg-card p-5 shadow-none'
 const FIELD = 'rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring'
@@ -15,6 +18,8 @@ export default async function ExperienceSurveysPage({ searchParams }: { searchPa
   const session = await requireSessionOrRedirect()
   // LeftNav.tsx:63 — { href: '/experience-surveys', roles: ['admin', 'crc'] }
   if (!['admin', 'crc'].includes(session.role)) redirect('/')
+  // Wave B P1-21: demo-only page -- 404 unless DEMO_FEATURES is on (after the role gate, before any read).
+  if (!demoFeaturesEnabled()) notFound()
   const sp = await searchParams
   const filters = {
     status: sp.status === 'sent' || sp.status === 'completed' ? (sp.status as 'sent' | 'completed') : undefined,
@@ -42,7 +47,7 @@ export default async function ExperienceSurveysPage({ searchParams }: { searchPa
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Pre-Screening Experience Surveys</h1>
+        <h1 className="text-2xl font-bold text-foreground">Pre-Screening Experience Surveys<DemoBadge /></h1>
         <SendSurveyButton candidates={surveyable} />
       </div>
 
@@ -134,8 +139,8 @@ export default async function ExperienceSurveysPage({ searchParams }: { searchPa
                     </span>
                   </td>
                   <td className="p-3 text-foreground">{r.ratingOverall !== null ? `${r.ratingOverall}/5` : '—'}</td>
-                  <td className="p-3 text-muted-foreground">{new Date(r.sentAt).toLocaleDateString()}</td>
-                  <td className="p-3 text-muted-foreground">{r.respondedAt ? new Date(r.respondedAt).toLocaleDateString() : '—'}</td>
+                  <td className="p-3 text-muted-foreground">{formatIstDate(r.sentAt)}</td>
+                  <td className="p-3 text-muted-foreground">{r.respondedAt ? formatIstDate(r.respondedAt) : '—'}</td>
                 </tr>
               ))}
             </tbody>

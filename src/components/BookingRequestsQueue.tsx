@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import type { BookingRequestRow } from '@/lib/queries/booking-requests'
 import { Button } from '@/components/ui/button'
@@ -32,7 +33,7 @@ function BookingRequestStatusChip({ status }: { status: BookingRequestStatus }) 
 
 function formatDate(value: string | Date) {
   const d = typeof value === 'string' ? new Date(`${value}T00:00:00`) : value
-  return d.toLocaleDateString([], { dateStyle: 'medium' })
+  return formatIstDate(d)
 }
 
 export function BookingRequestsQueue({ requests, providers, canResolve }: {

@@ -77,4 +77,12 @@ describe('Patient detail — Profile tab', () => {
     expect(fd.screen.queryByText(/Emergency/)).not.toBeInTheDocument()
     expect(fd.screen.getByText('Declined')).toBeInTheDocument()
   })
+
+  // Wave B P1-09: KYC verification can be performed from the Verification tab.
+  it.each([['frontdesk', true], ['crc', true], ['admin', true], ['pi', false]])('role %s gets the Verify identity action: %s', async (role, shows) => {
+    const { screen } = await renderAs(role)
+    const { fireEvent } = await import('@testing-library/react')
+    fireEvent.click(screen.getByRole('button', { name: /^verification$/i }))
+    expect(!!screen.queryByRole('button', { name: /verify identity/i })).toBe(shows)
+  })
 })

@@ -7,8 +7,9 @@ import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { listAllTrials } from '@/lib/queries/trials'
 import { PatientsTable } from '@/components/PatientsTable'
 import { AddPatientButton } from '@/components/AddPatientButton'
+import { matchesDirectoryQuery, paginate, parseDirectoryParams, PATIENT_PAGE_SIZE } from '@/lib/patient-directory'
 
-export default async function PatientsPage({ searchParams }: { searchParams: Promise<{ trialId?: string }> }) {
+export default async function PatientsPage({ searchParams }: { searchParams: Promise<{ trialId?: string; q?: string | string[]; page?: string | string[] }> }) {
   // Must be the first statement: a final security review proved that relying
   // on the (dashboard) layout's redirect() alone lets this page's full PHI
   // content render and stream into the response body even on an
@@ -23,10 +24,15 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
   // criteria counts. listPatientsWithStatus returns one row per screening,
   // so the unfiltered list is deduped to one card per patient.
   const isFrontDesk = session.role === 'frontdesk'
-  const { trialId: requestedTrialId } = await searchParams
+  const sp = await searchParams
+  const requestedTrialId = typeof sp.trialId === 'string' ? sp.trialId : undefined
   const trialId = isFrontDesk ? undefined : requestedTrialId
   const [rows, trials] = await Promise.all([listPatientsWithStatus(trialId ?? null), isFrontDesk ? Promise.resolve([]) : listAllTrials()])
   const patients = isFrontDesk ? [...new Map(rows.map((p) => [p.id, p])).values()] : rows
+  // Wave B P1-08: filter (name / anon id / UHID / mobile) and page on the
+  // server, so only one page of rows crosses to the client.
+  const { q, page: requestedPage } = parseDirectoryParams(sp)
+  const page = paginate(patients.filter((p) => matchesDirectoryQuery(p, q)), requestedPage, PATIENT_PAGE_SIZE)
   await logAudit(session, 'viewed patient list', null)
 
   return (
@@ -66,10 +72,12 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
           client bundle. Front desk's projection drops the verdict and
           criteria summary entirely, so they never reach the client. */}
       <PatientsTable
-        patients={patients.map((p) => ({
+        patients={page.rows.map((p) => ({
           id: p.id,
           name: p.name,
           dob: p.dob,
+          uhid: p.uhid ?? null,
+          phone: p.phone ?? null,
           currentProvider: p.currentProvider,
           referralType: p.referralType,
           lastCommunication: p.lastCommunication,
@@ -79,6 +87,7 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
         // redirects them (CLINICAL_ROLES gate).
         showMedicalRecordLink={!isFrontDesk}
         showScreening={!isFrontDesk}
+        directory={{ query: q, page: page.page, pageSize: page.pageSize, total: page.total, params: trialId ? { trialId } : {} }}
       />
     </div>
   )

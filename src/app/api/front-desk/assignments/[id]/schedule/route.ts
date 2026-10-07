@@ -7,14 +7,15 @@ import { getDb } from '@/db/client'
 import { doctorAssignments } from '@/db/schema'
 import { scheduleAssignmentIntoAppointment, notifyPatientOfScheduledAssignment } from '@/lib/queries/doctor-assignments'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
+import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
 
 // Only the time slot comes from the client. The visit reason is taken from
 // the stored assignment row server-side, so a crafted body cannot put
 // arbitrary text into the patient's automated confirmation; .strict() makes a
 // stray `visitReason` key a 400 like any other unknown key.
 const scheduleSchema = z.object({
-  startsAt: z.string().min(1),
-  endsAt: z.string().min(1),
+  startsAt: appointmentInstantSchema,
+  endsAt: appointmentInstantSchema,
 }).strict()
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!Number.isInteger(assignmentId)) return NextResponse.json({ error: 'Invalid assignment id' }, { status: 400 })
 
   const parsed = scheduleSchema.safeParse(await request.json())
+  if (!parsed.success && isTimeFieldError(parsed.error)) return invalidAppointmentTime()
   if (!parsed.success) return NextResponse.json({ error: 'Invalid schedule payload', details: parsed.error.flatten() }, { status: 400 })
 
   const startsAt = new Date(parsed.data.startsAt)

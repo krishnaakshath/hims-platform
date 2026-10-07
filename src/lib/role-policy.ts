@@ -95,7 +95,18 @@ export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc'
 export const CODE_SYSTEM_ADMIN_ROLES: readonly Role[] = ['admin']
 // end SP6
 
-export type SearchScopes = { patients: boolean; trials: boolean; formTemplates: boolean }
+// Wave B: account self-service and reachability.
+// Account = /account (own MFA method, MFA self-reset, "what you can do"):
+// every staff role. A named allowlist (not "no gate") so an unknown/future
+// role is still denied by default.
+export const ACCOUNT_ROLES: readonly Role[] = ALL_ROLES
+// end Wave B
+
+// Global search (TopBanner). Patients only for PATIENT_DIRECTORY_ROLES (no
+// directory for pharmacy/billing/labs); services = the tariff catalogue for
+// TARIFF_MANAGE_ROLES (Wave B P1-24). Pharmacy and labs have no global
+// search: their counter lookup and worklist are their search.
+export type SearchScopes = { patients: boolean; trials: boolean; formTemplates: boolean; services: boolean }
 
 export function searchScopesFor(role: Role): SearchScopes {
   const clinical = CLINICAL_ROLES.includes(role)
@@ -103,10 +114,11 @@ export function searchScopesFor(role: Role): SearchScopes {
     patients: PATIENT_DIRECTORY_ROLES.includes(role),
     trials: clinical,
     formTemplates: clinical,
+    services: TARIFF_MANAGE_ROLES.includes(role),
   }
 }
 
 export function hasSearchScope(role: Role): boolean {
   const s = searchScopesFor(role)
-  return s.patients || s.trials || s.formTemplates
+  return s.patients || s.trials || s.formTemplates || s.services
 }

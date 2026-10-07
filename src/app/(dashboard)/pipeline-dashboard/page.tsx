@@ -1,3 +1,4 @@
+import { istDateOf, startOfIstDay, todayIsoIn } from '@/lib/india-time'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import type { ComponentType } from 'react'
@@ -36,24 +37,23 @@ function StatTile({ icon: Icon, value, label, color }: { icon: ComponentType<{ c
   )
 }
 
+// Ranges are IST calendar days (00:00 IST), independent of the server's zone.
 function resolveRange(preset: string | undefined, from: string | undefined, to: string | undefined) {
   const now = new Date()
-  if (preset === 'custom' && from && to) {
-    return { from: new Date(from), to: new Date(to), preset: 'custom' as const }
+  const DAY = 24 * 60 * 60 * 1000
+  const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
+  if (preset === 'custom' && from && to && isDay(from) && isDay(to)) {
+    return { from: startOfIstDay(from), to: new Date(startOfIstDay(to).getTime() + DAY - 1), preset: 'custom' as const }
   }
+  const today = todayIsoIn()
   if (preset === 'week') {
-    const start = new Date(now)
-    start.setDate(now.getDate() - now.getDay())
-    start.setHours(0, 0, 0, 0)
-    return { from: start, to: now, preset: 'week' as const }
+    const weekday = new Date(`${today}T00:00:00Z`).getUTCDay()
+    return { from: new Date(startOfIstDay(today).getTime() - weekday * DAY), to: now, preset: 'week' as const }
   }
   if (preset === 'last30') {
-    const start = new Date(now)
-    start.setDate(now.getDate() - 30)
-    return { from: start, to: now, preset: 'last30' as const }
+    return { from: new Date(now.getTime() - 30 * DAY), to: now, preset: 'last30' as const }
   }
-  const start = new Date(now.getFullYear(), now.getMonth(), 1)
-  return { from: start, to: now, preset: 'month' as const }
+  return { from: startOfIstDay(`${today.slice(0, 7)}-01`), to: now, preset: 'month' as const }
 }
 
 export default async function PipelineDashboardPage({ searchParams }: { searchParams: Promise<{ preset?: string; from?: string; to?: string }> }) {
@@ -84,11 +84,11 @@ export default async function PipelineDashboardPage({ searchParams }: { searchPa
         <input type="hidden" name="preset" value="custom" />
         <div>
           <label htmlFor="pipeline-from" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">From</label>
-          <input id="pipeline-from" type="date" name="from" defaultValue={range.from.toISOString().slice(0, 10)} className="rounded-md border border-border bg-card px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring" />
+          <input id="pipeline-from" type="date" name="from" defaultValue={istDateOf(range.from)} className="rounded-md border border-border bg-card px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring" />
         </div>
         <div>
           <label htmlFor="pipeline-to" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">To</label>
-          <input id="pipeline-to" type="date" name="to" defaultValue={range.to.toISOString().slice(0, 10)} className="rounded-md border border-border bg-card px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring" />
+          <input id="pipeline-to" type="date" name="to" defaultValue={istDateOf(range.to)} className="rounded-md border border-border bg-card px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring" />
         </div>
         <button type="submit" className="rounded-md border border-border px-4 py-2 font-medium text-foreground transition-colors hover:bg-secondary">Update</button>
       </form>

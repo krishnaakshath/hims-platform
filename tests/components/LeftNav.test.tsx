@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
-import { LeftNav } from '@/components/LeftNav'
+import { LeftNav, NAV_BILLING_ITEMS } from '@/components/LeftNav'
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/patients' }))
 
@@ -89,6 +89,63 @@ describe('LeftNav', () => {
     render(<LeftNav role="pi" badges={{ '/doctor': 0 }} />)
     expect(screen.getByRole('link', { name: /my patients/i }).textContent).toBe('My Patients')
   })
+  // Wave B P0-01: billing-only nav must reach its own home and Tariffs.
+  it('gives billing a Billing Home link and the Tariffs link, but no clinical entries', () => {
+    render(<LeftNav role="billing" />)
+    expect(screen.getByRole('link', { name: /billing home/i })).toHaveAttribute('href', '/billing')
+    expect(screen.getByRole('link', { name: /^tariffs$/i })).toHaveAttribute('href', '/tariffs')
+    for (const hidden of [/^patients$/i, /^calendar$/i, /^labs$/i, /^settings$/i, /^reports$/i]) {
+      expect(screen.queryByRole('link', { name: hidden })).not.toBeInTheDocument()
+    }
+  })
+
+  it('lists Billing Home first in the billing group', () => {
+    expect(NAV_BILLING_ITEMS[0]).toMatchObject({ href: '/billing', label: 'Billing Home' })
+  })
+
+  it.each(['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs'] as const)('shows My Account to %s', (role) => {
+    render(<LeftNav role={role} />)
+    expect(screen.getByRole('link', { name: /my account/i })).toHaveAttribute('href', '/account')
+  })
+
+  // Wave B P1-21: demo-only entries follow DEMO_FEATURES and say "Demo" when shown.
+  it('hides demo entries when demo features are off', () => {
+    const { unmount } = render(<LeftNav role="billing" demoFeatures={false} />)
+    expect(screen.queryByRole('link', { name: /virtual card payment/i })).not.toBeInTheDocument()
+    unmount()
+    render(<LeftNav role="admin" demoFeatures={false} />)
+    expect(screen.queryByRole('link', { name: /broadcasts/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /experience surveys/i })).not.toBeInTheDocument()
+  })
+
+  it('shows demo entries with a Demo label when demo features are on', () => {
+    const { unmount } = render(<LeftNav role="billing" demoFeatures />)
+    expect(screen.getByRole('link', { name: /virtual card payment.*demo/i })).toHaveAttribute('href', '/billing/pay')
+    unmount()
+    render(<LeftNav role="admin" demoFeatures />)
+    expect(screen.getByRole('link', { name: /broadcasts.*demo/i })).toHaveAttribute('href', '/broadcasts')
+    expect(screen.getByRole('link', { name: /experience surveys.*demo/i })).toHaveAttribute('href', '/experience-surveys')
+  })
+
+  it('shows Price Lookup to admin, billing, crc and frontdesk only', () => {
+    for (const role of ['admin', 'billing', 'crc', 'frontdesk'] as const) {
+      const { unmount } = render(<LeftNav role={role} />)
+      expect(screen.getByRole('link', { name: /price lookup/i })).toHaveAttribute('href', '/price-lookup')
+      unmount()
+    }
+    for (const role of ['pi', 'pharmacy', 'labs'] as const) {
+      const { unmount } = render(<LeftNav role={role} />)
+      expect(screen.queryByRole('link', { name: /price lookup/i })).not.toBeInTheDocument()
+      unmount()
+    }
+  })
+
+  it('shows the unread-messages and pending-booking pills (Wave B P1-25)', () => {
+    render(<LeftNav role="crc" badges={{ '/messages': 4, '/booking-requests': 2 }} />)
+    expect(within(screen.getByRole('link', { name: /messages/i })).getByText('4')).toBeInTheDocument()
+    expect(within(screen.getByRole('link', { name: /booking requests/i })).getByText('2')).toBeInTheDocument()
+  })
+
   it('shows the decline pill on Assignments for frontdesk', () => {
     render(<LeftNav role="frontdesk" badges={{ '/front-desk/assignments': 2 }} />)
     expect(within(screen.getByRole('link', { name: /assignments/i })).getByText('2')).toBeInTheDocument()

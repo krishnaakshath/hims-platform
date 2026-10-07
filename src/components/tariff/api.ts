@@ -15,14 +15,7 @@ export async function sendJson<T = unknown>(url: string, method: 'POST' | 'PUT' 
   }
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/** '2026-10-07' -> '7 Oct 2026'. Pure string work (no Intl/toLocale), so SSR and hydration always agree. */
-export function formatIsoDate(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
-  if (!m) return '—'
-  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1] ?? '—'} ${m[1]}`
-}
+/** '2026-10-07' -> '7 Oct 2026'. The shared pure formatter (no Intl/toLocale), so SSR and hydration always agree. */
+export { formatCalendarDate as formatIsoDate } from '@/lib/india-time'
 
 export const FIELD_CLASS = 'w-full rounded-md border border-border bg-background px-3 py-2 text-sm'

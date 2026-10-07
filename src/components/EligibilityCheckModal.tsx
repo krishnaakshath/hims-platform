@@ -1,4 +1,5 @@
 'use client'
+import { formatPaise } from '@/lib/format'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -74,8 +75,8 @@ export function EligibilityCheckModal({ onClose }: { onClose: () => void }) {
           {result && (
             <p className="rounded-md border border-border bg-secondary p-2 text-sm">
               Status: <span className="font-medium capitalize">{result.status.replace('_', ' ')}</span>
-              {result.copayCents !== null && <> · Copay: ${(result.copayCents / 100).toFixed(2)}</>}
-              {result.deductibleRemainingCents !== null && <> · Deductible remaining: ${(result.deductibleRemainingCents / 100).toFixed(2)}</>}
+              {result.copayCents !== null && <> · Co-pay: {formatPaise(result.copayCents)}</>}
+              {result.deductibleRemainingCents !== null && <> · Deductible remaining: {formatPaise(result.deductibleRemainingCents)}</>}
               {result.planType && <> · Plan: <span className="uppercase">{result.planType}</span></>}
             </p>
           )}

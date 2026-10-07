@@ -1,4 +1,5 @@
-/** Formats an integer cents amount as US currency, e.g. 17500 -> "$175.00". */
-export function formatCents(cents: number): string {
-  return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
-}
+// The one money-display path. The hospital has a single currency (INR); every
+// amount column -- the SP2+ *Paise columns and the legacy billing tables'
+// *Cents columns alike -- holds integer minor units, i.e. paise, and is shown
+// through formatPaise (₹, en-IN grouping, deterministic on server and client).
+export { CURRENCY, formatPaise, formatRupeesWhole, parseRupeesToPaise } from '@/lib/money'

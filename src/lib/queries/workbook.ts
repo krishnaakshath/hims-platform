@@ -1,3 +1,4 @@
+import { ageOnDate, istDateOf, todayIsoIn } from '@/lib/india-time'
 import { getDb } from '@/db/client'
 import { patients, diagnoses, medicationEpisodes } from '@/db/schema'
 import { getOrSetCache, workbookListCacheKey } from '@/lib/cache'
@@ -51,12 +52,8 @@ export interface WorkbookRow {
 }
 
 export function calculateAge(dob: string): number {
-  const birth = new Date(dob)
-  const now = new Date()
-  let age = now.getFullYear() - birth.getFullYear()
-  const monthDiff = now.getMonth() - birth.getMonth()
-  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) age--
-  return age
+  // Age on today's IST calendar date.
+  return ageOnDate(dob, todayIsoIn())
 }
 
 export async function listWorkbookRows(): Promise<WorkbookRow[]> {
@@ -73,7 +70,7 @@ export async function listWorkbookRows(): Promise<WorkbookRow[]> {
 
       return {
         id: p.id,
-        dateAdded: p.dateAdded.toISOString().slice(0, 10),
+        dateAdded: istDateOf(new Date(p.dateAdded)),
         patientName: p.name,
         currentProvider: p.currentProvider,
         ratingScales: (p.ratingScales ?? []).map((r) => `${r.name}: ${r.score} (${r.date})`).join('; '),

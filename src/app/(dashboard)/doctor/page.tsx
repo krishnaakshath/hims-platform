@@ -1,3 +1,4 @@
+import { formatIstDate, formatIstDateTime, istDayBounds } from '@/lib/india-time'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Clock, AlertCircle, Activity } from 'lucide-react'
@@ -42,8 +43,8 @@ export default async function DoctorPortalPage() {
   const codingQueries = providerMatch ? await listOpenCodingQueriesForProvider(providerMatch.id) : []
 
   const now = new Date()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000)
+  // Today's IST business day, whatever zone the server runs in.
+  const { start: todayStart, end: todayEnd } = istDayBounds(now)
   const rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
   const rangeEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
 
@@ -137,7 +138,7 @@ export default async function DoctorPortalPage() {
                       <p className="text-xs text-foreground/80">{a.reason}</p>
                       <div className="mt-1 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground">
-                          {a.visitType} · Assigned by {a.assignedByName} · {a.createdAt.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                          {a.visitType} · Assigned by {a.assignedByName} · {formatIstDateTime(a.createdAt)}
                         </span>
                         <AssignmentScheduleModalTrigger assignment={a} />
                       </div>
@@ -169,7 +170,7 @@ export default async function DoctorPortalPage() {
                     <li key={l.id} className="flex flex-col gap-1.5 p-4 transition-colors hover:bg-muted/20">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium text-foreground">{l.patientName || l.patientId}</span>
-                        <span className="text-[10px] font-bold uppercase text-muted-foreground">{new Date(l.orderedAt).toLocaleDateString()}</span>
+                        <span className="text-[10px] font-bold uppercase text-muted-foreground">{formatIstDate(l.orderedAt)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-muted-foreground">{l.testName}</span>

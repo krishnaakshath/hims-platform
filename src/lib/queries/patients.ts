@@ -12,7 +12,7 @@ import {
 } from '@/db/schema'
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
-import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey } from '@/lib/cache'
+import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
@@ -73,7 +73,7 @@ export async function listPatientNameOptions(): Promise<PatientNameOption[]> {
     .orderBy(sql`patients.name`)
 }
 
-export async function listPatientsWithStatus(trialId: string | null): Promise<PatientWithStatus[]> {
+export async function listPatientsWithStatus(trialId: string | null): Promise<Jsonified<PatientWithStatus>[]> {
   return getOrSetCache(patientListCacheKey(trialId), 30, async () => {
     const rows = await getDb()
       .select({ patient: publicPatientColumns, screening: patientTrialScreenings })
@@ -606,16 +606,28 @@ export interface LikelyDuplicatePatient {
   id: string
   name: string
   dob: string
+  uhid: string | null
 }
 
 export async function findLikelyDuplicatePatients(name: string, dob: string): Promise<LikelyDuplicatePatient[]> {
   const rows = await getDb()
-    .select({ id: patients.id, name: patients.name, dob: patients.dob })
+    .select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid })
     .from(patients)
     .where(eq(patients.dob, dob))
 
   const needle = name.trim().toLowerCase()
   return rows
     .filter((r) => r.name.toLowerCase().includes(needle) || needle.includes(r.name.toLowerCase()))
-    .map((r) => ({ id: r.id, name: r.name, dob: r.dob }))
+    .map((r) => ({ id: r.id, name: r.name, dob: r.dob, uhid: r.uhid }))
+}
+
+/** Registration duplicate check by mobile (Wave B P1-10). `phone` must already
+ *  be normalised (normalizePhone), the same form registration stores. Never
+ *  returns the phone itself. */
+export async function findPatientsByPhone(phone: string): Promise<LikelyDuplicatePatient[]> {
+  return getDb()
+    .select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid })
+    .from(patients)
+    .where(eq(patients.phone, phone))
+    .limit(10)
 }
