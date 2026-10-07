@@ -114,7 +114,7 @@ export type UnbookFollowUpResult =
 
 /**
  * Cancels the booking but keeps the follow-up open (back to `planned`). The
- * front desk's free-text reason goes into the appointment's notes, never the
+ * front desk's free-text reason is appended to the appointment's notes, never the
  * audit log; the order's cancelReason is for cancelling the order itself.
  */
 export async function unbookFollowUp(id: number, reason: string, session: Session): Promise<UnbookFollowUpResult> {
@@ -124,14 +124,16 @@ export async function unbookFollowUp(id: number, reason: string, session: Sessio
     // A completed order keeps its (checked-in) appointment; only a live booking can be undone.
     if (order.status !== 'scheduled' || order.appointmentId === null) return { ok: false, error: 'not_booked' }
     const [appt] = await tx
-      .select({ id: appointments.id, status: appointments.status })
+      .select({ id: appointments.id, status: appointments.status, notes: appointments.notes })
       .from(appointments)
       .where(eq(appointments.id, order.appointmentId))
       .for('update')
     if (!appt || appt.status !== 'scheduled') return { ok: false, error: 'not_booked' }
 
+    // Ruling 3: append to the appointment's notes (row is locked), never overwrite them.
+    const line = `Follow-up booking cancelled: ${reason}`
     await tx.update(appointments)
-      .set({ status: 'cancelled', notes: `Follow-up booking cancelled: ${reason}` })
+      .set({ status: 'cancelled', notes: appt.notes?.trim() ? `${appt.notes}\n${line}` : line })
       .where(eq(appointments.id, appt.id))
 
     const at = new Date()

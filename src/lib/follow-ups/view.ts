@@ -1,7 +1,7 @@
 // Pure, client-safe projections of a follow-up order. Every view is built by
 // naming its fields: no spread of the DB row, so a column added later never
-// reaches the front desk or the portal by accident. Clinical plan notes are
-// released only to FOLLOW_UP_CLINICAL_NOTES_ROLES.
+// reaches the front desk or the portal by accident. Clinical plan notes and
+// the cancel reason are released only to FOLLOW_UP_CLINICAL_NOTES_ROLES.
 import type { Role } from '@/lib/auth'
 import type { FollowUpOrderRow } from '@/db/schema'
 import { FOLLOW_UP_CLINICAL_NOTES_ROLES } from '@/lib/role-policy'
@@ -79,6 +79,7 @@ export function toFollowUpView(row: FollowUpJoinedRow, todayIso: string, role: R
   const contactAttempts = [...row.contactAttempts]
     .sort((a, b) => b.attemptedAt.getTime() - a.attemptedAt.getTime() || b.id - a.id)
     .map(attemptView)
+  const clinical = FOLLOW_UP_CLINICAL_NOTES_ROLES.includes(role)
   return {
     id: row.id,
     patientId: row.patientId,
@@ -90,7 +91,7 @@ export function toFollowUpView(row: FollowUpJoinedRow, todayIso: string, role: R
     windowEnd: row.windowEnd,
     interval: row.intervalValue !== null && row.intervalUnit !== null ? { value: row.intervalValue, unit: row.intervalUnit } : null,
     reason: row.reason,
-    planNotes: FOLLOW_UP_CLINICAL_NOTES_ROLES.includes(role) ? row.planNotes : null,
+    planNotes: clinical ? row.planNotes : null,
     prescribedBy: { providerId: row.prescribedByProviderId, name: row.prescriberName },
     department: row.departmentId !== null && row.departmentName !== null ? { id: row.departmentId, name: row.departmentName } : null,
     appointment: appointmentView(row.appointment),
@@ -98,7 +99,8 @@ export function toFollowUpView(row: FollowUpJoinedRow, todayIso: string, role: R
     createdAt: row.createdAt,
     scheduledByName: row.scheduledByName,
     scheduledAt: row.scheduledAt,
-    cancelReason: row.cancelReason,
+    // Ruling 2: why a doctor cancelled is clinical, like the plan notes.
+    cancelReason: clinical ? row.cancelReason : null,
     contactAttempts,
     lastContact: contactAttempts[0] ?? null,
   }

@@ -65,6 +65,18 @@ describe('toFollowUpView', () => {
     }
   })
 
+  it('treats the cancel reason as clinical: only admin, crc and pi receive it (ruling 2)', () => {
+    const cancelled: FollowUpJoinedRow = { ...ROW, status: 'cancelled', cancelReason: 'Referred to oncology SECRET' }
+    for (const role of ['admin', 'crc', 'pi'] as const) {
+      expect(toFollowUpView(cancelled, '2026-10-20', role).cancelReason).toBe('Referred to oncology SECRET')
+    }
+    for (const role of ['frontdesk', 'billing', 'pharmacy', 'labs'] as const) {
+      const v = toFollowUpView(cancelled, '2026-10-20', role)
+      expect(v.cancelReason).toBeNull()
+      expect(JSON.stringify(v)).not.toContain('SECRET')
+    }
+  })
+
   it('is an explicit projection: raw order columns do not ride along', () => {
     const v = toFollowUpView(ROW, '2026-10-20', 'admin') as unknown as Record<string, unknown>
     for (const k of ['baseDate', 'createdByUserId', 'scheduledByUserId', 'originatingLabOrderId', 'intervalValue', 'prescribedByProviderId']) {

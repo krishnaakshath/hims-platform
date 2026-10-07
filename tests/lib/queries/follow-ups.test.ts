@@ -290,7 +290,8 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
 
     const desk = await listFollowUpsForPatient(PATIENT, 'frontdesk', '2099-04-10')
     expect(desk.map((v) => v.id)).toEqual([second.id, first.id])
-    expect(desk[1]).toMatchObject({ status: 'cancelled', bucket: 'closed', cancelReason: 'TEST_SP3 cancelled' })
+    // Ruling 2: the cancel reason is clinical -- the front desk sees that it was cancelled, not why.
+    expect(desk[1]).toMatchObject({ status: 'cancelled', bucket: 'closed', cancelReason: null })
     expect(desk[0]).toMatchObject({
       status: 'scheduled', bucket: 'scheduled', reason: 'TEST_SP3 BP review', planNotes: null,
       prescribedBy: { providerId, name: 'TEST_SP3 Dr Prescriber' }, department: { id: deptId, name: 'TEST_SP3 follow-up dept' },
@@ -302,6 +303,7 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
 
     const pi = await listFollowUpsForPatient(PATIENT, 'pi', '2099-04-10')
     expect(pi.find((v) => v.id === first.id)?.planNotes).toBe('TEST_SP3 clinical SECRETWORD')
+    expect(pi.find((v) => v.id === first.id)?.cancelReason).toBe('TEST_SP3 cancelled')
   })
 
   it('getPortalFollowUps returns open orders without reason or notes', async () => {

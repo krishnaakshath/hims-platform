@@ -223,6 +223,16 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up booking (DB)', () => {
     expect(await bookFollowUp(o.id, { providerId, ...SLOT }, S)).toMatchObject({ ok: true, kind: 'booked' })
   })
 
+  it('unbook APPENDS its line to existing appointment notes (ruling 3)', async () => {
+    const o = await makeOrder()
+    const b = await bookFollowUp(o.id, { providerId, ...SLOT }, S)
+    if (!b.ok) throw new Error('booking failed')
+    await getDb().update(appointments).set({ notes: 'TEST_SP3 bring old reports' }).where(eq(appointments.id, b.appointmentId))
+    expect(await unbookFollowUp(o.id, 'TEST_SP3 travelling', S)).toMatchObject({ ok: true })
+    const [appt] = await getDb().select().from(appointments).where(eq(appointments.id, b.appointmentId))
+    expect(appt.notes).toBe('TEST_SP3 bring old reports\nFollow-up booking cancelled: TEST_SP3 travelling')
+  })
+
   it('unbook refuses an order completed at check-in even though its appointment is still scheduled', async () => {
     const [appt] = await getDb().insert(appointments).values({ patientId: PATIENT, providerId, ...SLOT, visitReason: 'Follow-up: x' }).returning()
     const o = await makeOrder({ status: 'completed', appointmentId: appt.id })
