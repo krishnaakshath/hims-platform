@@ -1,4 +1,5 @@
 'use client'
+import { formatPaise } from '@/lib/format'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -57,7 +58,7 @@ export function PharmacyBillingTable({ rows }: { rows: PharmacyBillingRowView[] 
                     {loadingId === r.dispenseId ? 'Loading…' : 'Log bill'}
                   </Button>
                 ) : (
-                  <span className="text-foreground">{CHARGE_STATUS_LABELS[r.charge.status]} · ${(r.charge.amountCents / 100).toFixed(2)}</span>
+                  <span className="text-foreground">{CHARGE_STATUS_LABELS[r.charge.status]} · {formatPaise(r.charge.amountCents)}</span>
                 )}
               </td>
             </tr>

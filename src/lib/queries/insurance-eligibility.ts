@@ -30,8 +30,8 @@ export function simulateEligibilityCheck(patientId: string, payerName: string, p
 } {
   const hash = createHash('sha256').update(`${patientId}:${payerName.toLowerCase().trim()}`).digest()
   const status = STATUSES[hash[0] % STATUSES.length]
-  const copayCents = status === 'verified' ? (hash[1] % 10) * 500 : null // $0-$45 in $5 steps
-  const deductibleRemainingCents = status === 'verified' ? (hash[2] % 20) * 10000 : null // $0-$1900 in $100 steps
+  const copayCents = status === 'verified' ? (hash[1] % 10) * 500 : null // ₹0-₹45 in ₹5 steps (paise)
+  const deductibleRemainingCents = status === 'verified' ? (hash[2] % 20) * 10000 : null // ₹0-₹1900 in ₹100 steps (paise)
   // A simulated coverage effective date, 30-364 days in the past -- not
   // meant to be clinically meaningful, just a plausible, stable date for
   // the same patient+payer pair.

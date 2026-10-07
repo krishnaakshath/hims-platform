@@ -1,4 +1,5 @@
 'use client'
+import { formatPaise } from '@/lib/format'
 import { useState } from 'react'
 import { Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -263,7 +264,7 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
                           {d.charge === null ? (
                             <Button size="sm" variant="outline" onClick={() => setBillingDispense(d)}>Log bill</Button>
                           ) : (
-                            <span className="text-foreground">{CHARGE_STATUS_LABELS[d.charge.status]} · ${(d.charge.amountCents / 100).toFixed(2)}</span>
+                            <span className="text-foreground">{CHARGE_STATUS_LABELS[d.charge.status]} · {formatPaise(d.charge.amountCents)}</span>
                           )}
                         </td>
                       </tr>
