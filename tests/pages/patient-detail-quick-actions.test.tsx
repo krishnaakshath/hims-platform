@@ -63,4 +63,10 @@ describe('Patient detail quick actions', () => {
     const b = await renderAs('pi', { registered: '1' })
     expect(b.screen.queryByText(/patient registered/i)).not.toBeInTheDocument()
   })
+
+  // Wave C P1-11: admin-only correction of name / DOB.
+  it.each([['admin', true], ['crc', false], ['frontdesk', false], ['pi', false]])('%s sees the name/DOB correction: %s', async (role, shows) => {
+    const { screen } = await renderAs(role)
+    expect(!!screen.queryByRole('button', { name: /correct name/i })).toBe(shows)
+  })
 })

@@ -16,7 +16,8 @@ import { PatientProfilePanel } from '@/components/patient-profile/PatientProfile
 import { CopyUhidButton } from '@/components/patient-profile/CopyUhidButton'
 import { VerifyIdentityButton } from '@/components/patient-profile/VerifyIdentityButton' // Wave B
 import { IDENTITY_VERIFY_ROLES } from '@/lib/role-policy' // Wave B
-import { REGISTRATION_ROLES, SCHEDULING_ROLES, MLC_UNFLAG_ROLES } from '@/lib/role-policy' // Wave C
+import { REGISTRATION_ROLES, SCHEDULING_ROLES, MLC_UNFLAG_ROLES, DEMOGRAPHICS_CORRECTION_ROLES } from '@/lib/role-policy' // Wave C
+import { CorrectDemographicsButton } from '@/components/patient-profile/CorrectDemographicsButton' // Wave C P1-11
 import { PatientQuickActions, RegisteredBanner } from '@/components/patient-profile/PatientQuickActions' // Wave C
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { FollowUpPanel } from '@/components/follow-ups/FollowUpPanel'
@@ -264,6 +265,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {DEMOGRAPHICS_CORRECTION_ROLES.includes(session.role) && <CorrectDemographicsButton anonId={patient.id} name={name} dob={String(patient.dob)} />}
           {session.role === 'admin' && <DeletePatientButton patientId={patient.id} patientName={name} />}
           {isFrontDesk ? null : patient.selectionConfirmedAt ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
