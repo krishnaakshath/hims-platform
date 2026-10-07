@@ -601,6 +601,51 @@ export const serviceCatalog = pgTable('service_catalog', {
 
 export type ServiceCatalogRow = typeof serviceCatalog.$inferSelect
 
+// SP2 effective-dated tariff rates (scripts/migrations/2026-10-07-sp2-tariff-rates.sql).
+// MIGRATION-ONLY CONSTRAINT: `tariff_rates_no_overlap`, an EXCLUDE USING gist
+// (needs btree_gist) over (service_id, scope, coalesce(department_id,0),
+// coalesce(payer_id,0), coalesce(room_category_id,0), coalesce(ward,''),
+// daterange(valid_from, valid_to, '[]')) WHERE deactivated_at IS NULL.
+// drizzle cannot express it, so it exists only in that migration: after
+// `db:push` on a fresh DB, apply the SP2 migrations (docs/DEPLOYING.md §4),
+// and never `db:push` against a DB that has it (push would drop it).
+export const TARIFF_SCOPES = ['base', 'department', 'payer'] as const
+
+export const tariffRates = pgTable('tariff_rates', {
+  id: serial('id').primaryKey(),
+  serviceId: integer('service_id').notNull().references(() => serviceCatalog.id),
+  scope: text('scope', { enum: TARIFF_SCOPES }).notNull(),     // text, not pgEnum: used inside the gist exclusion
+  departmentId: integer('department_id').references(() => departments.id),
+  payerId: integer('payer_id').references(() => payers.id),
+  roomCategoryId: integer('room_category_id').references(() => roomCategories.id),
+  ward: text('ward'),                                             // stored normalised (normalizeWard, Task 5)
+  amountPaise: integer('amount_paise').notNull(),
+  currency: text('currency').default('INR').notNull(),
+  validFrom: date('valid_from').notNull(),
+  validTo: date('valid_to'),                                      // inclusive; null = open-ended
+  deactivatedAt: timestamp('deactivated_at'),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  check('tariff_rates_amount_nonneg', sql`${t.amountPaise} >= 0`),
+  check('tariff_rates_range_ordered', sql`${t.validTo} IS NULL OR ${t.validTo} >= ${t.validFrom}`),
+  check('tariff_rates_scope_keys', sql`(${t.scope} = 'base' AND ${t.departmentId} IS NULL AND ${t.payerId} IS NULL) OR (${t.scope} = 'department' AND ${t.departmentId} IS NOT NULL AND ${t.payerId} IS NULL) OR (${t.scope} = 'payer' AND ${t.payerId} IS NOT NULL AND ${t.departmentId} IS NULL)`),
+  index('tariff_rates_service_idx').on(t.serviceId),
+])
+
+export type TariffRateRow = typeof tariffRates.$inferSelect
+
+export const servicePackageItems = pgTable('service_package_items', {
+  id: serial('id').primaryKey(),
+  packageServiceId: integer('package_service_id').notNull().references(() => serviceCatalog.id),
+  itemServiceId: integer('item_service_id').notNull().references(() => serviceCatalog.id),
+  quantity: integer('quantity').default(1).notNull(),
+}, (t) => [
+  uniqueIndex('service_package_items_pkg_item_unique').on(t.packageServiceId, t.itemServiceId),
+  check('service_package_items_qty_positive', sql`${t.quantity} > 0`),
+  check('service_package_items_not_self', sql`${t.packageServiceId} <> ${t.itemServiceId}`),
+])
+
 export const appointments = pgTable('appointments', {
   id: serial('id').primaryKey(),
   patientId: text('patient_id').notNull().references(() => patients.id),

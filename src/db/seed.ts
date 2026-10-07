@@ -32,6 +32,8 @@ import {
   departments,
   serviceCatalog,
   roomCategories,
+  tariffRates,
+  servicePackageItems,
   appointments,
   rooms,
   documents,
@@ -941,6 +943,9 @@ async function clearExistingData() {
   await db.delete(providers)
   // SP2: service_catalog references departments; room_categories is
   // referenced by rooms, which were already deleted at the top.
+  // tariff_rates and service_package_items reference service_catalog.
+  await db.delete(tariffRates)
+  await db.delete(servicePackageItems)
   await db.delete(serviceCatalog)
   await db.delete(roomCategories)
   await db.delete(departments)
