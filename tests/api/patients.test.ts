@@ -289,4 +289,25 @@ describe('DELETE /api/patients/[anonId]', () => {
     // level) -- slower than a single-query test even with nothing to
     // delete in most of them, so this needs more than the default 5s.
   }, 15000)
+
+  // SP4: tax records must be kept, so a patient with a receipt cannot be deleted.
+  it('409s a patient with issued bills or receipts and deletes nothing', async () => {
+    const id = await createTestPatient()
+    const { patientPayments } = await import('@/db/schema')
+    const { purgeBillingFixtures } = await import('../db/billing-fixtures')
+    await getDb().insert(patientPayments).values({
+      receiptNumber: `RCT/99-00/DEL-${id}`, kind: 'advance', patientId: id, mode: 'cash', amountPaise: 100, financialYear: '2099-00', receiptDate: '2099-06-01', receivedByName: 'Test Admin',
+    })
+    try {
+      vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'admin', name: 'Test Admin', userId: null })
+      const response = await deletePatientRoute(new NextRequest(`http://localhost/api/patients/${id}`, { method: 'DELETE' }), { params: Promise.resolve({ anonId: id }) })
+      expect(response.status).toBe(409)
+      expect(await response.json()).toEqual({ error: 'This patient has issued bills or receipts, which must be kept; the patient cannot be deleted' })
+      expect(await getDb().select().from(patients).where(eq(patients.id, id))).toHaveLength(1)
+    } finally {
+      await purgeBillingFixtures([id])
+      const { deletePatient } = await import('@/lib/queries/patients')
+      await deletePatient(id)
+    }
+  }, 15000)
 })

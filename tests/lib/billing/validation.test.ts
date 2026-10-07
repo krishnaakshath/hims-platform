@@ -13,16 +13,16 @@ const msgs = (r: { success: boolean; error?: { issues: { message: string }[] } }
 
 describe('payment references', () => {
   it('rejects a Luhn-valid card number, accepts a 12-digit UTR', () => {
-    expect(paymentReferenceProblem('card', '4111 1111 1111 1111')).toBe('Do not enter card numbers; record the approval code or the last 4 digits')
+    expect(paymentReferenceProblem('card', '4111 1111 1111 1111')).toBe('This looks like a card number. Enter the bank or UPI reference instead')
     expect(paymentReferenceProblem('upi', '412345678901')).toBeNull()
     expect(paymentReferenceProblem('neft', '')).toBe('Enter the transaction reference for this payment mode')
     expect(paymentReferenceProblem('cash', null)).toBeNull()
   })
   it('ignores spaces and dashes, 13 to 19 digits, and every mode including cash', () => {
-    expect(paymentReferenceProblem('card', '4111-1111-1111-1111')).toMatch(/^Do not enter card numbers/)
-    expect(paymentReferenceProblem('cash', '4111111111111111')).toMatch(/^Do not enter card numbers/)
-    expect(paymentReferenceProblem('card', 'ref 4111111111111111 x')).toMatch(/^Do not enter card numbers/)
-    expect(paymentReferenceProblem('card', '378282246310005')).toMatch(/^Do not enter card numbers/) // 15-digit Amex test number
+    expect(paymentReferenceProblem('card', '4111-1111-1111-1111')).toMatch(/^This looks like a card number/)
+    expect(paymentReferenceProblem('cash', '4111111111111111')).toMatch(/^This looks like a card number/)
+    expect(paymentReferenceProblem('card', 'ref 4111111111111111 x')).toMatch(/^This looks like a card number/)
+    expect(paymentReferenceProblem('card', '378282246310005')).toMatch(/^This looks like a card number/) // 15-digit Amex test number
     expect(paymentReferenceProblem('card', '4111111111111112')).toBeNull() // fails Luhn
     expect(paymentReferenceProblem('card', '411111111111')).toBeNull() // 12 digits: too short to be a card
     expect(paymentReferenceProblem('card', 'APPR 123456')).toBeNull()
@@ -105,7 +105,7 @@ describe('payment and refund schemas', () => {
     expect(paymentSchema.safeParse(pay).success).toBe(true)
     const r = paymentSchema.safeParse({ ...pay, mode: 'card', reference: '4111 1111 1111 1111' })
     expect(r.success).toBe(false); expect(r.error!.issues[0].path).toEqual(['reference'])
-    expect(msgs(r)).toEqual(['Do not enter card numbers; record the approval code or the last 4 digits'])
+    expect(msgs(r)).toEqual(['This looks like a card number. Enter the bank or UPI reference instead'])
     expect(msgs(paymentSchema.safeParse({ ...pay, reference: undefined }))).toEqual(['Enter the transaction reference for this payment mode'])
     expect(paymentSchema.safeParse({ ...pay, mode: 'cash', reference: undefined }).success).toBe(true)
   })

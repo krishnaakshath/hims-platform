@@ -408,19 +408,37 @@ export async function listPharmacyPatientRoster(): Promise<PharmacyRosterRow[]> 
  * `patients` with a foreign-key violation. Returns false if the patient
  * doesn't exist, true once every row is gone.
  */
+// SP4 (plan ruling 11): issued bills, receipts and refunds are tax records that must be kept,
+// so a patient who has any cannot be deleted. The DELETE route maps this to a 409.
+export class PatientHasFinancialRecordsError extends Error {
+  constructor() {
+    super('This patient has issued bills or receipts, which must be kept; the patient cannot be deleted')
+    this.name = 'PatientHasFinancialRecordsError'
+  }
+}
+
+async function hasFinancialRecords(anonId: string): Promise<boolean> {
+  const result = await getDb().execute<{ found: boolean }>(sql`
+    select exists (select 1 from invoices where patient_id = ${anonId} and status in ('finalised', 'cancelled'))
+        or exists (select 1 from patient_payments where patient_id = ${anonId})
+        or exists (select 1 from refunds where patient_id = ${anonId}) as found`)
+  return Boolean(result.rows[0]?.found)
+}
+// end SP4
+
 export async function deletePatient(anonId: string): Promise<boolean> {
   const db = getDb()
   const [patient] = await db.select({ id: patients.id }).from(patients).where(eq(patients.id, anonId))
   if (!patient) return false
+  // SP4: refuse before anything is deleted.
+  if (await hasFinancialRecords(anonId)) throw new PatientHasFinancialRecordsError()
 
-  // SP4 billing, first and children-first, so a patient with issued documents is refused
-  // before anything else is deleted (plan ruling 11: tax records are kept). Receipts,
-  // advances and refunds are always issued: the migration-B immutability trigger refuses
-  // their DELETE (SQLSTATE 55000). A charge line on a finalised or cancelled invoice is
-  // still held by its invoice_lines row (FK, 23503), and the invoice guard trigger refuses
-  // an issued invoice's DELETE. Captured/void lines and draft/discarded invoices are
-  // deleted. Lines also reference medication_dispenses, charges, encounters and admissions,
-  // so they must go before those below. (Task 12 adds a friendly pre-check and a 409.)
+  // SP4 billing, first and children-first. After the pre-check above only captured/void lines
+  // and draft/discarded invoices remain, and they are deleted. The payment/refund deletes are a
+  // backstop: should a row slip past the pre-check (a concurrent receipt), the migration-B
+  // immutability trigger refuses it (SQLSTATE 55000) before anything else is deleted, as do the
+  // invoice_lines FK (23503) and the invoice guard trigger for an issued invoice. Lines also
+  // reference medication_dispenses, charges, encounters and admissions, so they go before those.
   await db.delete(refunds).where(eq(refunds.patientId, anonId))
   await db.delete(patientPayments).where(eq(patientPayments.patientId, anonId))
   await db.delete(chargeLines).where(eq(chargeLines.patientId, anonId))

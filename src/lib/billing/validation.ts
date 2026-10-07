@@ -47,7 +47,9 @@ export const emptyBodySchema = z.object({}).strict()
 export const PAYMENT_MODES = ['cash', 'upi', 'card', 'cheque', 'neft', 'other'] as const
 export type PaymentMode = (typeof PAYMENT_MODES)[number]
 
-const CARD_MESSAGE = 'Do not enter card numbers; record the approval code or the last 4 digits'
+// Ruling: some 13-19 digit bank/UPI references pass the Luhn check by chance, so the message says
+// what to enter instead rather than only refusing.
+const CARD_MESSAGE = 'This looks like a card number. Enter the bank or UPI reference instead'
 const BLANK_MESSAGE = 'Enter the transaction reference for this payment mode'
 
 function luhn(digits: string): boolean {

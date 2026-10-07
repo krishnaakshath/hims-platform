@@ -110,6 +110,13 @@ describe('charge-line routes', () => {
     expect((await voidLine(send('/api/billing/charge-lines/1/void', { reason: 'Wrong visit' }), ctx('1'))).status).toBe(409)
   })
 
+  it('an unknown performing doctor (FK violation) is a 400, not a 500', async () => {
+    vi.mocked(captureChargeLine).mockRejectedValue(Object.assign(new Error('fk'), { code: '23503', constraint: 'charge_lines_performing_provider_id_providers_id_fk' }))
+    const res = await capture(send('/api/billing/charge-lines', { ...VALID, performingProviderId: 999 }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Performing doctor not found' })
+  })
+
   it('void: 200, 400 bad id, 404, 409', async () => {
     const ok = await voidLine(send('/api/billing/charge-lines/4/void', { reason: 'Wrong visit' }), ctx('4'))
     expect(ok.status).toBe(200)

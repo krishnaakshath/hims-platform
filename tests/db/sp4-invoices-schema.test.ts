@@ -462,7 +462,9 @@ describe.skipIf(!process.env.DATABASE_URL)('invoices and ledger (DB)', () => {
       try {
         await insertLine({ patientId: pid, encounterId })
         await payment({ patientId: pid })
-        expect(await code(deletePatient(pid))).toBe('55000')
+        // Task 12: the friendly pre-check refuses first (the trigger stays the backstop).
+        const { PatientHasFinancialRecordsError } = await import('@/lib/queries/patients')
+        expect(await errorOf(deletePatient(pid))).toBeInstanceOf(PatientHasFinancialRecordsError)
         expect(await d.select().from(patients).where(eq(patients.id, pid))).toHaveLength(1)
         expect(await d.select().from(encounters).where(eq(encounters.patientId, pid))).toHaveLength(1)
         expect(await d.select().from(chargeLines).where(eq(chargeLines.patientId, pid))).toHaveLength(1)
@@ -487,8 +489,8 @@ describe.skipIf(!process.env.DATABASE_URL)('invoices and ledger (DB)', () => {
         })
         await d.update(invoices).set({ status: 'finalised', invoiceNumber: num('INV'), financialYear: '2099-00', invoiceDate: '2099-06-01', snapshot: SNAPSHOT, totalPaise: 50000 })
           .where(eq(invoices.id, inv.id))
-        const err = await errorOf(deletePatient(pid))
-        expect(err).toBeDefined()
+        const { PatientHasFinancialRecordsError } = await import('@/lib/queries/patients')
+        expect(await errorOf(deletePatient(pid))).toBeInstanceOf(PatientHasFinancialRecordsError)
         expect(await d.select().from(patients).where(eq(patients.id, pid))).toHaveLength(1)
         expect(await d.select().from(encounters).where(eq(encounters.patientId, pid))).toHaveLength(1)
         expect(await d.select().from(invoices).where(eq(invoices.patientId, pid))).toHaveLength(1)

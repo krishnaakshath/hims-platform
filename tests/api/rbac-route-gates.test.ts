@@ -22,7 +22,7 @@ import {
   hasSearchScope,
 } from '@/lib/role-policy'
 import { CHECK_IN_ROLES, DISCHARGE_ROLES, ENCOUNTER_STATUS_ROLES, FOLLOW_UP_BOOKING_ROLES, FOLLOW_UP_PLAN_ROLES } from '@/lib/role-policy' // SP3
-import { BILLING_AUTHORITY_ROLES, BILLING_CONFIG_ROLES, CHARGE_CAPTURE_ROLES } from '@/lib/role-policy' // SP4
+import { BILLING_AUTHORITY_ROLES, BILLING_CONFIG_ROLES, CASH_DESK_ROLES, CHARGE_CAPTURE_ROLES } from '@/lib/role-policy' // SP4
 import { gateIt } from '../pages/page-gates-harness'
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -416,6 +416,8 @@ import { POST as postDraftInvoice } from '@/app/api/billing/invoices/route'
 import { POST as finaliseInvoiceRoute } from '@/app/api/billing/invoices/[id]/finalise/route'
 import { POST as discardInvoiceRoute } from '@/app/api/billing/invoices/[id]/discard/route'
 import { POST as cancelInvoiceRoute } from '@/app/api/billing/invoices/[id]/cancel/route'
+import { POST as postPaymentRoute } from '@/app/api/billing/payments/route'
+import { POST as postRefundRoute } from '@/app/api/billing/refunds/route'
 // end SP4
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
@@ -625,6 +627,9 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/billing/invoices/[id]/discard', call: () => settle(() => discardInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/discard`), ctx({ id: BOGUS_ID }))), allowed: [...CHARGE_CAPTURE_ROLES] },
   { name: 'POST /api/billing/invoices/[id]/finalise', call: () => settle(() => finaliseInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/finalise`), ctx({ id: BOGUS_ID }))), allowed: [...BILLING_AUTHORITY_ROLES] },
   { name: 'POST /api/billing/invoices/[id]/cancel', call: () => settle(() => cancelInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...BILLING_AUTHORITY_ROLES] },
+  // SP4 cash desk: receipts for CASH_DESK_ROLES, refunds for BILLING_AUTHORITY_ROLES (`{}` fails validation).
+  { name: 'POST /api/billing/payments', call: () => settle(() => postPaymentRoute(send('POST', '/api/billing/payments'))), allowed: [...CASH_DESK_ROLES] },
+  { name: 'POST /api/billing/refunds', call: () => settle(() => postRefundRoute(send('POST', '/api/billing/refunds'))), allowed: [...BILLING_AUTHORITY_ROLES] },
   // end SP4
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
@@ -684,6 +689,8 @@ const SP4_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/billing/invoices/[id]/discard', call: () => discardInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/discard`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CHARGE_CAPTURE_ROLES },
   { name: 'POST /api/billing/invoices/[id]/finalise', call: () => finaliseInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/finalise`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: BILLING_AUTHORITY_ROLES },
   { name: 'POST /api/billing/invoices/[id]/cancel', call: () => cancelInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: BILLING_AUTHORITY_ROLES },
+  { name: 'POST /api/billing/payments', call: () => postPaymentRoute(send('POST', '/api/billing/payments', NOT_JSON)), allowed: CASH_DESK_ROLES },
+  { name: 'POST /api/billing/refunds', call: () => postRefundRoute(send('POST', '/api/billing/refunds', NOT_JSON)), allowed: BILLING_AUTHORITY_ROLES },
 ]
 // end SP4
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES])('$name (deny before parse)', (c) => {
