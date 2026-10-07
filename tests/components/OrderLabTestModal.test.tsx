@@ -56,6 +56,16 @@ describe('OrderLabTestModal', () => {
     expect(await screen.findByText('Patient is outside the home-collection area: walk-in only')).toBeInTheDocument()
   })
 
+  it('does not offer home collection for an imaging-only order, even for a local patient', async () => {
+    vi.stubGlobal('fetch', created(true))
+    render(<OrderLabTestModal patientId="RD-0001" labTests={TESTS} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /chest x-ray/i }))
+    fireEvent.click(screen.getByRole('button', { name: /order 1 test/i }))
+    expect(await screen.findByText('Tests ordered.')).toBeInTheDocument()
+    expect(screen.queryByText('Home collection available for this patient')).not.toBeInTheDocument()
+    expect(screen.queryByText(/walk-in only/)).not.toBeInTheDocument()
+  })
+
   it('refuses a follow-up without a reason before posting', async () => {
     const fetchMock = created(true)
     vi.stubGlobal('fetch', fetchMock)

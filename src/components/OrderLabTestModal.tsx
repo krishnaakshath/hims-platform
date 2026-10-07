@@ -37,7 +37,7 @@ export function OrderLabTestModal({ patientId, labTests, onClose }: { patientId:
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [placed, setPlaced] = useState<{ patientIsLocal: boolean } | null>(null)
+  const [placed, setPlaced] = useState<{ patientIsLocal: boolean; includesLabTest: boolean } | null>(null)
 
   function toggle(testId: number) {
     setSelected((s) => (s.includes(testId) ? s.filter((x) => x !== testId) : [...s, testId]))
@@ -64,7 +64,9 @@ export function OrderLabTestModal({ patientId, labTests, onClose }: { patientId:
     setSubmitting(false)
     if (res.ok) {
       const body = await res.json().catch(() => null)
-      setPlaced({ patientIsLocal: body?.patientIsLocal === true })
+      // SP5: imaging is never home-collected, so an imaging-only order gets no home-collection line.
+      const includesLabTest = labTests.some((t) => labTestIds.includes(t.id) && t.category === 'lab')
+      setPlaced({ patientIsLocal: body?.patientIsLocal === true, includesLabTest })
       router.refresh()
       return
     }
@@ -99,7 +101,7 @@ export function OrderLabTestModal({ patientId, labTests, onClose }: { patientId:
         {placed ? (
           <div className="space-y-3">
             <p className="text-sm font-medium">Tests ordered.</p>
-            <p role="status" className="text-sm">{placed.patientIsLocal ? LOCAL_MESSAGE : NOT_LOCAL_MESSAGE}</p>
+            {placed.includesLabTest && <p role="status" className="text-sm">{placed.patientIsLocal ? LOCAL_MESSAGE : NOT_LOCAL_MESSAGE}</p>}
             <DialogFooter>
               <Button onClick={onClose}>Done</Button>
             </DialogFooter>
