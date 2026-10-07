@@ -106,6 +106,18 @@ describe.skipIf(!process.env.DATABASE_URL)('code systems (DB)', () => {
     expect((await systemByVersion(V('lic')))!.isCurrent).toBe(true)
   })
 
+  it('a licensed import replaces a current sample, so a sample is never current beside a licensed set', async () => {
+    // Other licensed icd10 versions may exist in a shared dev DB; this case needs none.
+    const db = getDb()
+    const licensed = await db.select({ id: codeSystems.id }).from(codeSystems).where(and(eq(codeSystems.kind, 'icd10'), eq(codeSystems.isSample, false)))
+    if (licensed.length > 0) return
+    const sample = await commitCodeSystemImport(input(SV('cur')), [row('F00')], SESSION)
+    expect(sample.isCurrent).toBe(true)
+    const lic = await commitCodeSystemImport(input(V('after-sample')), [row('F00')], SESSION)
+    expect(lic.isCurrent).toBe(true)
+    expect((await systemByVersion(SV('cur')))!.isCurrent).toBe(false)
+  })
+
   it('searches the current version by code prefix and display text, valid on a date', async () => {
     const r0 = await commitCodeSystemImport(input(V('search'), { makeCurrent: true }), [
       row('E11', { display: 'Type 2 diabetes group', selectable: false }),

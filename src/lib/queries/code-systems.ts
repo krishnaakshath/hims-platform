@@ -74,14 +74,16 @@ export async function commitCodeSystemImport(
       .where(and(eq(codeSystems.kind, input.kind), eq(codeSystems.version, input.version))).limit(1)
     if (existing) throw new CodeSystemVersionExistsError()
 
-    const [current] = await tx.select({ id: codeSystems.id }).from(codeSystems)
+    const [current] = await tx.select({ id: codeSystems.id, isSample: codeSystems.isSample }).from(codeSystems)
       .where(and(eq(codeSystems.kind, input.kind), eq(codeSystems.isCurrent, true))).limit(1)
     let isCurrent: boolean
     if (isSample && await hasLicensedVersion(tx, input.kind)) {
       if (input.makeCurrent) throw new SampleOverLicensedError()
       isCurrent = false
     } else {
-      isCurrent = input.makeCurrent || current === undefined
+      // A licensed set always replaces a current sample (ruling 1: a sample is never current
+      // while a licensed version of the kind is loaded).
+      isCurrent = input.makeCurrent || current === undefined || (!isSample && current.isSample)
     }
     if (isCurrent && current) {
       await tx.update(codeSystems).set({ isCurrent: false }).where(eq(codeSystems.id, current.id))

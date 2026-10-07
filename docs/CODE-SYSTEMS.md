@@ -73,7 +73,7 @@ npm run codes:import -- --file /path/to/file.csv --kind <kind> --version <versio
 - `--version` is 1–40 letters, digits, `.`, `_` or `-`, for example `2019-WHO` or `2026`. Versions starting `SAMPLE-` are samples.
 - `--licence` is required for every non-sample set. Record where the licence comes from, for example `WHO ICD-10 licence ref …` or `NRCeS SNOMED CT affiliate licence …`. It is stored with the version.
 - `--by` is your name. The import is audited as role admin with user `CLI: <your name>`.
-- `--make-current` makes this version the one coders search. Without it, the version becomes current only when the kind has no current version yet.
+- `--make-current` makes this version the one coders search. Without it, the version becomes current only when the kind has no current version yet, or when the current version is a `SAMPLE-` set (a licensed set always replaces a sample).
 - Run with `--dry-run` first. It validates the file, prints the issue count and any line-numbered issues, and loads nothing.
 
 The command reads `DATABASE_URL` from `.env.local`. Point that file at the
