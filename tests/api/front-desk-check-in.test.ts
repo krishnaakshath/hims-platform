@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, inArray, or } from 'drizzle-orm'
 import { POST } from '@/app/api/front-desk/check-in/route'
 import { getDb } from '@/db/client'
-import { doctorAssignments, rooms, admissions } from '@/db/schema'
+import { doctorAssignments, rooms, admissions, encounters } from '@/db/schema'
 import { listActiveProviders } from '@/lib/queries/providers'
 
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: 'frontdesk', name: 'Taylor Nguyen' })) }))
@@ -11,6 +11,14 @@ const createdAssignmentIds: number[] = []
 const createdRoomIds: number[] = []
 const createdAdmissionIds: number[] = []
 afterEach(async () => {
+  // SP3: check-in now opens an encounter in the same transaction -- remove
+  // those first (they reference the assignment and admission). This file
+  // creates no follow_up_orders and never checks in against an appointment.
+  const sp3Encounters = getDb().select({ id: encounters.id }).from(encounters).where(or(
+    createdAssignmentIds.length > 0 ? inArray(encounters.doctorAssignmentId, createdAssignmentIds) : undefined,
+    and(eq(encounters.patientId, 'RD-0001'), eq(encounters.checkedInByName, 'Taylor Nguyen')),
+  ))
+  await getDb().delete(encounters).where(inArray(encounters.id, sp3Encounters))
   while (createdAdmissionIds.length > 0) await getDb().delete(admissions).where(eq(admissions.id, createdAdmissionIds.pop()!))
   // Safety net: several of the pre-existing tests above (not part of this
   // task's brief) also do an inpatient check-in for the shared 'RD-0001'

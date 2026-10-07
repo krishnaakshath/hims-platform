@@ -2,38 +2,49 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { DISCHARGE_ROLES } from '@/lib/role-policy'
 import { getAdmissionById, dischargeAdmission } from '@/lib/queries/admissions'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
-import { hasSchedulingConflict } from '@/lib/queries/appointments'
 import { createSignature } from '@/lib/queries/signatures'
+import { followUpPlanFieldsSchema, offsetDateTimeSchema } from '@/lib/follow-ups/validation'
+import { notifyFollowUpSafely } from '@/lib/follow-ups/notifier'
+import { errorResponse, followUpServerError, readJsonBody } from '@/lib/follow-ups/route-responses'
 
 const DISCHARGE_ATTESTATION = 'I attest that this discharge summary is accurate and complete.'
+const MAX_INT = 2_147_483_647
 
+// SP3: the slot times must carry an explicit UTC offset (the modal sends
+// +05:30), so the instant never depends on the server's zone. `followUp` is the
+// clinical plan; it is separate from the slot, and both may be sent.
 const dischargeSchema = z.object({
   dischargeDiagnosis: z.string().min(1),
   dischargeDrugs: z.string().min(1),
   dischargeDevices: z.string().min(1),
   dischargeDiet: z.string().min(1),
   dischargeSummaryNotes: z.string().min(1),
-  followUpStartsAt: z.string().min(1).optional(),
-  followUpEndsAt: z.string().min(1).optional(),
+  followUpStartsAt: offsetDateTimeSchema.optional(),
+  followUpEndsAt: offsetDateTimeSchema.optional(),
+  followUp: followUpPlanFieldsSchema.optional(),
   typedName: z.string().trim().min(1),
-}).strict()
+}).strict().refine((b) => (b.followUpStartsAt === undefined) === (b.followUpEndsAt === undefined))
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
-  if (!['pi', 'admin'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!DISCHARGE_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  // Fixed message: a 400 never echoes the input (or its key names).
+  const parsed = dischargeSchema.safeParse(json.body)
+  if (!parsed.success) return errorResponse(400, 'Invalid discharge payload')
 
   const { id } = await params
-  const admissionId = Number(id)
-  if (!Number.isInteger(admissionId)) return NextResponse.json({ error: 'Invalid admission id' }, { status: 400 })
-
-  const parsed = dischargeSchema.safeParse(await request.json())
-  if (!parsed.success) return NextResponse.json({ error: 'Invalid discharge payload', details: parsed.error.flatten() }, { status: 400 })
+  const admissionId = /^\d{1,10}$/.test(id) ? Number(id) : NaN
+  if (!(admissionId > 0 && admissionId <= MAX_INT)) return errorResponse(400, 'Invalid admission id')
 
   const admission = await getAdmissionById(admissionId)
-  if (!admission) return NextResponse.json({ error: 'Admission not found' }, { status: 404 })
+  if (!admission) return errorResponse(404, 'Admission not found')
 
   // Mirrors signNote's exact posture (encounter-notes.ts): the typed name
   // must match the authenticated signer's own session name, unless the
@@ -43,7 +54,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // ("Signed by {signerTypedName}"), so an unchecked mismatch would let a PI
   // attest a discharge under a name that isn't their own.
   if (parsed.data.typedName !== session.name && session.role !== 'admin') {
-    return NextResponse.json({ error: 'The typed name must match your own name to sign this discharge' }, { status: 403 })
+    return errorResponse(403, 'The typed name must match your own name to sign this discharge')
   }
 
   if (session.role === 'pi') {
@@ -57,38 +68,48 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (parsed.data.followUpStartsAt && parsed.data.followUpEndsAt) {
     const startsAt = new Date(parsed.data.followUpStartsAt)
     const endsAt = new Date(parsed.data.followUpEndsAt)
-    if (isNaN(startsAt.getTime()) || isNaN(endsAt.getTime()) || endsAt <= startsAt) {
-      return NextResponse.json({ error: 'followUpEndsAt must be a valid time after followUpStartsAt' }, { status: 400 })
-    }
-    if (await hasSchedulingConflict(admission.attendingProviderId, startsAt, endsAt)) {
-      return NextResponse.json({ error: 'The attending provider already has an appointment during that time.' }, { status: 409 })
+    if (endsAt <= startsAt) {
+      return errorResponse(400, 'followUpEndsAt must be a valid time after followUpStartsAt')
     }
     followUp = { startsAt, endsAt }
   }
 
-  const result = await dischargeAdmission(admissionId, {
-    dischargeDiagnosis: parsed.data.dischargeDiagnosis,
-    dischargeDrugs: parsed.data.dischargeDrugs,
-    dischargeDevices: parsed.data.dischargeDevices,
-    dischargeDiet: parsed.data.dischargeDiet,
-    dischargeSummaryNotes: parsed.data.dischargeSummaryNotes,
-    followUp,
-  })
+  const plan = parsed.data.followUp
+  let result
+  try {
+    // One transaction: the slot's conflict check runs inside it, under the
+    // per-doctor booking lock, so there is no pre-check here.
+    result = await dischargeAdmission(admissionId, {
+      dischargeDiagnosis: parsed.data.dischargeDiagnosis,
+      dischargeDrugs: parsed.data.dischargeDrugs,
+      dischargeDevices: parsed.data.dischargeDevices,
+      dischargeDiet: parsed.data.dischargeDiet,
+      dischargeSummaryNotes: parsed.data.dischargeSummaryNotes,
+      followUp,
+      followUpPlan: plan
+        ? { timing: plan.timing, windowDaysBefore: plan.windowDaysBefore, windowDaysAfter: plan.windowDaysAfter, reason: plan.reason, planNotes: plan.planNotes ?? null }
+        : null,
+    }, session)
+  } catch (err) {
+    // 40P01 / 40001 -> 409 "try again" (nothing was written); else a generic 500.
+    return followUpServerError('discharge', err, 'Could not discharge this patient')
+  }
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: result.error === 'Admission not found' ? 404 : 409 })
+    switch (result.error) {
+      case 'Admission not found': return errorResponse(404, 'Admission not found')
+      case 'conflict': return errorResponse(409, 'The attending provider already has an appointment during that time.')
+      case 'slot_in_past': return errorResponse(400, 'Pick a time later than now.')
+      case 'due_date_invalid': return errorResponse(400, result.message ?? 'The follow-up date is not valid.')
+      case 'provider_not_found': return errorResponse(409, 'The attending doctor is inactive, so a follow-up cannot be recorded.')
+      default: return errorResponse(409, 'This admission has already been discharged')
+    }
   }
 
-  await logAudit(session, 'discharged patient', admission.patientId)
-
-  // Insert the discharge signature as a SEPARATE step after the
-  // authoritative discharge write above -- same sequential-not-transactional
-  // posture dischargeAdmission itself already documents for its own
-  // room-freeing/follow-up-appointment steps (this driver has no
-  // multi-statement transactions). If this insert throws, the admission is
+  // Insert the discharge signature as a SEPARATE step after the committed
+  // discharge transaction above. If this insert throws, the admission is
   // already correctly discharged -- the medically important fact -- and the
   // missing signature is left as a genuine, visible "Not yet signed" gap on
-  // the chart (Task 4) rather than a silently swallowed error or a blocked
-  // discharge.
+  // the chart rather than a silently swallowed error or a blocked discharge.
   try {
     await createSignature({
       signableType: 'admission_discharge',
@@ -98,12 +119,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       attestationText: DISCHARGE_ATTESTATION,
     })
   } catch (err) {
-    console.error(`Failed to record discharge signature for admission ${admissionId}:`, err)
+    console.error(`Failed to record discharge signature for admission ${admissionId}:`, err instanceof Error ? err.name : 'error')
     // Make this queryable, not just console noise -- a missing discharge
     // signature is exactly the kind of gap this product's audit trail
     // exists to surface.
     await logAudit(session, 'discharge signature failed to record', admission.patientId)
   }
 
-  return NextResponse.json({ ok: true, followUpAppointmentId: result.followUpAppointmentId ?? null })
+  // After commit; never throws. Ids and dates only.
+  if (result.followUpOrderId !== undefined && result.followUpDueDate !== undefined) {
+    await notifyFollowUpSafely(session, {
+      kind: followUp ? 'booked' : 'planned',
+      followUpOrderId: result.followUpOrderId,
+      patientId: admission.patientId,
+      dueDate: result.followUpDueDate,
+      appointmentStartsAt: followUp ? followUp.startsAt : null,
+    })
+  }
+
+  return NextResponse.json({ ok: true, followUpAppointmentId: result.followUpAppointmentId ?? null, followUpOrderId: result.followUpOrderId ?? null })
 }

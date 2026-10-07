@@ -101,6 +101,10 @@ function mockCommon(role: Role) {
   vi.doMock('@/lib/queries/trials', () => ({ listAllTrials: spies.listAllTrials }))
   vi.doMock('@/lib/queries/admissions', () => ({ listAdmissionsForPatient: spies.listAdmissionsForPatient }))
   vi.doMock('@/lib/queries/rooms', () => ({ listAvailableRooms: spies.listAvailableRooms }))
+  vi.doMock('@/lib/queries/follow-ups', () => ({ listFollowUpsForPatient: async () => [] }))
+  vi.doMock('@/lib/queries/encounters', () => ({ listEncountersForPatient: async () => [] }))
+  vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: async () => [] }))
+  vi.doMock('@/lib/queries/departments', () => ({ listDepartments: async () => [] }))
   return spies
 }
 

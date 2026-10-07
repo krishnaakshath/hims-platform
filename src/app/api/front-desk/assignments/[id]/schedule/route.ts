@@ -4,9 +4,8 @@ import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { appointments, doctorAssignments } from '@/db/schema'
-import { hasSchedulingConflict } from '@/lib/queries/appointments'
-import { scheduleAssignment, notifyPatientOfScheduledAssignment } from '@/lib/queries/doctor-assignments'
+import { doctorAssignments } from '@/db/schema'
+import { scheduleAssignmentIntoAppointment, notifyPatientOfScheduledAssignment } from '@/lib/queries/doctor-assignments'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 
 // Only the time slot comes from the client. The visit reason is taken from
@@ -53,27 +52,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json(alreadyHandled, { status: 409 })
   }
 
-  if (await hasSchedulingConflict(assignmentRow.providerId, startsAt, endsAt)) {
-    return NextResponse.json({ error: 'You already have an appointment during that time.' }, { status: 409 })
-  }
-
-  const [appointment] = await db.insert(appointments).values({
+  // I7: the doctor's schedule lock, the conflict check, the appointment and the
+  // pending -> scheduled transition are one transaction. A concurrent
+  // schedule/decline rolls the appointment back with it (no orphan).
+  const scheduled = await scheduleAssignmentIntoAppointment(assignmentId, {
     patientId: assignmentRow.patientId,
     providerId: assignmentRow.providerId,
     startsAt,
     endsAt,
     visitReason: assignmentRow.reason,
-    status: 'scheduled',
-  }).returning()
-
-  const updated = await scheduleAssignment(assignmentId, appointment.id)
-  if (!updated) {
-    // A concurrent request scheduled (or someone declined) this assignment
-    // between our status read and our update. Remove the appointment we just
-    // inserted so it isn't orphaned, and send no message.
-    await db.delete(appointments).where(eq(appointments.id, appointment.id))
+  })
+  if (!scheduled.ok) {
+    if (scheduled.error === 'conflict') return NextResponse.json({ error: 'You already have an appointment during that time.' }, { status: 409 })
     return NextResponse.json(alreadyHandled, { status: 409 })
   }
+  const { assignment: updated, appointment } = scheduled
   try {
     await notifyPatientOfScheduledAssignment(updated, appointment, providerMatch.name)
   } catch (err) {

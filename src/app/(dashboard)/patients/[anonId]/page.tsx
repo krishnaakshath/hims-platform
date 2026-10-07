@@ -15,12 +15,20 @@ import { InpatientHistoryPanel } from '@/components/InpatientHistoryPanel'
 import { PatientProfilePanel } from '@/components/patient-profile/PatientProfilePanel'
 import { CopyUhidButton } from '@/components/patient-profile/CopyUhidButton'
 import { requireSessionOrRedirect } from '@/lib/auth'
-import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES } from '@/lib/role-policy'
+import { FollowUpPanel } from '@/components/follow-ups/FollowUpPanel'
+import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
+import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
+import { todayIsoIn } from '@/lib/india-time'
 import { toAadhaarView } from '@/lib/patient-identity'
 import { logAudit } from '@/lib/audit'
 import { getPatientDetail } from '@/lib/queries/patients'
 import { listAdmissionsForPatient } from '@/lib/queries/admissions'
 import { listAvailableRooms } from '@/lib/queries/rooms'
+import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
+import { listFollowUpsForPatient } from '@/lib/queries/follow-ups'
+import { listEncountersForPatient } from '@/lib/queries/encounters'
+import { listActiveProviders } from '@/lib/queries/providers'
+import { listDepartments } from '@/lib/queries/departments'
 
 const SECTION = 'rounded-md border border-border bg-card p-5 shadow-none'
 const SECTION_HEADING = 'mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
@@ -55,7 +63,18 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
   if (!patient) notFound()
   await logAudit(session, 'viewed patient detail', anonId)
 
-  const [admissionHistory, availableRooms] = await Promise.all([listAdmissionsForPatient(anonId), listAvailableRooms()])
+  const [admissionHistory, availableRooms, followUps, encounterRows, activeProviders, activeDepartments, selfProvider] = await Promise.all([
+    listAdmissionsForPatient(anonId),
+    listAvailableRooms(),
+    // The role decides which fields the view carries (no plan notes or cancel reason for front desk).
+    listFollowUpsForPatient(anonId, session.role),
+    listEncountersForPatient(anonId),
+    listActiveProviders(),
+    listDepartments({ activeOnly: true }),
+    // A pi changes only their own follow-ups and visits; resolve who they are on the server.
+    session.role === 'pi' ? resolveDoctorQueueProvider(session) : Promise.resolve(null),
+  ])
+  const todayIso = todayIsoIn()
 
   const name = patient.name
 
@@ -191,6 +210,27 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
     />
   )
 
+  const followUpTab = (
+    <FollowUpPanel
+      patientId={patient.id}
+      followUps={followUps}
+      encounters={encounterRows}
+      // Only id and name reach the client, never whole provider/department rows.
+      providers={activeProviders.map((p) => ({ id: p.id, name: p.name }))}
+      departments={activeDepartments.map((d) => ({ id: d.id, name: d.name }))}
+      todayIso={todayIso}
+      can={{
+        plan: FOLLOW_UP_PLAN_ROLES.includes(session.role),
+        book: FOLLOW_UP_BOOKING_ROLES.includes(session.role),
+        checkIn: CHECK_IN_ROLES.includes(session.role),
+        startOrComplete: ENCOUNTER_TRANSITION_ROLES.completed.includes(session.role),
+        cancelVisit: ENCOUNTER_TRANSITION_ROLES.cancelled.includes(session.role),
+      }}
+      isPi={session.role === 'pi'}
+      selfProviderId={selfProvider?.id ?? null}
+    />
+  )
+
   return (
     <div className="max-w-4xl space-y-6">
       <BackLink href="/patients" label="Back to Patients" />
@@ -241,6 +281,7 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
           { id: 'screening', label: 'Screening', content: screeningTab },
         ]),
         { id: 'identity', label: 'Verification', content: identityAndPortalTab },
+        ...(FOLLOW_UP_VIEW_ROLES.includes(session.role) ? [{ id: 'follow-up', label: 'Visits & follow-up', content: followUpTab }] : []),
         ...(admissionHistory.length > 0 ? [{ id: 'inpatient', label: <span className="inline-flex items-center gap-1.5"><BedDouble className="h-3.5 w-3.5" aria-hidden="true" />Inpatient History</span>, content: inpatientTab }] : []),
       ]} />
     </div>

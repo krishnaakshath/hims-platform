@@ -1,28 +1,15 @@
 import { getDb } from '@/db/client'
 import { appointments, doctorAssignments, patients } from '@/db/schema'
-import { and, asc, desc, eq, getTableColumns, gte, isNull, sql } from 'drizzle-orm'
-import { getNextQueueTicketNumberForToday } from './queue-tickets'
+import { and, asc, desc, eq, getTableColumns, gte, isNull, lt, sql } from 'drizzle-orm'
+import { istDayBounds } from '@/lib/india-time'
+import { hasSchedulingConflict, lockProviderSchedule } from './appointments'
 import { sendMessage } from './messages'
 import { SYSTEM_SENDER_NAME } from './eligibility'
 import { buildVisitConfirmationBody } from '@/lib/notification-templates'
 
-export interface CreateDoctorAssignmentInput {
-  patientId: string
-  providerId: number
-  visitType: 'inpatient' | 'outpatient'
-  urgency: 'routine' | 'urgent' | 'emergency'
-  reason: string
-  roomId: number | null
-  assignedByName: string
-}
-
+// Assignments are created only by checkInVisit (src/lib/queries/encounters.ts),
+// in one transaction with the OPD token that is also the lobby ticket.
 export type DoctorAssignmentRow = typeof doctorAssignments.$inferSelect
-
-export async function createDoctorAssignment(input: CreateDoctorAssignmentInput): Promise<DoctorAssignmentRow> {
-  const queueTicketNumber = await getNextQueueTicketNumberForToday()
-  const [created] = await getDb().insert(doctorAssignments).values({ ...input, queueTicketNumber }).returning()
-  return created
-}
 
 export type PendingAssignmentRow = DoctorAssignmentRow & { patientName: string }
 
@@ -92,6 +79,40 @@ export async function scheduleAssignment(assignmentId: number, appointmentId: nu
   return updated ?? null
 }
 
+class AlreadyHandled extends Error {}
+
+/**
+ * The doctor schedules a pending assignment (I7): the provider schedule lock,
+ * the conflict check, the appointment insert and the pending -> scheduled
+ * transition are ONE transaction. A concurrent schedule/decline makes the
+ * conditional update match nothing, and the whole transaction (including the
+ * appointment) rolls back, so no orphan appointment is ever left.
+ */
+export async function scheduleAssignmentIntoAppointment(
+  assignmentId: number,
+  slot: { patientId: string; providerId: number; startsAt: Date; endsAt: Date; visitReason: string },
+): Promise<
+  | { ok: true; assignment: DoctorAssignmentRow; appointment: typeof appointments.$inferSelect }
+  | { ok: false; error: 'conflict' | 'already_handled' }
+> {
+  try {
+    return await getDb().transaction(async (tx) => {
+      await lockProviderSchedule(tx, slot.providerId)
+      if (await hasSchedulingConflict(slot.providerId, slot.startsAt, slot.endsAt, undefined, tx)) return { ok: false as const, error: 'conflict' as const }
+      const [appointment] = await tx.insert(appointments).values({ ...slot, status: 'scheduled' }).returning()
+      const [assignment] = await tx.update(doctorAssignments)
+        .set({ status: 'scheduled', appointmentId: appointment.id })
+        .where(and(eq(doctorAssignments.id, assignmentId), eq(doctorAssignments.status, 'pending')))
+        .returning()
+      if (!assignment) throw new AlreadyHandled()
+      return { ok: true as const, assignment, appointment }
+    })
+  } catch (err) {
+    if (err instanceof AlreadyHandled) return { ok: false, error: 'already_handled' }
+    throw err
+  }
+}
+
 /** Transitions a PENDING assignment to declined. The status condition is in
  *  the UPDATE itself, so a schedule that commits between a caller's read and
  *  this write wins: this returns null and the scheduled row (and its
@@ -116,18 +137,17 @@ export async function listAllAssignments(): Promise<DoctorAssignmentRow[]> {
 }
 
 /**
- * Restricts the KPI/queue view to assignments created today (calendar day,
- * server-local time) -- listAllAssignments() itself is intentionally left
- * alone since /front-desk/assignments shows the full history, not just
- * today.
+ * Restricts the KPI/queue view to assignments created today (the IST business
+ * day, whatever the server's zone) -- listAllAssignments() itself is
+ * intentionally left alone since /front-desk/assignments shows the full
+ * history, not just today.
  */
 export async function listTodaysAssignments(): Promise<DoctorAssignmentRow[]> {
-  const startOfToday = new Date()
-  startOfToday.setHours(0, 0, 0, 0)
+  const today = istDayBounds()
   return getDb()
     .select()
     .from(doctorAssignments)
-    .where(gte(doctorAssignments.createdAt, startOfToday))
+    .where(and(gte(doctorAssignments.createdAt, today.start), lt(doctorAssignments.createdAt, today.end)))
     .orderBy(desc(doctorAssignments.createdAt))
 }
 

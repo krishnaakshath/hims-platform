@@ -1,7 +1,14 @@
 import { getDb } from '@/db/client'
-import { admissions, admissionTransfers, rooms, appointments } from '@/db/schema'
+import { admissions, admissionTransfers, rooms, appointments, encounters } from '@/db/schema'
 import { and, desc, eq } from 'drizzle-orm'
+import { logAudit } from '@/lib/audit'
+import type { Session } from '@/lib/auth'
+import { istDateOf } from '@/lib/india-time'
+import type { FollowUpTiming } from '@/lib/follow-ups/rules'
 import { getLatestSignatureForSignable } from '@/lib/queries/signatures'
+import { hasSchedulingConflict, lockProviderSchedule } from '@/lib/queries/appointments'
+import { completeAdmissionEncounter } from '@/lib/queries/encounters'
+import { createFollowUpOrder } from '@/lib/queries/follow-ups'
 
 export type Admission = typeof admissions.$inferSelect
 
@@ -142,63 +149,156 @@ export async function transferAdmission(admissionId: number, toRoomId: number, r
   return { ok: true }
 }
 
+export interface DischargeFollowUpPlan {
+  timing: FollowUpTiming
+  windowDaysBefore?: number
+  windowDaysAfter?: number
+  reason: string
+  planNotes: string | null
+}
+
 export interface DischargeInput {
   dischargeDiagnosis: string
   dischargeDrugs: string
   dischargeDevices: string
   dischargeDiet: string
   dischargeSummaryNotes: string
+  /** A booked follow-up slot with the attending provider. */
   followUp: { startsAt: Date; endsAt: Date } | null
+  /** SP3: the clinical follow-up plan (becomes a `discharge` follow-up order). */
+  followUpPlan: DischargeFollowUpPlan | null
 }
+
+export const DISCHARGE_FOLLOW_UP_REASON = 'Post-discharge follow-up'
 
 export interface DischargeResult {
   ok: boolean
+  /**
+   * 'Admission not found' | 'This admission has already been discharged' (legacy
+   * display strings), or the SP3 codes 'conflict' (the slot is taken),
+   * 'slot_in_past' (the slot is not later than now),
+   * 'due_date_invalid' (fixed `message`) and 'provider_not_found' (the
+   * attending doctor is inactive, so no follow-up can be prescribed).
+   */
   error?: string
+  message?: string
   followUpAppointmentId?: number
+  followUpOrderId?: number
+  followUpDueDate?: string
 }
 
-// Sequential, not transactional -- same driver limitation noted on
-// transferAdmission. Order: mark the admission discharged FIRST (the
-// single authoritative state change), then free the room, then create the
-// optional follow-up appointment. If the process dies after the first step,
-// the admission is correctly discharged and only the room-freeing or
-// appointment-creation is left incomplete -- a visible, fixable state, never
-// a room silently left occupied by a patient the record says already left,
-// or a "successful" discharge that silently kept the room occupied.
-export async function dischargeAdmission(admissionId: number, input: DischargeInput): Promise<DischargeResult> {
-  const db = getDb()
-  const admission = await getAdmissionById(admissionId)
-  if (!admission) return { ok: false, error: 'Admission not found' }
-  if (admission.status !== 'admitted') return { ok: false, error: 'This admission has already been discharged' }
-
-  await db.update(admissions).set({
-    status: 'discharged',
-    dischargedAt: new Date(),
-    currentRoomId: null,
-    dischargeDiagnosis: input.dischargeDiagnosis,
-    dischargeDrugs: input.dischargeDrugs,
-    dischargeDevices: input.dischargeDevices,
-    dischargeDiet: input.dischargeDiet,
-    dischargeSummaryNotes: input.dischargeSummaryNotes,
-  }).where(eq(admissions.id, admissionId))
-
-  if (admission.currentRoomId !== null) {
-    await db.update(rooms).set({ status: 'dirty', occupiedByPatientId: null }).where(eq(rooms.id, admission.currentRoomId))
+/** Thrown inside the transaction to roll it back; mapped to a result outside. */
+class DischargeRollback extends Error {
+  constructor(readonly result: DischargeResult) {
+    super('discharge rolled back')
   }
+}
 
-  let followUpAppointmentId: number | undefined
-  if (input.followUp) {
-    const [appt] = await db.insert(appointments).values({
-      patientId: admission.patientId,
-      providerId: admission.attendingProviderId,
-      startsAt: input.followUp.startsAt,
-      endsAt: input.followUp.endsAt,
-      visitReason: 'Post-discharge follow-up',
-      status: 'scheduled',
-    }).returning()
-    followUpAppointmentId = appt.id
-    await db.update(admissions).set({ followUpAppointmentId: appt.id }).where(eq(admissions.id, admissionId))
+/**
+ * Discharges the admission as ONE transaction (node-postgres supports real
+ * transactions; the old "sequential, not transactional" posture is gone):
+ *
+ * 1. Lock the admission row `for update` and check it is still admitted.
+ * 2. Store the five Ds and the discharge fields; free the room to `dirty`.
+ * 3. With a slot: take the per-provider booking lock (the same key as
+ *    bookFollowUp), run the conflict check on the tx, insert the appointment
+ *    and link it as `followUpAppointmentId`.
+ * 4. With a plan or a slot: create the `discharge` follow-up order on the tx
+ *    (`scheduled` when a slot was booked, else `planned`). Interval plans count
+ *    from the discharge day (IST), not the admission day.
+ * 5. Close the admission's open IPD encounter.
+ * 6. Audit `discharged patient` (ids only) on the tx.
+ *
+ * Any failure (conflict, invalid due date, a thrown DB error) rolls back
+ * every step, so the room, the admission and the calendar stay untouched.
+ */
+export async function dischargeAdmission(admissionId: number, input: DischargeInput, session: Session): Promise<DischargeResult> {
+  try {
+    return await getDb().transaction(async (tx): Promise<DischargeResult> => {
+      // 1.
+      const [admission] = await tx.select().from(admissions).where(eq(admissions.id, admissionId)).for('update')
+      if (!admission) return { ok: false, error: 'Admission not found' }
+      if (admission.status !== 'admitted') return { ok: false, error: 'This admission has already been discharged' }
+
+      // 2.
+      const dischargedAt = new Date()
+      await tx.update(admissions).set({
+        status: 'discharged',
+        dischargedAt,
+        currentRoomId: null,
+        dischargeDiagnosis: input.dischargeDiagnosis,
+        dischargeDrugs: input.dischargeDrugs,
+        dischargeDevices: input.dischargeDevices,
+        dischargeDiet: input.dischargeDiet,
+        dischargeSummaryNotes: input.dischargeSummaryNotes,
+      }).where(eq(admissions.id, admissionId))
+
+      if (admission.currentRoomId !== null) {
+        await tx.update(rooms).set({ status: 'dirty', occupiedByPatientId: null }).where(eq(rooms.id, admission.currentRoomId))
+      }
+
+      // 3.
+      let followUpAppointmentId: number | undefined
+      if (input.followUp) {
+        const providerId = admission.attendingProviderId
+        // M10: the same rule as bookFollowUp -- a follow-up slot must be later than now.
+        if (input.followUp.startsAt.getTime() <= dischargedAt.getTime()) throw new DischargeRollback({ ok: false, error: 'slot_in_past' })
+        await lockProviderSchedule(tx, providerId)
+        if (await hasSchedulingConflict(providerId, input.followUp.startsAt, input.followUp.endsAt, undefined, tx)) {
+          throw new DischargeRollback({ ok: false, error: 'conflict' })
+        }
+        const [appt] = await tx.insert(appointments).values({
+          patientId: admission.patientId,
+          providerId,
+          startsAt: input.followUp.startsAt,
+          endsAt: input.followUp.endsAt,
+          visitReason: DISCHARGE_FOLLOW_UP_REASON,
+          status: 'scheduled',
+        }).returning({ id: appointments.id })
+        followUpAppointmentId = appt.id
+        await tx.update(admissions).set({ followUpAppointmentId: appt.id }).where(eq(admissions.id, admissionId))
+      }
+
+      // 4.
+      let followUpOrderId: number | undefined
+      let followUpDueDate: string | undefined
+      if (input.followUpPlan || input.followUp) {
+        const today = istDateOf(dischargedAt)
+        const [encounter] = await tx.select({ id: encounters.id }).from(encounters).where(eq(encounters.admissionId, admissionId))
+        const plan = input.followUpPlan
+        const created = await createFollowUpOrder({
+          patientId: admission.patientId,
+          source: 'discharge',
+          prescribedByProviderId: admission.attendingProviderId,
+          departmentId: null,
+          timing: plan ? plan.timing : { kind: 'date', dueDate: istDateOf(input.followUp!.startsAt) },
+          windowDaysBefore: plan?.windowDaysBefore,
+          windowDaysAfter: plan?.windowDaysAfter,
+          reason: plan ? plan.reason : DISCHARGE_FOLLOW_UP_REASON,
+          planNotes: plan ? plan.planNotes : null,
+          originatingEncounterId: encounter?.id ?? null,
+          originatingAdmissionId: admissionId,
+          appointmentId: followUpAppointmentId ?? null,
+        }, session, { executor: tx, today, baseDate: today })
+        if (!created.ok) {
+          if (created.error === 'due_date_invalid') throw new DischargeRollback({ ok: false, error: 'due_date_invalid', message: created.message })
+          if (created.error === 'provider_not_found') throw new DischargeRollback({ ok: false, error: 'provider_not_found' })
+          throw new Error(`follow-up order not created: ${created.error}`)
+        }
+        followUpOrderId = created.order.id
+        followUpDueDate = created.order.dueDate
+      }
+
+      // 5.
+      await completeAdmissionEncounter(tx, admissionId, session.name)
+
+      // 6. Ids only.
+      await logAudit(session, 'discharged patient', admission.patientId, `admission=${admissionId}`, tx)
+
+      return { ok: true, followUpAppointmentId, followUpOrderId, followUpDueDate }
+    })
+  } catch (err) {
+    if (err instanceof DischargeRollback) return err.result
+    throw err
   }
-
-  return { ok: true, followUpAppointmentId }
 }

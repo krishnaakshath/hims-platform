@@ -95,3 +95,12 @@ describe('ROLE_CAPABILITIES', () => {
     for (const role of ['pi', 'pharmacy', 'labs'] as Role[]) expect(has(role, /tariff|price of a service/i)).toBe(false)
   })
 })
+
+describe('SP3 follow-up capabilities', () => {
+  const has = (role: Role, re: RegExp) => ROLE_CAPABILITIES[role].bullets.some((b) => re.test(b))
+  it('states the SP3 follow-up capabilities the server grants', () => {
+    expect(has('pi', /follow-up plan/i)).toBe(true); expect(has('admin', /follow-up plan/i)).toBe(true)
+    expect(has('frontdesk', /recall list/i)).toBe(true); expect(has('frontdesk', /follow-up plan/i)).toBe(false)
+    expect(has('crc', /recall list \(read-only\)/i)).toBe(true)
+  })
+})

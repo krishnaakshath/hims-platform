@@ -16,3 +16,11 @@ export function isUniqueViolation(err: unknown, constraint?: string): boolean {
 export function isExclusionViolation(err: unknown, constraint?: string): boolean {
   return pgErrorCode(err) === '23P01' && (constraint === undefined || pgConstraint(err) === constraint)
 }
+
+export const RETRY_MESSAGE = 'Another change was being saved at the same time; please try again'
+
+/** Postgres deadlock (40P01) or serialization failure (40001): nothing was written; a retry can succeed. */
+export function isRetryableConflict(err: unknown): boolean {
+  const code = pgErrorCode(err)
+  return code === '40P01' || code === '40001'
+}

@@ -21,6 +21,7 @@ import {
   TRIAL_CRITERIA_EDIT_ROLES,
   hasSearchScope,
 } from '@/lib/role-policy'
+import { CHECK_IN_ROLES, DISCHARGE_ROLES, ENCOUNTER_STATUS_ROLES, FOLLOW_UP_BOOKING_ROLES, FOLLOW_UP_PLAN_ROLES } from '@/lib/role-policy' // SP3
 import { gateIt } from '../pages/page-gates-harness'
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -392,6 +393,16 @@ import { POST as reviseTariffRate } from '@/app/api/tariff/rates/[id]/revise/rou
 import { PUT as putPackageItems } from '@/app/api/tariff/packages/[id]/items/route'
 import { GET as resolveTariff } from '@/app/api/tariff/resolve/route'
 import { POST as postTariffImport } from '@/app/api/tariff/import/route'
+// SP3
+import { POST as postCheckIn } from '@/app/api/front-desk/check-in/route'
+import { POST as postEncounterStatus } from '@/app/api/encounters/[id]/status/route'
+import { POST as postFollowUp } from '@/app/api/follow-ups/route'
+import { PATCH as patchFollowUp } from '@/app/api/follow-ups/[id]/route'
+import { POST as cancelFollowUp } from '@/app/api/follow-ups/[id]/cancel/route'
+import { PUT as putFollowUpBooking } from '@/app/api/follow-ups/[id]/booking/route'
+import { POST as unbookFollowUp } from '@/app/api/follow-ups/[id]/unbook/route'
+import { POST as postFollowUpContact } from '@/app/api/follow-ups/[id]/contact-attempts/route'
+import { POST as postDischarge } from '@/app/api/inpatient/admissions/[id]/discharge/route'
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -570,6 +581,21 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PUT /api/tariff/packages/[id]/items', call: () => settle(() => putPackageItems(send('PUT', `/api/tariff/packages/${BOGUS_ID}/items`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
   { name: 'GET /api/tariff/resolve', call: () => settle(() => resolveTariff(get('/api/tariff/resolve'))), allowed: [...TARIFF_LOOKUP_ROLES] },
   { name: 'POST /api/tariff/import', call: () => settle(() => postTariffImport(send('POST', '/api/tariff/import'))), allowed: [...TARIFF_MANAGE_ROLES] },
+  // SP3: check-in opens an encounter (CHECK_IN_ROLES); the visit status route is
+  // ENCOUNTER_STATUS_ROLES (per-transition roles are tested in encounter-status.test.ts).
+  // An allowed role's `{}` body fails validation before any query.
+  { name: 'POST /api/front-desk/check-in', call: () => settle(() => postCheckIn(send('POST', '/api/front-desk/check-in'))), allowed: [...CHECK_IN_ROLES] },
+  { name: 'POST /api/encounters/[id]/status', call: () => settle(() => postEncounterStatus(send('POST', `/api/encounters/${BOGUS_ID}/status`), ctx({ id: BOGUS_ID }))), allowed: [...ENCOUNTER_STATUS_ROLES] },
+  // SP3 follow-up plan (FOLLOW_UP_PLAN_ROLES): an allowed role's `{}` body fails validation before any query.
+  { name: 'POST /api/follow-ups', call: () => settle(() => postFollowUp(send('POST', '/api/follow-ups'))), allowed: [...FOLLOW_UP_PLAN_ROLES] },
+  { name: 'PATCH /api/follow-ups/[id]', call: () => settle(() => patchFollowUp(send('PATCH', `/api/follow-ups/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_PLAN_ROLES] },
+  { name: 'POST /api/follow-ups/[id]/cancel', call: () => settle(() => cancelFollowUp(send('POST', `/api/follow-ups/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_PLAN_ROLES] },
+  // SP3 follow-up booking and recall (FOLLOW_UP_BOOKING_ROLES): `{}` fails validation before any query.
+  { name: 'PUT /api/follow-ups/[id]/booking', call: () => settle(() => putFollowUpBooking(send('PUT', `/api/follow-ups/${BOGUS_ID}/booking`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_BOOKING_ROLES] },
+  { name: 'POST /api/follow-ups/[id]/unbook', call: () => settle(() => unbookFollowUp(send('POST', `/api/follow-ups/${BOGUS_ID}/unbook`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_BOOKING_ROLES] },
+  { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => settle(() => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_BOOKING_ROLES] },
+  // SP3 discharge (DISCHARGE_ROLES): `{}` fails validation before any query.
+  { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => settle(() => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`), ctx({ id: BOGUS_ID }))), allowed: [...DISCHARGE_ROLES] },
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
@@ -601,7 +627,19 @@ const SP2_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // The import route 415s anything but application/json, so this row declares it: the 400 then proves the body was parsed only after the gate.
   { name: 'POST /api/tariff/import', call: () => postTariffImport(new NextRequest(url('/api/tariff/import'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: NOT_JSON })), allowed: TARIFF_MANAGE_ROLES },
 ]
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES])('$name (deny before parse)', (c) => {
+// SP3 writes: the same deny-before-parse contract.
+const SP3_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'POST /api/front-desk/check-in', call: () => postCheckIn(send('POST', '/api/front-desk/check-in', NOT_JSON)), allowed: CHECK_IN_ROLES },
+  { name: 'POST /api/encounters/[id]/status', call: () => postEncounterStatus(send('POST', `/api/encounters/${BOGUS_ID}/status`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ENCOUNTER_STATUS_ROLES },
+  { name: 'POST /api/follow-ups', call: () => postFollowUp(send('POST', '/api/follow-ups', NOT_JSON)), allowed: FOLLOW_UP_PLAN_ROLES },
+  { name: 'PATCH /api/follow-ups/[id]', call: () => patchFollowUp(send('PATCH', `/api/follow-ups/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_PLAN_ROLES },
+  { name: 'POST /api/follow-ups/[id]/cancel', call: () => cancelFollowUp(send('POST', `/api/follow-ups/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_PLAN_ROLES },
+  { name: 'PUT /api/follow-ups/[id]/booking', call: () => putFollowUpBooking(send('PUT', `/api/follow-ups/${BOGUS_ID}/booking`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_BOOKING_ROLES },
+  { name: 'POST /api/follow-ups/[id]/unbook', call: () => unbookFollowUp(send('POST', `/api/follow-ups/${BOGUS_ID}/unbook`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_BOOKING_ROLES },
+  { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_BOOKING_ROLES },
+  { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: DISCHARGE_ROLES },
+]
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role

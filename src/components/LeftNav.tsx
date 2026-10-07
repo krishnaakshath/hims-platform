@@ -8,9 +8,10 @@ import {
   FileBarChart, TrendingUp, BarChart3, CreditCard, FileBarChart2, FolderOpen,
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
-  DollarSign, ScrollText, Tags,
+  DollarSign, ScrollText, Tags, CalendarSync,
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
+import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -58,6 +59,7 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   // Front Desk specific flows
   { href: '/front-desk/check-in', label: 'Check-In', icon: ClipboardCheck, roles: ['frontdesk', 'admin', 'crc'] as Role[] },
   { href: '/front-desk/assignments', label: 'Assignments', icon: ListChecks, roles: ['frontdesk', 'admin', 'crc'] as Role[] },
+  { href: '/front-desk/follow-ups', label: 'Follow-ups', icon: CalendarSync, roles: [...FOLLOW_UP_WORKLIST_ROLES] },
   { href: '/inpatient/beds', label: 'Beds / Wards', icon: BedDouble, roles: ['frontdesk', 'admin', 'crc', 'pi'] as Role[] },
 
   // Pharmacy — dedicated section; no full patient record access

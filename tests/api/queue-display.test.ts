@@ -1,10 +1,12 @@
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { appSettings, patients, doctorAssignments, appointments, admissions, rooms } from '@/db/schema'
+import { appSettings, patients, doctorAssignments, appointments, admissions, rooms, encounters, auditLog } from '@/db/schema'
 import { GET } from '@/app/api/queue-display/route'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { getAppSettings } from '@/lib/queries/settings'
+import { checkInVisit, transitionEncounter } from '@/lib/queries/encounters'
+import type { Session } from '@/lib/auth'
 
 const PIN_HEADER = 'x-queue-display-pin'
 const TEST_PIN = 'lobby-4821'
@@ -51,7 +53,13 @@ const createdAssignmentIds: number[] = []
 const createdRoomIds: number[] = []
 const createdAdmissionIds: number[] = []
 const createdAppointmentIds: number[] = []
+const createdEncounterIds: number[] = []
+// SP3: check-ins through checkInVisit write their audit rows as this probe user.
+const SP3_PROBE_USER = `TEST_SP3_QD-${Date.now()}`
+const SP3_SESSION: Session = { role: 'frontdesk', name: SP3_PROBE_USER, userId: null }
 afterEach(async () => {
+  while (createdEncounterIds.length > 0) await getDb().delete(encounters).where(eq(encounters.id, createdEncounterIds.pop()!))
+  await getDb().delete(auditLog).where(eq(auditLog.userName, SP3_PROBE_USER))
   while (createdAdmissionIds.length > 0) await getDb().delete(admissions).where(eq(admissions.id, createdAdmissionIds.pop()!))
   while (createdAssignmentIds.length > 0) await getDb().delete(doctorAssignments).where(eq(doctorAssignments.id, createdAssignmentIds.pop()!))
   while (createdAppointmentIds.length > 0) await getDb().delete(appointments).where(eq(appointments.id, createdAppointmentIds.pop()!))
@@ -192,6 +200,53 @@ describe('GET /api/queue-display', () => {
     const body = await res.json()
     expect(body.tickets.some((t: ResponseTicket) => t.ticketNumber === 0)).toBe(false)
     expect(body.tickets.some((t: ResponseTicket) => t.ticketNumber === 601)).toBe(true)
+  })
+
+  // SP3: a check-in against a booked appointment creates the assignment already
+  // 'scheduled' with no room; while its encounter is checked_in it is waiting.
+  async function checkInAgainstTodaysAppointment() {
+    const providerRows = await listActiveProviders()
+    const [appointment] = await getDb().insert(appointments).values({ patientId: 'RD-0001', providerId: providerRows[0].id, startsAt: new Date(), endsAt: new Date(Date.now() + 15 * 60000), visitReason: 'x' }).returning()
+    createdAppointmentIds.push(appointment.id)
+    const r = await checkInVisit({ patientId: 'RD-0001', providerId: providerRows[0].id, visitType: 'outpatient', urgency: 'routine', reason: 'x', roomId: null, appointmentId: appointment.id, createAdmission: false }, SP3_SESSION)
+    if (!r.ok) throw new Error(`check-in failed: ${r.error}`)
+    createdEncounterIds.push(r.encounter.id)
+    createdAssignmentIds.push(r.assignment.id)
+    return r
+  }
+
+  it('shows a checked-in follow-up (scheduled, no room, encounter checked_in) as waiting', async () => {
+    await setPin(TEST_PIN)
+    const r = await checkInAgainstTodaysAppointment()
+    expect(r.assignment).toMatchObject({ status: 'scheduled', roomId: null })
+    const res = await GET(new Request('http://localhost/api/queue-display', { headers: FUNCTIONAL_HEADERS(TEST_PIN) }) as never)
+    const body = await res.json()
+    expect(body.tickets.filter((t: ResponseTicket) => t.ticketNumber === r.encounter.opdToken)).toEqual([{ ticketNumber: r.encounter.opdToken, urgency: 'routine', stage: 'waiting' }])
+  })
+
+  it('drops the ticket once the encounter is completed or cancelled', async () => {
+    await setPin(TEST_PIN)
+    const done = await checkInAgainstTodaysAppointment()
+    const left = await checkInAgainstTodaysAppointment()
+    expect((await transitionEncounter(done.encounter.id, 'completed', SP3_SESSION)).ok).toBe(true)
+    expect((await transitionEncounter(left.encounter.id, 'cancelled', SP3_SESSION, { cancelReason: 'left' })).ok).toBe(true)
+    const res = await GET(new Request('http://localhost/api/queue-display', { headers: FUNCTIONAL_HEADERS(TEST_PIN) }) as never)
+    const body = await res.json()
+    const shown = body.tickets.map((t: ResponseTicket) => t.ticketNumber)
+    expect(shown).not.toContain(done.encounter.opdToken)
+    expect(shown).not.toContain(left.encounter.opdToken)
+  })
+
+  it('still hides a scheduled, roomless assignment that has no encounter', async () => {
+    await setPin(TEST_PIN)
+    const providerRows = await listActiveProviders()
+    const [appointment] = await getDb().insert(appointments).values({ patientId: 'RD-0001', providerId: providerRows[0].id, startsAt: new Date(), endsAt: new Date(Date.now() + 15 * 60000), visitReason: 'x' }).returning()
+    createdAppointmentIds.push(appointment.id)
+    const [assignment] = await getDb().insert(doctorAssignments).values({ patientId: 'RD-0001', providerId: providerRows[0].id, visitType: 'outpatient', urgency: 'routine', reason: 'x', assignedByName: 'Test Staff', queueTicketNumber: 701, status: 'scheduled', appointmentId: appointment.id }).returning()
+    createdAssignmentIds.push(assignment.id)
+    const res = await GET(new Request('http://localhost/api/queue-display', { headers: FUNCTIONAL_HEADERS(TEST_PIN) }) as never)
+    const body = await res.json()
+    expect(body.tickets.some((t: ResponseTicket) => t.ticketNumber === 701)).toBe(false)
   })
 
   describe('rate limiting (Important #2)', () => {

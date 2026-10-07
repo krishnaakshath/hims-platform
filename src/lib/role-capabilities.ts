@@ -24,6 +24,7 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Transfer an admitted patient between rooms',
       'Record or update a patient\'s Aadhaar with consent, seeing only its last 4 digits',
       'Look up the current price of a service',
+      'View follow-ups and the follow-up recall list (read-only)',
     ],
   },
   pi: {
@@ -48,6 +49,7 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Order inpatient medications and record administrations on the MAR',
       'Transfer an admitted patient between rooms',
       'Discharge an admitted patient and sign the discharge summary',
+      'Set and change a patient\'s follow-up plan (due date or interval, window, reason and plan notes), and start or complete a visit',
     ],
   },
   admin: {
@@ -74,6 +76,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Order inpatient medications and record administrations on the MAR',
       'Transfer an admitted patient between rooms',
       'Discharge an admitted patient and sign the discharge summary',
+      'Set and change a patient\'s follow-up plan (due date or interval, window, reason and plan notes), and start or complete a visit',
+      'Book, reschedule or cancel follow-up appointments and log patient contact attempts from the follow-up recall list',
       'Manage the department master and the UHID prefix',
       'Manage the service catalogue, tariffs, packages and room categories, including CSV tariff import',
     ],
@@ -91,6 +95,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Transfer an admitted patient between rooms',
       'Record a patient\'s Aadhaar with consent or the reason it was declined (the number is never shown back)',
       'Look up the current price of a service',
+      'View every follow-up and work the follow-up recall list: book, reschedule or cancel the follow-up appointment and log contact attempts (the clinical plan stays with the doctor)',
+      'Check a patient in against a booked follow-up appointment, which issues the OPD token',
     ],
   },
   pharmacy: {

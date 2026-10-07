@@ -5,6 +5,8 @@ import {
   rooms, doctorAssignments, insuranceEligibilityChecks, admissions, admissionTransfers, encounterNotes, medicationAdministrations,
   medicationDispenses, carePlans, carePlanGoals, labOrders, labResults, medications,
   adverseEvents, drugAccountabilityEntries, signatures,
+  // SP3
+  encounters, followUpOrders,
 } from '@/db/schema'
 import { desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey } from '@/lib/cache'
@@ -482,6 +484,12 @@ export async function deletePatient(anonId: string): Promise<boolean> {
   if (patientAdmissionIds.length > 0) {
     await db.delete(admissionTransfers).where(inArray(admissionTransfers.admissionId, patientAdmissionIds))
   }
+  // SP3: follow_up_orders and encounters reference patients(id) with no ON DELETE action.
+  // Contact attempts cascade with their order; every other SP3 link (appointment, admission,
+  // doctor assignment, encounter, lab order) is ON DELETE SET NULL, so these two only need
+  // to go before the patient row; orders go first so their encounter links are not churned.
+  await db.delete(followUpOrders).where(eq(followUpOrders.patientId, anonId))
+  await db.delete(encounters).where(eq(encounters.patientId, anonId))
   await db.delete(admissions).where(eq(admissions.patientId, anonId))
   await db.delete(doctorAssignments).where(eq(doctorAssignments.patientId, anonId))
   await db.delete(appointments).where(eq(appointments.patientId, anonId))

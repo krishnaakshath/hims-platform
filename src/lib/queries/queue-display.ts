@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
-import { doctorAssignments, appointments, admissions } from '@/db/schema'
-import { and, eq, gte, ne } from 'drizzle-orm'
+import { doctorAssignments, appointments, admissions, encounters } from '@/db/schema'
+import { and, eq, gte, lt, ne } from 'drizzle-orm'
+import { istDayBounds } from '@/lib/india-time'
 
 export type QueueDisplayStage = 'waiting' | 'ready'
 
@@ -10,29 +11,29 @@ export interface QueueDisplayRow {
   stage: QueueDisplayStage
 }
 
-function startOfToday(): Date {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  return start
-}
-
 // Reuses doctorAssignments/rooms/admissions/appointments -- no new status
-// enum (spec §4). Scoped to "today" (see this plan's "Scope decisions" #2).
+// enum (spec §4). Scoped to "today" (see this plan's "Scope decisions" #2):
+// the IST business day, the same day OPD tokens restart on (SP3), whatever
+// zone the server runs in.
 export async function getQueueDisplayRows(): Promise<QueueDisplayRow[]> {
   const db = getDb()
+  const today = istDayBounds()
   const rows = await db
     .select({
       queueTicketNumber: doctorAssignments.queueTicketNumber,
       urgency: doctorAssignments.urgency,
       status: doctorAssignments.status,
       roomId: doctorAssignments.roomId,
+      appointmentId: doctorAssignments.appointmentId,
       appointmentStatus: appointments.status,
       admissionId: admissions.id,
+      encounterStatus: encounters.status, // SP3
     })
     .from(doctorAssignments)
     .leftJoin(appointments, eq(doctorAssignments.appointmentId, appointments.id))
     .leftJoin(admissions, eq(admissions.createdFromAssignmentId, doctorAssignments.id))
-    .where(and(gte(doctorAssignments.createdAt, startOfToday()), ne(doctorAssignments.status, 'declined')))
+    .leftJoin(encounters, eq(encounters.doctorAssignmentId, doctorAssignments.id)) // SP3
+    .where(and(gte(doctorAssignments.createdAt, today.start), lt(doctorAssignments.createdAt, today.end), ne(doctorAssignments.status, 'declined')))
 
   const result: QueueDisplayRow[] = []
   for (const row of rows) {
@@ -49,12 +50,18 @@ export async function getQueueDisplayRows(): Promise<QueueDisplayRow[]> {
     // lobby board's point of view -- none of the three should keep a ticket
     // showing as perpetually "Ready".
     if (row.appointmentStatus === 'completed' || row.appointmentStatus === 'cancelled' || row.appointmentStatus === 'no_show') continue
+    // SP3: a finished or cancelled visit leaves the lobby board.
+    if (row.encounterStatus === 'completed' || row.encounterStatus === 'cancelled') continue
     if (row.status === 'pending') {
       result.push({ ticketNumber: row.queueTicketNumber, urgency: row.urgency, stage: 'waiting' })
     } else if (row.status === 'scheduled' && row.roomId !== null) {
       result.push({ ticketNumber: row.queueTicketNumber, urgency: row.urgency, stage: 'ready' })
+    } else if (row.status === 'scheduled' && row.roomId === null && row.appointmentId !== null && row.encounterStatus === 'checked_in') {
+      // SP3: checked in against a booked appointment (e.g. a follow-up) -- the
+      // assignment is born 'scheduled', and the patient waits in the lobby.
+      result.push({ ticketNumber: row.queueTicketNumber, urgency: row.urgency, stage: 'waiting' })
     }
-    // 'scheduled' with no roomId has no bucket here -- see "Scope decisions" #3.
+    // Any other 'scheduled' with no roomId has no bucket here -- see "Scope decisions" #3.
   }
   return result.sort((a, b) => a.ticketNumber - b.ticketNumber)
 }

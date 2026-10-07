@@ -4,6 +4,9 @@ import { Pill, Stethoscope, CalendarCheck, FileText, MessageSquare, ArrowRight, 
 import { requirePatientSessionOrRedirect } from '@/lib/patient-session'
 import { getPatientPortalData } from '@/lib/queries/patient-portal'
 import { listBroadcastsForPatient } from '@/lib/queries/broadcasts'
+import { getPortalFollowUps } from '@/lib/queries/follow-ups'
+import { formatIstDateTime } from '@/components/follow-ups/format'
+import { PortalFollowUpCard } from '@/components/follow-ups/PortalFollowUpCard'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { normalizeVisitReason } from '@/lib/notification-templates'
 
@@ -52,12 +55,13 @@ export default async function PatientPortalOverviewPage() {
   const data = await getPatientPortalData(session.patientId)
   if (!data) notFound()
 
-  const broadcasts = await listBroadcastsForPatient(session.patientId)
+  const [broadcasts, followUps] = await Promise.all([listBroadcastsForPatient(session.patientId), getPortalFollowUps(session.patientId)])
   await logPatientPortalAction('viewed patient portal overview', session.patientId)
 
   const nextAppointment = data.upcomingAppointments[0]
   const formsToComplete = data.forms.filter((f) => f.status !== 'completed')
-  const hasActionItems = Boolean(nextAppointment) || formsToComplete.length > 0
+  const followUp = followUps[0]
+  const hasActionItems = Boolean(nextAppointment) || formsToComplete.length > 0 || Boolean(followUp)
 
   return (
     <div className="space-y-6">
@@ -70,11 +74,12 @@ export default async function PatientPortalOverviewPage() {
               <div>
                 <h2 className={HEADING}>Your next visit</h2>
                 <p className="text-sm font-medium text-foreground">{normalizeVisitReason(nextAppointment.visitReason)} with {nextAppointment.providerName}</p>
-                <p className="text-xs text-muted-foreground">{new Date(nextAppointment.startsAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                <p className="text-xs text-muted-foreground">{formatIstDateTime(new Date(nextAppointment.startsAt))}</p>
               </div>
               <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
             </Link>
           )}
+          {followUp && <PortalFollowUpCard followUp={followUp} />}
           {formsToComplete.length > 0 && (
             <Link href="/patient-portal/forms" className={`${SECTION} group flex items-center justify-between transition-all duration-200 hover:border-primary/25 hover:shadow-md`}>
               <div>
