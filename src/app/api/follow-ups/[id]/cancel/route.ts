@@ -25,11 +25,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (id === null) return invalidFollowUpId()
 
   try {
-    if (session.role === 'pi' && !(await resolveDoctorQueueProvider(session))) return errorResponse(403, NOT_LINKED_TO_DOCTOR)
+    // A pi acts only as their own linked doctor profile, and only on follow-ups they prescribed.
+    let actingProviderId: number | null = null
+    if (session.role === 'pi') {
+      const self = await resolveDoctorQueueProvider(session)
+      if (!self) return errorResponse(403, NOT_LINKED_TO_DOCTOR)
+      actingProviderId = self.id
+    }
 
-    const result = await cancelFollowUpOrder(id, parsed.data.reason, session)
+    const result = await cancelFollowUpOrder(id, parsed.data.reason, session, actingProviderId)
     if (!result.ok) {
       if (result.error === 'not_found') return errorResponse(404, FOLLOW_UP_NOT_FOUND)
+      if (result.error === 'not_owner') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       return errorResponse(409, FOLLOW_UP_CLOSED)
     }
 

@@ -140,18 +140,28 @@ export type UpdateFollowUpPlanInput = UpdateFollowUpPlanRequest
 
 export type UpdateFollowUpPlanResult =
   | { ok: true; order: FollowUpOrder; changedFields: string[]; bookingOutsideWindow: boolean }
-  | { ok: false; error: 'not_found' | 'not_editable' | 'provider_not_found' | 'due_date_invalid'; message?: string }
+  | { ok: false; error: 'not_found' | 'not_owner' | 'not_editable' | 'provider_not_found' | 'due_date_invalid'; message?: string }
 
 /**
  * Changes the clinical plan of an open order. A new timing is resolved from
  * the stored base date; a window-only change is recomputed around the stored
  * due date. A booked appointment is never moved: `bookingOutsideWindow`
  * reports when it now falls outside the window (by its IST date).
+ *
+ * `actingProviderId` is the doctor acting (a pi's own provider profile); only
+ * the prescriber may change the plan. `null` means an admin (no ownership check).
  */
-export async function updateFollowUpPlan(id: number, patch: UpdateFollowUpPlanInput, session: Session, today = todayIsoIn()): Promise<UpdateFollowUpPlanResult> {
+export async function updateFollowUpPlan(
+  id: number,
+  patch: UpdateFollowUpPlanInput,
+  session: Session,
+  actingProviderId: number | null,
+  today = todayIsoIn(),
+): Promise<UpdateFollowUpPlanResult> {
   return getDb().transaction(async (tx): Promise<UpdateFollowUpPlanResult> => {
     const [order] = await tx.select().from(followUpOrders).where(eq(followUpOrders.id, id)).for('update')
     if (!order) return { ok: false, error: 'not_found' }
+    if (actingProviderId !== null && order.prescribedByProviderId !== actingProviderId) return { ok: false, error: 'not_owner' }
     const { status, appointment } = await deriveOnExecutor(tx, order, today)
     if (!isOpenFollowUp(status)) return { ok: false, error: 'not_editable' }
 
@@ -220,17 +230,19 @@ export async function updateFollowUpPlan(id: number, patch: UpdateFollowUpPlanIn
 
 export type CancelFollowUpResult =
   | { ok: true; order: FollowUpOrder; cancelledAppointmentId: number | null }
-  | { ok: false; error: 'not_found' | 'not_cancellable' }
+  | { ok: false; error: 'not_found' | 'not_owner' | 'not_cancellable' }
 
 /**
  * Cancels an open order. A linked appointment that is still `scheduled` is
  * cancelled in the same transaction. The cancel reason stays on the row; the
- * audit row carries ids only.
+ * audit row carries ids only. `actingProviderId`: as for updateFollowUpPlan
+ * (only the prescriber, or an admin with `null`).
  */
-export async function cancelFollowUpOrder(id: number, reason: string, session: Session): Promise<CancelFollowUpResult> {
+export async function cancelFollowUpOrder(id: number, reason: string, session: Session, actingProviderId: number | null): Promise<CancelFollowUpResult> {
   return getDb().transaction(async (tx): Promise<CancelFollowUpResult> => {
     const [order] = await tx.select().from(followUpOrders).where(eq(followUpOrders.id, id)).for('update')
     if (!order) return { ok: false, error: 'not_found' }
+    if (actingProviderId !== null && order.prescribedByProviderId !== actingProviderId) return { ok: false, error: 'not_owner' }
     const { status, appointment } = await deriveOnExecutor(tx, order, todayIsoIn())
     if (!isOpenFollowUp(status)) return { ok: false, error: 'not_cancellable' }
 

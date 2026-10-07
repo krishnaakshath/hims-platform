@@ -336,6 +336,15 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     expect(JSON.stringify(audit)).not.toContain('secret')
   })
 
+  it('a doctor may start/complete only their own visit; admin (null) any (I3)', async () => {
+    const r = await checkInVisit(input(), SESSION, NOW)
+    if (!r.ok) throw new Error('check-in failed')
+    expect(await transitionEncounter(r.encounter.id, 'in_consultation', SESSION, { actingProviderId: otherProviderId })).toEqual({ ok: false, error: 'not_owner' })
+    expect((await getEncounterById(r.encounter.id))?.status).toBe('checked_in')
+    expect((await transitionEncounter(r.encounter.id, 'in_consultation', SESSION, { actingProviderId: providerId })).ok).toBe(true)
+    expect((await transitionEncounter(r.encounter.id, 'completed', SESSION, { actingProviderId: null })).ok).toBe(true)
+  })
+
   it('cancelling a visit reopens the follow-up it completed and frees the appointment for a new check-in (I6)', async () => {
     const appt = await makeAppointment()
     const order = await makeOrder(appt.id)

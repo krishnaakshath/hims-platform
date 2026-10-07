@@ -154,13 +154,13 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
   })
 }
 
-export type TransitionEncounterResult = { ok: true; encounter: Encounter } | { ok: false; error: 'not_found' | 'invalid_transition' }
+export type TransitionEncounterResult = { ok: true; encounter: Encounter } | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' }
 
 export async function transitionEncounter(
   id: number,
   to: 'in_consultation' | 'completed' | 'cancelled',
   session: Session,
-  opts: { cancelReason?: string } = {},
+  opts: { cancelReason?: string; actingProviderId?: number | null } = {},
 ): Promise<TransitionEncounterResult> {
   return getDb().transaction(async (tx): Promise<TransitionEncounterResult> => {
     // Global lock order (I1): follow-up orders before the encounter. Only a
@@ -171,6 +171,8 @@ export async function transitionEncounter(
       : []
     const [current] = await tx.select().from(encounters).where(eq(encounters.id, id)).for('update')
     if (!current) return { ok: false, error: 'not_found' }
+    // A doctor (pi) acts as their own provider profile: only the visit's doctor moves it on.
+    if (opts.actingProviderId != null && current.providerId !== opts.actingProviderId) return { ok: false, error: 'not_owner' }
     if (!canTransitionEncounter(current.status, to)) return { ok: false, error: 'invalid_transition' }
     const at = new Date()
     const [updated] = await tx.update(encounters).set({

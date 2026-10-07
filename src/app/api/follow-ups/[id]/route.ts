@@ -31,13 +31,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   try {
-    // A pi acts only as their own linked doctor profile.
-    if (session.role === 'pi' && !(await resolveDoctorQueueProvider(session))) return errorResponse(403, NOT_LINKED_TO_DOCTOR)
+    // A pi acts only as their own linked doctor profile, and only on follow-ups they prescribed.
+    let actingProviderId: number | null = null
+    if (session.role === 'pi') {
+      const self = await resolveDoctorQueueProvider(session)
+      if (!self) return errorResponse(403, NOT_LINKED_TO_DOCTOR)
+      actingProviderId = self.id
+    }
 
-    const result = await updateFollowUpPlan(id, patch, session)
+    const result = await updateFollowUpPlan(id, patch, session, actingProviderId)
     if (!result.ok) {
       switch (result.error) {
         case 'not_found': return errorResponse(404, FOLLOW_UP_NOT_FOUND)
+        case 'not_owner': return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         case 'not_editable': return errorResponse(409, FOLLOW_UP_CLOSED)
         case 'provider_not_found': return errorResponse(404, DOCTOR_NOT_FOUND)
         case 'due_date_invalid': return errorResponse(400, result.message ?? 'Invalid follow-up date')

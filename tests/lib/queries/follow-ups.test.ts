@@ -165,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
   it('updateFollowUpPlan recomputes from baseDate, reports changed fields and never moves the booking', async () => {
     const appt = await makeAppointment(new Date('2099-04-14T04:30:00Z')) // 10:00 IST 14 Apr
     const order = await created({ appointmentId: appt.id })
-    const r = await updateFollowUpPlan(order.id, { timing: { kind: 'interval', interval: { value: 1, unit: 'months' } }, reason: 'TEST_SP3 new reason' }, SESSION, '2099-04-02')
+    const r = await updateFollowUpPlan(order.id, { timing: { kind: 'interval', interval: { value: 1, unit: 'months' } }, reason: 'TEST_SP3 new reason' }, SESSION, null, '2099-04-02')
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.changedFields).toEqual(['reason', 'timing'])
@@ -185,7 +185,7 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
   it('a window-only change recomputes around the stored due date; a booking inside the window is reported as such', async () => {
     const appt = await makeAppointment(new Date('2099-04-14T04:30:00Z'))
     const order = await created({ appointmentId: appt.id })
-    const r = await updateFollowUpPlan(order.id, { windowDaysBefore: 1, windowDaysAfter: 1 }, SESSION, '2099-04-02')
+    const r = await updateFollowUpPlan(order.id, { windowDaysBefore: 1, windowDaysAfter: 1 }, SESSION, null, '2099-04-02')
     expect(r.ok && r.order).toMatchObject({ dueDate: '2099-04-15', windowStart: '2099-04-14', windowEnd: '2099-04-16' })
     expect(r.ok && r.changedFields).toEqual(['windowDaysAfter', 'windowDaysBefore'])
     expect(r.ok && r.bookingOutsideWindow).toBe(false)
@@ -193,40 +193,40 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
 
   it('updateFollowUpPlan clears plan notes, changes the prescriber and rejects bad input', async () => {
     const order = await created()
-    const r = await updateFollowUpPlan(order.id, { planNotes: null, prescribedByProviderId: otherProviderId, departmentId: null }, SESSION, '2099-04-02')
+    const r = await updateFollowUpPlan(order.id, { planNotes: null, prescribedByProviderId: otherProviderId, departmentId: null }, SESSION, null, '2099-04-02')
     expect(r.ok && r.order).toMatchObject({ planNotes: null, prescribedByProviderId: otherProviderId, departmentId: null })
     expect(r.ok && r.changedFields).toEqual(['departmentId', 'planNotes', 'prescribedByProviderId'])
-    expect(await updateFollowUpPlan(order.id, { prescribedByProviderId: inactiveProviderId }, SESSION, '2099-04-02')).toMatchObject({ ok: false, error: 'provider_not_found' })
-    expect(await updateFollowUpPlan(order.id, { timing: { kind: 'date', dueDate: '2099-04-01' } }, SESSION, '2099-04-02')).toMatchObject({ ok: false, error: 'due_date_invalid' })
-    expect(await updateFollowUpPlan(2147483000, { reason: 'x' }, SESSION, '2099-04-02')).toEqual({ ok: false, error: 'not_found' })
+    expect(await updateFollowUpPlan(order.id, { prescribedByProviderId: inactiveProviderId }, SESSION, null, '2099-04-02')).toMatchObject({ ok: false, error: 'provider_not_found' })
+    expect(await updateFollowUpPlan(order.id, { timing: { kind: 'date', dueDate: '2099-04-01' } }, SESSION, null, '2099-04-02')).toMatchObject({ ok: false, error: 'due_date_invalid' })
+    expect(await updateFollowUpPlan(2147483000, { reason: 'x' }, SESSION, null, '2099-04-02')).toEqual({ ok: false, error: 'not_found' })
   })
 
   it('refuses to edit a cancelled order', async () => {
     const order = await created()
-    const c = await cancelFollowUpOrder(order.id, 'TEST_SP3 no longer needed', SESSION)
+    const c = await cancelFollowUpOrder(order.id, 'TEST_SP3 no longer needed', SESSION, null)
     expect(c.ok).toBe(true)
-    expect(await updateFollowUpPlan(order.id, { reason: 'x' }, SESSION, '2099-04-02')).toEqual({ ok: false, error: 'not_editable' })
+    expect(await updateFollowUpPlan(order.id, { reason: 'x' }, SESSION, null, '2099-04-02')).toEqual({ ok: false, error: 'not_editable' })
   })
 
   it('cancel cancels the linked scheduled appointment in the same transaction', async () => {
     const appt = await makeAppointment(new Date('2099-04-14T04:30:00Z'))
     const order = await created({ appointmentId: appt.id })
-    const r = await cancelFollowUpOrder(order.id, 'TEST_SP3 patient moved away', SESSION)
+    const r = await cancelFollowUpOrder(order.id, 'TEST_SP3 patient moved away', SESSION, null)
     expect(r).toMatchObject({ ok: true, cancelledAppointmentId: appt.id })
     expect(r.ok && r.order).toMatchObject({ status: 'cancelled', cancelReason: 'TEST_SP3 patient moved away', cancelledByName: PROBE_USER })
     const [after] = await getDb().select().from(appointments).where(eq(appointments.id, appt.id))
     expect(after.status).toBe('cancelled')
     const audit = (await auditRows()).find((a) => a.action === 'cancelled follow-up')
     expect(audit?.details).toBe(`followUp=${order.id} appointment=${appt.id}`)
-    expect(await cancelFollowUpOrder(order.id, 'again', SESSION)).toEqual({ ok: false, error: 'not_cancellable' })
-    expect(await cancelFollowUpOrder(2147483000, 'x', SESSION)).toEqual({ ok: false, error: 'not_found' })
+    expect(await cancelFollowUpOrder(order.id, 'again', SESSION, null)).toEqual({ ok: false, error: 'not_cancellable' })
+    expect(await cancelFollowUpOrder(2147483000, 'x', SESSION, null)).toEqual({ ok: false, error: 'not_found' })
   })
 
   it('cancel is atomic: a failing audit leaves the order and the appointment untouched', async () => {
     const appt = await makeAppointment(new Date('2099-04-14T04:30:00Z'))
     const order = await created({ appointmentId: appt.id })
     vi.mocked(logAudit).mockRejectedValueOnce(new Error('audit insert failed'))
-    await expect(cancelFollowUpOrder(order.id, 'TEST_SP3 x', SESSION)).rejects.toThrow('audit insert failed')
+    await expect(cancelFollowUpOrder(order.id, 'TEST_SP3 x', SESSION, null)).rejects.toThrow('audit insert failed')
     expect((await getFollowUpById(order.id))?.status).toBe('scheduled')
     const [after] = await getDb().select().from(appointments).where(eq(appointments.id, appt.id))
     expect(after.status).toBe('scheduled')
@@ -234,25 +234,37 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
 
   it('cancel without an appointment, and cancelling a completed order is refused', async () => {
     const order = await created()
-    const r = await cancelFollowUpOrder(order.id, 'TEST_SP3 x', SESSION)
+    const r = await cancelFollowUpOrder(order.id, 'TEST_SP3 x', SESSION, null)
     expect(r).toMatchObject({ ok: true, cancelledAppointmentId: null })
     expect((await auditRows()).find((a) => a.action === 'cancelled follow-up')?.details).toBe(`followUp=${order.id}`)
     const done = await created()
     await getDb().update(followUpOrders).set({ status: 'completed' }).where(eq(followUpOrders.id, done.id))
-    expect(await cancelFollowUpOrder(done.id, 'x', SESSION)).toEqual({ ok: false, error: 'not_cancellable' })
+    expect(await cancelFollowUpOrder(done.id, 'x', SESSION, null)).toEqual({ ok: false, error: 'not_cancellable' })
   })
 
   it('audit details carry ids only', async () => {
     const appt = await makeAppointment(new Date('2099-04-14T04:30:00Z'))
     const order = await created({ reason: 'BP review SECRETWORD', planNotes: 'notes SECRETWORD' })
-    await updateFollowUpPlan(order.id, { reason: 'changed SECRETWORD', planNotes: 'more SECRETWORD' }, SESSION, '2099-04-02')
+    await updateFollowUpPlan(order.id, { reason: 'changed SECRETWORD', planNotes: 'more SECRETWORD' }, SESSION, null, '2099-04-02')
     await getDb().update(followUpOrders).set({ appointmentId: appt.id, status: 'scheduled' }).where(eq(followUpOrders.id, order.id))
-    await cancelFollowUpOrder(order.id, 'cancel SECRETWORD', SESSION)
+    await cancelFollowUpOrder(order.id, 'cancel SECRETWORD', SESSION, null)
     const rows = await getDb().select().from(auditLog).where(eq(auditLog.patientId, PATIENT))
     expect(rows.length).toBeGreaterThanOrEqual(3)
     for (const row of rows) {
       expect(`${row.action} ${row.details ?? ''}`).not.toContain('SECRETWORD')
     }
+  })
+
+  it('only the prescribing doctor (or admin, null) may change or cancel the plan (I3)', async () => {
+    const order = await created()
+    expect(await updateFollowUpPlan(order.id, { reason: 'TEST_SP3 hijack' }, SESSION, otherProviderId, '2099-04-02')).toEqual({ ok: false, error: 'not_owner' })
+    expect(await cancelFollowUpOrder(order.id, 'TEST_SP3 hijack', SESSION, otherProviderId)).toEqual({ ok: false, error: 'not_owner' })
+    expect(await getFollowUpById(order.id)).toMatchObject({ status: 'planned', reason: 'TEST_SP3 BP review' })
+    expect(await updateFollowUpPlan(order.id, { reason: 'TEST_SP3 own change' }, SESSION, providerId, '2099-04-02')).toMatchObject({ ok: true, changedFields: ['reason'] })
+    expect(await updateFollowUpPlan(order.id, { reason: 'TEST_SP3 admin change' }, SESSION, null, '2099-04-02')).toMatchObject({ ok: true })
+    expect(await cancelFollowUpOrder(order.id, 'TEST_SP3 own cancel', SESSION, providerId)).toMatchObject({ ok: true })
+    // not_found still wins over ownership for a missing id.
+    expect(await cancelFollowUpOrder(2147483000, 'x', SESSION, otherProviderId)).toEqual({ ok: false, error: 'not_found' })
   })
 
   it('getFollowUpById returns the row or null', async () => {
@@ -281,7 +293,7 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
     const appt = await makeAppointment(new Date('2099-04-14T04:30:00Z'))
     const first = await created({ planNotes: 'TEST_SP3 clinical SECRETWORD' })
     const second = await created({ appointmentId: appt.id })
-    await cancelFollowUpOrder(first.id, 'TEST_SP3 cancelled', SESSION)
+    await cancelFollowUpOrder(first.id, 'TEST_SP3 cancelled', SESSION, null)
     await getDb().insert(followUpContactAttempts).values([
       { followUpOrderId: second.id, channel: 'phone', outcome: 'no_answer', attemptedByName: PROBE_USER, attemptedAt: new Date('2099-04-03T04:00:00Z') },
       { followUpOrderId: second.id, channel: 'sms', outcome: 'message_left', note: 'TEST_SP3 msg', attemptedByName: PROBE_USER, attemptedAt: new Date('2099-04-04T04:00:00Z') },
@@ -310,7 +322,7 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
     const later = await created({ reason: 'later SECRETWORD', planNotes: 'n SECRETWORD', timing: { kind: 'interval', interval: { value: 3, unit: 'weeks' } } })
     const sooner = await created({ reason: 'sooner SECRETWORD', planNotes: 'n SECRETWORD' })
     const gone = await created({ reason: 'gone SECRETWORD' })
-    await cancelFollowUpOrder(gone.id, 'x SECRETWORD', SESSION)
+    await cancelFollowUpOrder(gone.id, 'x SECRETWORD', SESSION, null)
 
     const result = await getPortalFollowUps(PATIENT, '2099-04-10')
     expect(result).toHaveLength(2)

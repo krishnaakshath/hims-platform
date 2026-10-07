@@ -181,13 +181,23 @@ describe('PATCH /api/follow-ups/[id]', () => {
     expect(updateFollowUpPlan).not.toHaveBeenCalled()
     role = 'admin'
     expect((await PATCH(send('PATCH', '/api/follow-ups/3', { prescribedByProviderId: 9 }), ctx({ id: '3' }))).status).toBe(200)
-    expect(updateFollowUpPlan).toHaveBeenCalledWith(3, { prescribedByProviderId: 9 }, expect.objectContaining({ role: 'admin' }))
+    expect(updateFollowUpPlan).toHaveBeenCalledWith(3, { prescribedByProviderId: 9 }, expect.objectContaining({ role: 'admin' }), null)
   })
 
   it('a pi with no linked provider gets 403 before any write', async () => {
     vi.mocked(resolveDoctorQueueProvider).mockResolvedValue(null)
     expect((await PATCH(send('PATCH', '/api/follow-ups/3', { reason: 'x' }), ctx({ id: '3' }))).status).toBe(403)
     expect(updateFollowUpPlan).not.toHaveBeenCalled()
+  })
+
+  it('a pi acts as their own provider; another doctor\'s follow-up is 403 Forbidden (I3)', async () => {
+    await PATCH(send('PATCH', '/api/follow-ups/3', { reason: 'x' }), ctx({ id: '3' }))
+    expect(updateFollowUpPlan).toHaveBeenLastCalledWith(3, { reason: 'x' }, expect.objectContaining({ role: 'pi' }), 4)
+    vi.mocked(updateFollowUpPlan).mockResolvedValueOnce({ ok: false, error: 'not_owner' })
+    const res = await PATCH(send('PATCH', '/api/follow-ups/3', { reason: 'x' }), ctx({ id: '3' }))
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'Forbidden' })
+    expect(notifyFollowUpSafely).not.toHaveBeenCalled()
   })
 
   it('PATCH reports bookingOutsideWindow and notifies plan_changed only when timing changed', async () => {
@@ -240,7 +250,7 @@ describe('POST /api/follow-ups/[id]/cancel', () => {
     const res = await CANCEL(send('POST', '/api/follow-ups/3/cancel', { reason: 'Patient moved away' }), ctx({ id: '3' }))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ order: VIEW, cancelledAppointmentId: 8 })
-    expect(cancelFollowUpOrder).toHaveBeenCalledWith(3, 'Patient moved away', expect.objectContaining({ role: 'pi' }))
+    expect(cancelFollowUpOrder).toHaveBeenCalledWith(3, 'Patient moved away', expect.objectContaining({ role: 'pi' }), 4)
     expect(notifyFollowUpSafely).toHaveBeenCalledWith(expect.anything(), { kind: 'cancelled', followUpOrderId: 3, patientId: 'RD-0001', dueDate: '2099-04-15', appointmentStartsAt: null })
   })
 
@@ -248,6 +258,17 @@ describe('POST /api/follow-ups/[id]/cancel', () => {
     vi.mocked(cancelFollowUpOrder).mockResolvedValueOnce({ ok: false, error })
     expect((await CANCEL(send('POST', '/api/follow-ups/3/cancel', { reason: 'x' }), ctx({ id: '3' }))).status).toBe(status)
     expect(notifyFollowUpSafely).not.toHaveBeenCalled()
+  })
+
+  it('another doctor\'s follow-up is 403 Forbidden for a pi (I3)', async () => {
+    vi.mocked(cancelFollowUpOrder).mockResolvedValueOnce({ ok: false, error: 'not_owner' })
+    const res = await CANCEL(send('POST', '/api/follow-ups/3/cancel', { reason: 'x' }), ctx({ id: '3' }))
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'Forbidden' })
+    expect(notifyFollowUpSafely).not.toHaveBeenCalled()
+    role = 'admin'
+    await CANCEL(send('POST', '/api/follow-ups/3/cancel', { reason: 'x' }), ctx({ id: '3' }))
+    expect(cancelFollowUpOrder).toHaveBeenLastCalledWith(3, 'x', expect.objectContaining({ role: 'admin' }), null)
   })
 
   it('requires a reason and a pi linked to a doctor profile', async () => {

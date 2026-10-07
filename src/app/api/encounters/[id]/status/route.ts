@@ -3,6 +3,7 @@ import { requireSession } from '@/lib/auth'
 import { ENCOUNTER_STATUS_ROLES } from '@/lib/role-policy'
 import { ENCOUNTER_TRANSITION_ROLES, encounterStatusRequestSchema } from '@/lib/encounters/status'
 import { transitionEncounter } from '@/lib/queries/encounters'
+import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 
 const MAX_INT = 2147483647
@@ -35,9 +36,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!ENCOUNTER_TRANSITION_ROLES[to].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
-    const result = await transitionEncounter(encounterId, to, session, { cancelReason })
+    // A pi acts as their own linked provider profile and may move only their own visits.
+    let actingProviderId: number | null = null
+    if (session.role === 'pi') {
+      const self = await resolveDoctorQueueProvider(session)
+      if (!self) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      actingProviderId = self.id
+    }
+    const result = await transitionEncounter(encounterId, to, session, { cancelReason, actingProviderId })
     if (!result.ok) {
       if (result.error === 'not_found') return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      if (result.error === 'not_owner') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       return NextResponse.json({ error: 'This visit can no longer change to that status.' }, { status: 409 })
     }
     return NextResponse.json({ encounter: result.encounter })

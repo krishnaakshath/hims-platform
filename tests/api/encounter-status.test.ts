@@ -4,9 +4,11 @@ import { NextRequest } from 'next/server'
 let role = 'frontdesk'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role, name: 'Probe User', userId: null })) }))
 vi.mock('@/lib/queries/encounters', () => ({ transitionEncounter: vi.fn() }))
+vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn() }))
 
 import { POST } from '@/app/api/encounters/[id]/status/route'
 import { transitionEncounter } from '@/lib/queries/encounters'
+import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { RETRY_MESSAGE } from '@/lib/db-errors'
 
 const send = (body: unknown) => new NextRequest('http://localhost/api/encounters/3/status', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) })
@@ -17,6 +19,7 @@ beforeEach(() => {
   role = 'frontdesk'
   vi.mocked(transitionEncounter).mockReset()
   vi.mocked(transitionEncounter).mockResolvedValue({ ok: true, encounter: ENCOUNTER as never })
+  vi.mocked(resolveDoctorQueueProvider).mockReset().mockResolvedValue({ id: 4, name: 'Dr. K' })
 })
 
 describe('POST /api/encounters/[id]/status', () => {
@@ -27,7 +30,7 @@ describe('POST /api/encounters/[id]/status', () => {
     const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ encounter: ENCOUNTER })
-    expect(transitionEncounter).toHaveBeenCalledWith(3, 'cancelled', expect.objectContaining({ role: 'frontdesk' }), { cancelReason: 'left' })
+    expect(transitionEncounter).toHaveBeenCalledWith(3, 'cancelled', expect.objectContaining({ role: 'frontdesk' }), { cancelReason: 'left', actingProviderId: null })
   })
 
   it('pi may start and complete a consultation but not cancel', async () => {
@@ -37,6 +40,29 @@ describe('POST /api/encounters/[id]/status', () => {
     const denied = await POST(send({ to: 'cancelled', cancelReason: 'x' }), ctx('3'))
     expect(denied.status).toBe(403)
     expect(await denied.json()).toEqual({ error: 'Forbidden' })
+  })
+
+  it('a pi acts as their own provider: another doctor\'s visit is 403, an unlinked pi is 403 before any write (I3)', async () => {
+    role = 'pi'
+    await POST(send({ to: 'in_consultation' }), ctx('3'))
+    expect(transitionEncounter).toHaveBeenLastCalledWith(3, 'in_consultation', expect.objectContaining({ role: 'pi' }), { cancelReason: undefined, actingProviderId: 4 })
+    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'not_owner' })
+    const notMine = await POST(send({ to: 'completed' }), ctx('3'))
+    expect(notMine.status).toBe(403)
+    expect(await notMine.json()).toEqual({ error: 'Forbidden' })
+    vi.mocked(transitionEncounter).mockClear()
+    vi.mocked(resolveDoctorQueueProvider).mockResolvedValueOnce(null)
+    const unlinked = await POST(send({ to: 'completed' }), ctx('3'))
+    expect(unlinked.status).toBe(403)
+    expect(await unlinked.json()).toEqual({ error: 'Forbidden' })
+    expect(transitionEncounter).not.toHaveBeenCalled()
+  })
+
+  it('admin is not bound to a provider', async () => {
+    role = 'admin'
+    await POST(send({ to: 'completed' }), ctx('3'))
+    expect(transitionEncounter).toHaveBeenLastCalledWith(3, 'completed', expect.objectContaining({ role: 'admin' }), { cancelReason: undefined, actingProviderId: null })
+    expect(resolveDoctorQueueProvider).not.toHaveBeenCalled()
   })
 
   it('maps invalid_transition to 409 and not_found to 404', async () => {
