@@ -36,8 +36,7 @@ const entryBase = (e: WorkspaceDiagnosis | WorkspaceProcedure) => ({
   display: e.display,
   isSample: e.isSample,
   codingStatus: e.codingStatus,
-  // The workspace loader returns the proposer for diagnoses only; a proposed procedure reads "Proposed by a doctor".
-  proposedByName: 'proposedByName' in e ? e.proposedByName : null,
+  proposedByName: e.proposedByName,
   sequence: e.sequence,
 })
 

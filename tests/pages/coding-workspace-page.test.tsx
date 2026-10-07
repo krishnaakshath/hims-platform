@@ -11,7 +11,7 @@ const dx = (o: Partial<WorkspaceDiagnosis> = {}): WorkspaceDiagnosis => ({
 })
 const proc = (o: Partial<WorkspaceProcedure> = {}): WorkspaceProcedure => ({
   id: 21, description: 'ECG', codingStatus: 'uncoded', performedOn: '2026-10-01', performedByName: 'Dr. K', serviceId: null, serviceName: null,
-  sequence: null, codeId: null, kind: null, code: '', display: null, version: null, isSample: false, ...o,
+  sequence: null, proposedByName: null, codeId: null, kind: null, code: '', display: null, version: null, isSample: false, ...o,
 })
 
 function workspace(status: EncounterCodingStatus, o: Partial<CodingWorkspace> = {}): CodingWorkspace {
@@ -176,6 +176,14 @@ describe('/coding/encounters/[id]', () => {
     expect(items[1]).toHaveTextContent('A provisional diagnosis remains')
     expect(within(items[0]).getByRole('link')).toHaveAttribute('href', '#procedure-21')
     expect(document.getElementById('procedure-21')).not.toBeNull()
+  })
+
+  // SP6 Task 13: the loader now returns the proposer of a procedure too.
+  it('names the doctor who proposed a procedure', async () => {
+    const { screen } = await renderPage({
+      data: workspace('in_progress', { procedures: [proc({ id: 22, codingStatus: 'proposed', proposedByName: 'Dr. Proc', codeId: 8, kind: 'hbp', code: 'SMP001A', display: 'SAMPLE fictional' })] }),
+    })
+    expect(screen.getByText('Proposed by Dr. Proc')).toBeInTheDocument()
   })
 
   it('shows the event history with the reopen reason and the query thread', async () => {

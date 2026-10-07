@@ -86,6 +86,7 @@ describe('a pi reaches the whole chart', () => {
     vi.doMock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(async () => []) }))
     vi.doMock('@/lib/queries/care-plans', () => ({ listCarePlansForPatient: vi.fn(async () => []) }))
     vi.doMock('@/lib/queries/providers', () => ({ listAllProviders: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/coding-workspace', () => ({ listEncounterCodingForPatient: vi.fn(async () => []) })) // SP6
 
     const { default: MedicalRecordPage } = await import('@/app/(dashboard)/patients/[anonId]/medical-record/page')
     await MedicalRecordPage({ params: Promise.resolve({ anonId: 'RD-TEST' }) } as never)
@@ -101,5 +102,69 @@ describe('a pi reaches the whole chart', () => {
     expect(listDispensesForPatient).toHaveBeenCalled()
     expect(listNotesForPatient).toHaveBeenCalled()
     expect(listCarePlansForPatient).toHaveBeenCalled()
+  })
+
+  // SP6 Task 13: the "Visit coding" section and legacy diagnosis labelling.
+  async function renderChart(role: 'pi' | 'crc' | 'admin', diagnoses: unknown[], encounters: unknown[] = []) {
+    vi.resetModules()
+    vi.doMock('next/navigation', () => ({
+      redirect: vi.fn(() => { throw new Error('NEXT_REDIRECT') }),
+      notFound: () => { throw new Error('NEXT_NOT_FOUND') },
+      useRouter: () => ({ refresh: vi.fn() }),
+    }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Test User' })) }))
+    vi.doMock('@/lib/provider-identity', () => ({ resolveSessionProvider: vi.fn(async () => null) }))
+    vi.doMock('@/lib/queries/patients', () => ({
+      getPatientDetail: vi.fn(async () => ({
+        id: 'RD-TEST', name: 'Test Patient', dob: '1990-01-01', chartDataAsOf: new Date('2026-09-01T00:00:00Z'),
+        lastApptDate: null, nextApptDate: null, currentProvider: null, diagnoses, medications: [], allergies: [],
+        primaryPayerId: null, secondaryPayerId: null,
+      })),
+    }))
+    vi.doMock('@/lib/queries/encounter-notes', () => ({ listNotesForPatient: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/payers', () => ({ getPayerName: vi.fn(async () => null) }))
+    vi.doMock('@/lib/queries/medication-dispenses', () => ({ listDispensesForPatient: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/medications', () => ({ listMedicationsWithInventory: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/lab-orders', () => ({ listOrdersForPatient: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/lab-tests', () => ({ listLabTests: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/care-plans', () => ({ listCarePlansForPatient: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/providers', () => ({ listAllProviders: vi.fn(async () => []) }))
+    const listEncounterCodingForPatient = vi.fn(async () => encounters)
+    vi.doMock('@/lib/queries/coding-workspace', () => ({ listEncounterCodingForPatient }))
+    const { default: MedicalRecordPage } = await import('@/app/(dashboard)/patients/[anonId]/medical-record/page')
+    const jsx = await MedicalRecordPage({ params: Promise.resolve({ anonId: 'RD-TEST' }) } as never)
+    const { render, screen, cleanup } = await import('@testing-library/react')
+    cleanup()
+    render(jsx)
+    return { screen, listEncounterCodingForPatient }
+  }
+
+  const visit = {
+    encounterId: 41, encounterDate: '2026-03-01', encounterType: 'opd', encounterStatus: 'completed', providerName: 'Dr. Asha Rao',
+    codingStatus: 'in_progress', diagnoses: [], procedures: [], openQueries: [],
+  }
+
+  it('labels legacy free-text diagnoses as uncoded', async () => {
+    const { screen } = await renderChart('pi', [
+      { id: 1, code: 'F32.1', description: 'Depression', encounterId: null },
+      { id: 2, code: 'E11.9', description: 'Diabetes this visit', encounterId: 41 },
+    ])
+    const legacy = screen.getByText('Depression').closest('li')!
+    expect(legacy).toHaveTextContent('Uncoded (legacy)')
+    expect(legacy).toHaveTextContent(/F32\.1.*unverified/)
+    const linked = screen.getByText('Diabetes this visit').closest('li')!
+    expect(linked).not.toHaveTextContent('Uncoded (legacy)')
+  })
+
+  it('shows the Visit coding section with propose controls for a pi and read-only for crc', async () => {
+    const pi = await renderChart('pi', [], [visit])
+    expect(pi.listEncounterCodingForPatient).toHaveBeenCalledWith('RD-TEST')
+    expect(pi.screen.getByRole('heading', { name: /visit coding/i }).closest('section')).toHaveAttribute('id', 'visit-coding')
+    expect(pi.screen.getByRole('button', { name: /propose diagnosis/i })).toBeInTheDocument()
+    const crc = await renderChart('crc', [], [visit])
+    expect(crc.screen.getByRole('heading', { name: /visit coding/i })).toBeInTheDocument()
+    expect(crc.screen.queryByRole('button', { name: /propose diagnosis/i })).toBeNull()
   })
 })

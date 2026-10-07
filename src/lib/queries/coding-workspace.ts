@@ -47,6 +47,7 @@ export interface WorkspaceProcedure extends WorkspaceEntryCode {
   serviceId: number | null
   serviceName: string | null
   sequence: number | null
+  proposedByName: string | null
 }
 
 export interface WorkspaceQuery {
@@ -171,6 +172,7 @@ async function loadProcedures(encounterIds: number[]): Promise<Map<number, Works
       serviceId: encounterProcedures.serviceId,
       serviceName: serviceCatalog.name,
       sequence: encounterProcedures.sequence,
+      proposedByName: encounterProcedures.proposedByName,
       codeId: encounterProcedures.codeId,
       kind: encounterProcedures.codeSystemKind,
       code: sql<string>`coalesce(${encounterProcedures.code}, '')`,

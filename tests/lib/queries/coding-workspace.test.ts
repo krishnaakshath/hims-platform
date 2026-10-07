@@ -162,7 +162,7 @@ describe.skipIf(!process.env.DATABASE_URL)('coding workspace and chart loaders (
     })
     expect(w.procedures).toEqual([{
       id: procedureId, description: 'SAMPLE fictional ZZ00000', codingStatus: 'proposed', performedOn: '2026-03-01', performedByName: 'TEST_SP6 Dr Workspace',
-      serviceId: null, serviceName: null, sequence: null,
+      serviceId: null, serviceName: null, sequence: null, proposedByName: PROBE_USER,
       codeId: C['ZZ00000'], kind: 'icd10pcs', code: 'ZZ00000', display: 'SAMPLE fictional ZZ00000', version: `SAMPLE-TEST-SP6-${RUN}-w`, isSample: true,
     }])
     expect(w.queries.map((q) => [q.id, q.status])).toEqual([[openQueryId, 'answered'], [closedQueryId, 'closed']])
