@@ -5,11 +5,9 @@ import type { TARIFF_SCOPES } from '@/db/schema'
 
 export type TariffScope = (typeof TARIFF_SCOPES)[number]
 
-// NOTE: Task 4 (resolve.ts) owns normalizeWard and was not yet present when Task 5 landed.
-// Once resolve.ts exists, replace this with `export { normalizeWard } from './resolve'`.
-export function normalizeWard(ward: string): string {
-  return ward.trim().replace(/\s+/g, ' ').toLowerCase()
-}
+// One definition of ward normalisation (resolver and version helpers must agree).
+import { normalizeWard } from './resolve'
+export { normalizeWard }
 
 export interface RateDims {
   serviceId: number; scope: TariffScope
