@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach, beforeAll, afterAll } from 'vitest'
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq, like } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import * as auth from '@/lib/auth'
 import { getDb } from '@/db/client'
 import { patients, patientAadhaar, auditLog } from '@/db/schema'
@@ -173,7 +173,7 @@ describe('POST /api/patients', () => {
   afterEach(async () => {
     while (createdIds.length > 0) {
       const id = createdIds.pop()!
-      await getDb().delete(auditLog).where(and(eq(auditLog.patientId, id), like(auditLog.userName, 'Test %')))
+      await getDb().delete(auditLog).where(and(eq(auditLog.patientId, id), eq(auditLog.userName, 'Test frontdesk')))
       await getDb().delete(patientAadhaar).where(eq(patientAadhaar.patientId, id))
       await getDb().delete(patients).where(eq(patients.id, id))
     }
@@ -240,10 +240,21 @@ describe('POST /api/patients', () => {
 })
 
 describe('DELETE /api/patients/[anonId]', () => {
+  // Registration writes audit rows (as 'Test Admin') that the DELETE route
+  // does not remove; delete exactly those, by patient id and userName.
+  const auditedIds: string[] = []
+  afterEach(async () => {
+    while (auditedIds.length > 0) {
+      await getDb().delete(auditLog).where(and(eq(auditLog.patientId, auditedIds.pop()!), eq(auditLog.userName, 'Test Admin')))
+    }
+  })
+
   async function createTestPatient(): Promise<string> {
     vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'admin', name: 'Test Admin', userId: null })
     const res = await createPatient(new NextRequest('http://localhost/api/patients', { method: 'POST', body: JSON.stringify(registration({ name: 'Delete Route Test', dob: '1993-03-03' })) }))
+    expect(res.status).toBe(201)
     const body = await res.json()
+    auditedIds.push(body.id)
     return body.id
   }
 

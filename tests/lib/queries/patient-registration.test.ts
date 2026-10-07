@@ -8,6 +8,7 @@ import { isUniqueViolation } from '@/lib/db-errors'
 import { decryptSensitive } from '@/lib/crypto'
 import { parseUhid, formatUhid } from '@/lib/uhid'
 import { getUhidPrefix } from '@/lib/queries/uhid'
+import type { Session } from '@/lib/auth'
 
 const AADHAAR = '234567890124'
 // Fixture ids, UHIDs and ABHA values are run-derived digits, so match the
@@ -15,6 +16,7 @@ const AADHAAR = '234567890124'
 const AADHAAR_FRAGMENTS = /2345[\s.-]*6789[\s.-]*0124/
 const RUN = `${Date.now()}`
 const PROBE_USER = `TEST-SP1-registration-${RUN}`
+const SESSION: Session = { role: 'frontdesk', name: PROBE_USER, userId: null }
 // Unique per run: ABHA number/address are UNIQUE on patients.
 const ABHA_NUMBER = `91${RUN.slice(-12).padStart(12, '0')}`
 const ABHA_ADDRESS = `sp1t${RUN.slice(-8)}@sbx`
@@ -55,7 +57,7 @@ describe.skipIf(!process.env.DATABASE_URL)('registerPatient (DB)', () => {
   })
 
   it('writes the patient, contacts, encrypted Aadhaar and KYC in one go and returns the identity audit entries', async () => {
-    const res = await registerPatient(input({ kyc: { docType: 'pan', docNumber: 'ABCDE1234F' }, isMlc: true, mlcNumber: 'MLC-77' }), PROBE_USER)
+    const res = await registerPatient(input({ kyc: { docType: 'pan', docNumber: 'ABCDE1234F' }, isMlc: true, mlcNumber: 'MLC-77' }), SESSION)
     createdIds.push(res.id)
 
     expect(res.id).toMatch(/^RD-\d{4,}$/)
@@ -100,7 +102,7 @@ describe.skipIf(!process.env.DATABASE_URL)('registerPatient (DB)', () => {
       aadhaar: { status: 'declined', reason: 'patient_declined' },
       abha: { status: 'unavailable', reason: 'not_created' },
       contacts: [],
-    }), PROBE_USER)
+    }), SESSION)
     createdIds.push(res.id)
     expect(res.auditEntries).toEqual([
       { action: 'recorded Aadhaar decline', details: 'reason: patient_declined' },
@@ -115,18 +117,18 @@ describe.skipIf(!process.env.DATABASE_URL)('registerPatient (DB)', () => {
   })
 
   it('a second registration with the same ABHA number throws a unique violation and leaves nothing behind', async () => {
-    const first = await registerPatient(input({ abha: { status: 'provided', abhaNumber: ABHA_NUMBER } }), PROBE_USER)
+    const first = await registerPatient(input({ abha: { status: 'provided', abhaNumber: ABHA_NUMBER } }), SESSION)
     createdIds.push(first.id)
     const dupName = `TEST-SP1 Duplicate ${RUN}`
-    const err = await registerPatient(input({ name: dupName, abha: { status: 'provided', abhaNumber: ABHA_NUMBER } }), PROBE_USER).catch((e: unknown) => e)
+    const err = await registerPatient(input({ name: dupName, abha: { status: 'provided', abhaNumber: ABHA_NUMBER } }), SESSION).catch((e: unknown) => e)
     expect(isUniqueViolation(err, 'patients_abha_number_unique')).toBe(true)
     expect(await patientsNamed(dupName)).toEqual([])
   })
 
   it('a second registration with the same ABHA address throws a unique violation', async () => {
-    const first = await registerPatient(input({ abha: { status: 'provided', abhaAddress: ABHA_ADDRESS } }), PROBE_USER)
+    const first = await registerPatient(input({ abha: { status: 'provided', abhaAddress: ABHA_ADDRESS } }), SESSION)
     createdIds.push(first.id)
-    const err = await registerPatient(input({ name: `TEST-SP1 Duplicate addr ${RUN}`, abha: { status: 'provided', abhaAddress: ABHA_ADDRESS.toUpperCase() } }), PROBE_USER).catch((e: unknown) => e)
+    const err = await registerPatient(input({ name: `TEST-SP1 Duplicate addr ${RUN}`, abha: { status: 'provided', abhaAddress: ABHA_ADDRESS.toUpperCase() } }), SESSION).catch((e: unknown) => e)
     expect(isUniqueViolation(err, 'patients_abha_address_unique')).toBe(true)
   })
 
@@ -151,7 +153,7 @@ describe.skipIf(!process.env.DATABASE_URL)('registerPatient (DB)', () => {
     const [{ n: before }] = await getDb().select({ n: sql<number>`count(*)::int` }).from(patientAadhaar)
     // Encryption fails inside the transaction, after two inserts.
     vi.stubEnv('IDENTITY_ENCRYPTION_KEY', '')
-    const err = await registerPatient(data, PROBE_USER).catch((e: unknown) => e)
+    const err = await registerPatient(data, SESSION).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(Error)
     expect(`${(err as Error).message}\n${(err as Error).stack}`).not.toMatch(AADHAAR_FRAGMENTS)
     await expectNothingPersisted(name, contactName, before)
@@ -164,10 +166,54 @@ describe.skipIf(!process.env.DATABASE_URL)('registerPatient (DB)', () => {
     // Not an id_type enum value: bypasses zod, so Postgres rejects the final insert.
     data.kyc = { docType: 'not_a_doc_type' as never, docNumber: 'X1' }
     const [{ n: before }] = await getDb().select({ n: sql<number>`count(*)::int` }).from(patientAadhaar)
-    const err = await registerPatient(data, PROBE_USER).catch((e: unknown) => e)
+    const err = await registerPatient(data, SESSION).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(Error)
     // The driver error carries query params: ciphertext only, never plaintext.
     expect(`${(err as Error).message}\n${(err as Error).stack}\n${JSON.stringify((err as { cause?: unknown }).cause ?? null)}`).not.toMatch(/234567890124|2345 6789 0124/)
     await expectNothingPersisted(name, contactName, before)
+  })
+
+  it('writes every registration audit row inside the transaction (registered + identity entries)', async () => {
+    const res = await registerPatient(input({ abha: { status: 'unavailable', reason: 'not_created' } }), SESSION)
+    createdIds.push(res.id)
+    const rows = await getDb().select().from(auditLog).where(sql`${auditLog.patientId} = ${res.id} and ${auditLog.userName} = ${PROBE_USER}`).orderBy(auditLog.id)
+    expect(rows.map((r) => [r.action, r.details, r.role])).toEqual([
+      ['registered patient', null, 'frontdesk'],
+      ['recorded Aadhaar with consent', null, 'frontdesk'],
+      ['recorded ABHA unavailable', 'reason: not_created', 'frontdesk'],
+    ])
+    expect(JSON.stringify(rows)).not.toMatch(AADHAAR_FRAGMENTS)
+  })
+
+  it('rolls the whole registration back when an audit insert fails', async () => {
+    const name = `TEST-SP1 Rollback audit ${RUN}`
+    const contactName = `TEST-SP1 Rollback contact U ${RUN}`
+    const data = input({ name, abha: { status: 'unavailable', reason: 'not_created' }, contacts: [{ kind: 'emergency', name: contactName, relationship: 'friend', phone: '9876543210' }] })
+    const [{ n: before }] = await getDb().select({ n: sql<number>`count(*)::int` }).from(patientAadhaar)
+    // Not a role enum value: Postgres rejects the audit insert, after every
+    // registration row was written in the same transaction.
+    const badSession = { ...SESSION, role: 'not_a_role' as never }
+    const err = await registerPatient(data, badSession).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    await expectNothingPersisted(name, contactName, before)
+    expect(await getDb().select().from(auditLog).where(eq(auditLog.userName, PROBE_USER))).toEqual([])
+  })
+
+  it('two concurrent registrations get distinct consecutive RD ids', async () => {
+    // Warm two pooled connections so both transactions really run at once
+    // (a cold pool connects them one after the other and hides the race).
+    await Promise.all([getDb().execute(sql`select pg_sleep(0.05)`), getDb().execute(sql`select pg_sleep(0.05)`)])
+    const [a, b] = await Promise.all([
+      registerPatient(input({ name: `TEST-SP1 Concurrent A ${RUN}`, abha: { status: 'unavailable', reason: 'not_created' }, contacts: [] }), SESSION),
+      registerPatient(input({ name: `TEST-SP1 Concurrent B ${RUN}`, abha: { status: 'unavailable', reason: 'not_created' }, contacts: [] }), SESSION),
+    ])
+    createdIds.push(a.id, b.id)
+    const num = (id: string) => Number(/^RD-(\d+)$/.exec(id)![1])
+    expect(a.id).not.toBe(b.id)
+    expect(Math.abs(num(a.id) - num(b.id))).toBe(1)
+    for (const id of [a.id, b.id]) expect(id).toMatch(/^RD-\d{4,}$/)
+    // Each is one past the highest RD id that existed before it.
+    const [{ max }] = await getDb().select({ max: sql<number>`max(substring(${patients.id} from '^RD-(\\d+)$')::bigint)` }).from(patients).where(sql`${patients.id} ~ '^RD-\\d+$'`)
+    expect(Number(max)).toBe(Math.max(num(a.id), num(b.id)))
   })
 })

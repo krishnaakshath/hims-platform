@@ -4,8 +4,10 @@ import { POST as createRoute } from '@/app/api/patients/route'
 import { getDb } from '@/db/client'
 import { patients, payers, patientAadhaar, auditLog } from '@/db/schema'
 
-const PROBE_USER = 'Taylor Nguyen'
-vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: 'frontdesk', name: 'Taylor Nguyen' })) }))
+// vi.mock is hoisted above module-level consts, so the factory reads the
+// probe name lazily through vi.hoisted -- one constant for session and cleanup.
+const { PROBE_USER } = vi.hoisted(() => ({ PROBE_USER: 'Taylor Nguyen' }))
+vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: 'frontdesk', name: PROBE_USER, userId: null })) }))
 
 const createdPatientIds: string[] = []
 afterEach(async () => {

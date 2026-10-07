@@ -18,8 +18,13 @@ import { redactAadhaarLike } from './india/aadhaar'
 // enforced structurally, not just by convention.
 //
 // `details` is optional free text (e.g. `reason: emergency`); omitted -> NULL.
-export async function logAudit(session: Session, action: string, patientId: string | null, details?: string | null): Promise<void> {
-  await getDb().insert(auditLog).values({
+// `executor` lets a caller write the audit row inside its own transaction
+// (e.g. registerPatient), so the row commits or rolls back with the change it
+// records; omitted -> the shared db.
+export type AuditExecutor = Pick<ReturnType<typeof getDb>, 'insert'>
+
+export async function logAudit(session: Session, action: string, patientId: string | null, details?: string | null, executor: AuditExecutor = getDb()): Promise<void> {
+  await executor.insert(auditLog).values({
     userName: session.name,
     role: session.role,
     action: redactAadhaarLike(action),

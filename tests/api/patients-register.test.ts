@@ -121,42 +121,39 @@ describe('POST /api/patients -- validation', () => {
 })
 
 describe('POST /api/patients -- success', () => {
-  it('returns 201 {id, uhid} only and audits each identity entry', async () => {
+  // Audit rows are written by registerPatient inside its transaction (fix
+  // round ruling 2), so the route itself writes none; the DB test proves the
+  // rows and their rollback.
+  it('returns 201 {id, uhid} only; audit happens inside registerPatient, not in the route', async () => {
     vi.mocked(registerPatient).mockResolvedValue({ id: 'RD-0100', uhid: 'UH000000427', auditEntries: [{ action: 'recorded Aadhaar with consent', details: null }] })
     const res = await POST(req(valid()))
     expect(res.status).toBe(201)
     expect(await res.json()).toEqual({ id: 'RD-0100', uhid: 'UH000000427' })
-    expect(logAudit).toHaveBeenCalledWith(expect.anything(), 'recorded Aadhaar with consent', 'RD-0100', null)
+    expect(logAudit).not.toHaveBeenCalled()
   })
 
-  it('audits registration first, then each entry in order, then invalidates the list cache', async () => {
-    vi.mocked(registerPatient).mockResolvedValue({
-      id: 'RD-0101', uhid: 'UH000000435',
-      auditEntries: [{ action: 'recorded Aadhaar decline', details: 'reason: patient_declined' }, { action: 'recorded ABHA unavailable', details: 'reason: not_created' }],
-    })
-    sessionRole = 'admin'
-    const res = await POST(req(valid()))
-    expect(res.status).toBe(201)
-    const calls = vi.mocked(logAudit).mock.calls
-    expect(calls.map((c) => [c[1], c[2], c[3]])).toEqual([
-      ['registered patient', 'RD-0101', undefined],
-      ['recorded Aadhaar decline', 'RD-0101', 'reason: patient_declined'],
-      ['recorded ABHA unavailable', 'RD-0101', 'reason: not_created'],
-    ])
-    expect(calls[0][0]).toMatchObject({ role: 'admin', name: 'Test admin' })
-    expect(invalidateCache).toHaveBeenCalledWith('patients:list:all')
-    expect(vi.mocked(invalidateCache).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(logAudit).mock.invocationCallOrder[2])
-  })
-
-  it('hands registerPatient the normalised input and the session name; Aadhaar never reaches the response or audit', async () => {
+  it('hands registerPatient the normalised input and the session, then invalidates the list cache', async () => {
     vi.mocked(registerPatient).mockResolvedValue({ id: 'RD-0102', uhid: 'UH000000443', auditEntries: [{ action: 'recorded Aadhaar with consent', details: null }] })
+    sessionRole = 'admin'
     const res = await POST(req(withAadhaar('2345 6789 0124')))
     expect(res.status).toBe(201)
-    const [input, recordedBy] = vi.mocked(registerPatient).mock.calls[0]
+    const [input, session] = vi.mocked(registerPatient).mock.calls[0]
     expect(input.aadhaar).toEqual({ status: 'provided', number: '234567890124', consent: true })
-    expect(recordedBy).toBe('Test frontdesk')
+    expect(session).toMatchObject({ role: 'admin', name: 'Test admin' })
     expect(await res.text()).not.toMatch(AADHAAR_DIGITS)
-    expect(JSON.stringify(vi.mocked(logAudit).mock.calls)).not.toMatch(AADHAAR_DIGITS)
+    expect(invalidateCache).toHaveBeenCalledWith('patients:list:all')
+    expect(vi.mocked(invalidateCache).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(registerPatient).mock.invocationCallOrder[0])
+  })
+
+  it('a cache invalidation failure after commit still returns 201 and logs only the error class', async () => {
+    vi.mocked(registerPatient).mockResolvedValue({ id: 'RD-0104', uhid: 'UH000000468', auditEntries: [] })
+    vi.mocked(invalidateCache).mockRejectedValueOnce(new TypeError('redis down at secret-host:6379 for RD-0104'))
+    const res = await POST(req(valid()))
+    expect(res.status).toBe(201)
+    expect(await res.json()).toEqual({ id: 'RD-0104', uhid: 'UH000000468' })
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls)
+    expect(logged).toContain('TypeError')
+    expect(logged).not.toContain('secret-host')
   })
 
   it('checks a real payer and lets the registration through', async () => {

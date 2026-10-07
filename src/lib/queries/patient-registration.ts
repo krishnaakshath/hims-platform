@@ -1,6 +1,9 @@
+import { sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, patientContacts, patientAadhaar, identityVerifications } from '@/db/schema'
 import { encryptSensitive } from '@/lib/crypto'
+import { logAudit } from '@/lib/audit'
+import type { Session } from '@/lib/auth'
 import { buildAadhaarRow, identityAuditEntries, type IdentityAuditEntry } from '@/lib/patient-identity'
 import { nextUhid } from '@/lib/queries/uhid'
 import type { PatientRegistrationInput } from '@/lib/validation/patient-registration'
@@ -19,25 +22,24 @@ export interface RegisteredPatient {
 // not transactional, so a failed attempt leaves a gap in the sequence; that
 // is expected and harmless.)
 //
-// The Aadhaar plaintext only ever reaches buildAadhaarRow, which encrypts it
-// immediately. Nothing here logs, and errors propagate unchanged for the
+// Its audit rows ('registered patient' plus the identity entries) are written
+// on the same transaction. The Aadhaar plaintext only ever reaches
+// buildAadhaarRow, which encrypts it immediately. Nothing here logs, and errors propagate unchanged for the
 // route to map (ABHA duplicates -> 409) or report generically.
-export async function registerPatient(input: PatientRegistrationInput, recordedByName: string): Promise<RegisteredPatient> {
+export async function registerPatient(input: PatientRegistrationInput, session: Session): Promise<RegisteredPatient> {
+  const recordedByName = session.name
   return getDb().transaction(async (tx) => {
-    // Anon IDs are RD-#### sequential; find the current max and increment.
-    // Only consider ids that actually match the RD-#### shape -- Math.max
-    // propagates NaN from a single bad operand to its entire result, so any
-    // non-conforming id (e.g. a dedicated TEST-*-<timestamp> fixture id left
-    // behind by a test that didn't clean itself up) would otherwise
-    // permanently poison every future call to "RD-0NaN", which then collides
-    // on the unique constraint forever after the first one.
-    const existing = await tx.select({ id: patients.id }).from(patients)
-    const existingNumbers = existing
-      .map((p) => /^RD-(\d+)$/.exec(p.id))
-      .filter((m): m is RegExpExecArray => m !== null)
-      .map((m) => parseInt(m[1], 10))
-    const nextNum = existingNumbers.length === 0 ? 1 : Math.max(...existingNumbers) + 1
-    const id = `RD-${String(nextNum).padStart(4, '0')}`
+    // Anon IDs are RD-#### sequential: one past the highest id that matches
+    // the RD-#### shape. The transaction-scoped advisory lock serialises
+    // allocation, so two concurrent registrations cannot compute the same id
+    // (the second waits until the first commits or rolls back, then sees its
+    // row). Only ids matching ^RD-\d+$ are considered, so a non-conforming
+    // id (e.g. a TEST-*-<timestamp> fixture left behind) can never poison the
+    // result -- the NaN problem the previous Math.max version guarded against.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('patients.rd_id'))`)
+    const res = await tx.execute(sql`select coalesce(max(substring(${patients.id} from '^RD-(\\d+)$')::bigint), 0) + 1 as next from ${patients} where ${patients.id} ~ '^RD-\\d+$'`)
+    const rows = (Array.isArray(res) ? res : (res as { rows: unknown[] }).rows) as { next: string | number }[]
+    const id = `RD-${String(Number(rows[0].next)).padStart(4, '0')}`
 
     const uhid = await nextUhid(tx)
 
@@ -113,6 +115,12 @@ export async function registerPatient(input: PatientRegistrationInput, recordedB
       abhaUnavailableReason: abhaUnavailable?.reason ?? null,
       isMlc: input.isMlc,
     }, true)
+
+    // Audit rows are part of the registration: written on the same
+    // transaction, so a failed audit insert rolls the registration back and
+    // a rolled-back registration leaves no audit row.
+    await logAudit(session, 'registered patient', id, null, tx)
+    for (const e of auditEntries) await logAudit(session, e.action, id, e.details, tx)
 
     return { id, uhid, auditEntries }
   })

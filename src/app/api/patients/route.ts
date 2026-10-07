@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 
 // Patient registration (Indian patient master, SP1). Gate first, then the
 // strict zod schema, then ONE transaction in registerPatient (patient row,
-// contacts, Aadhaar value-or-decline, optional KYC, UHID). Responses never
+// contacts, Aadhaar value-or-decline, optional KYC, UHID, audit rows). Responses never
 // echo the submitted body: validation details carry fixed messages only, the
 // 201 is just { id, uhid }, and any unmapped failure is a generic 500.
 export async function POST(request: NextRequest) {
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
 
   let registered: Awaited<ReturnType<typeof registerPatient>>
   try {
-    registered = await registerPatient(parsed.data, session.name)
+    registered = await registerPatient(parsed.data, session)
   } catch (err) {
     if (isUniqueViolation(err, 'patients_abha_number_unique')) {
       return NextResponse.json({ error: 'This ABHA number is already registered to another patient' }, { status: 409 })
@@ -67,9 +67,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Registration failed' }, { status: 500 })
   }
 
-  const { id, uhid, auditEntries } = registered
-  await logAudit(session, 'registered patient', id)
-  for (const e of auditEntries) await logAudit(session, e.action, id, e.details)
-  await invalidateCache(patientListCacheKey(null))
+  // Audit rows were committed with the registration (inside registerPatient).
+  // The cache bust runs after commit; a cache failure must not turn a
+  // committed registration into an error, and only the error class is logged.
+  const { id, uhid } = registered
+  try {
+    await invalidateCache(patientListCacheKey(null))
+  } catch (err) {
+    console.error(`[patients] list cache invalidation failed (${err instanceof Error ? err.name : typeof err})`)
+  }
   return NextResponse.json({ id, uhid }, { status: 201 })
 }
