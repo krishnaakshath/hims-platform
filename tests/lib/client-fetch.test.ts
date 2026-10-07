@@ -43,6 +43,15 @@ describe('readError', () => {
   })
 })
 
+describe('passThrough option', () => {
+  it('shows the authored text for an opted-in status only', async () => {
+    expect(await readError(jsonResponse(401, { error: 'Invalid code' }), { passThrough: [401] })).toBe('Invalid code')
+    expect(await readError(jsonResponse(401, { error: 'Invalid code' }))).toBe(CLIENT_ERROR_MESSAGES.unauthorized)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { error: 'Invalid code' })))
+    expect(await sendJson('/api/x', 'POST', {}, { passThrough: [401] })).toEqual({ ok: false, status: 401, error: 'Invalid code' })
+  })
+})
+
 describe('sendJson / fetchJson', () => {
   it('sends JSON and returns the parsed data on success', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(201, { id: 7 }))

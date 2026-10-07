@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
+import { sendJson } from '@/lib/client-fetch'
 
 export interface DiscrepancyRow {
   id: number
@@ -18,9 +19,13 @@ export function DiscrepancyList({ discrepancies }: { discrepancies: DiscrepancyR
   const open = discrepancies.filter((d) => !d.resolved)
   const resolved = discrepancies.filter((d) => d.resolved)
 
+  const [error, setError] = useState<string | null>(null)
+
   async function resolve(id: number) {
     setResolvingId(id)
-    await fetch(`/api/discrepancies/${id}/resolve`, { method: 'POST' })
+    setError(null)
+    const result = await sendJson(`/api/discrepancies/${id}/resolve`, 'POST')
+    if (!result.ok) { setError(result.error); setResolvingId(null); return }
     // A full reload rather than router.refresh() -- this page's data comes
     // from a Redis-cached query (getPatientDetail), and the freshly
     // invalidated cache only reliably shows up on a real navigation, not a
@@ -34,6 +39,7 @@ export function DiscrepancyList({ discrepancies }: { discrepancies: DiscrepancyR
 
   return (
     <div className="space-y-3">
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {open.map((d) => (
         <div key={d.id} className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
           <div className="mb-2 flex items-center gap-2">

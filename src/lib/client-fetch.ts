@@ -37,8 +37,15 @@ export function messageForStatus(status: number): string {
   return CLIENT_ERROR_MESSAGES.badRequest
 }
 
-function authoredMessage(status: number, data: unknown): string | null {
-  if (!PASS_THROUGH.has(status) || !data || typeof data !== 'object') return null
+/**
+ * `passThrough` adds statuses whose authored `error` text is shown -- e.g. a
+ * sign-in form passes [401] so "Invalid code" is shown instead of the generic
+ * session-expired message.
+ */
+export interface ErrorOptions { passThrough?: readonly number[] }
+
+function authoredMessage(status: number, data: unknown, options?: ErrorOptions): string | null {
+  if (!(PASS_THROUGH.has(status) || options?.passThrough?.includes(status)) || !data || typeof data !== 'object') return null
   const error = (data as { error?: unknown }).error
   if (typeof error !== 'string') return null
   const trimmed = error.trim()
@@ -55,8 +62,8 @@ async function parseBody(res: Response): Promise<unknown> {
 }
 
 /** The human message for a failed (non-2xx) Response. Consumes the body. */
-export async function readError(res: Response): Promise<string> {
-  return authoredMessage(res.status, await parseBody(res)) ?? messageForStatus(res.status)
+export async function readError(res: Response, options?: ErrorOptions): Promise<string> {
+  return authoredMessage(res.status, await parseBody(res), options) ?? messageForStatus(res.status)
 }
 
 /**
@@ -64,7 +71,7 @@ export async function readError(res: Response): Promise<string> {
  * JSON body, or null when empty), otherwise `{ ok: false, error }` with a
  * human message. Network failures come back as status 0.
  */
-export async function fetchJson<T = unknown>(url: string, init?: RequestInit): Promise<FetchResult<T>> {
+export async function fetchJson<T = unknown>(url: string, init?: RequestInit, options?: ErrorOptions): Promise<FetchResult<T>> {
   let res: Response
   try {
     res = await fetch(url, init)
@@ -73,7 +80,7 @@ export async function fetchJson<T = unknown>(url: string, init?: RequestInit): P
   }
   const data = await parseBody(res)
   if (res.ok) return { ok: true, status: res.status, data: data as T }
-  return { ok: false, status: res.status, error: authoredMessage(res.status, data) ?? messageForStatus(res.status) }
+  return { ok: false, status: res.status, error: authoredMessage(res.status, data, options) ?? messageForStatus(res.status) }
 }
 
 /** A JSON mutation (body omitted when undefined). See fetchJson. */
@@ -81,10 +88,11 @@ export function sendJson<T = unknown>(
   url: string,
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   body?: unknown,
+  options?: ErrorOptions,
 ): Promise<FetchResult<T>> {
   return fetchJson<T>(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  }, options)
 }
