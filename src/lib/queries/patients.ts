@@ -282,7 +282,10 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
       currentProvider: patients.currentProvider,
     })
     .from(patients)
-    .where(sql`lower(trim(${patients.id})) = lower(trim(${trimmed}))`)
+    // Wave C: chart id or UHID, both case-insensitive; a chart-id match wins.
+    .where(sql`lower(trim(${patients.id})) = lower(trim(${trimmed})) or lower(${patients.uhid}) = lower(${trimmed})`)
+    .orderBy(sql`(lower(trim(${patients.id})) = lower(trim(${trimmed}))) desc`)
+    .limit(1)
   if (!patientRow) return null
 
   const dx = await db
