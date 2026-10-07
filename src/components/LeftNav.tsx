@@ -8,7 +8,7 @@ import {
   FileBarChart, TrendingUp, BarChart3, CreditCard, FileBarChart2, FolderOpen,
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
-  DollarSign, ScrollText,
+  DollarSign, ScrollText, Tags,
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import { BrandLogo } from '@/components/BrandLogo'
@@ -101,6 +101,8 @@ export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; role
   { href: '/experience-surveys', label: 'Experience Surveys', icon: Star, roles: ['admin', 'crc'] as Role[] },
   { href: '/pipeline-dashboard', label: 'Pipeline Dashboard', icon: Activity, roles: ['admin', 'crc'] as Role[] },
   { href: '/audit-log', label: 'Audit Log', icon: History, roles: ['admin'] as Role[] },
+  // Tariffs: service catalogue and price lists -- admin and billing (TARIFF_MANAGE_ROLES). crc/frontdesk only use the lookup API.
+  { href: '/tariffs', label: 'Tariffs', icon: Tags, roles: ['admin', 'billing'] as Role[] },
   // Settings: admin and the PI only, no other role -- explicit product direction.
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['admin', 'pi'] as Role[] },
 ]
