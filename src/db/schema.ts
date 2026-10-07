@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, date, boolean, jsonb, integer, pgEnum, serial, uniqueIndex, pgSequence, check } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, date, boolean, jsonb, integer, pgEnum, serial, uniqueIndex, index, pgSequence, check } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
@@ -496,7 +496,7 @@ export const patientContacts = pgTable('patient_contacts', {
   addressText: text('address_text'),
   isPrimary: boolean('is_primary').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-})
+}, (t) => [index('patient_contacts_patient_id_idx').on(t.patientId)])
 
 // Aadhaar, one row per patient, kept off `patients` on purpose. Either an
 // encrypted value (with consent and last 4) or a recorded decline reason --

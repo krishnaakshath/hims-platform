@@ -4,7 +4,7 @@ import { stateName } from '@/lib/india/reference'
 import { ABHA_ADDRESS_SYSTEM, ABHA_NUMBER_SYSTEM, uhidSystem } from '@/lib/fhir/identifier-systems'
 
 export interface FhirIdentifier { system?: string; type?: { text: string }; value: string }
-export interface FhirAddress { line: string[]; city?: string; district?: string; state?: string; postalCode?: string; country: string }
+export interface FhirAddress { line: string[]; city?: string; district?: string; state?: string; postalCode?: string; country?: string }
 
 export interface FhirPatient {
   resourceType: 'Patient'
@@ -39,12 +39,12 @@ export function patientToFhir(patient: PublicPatientRow): FhirPatient {
   if (patient.addressLine1) {
     const address: FhirAddress = {
       line: [patient.addressLine1, ...(patient.addressLine2 ? [patient.addressLine2] : [])],
-      country: !patient.nationality || patient.nationality === 'IN' ? 'IN' : patient.nationality,
     }
+    // Nationality is a person attribute, not an address country: IN only when the address itself is Indian.
     if (patient.city) address.city = patient.city
     if (patient.district) address.district = patient.district
     const state = patient.stateCode ? stateName(patient.stateCode) : null
-    if (state) address.state = state
+    if (state) { address.state = state; address.country = 'IN' }
     if (patient.pinCode) address.postalCode = patient.pinCode
     fhir.address = [address]
   }

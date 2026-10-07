@@ -96,6 +96,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+CREATE INDEX IF NOT EXISTS patient_contacts_patient_id_idx ON patient_contacts (patient_id);
+
 -- Aadhaar: one row per patient, encrypted value + last 4 with consent, XOR a
 -- recorded decline reason.
 CREATE TABLE IF NOT EXISTS patient_aadhaar (

@@ -47,9 +47,15 @@ describe('patientToFhir', () => {
 
   it('omits address without a first line, and optional parts when absent', () => {
     expect(patientToFhir(makePatientRow({ city: 'Pune', pinCode: '411001' }))).not.toHaveProperty('address')
-    const f = patientToFhir(makePatientRow({ addressLine1: '5 Lane', nationality: 'NP' }))
-    expect(f.address).toEqual([{ line: ['5 Lane'], country: 'NP' }])
-    expect(patientToFhir(makePatientRow({ addressLine1: '5 Lane', nationality: null })).address?.[0].country).toBe('IN')
+    expect(patientToFhir(makePatientRow({ addressLine1: '5 Lane' })).address).toEqual([{ line: ['5 Lane'] }])
+  })
+
+  it('does not derive the address country from nationality; Indian addresses get IN', () => {
+    // A Nepali national living at an Indian address: the address is in India.
+    expect(patientToFhir(makePatientRow({ addressLine1: '5 Lane', stateCode: 'IN-KA', nationality: 'NP' })).address?.[0].country).toBe('IN')
+    // No Indian state on the address: no country is asserted, whatever the nationality.
+    expect(patientToFhir(makePatientRow({ addressLine1: '5 Lane', nationality: 'NP' })).address?.[0]).not.toHaveProperty('country')
+    expect(patientToFhir(makePatientRow({ addressLine1: '5 Lane', nationality: 'IN' })).address?.[0]).not.toHaveProperty('country')
   })
 
   it('never emits an Aadhaar identifier even if a caller smuggles the field in', () => {

@@ -79,6 +79,11 @@ describe('patient master schema', () => {
     expect(getTableConfig(providers).checks.map((c) => c.name)).toEqual(['providers_consultation_fee_nonneg'])
   })
 
+  it('patient_contacts.patient_id is indexed in both the schema and the migration', () => {
+    expect(getTableConfig(patientContacts).indexes.map((i) => i.config.name)).toContain('patient_contacts_patient_id_idx')
+    expect(readMigration(MIGRATION)).toMatch(/CREATE INDEX IF NOT EXISTS patient_contacts_patient_id_idx\s+ON patient_contacts \(patient_id\)/)
+  })
+
   it('deletePatient and clearExistingData clear the new child tables', () => {
     for (const f of ['src/lib/queries/patients.ts', 'src/db/seed.ts']) {
       const src = readFileSync(join(process.cwd(), f), 'utf8')
