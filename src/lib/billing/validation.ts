@@ -108,6 +108,7 @@ export const refundSchema = z.object({
 })
 
 const GSTIN_MESSAGE = 'Enter a valid 15-character GSTIN'
+const GSTIN_STATE_MESSAGE = 'The GSTIN does not belong to the selected state'
 // Ruling: a lowercase or padded GSTIN is accepted and stored trimmed and uppercase.
 const gstinField = z.string().trim().toUpperCase().refine(isValidGstin, GSTIN_MESSAGE)
 const stateCodeField = z.string().refine(isIndianStateCode, 'Choose a state')
@@ -125,7 +126,7 @@ export const billingSettingsSchema = z.object({
   pharmacyHsn: z.string().regex(/^\d{4,8}$/, 'HSN must be 4 to 8 digits'),
 }).strict().superRefine((v, ctx) => {
   if (v.gstin !== null && stateCodeOfGstin(v.gstin) !== v.stateCode) {
-    ctx.addIssue({ code: 'custom', path: ['gstin'], message: 'The GSTIN does not belong to the selected state' })
+    ctx.addIssue({ code: 'custom', path: ['gstin'], message: GSTIN_STATE_MESSAGE })
   }
 })
 
@@ -135,7 +136,12 @@ export const payerBillingFlagsSchema = z.object({
   requiresPreauth: z.boolean(),
   gstin: gstinField.nullable(),
   stateCode: stateCodeField.nullable(),
-}).strict()
+}).strict().superRefine((v, ctx) => {
+  // The payer's state wins over its GSTIN for the place of supply, so the two must agree.
+  if (v.gstin !== null && v.stateCode !== null && stateCodeOfGstin(v.gstin) !== v.stateCode) {
+    ctx.addIssue({ code: 'custom', path: ['gstin'], message: GSTIN_STATE_MESSAGE })
+  }
+})
 
 export type ChargeCaptureInput = z.infer<typeof chargeCaptureSchema>
 export type PaymentInput = z.infer<typeof paymentSchema>

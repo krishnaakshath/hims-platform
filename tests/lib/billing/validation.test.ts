@@ -101,6 +101,10 @@ describe('small request schemas', () => {
     expect(payerBillingFlagsSchema.safeParse({ requiresPreauth: true, gstin: '27AAPFU0939F1ZV', stateCode: 'IN-MH' }).success).toBe(true)
     expect(payerBillingFlagsSchema.safeParse({ requiresPreauth: true, gstin: '27AAPFU0939F1ZW', stateCode: null }).success).toBe(false)
     expect(payerBillingFlagsSchema.safeParse({ requiresPreauth: true, gstin: null, stateCode: 'IN-XX' }).success).toBe(false)
+    // the payer's state decides the place of supply, so it must agree with its GSTIN
+    const mismatch = payerBillingFlagsSchema.safeParse({ requiresPreauth: false, gstin: '27AAPFU0939F1ZV', stateCode: 'IN-KA' })
+    expect(mismatch.success).toBe(false)
+    expect(mismatch.error?.issues[0]).toMatchObject({ path: ['gstin'], message: 'The GSTIN does not belong to the selected state' })
   })
 })
 
