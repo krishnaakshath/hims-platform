@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
 import { CODING_ROLES } from '@/lib/role-policy'
-import { pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { codingServerError } from '@/lib/coding/route-responses'
 import { listCodeSystems } from '@/lib/queries/code-systems'
 
 export async function GET() {
@@ -13,7 +13,6 @@ export async function GET() {
   try {
     return NextResponse.json(await listCodeSystems())
   } catch (err) {
-    console.error(`[coding] list code systems failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
-    return NextResponse.json({ error: 'Could not load code systems' }, { status: 500 })
+    return codingServerError('list code systems', err, 'Could not load code systems')
   }
 }

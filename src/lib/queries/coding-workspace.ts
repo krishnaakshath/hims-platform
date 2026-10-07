@@ -1,7 +1,7 @@
 // Coding workspace and chart loaders (SP6 Task 8). Read-only.
 // PHI (ruling 4): the coder-facing workspace reads the patient by NAMED columns — id, name,
 // uhid, gender, dob — and returns only id, name, uhid, gender and ageYears; dob is used for the
-// age and never returned. No contact, address, ABHA, insurance or Aadhaar column is read.
+// age and never returned. No contact, address, ABHA, insurance or national-ID column is read.
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'

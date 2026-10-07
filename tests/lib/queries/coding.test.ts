@@ -3,7 +3,7 @@
 // TEST icd10 / icd10pcs code-system versions (never current, so the real current flags are
 // never touched), and two TEST coder users. Every fixture is deleted by id, children first;
 // audit rows by this run's unique probe user name.
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
@@ -27,6 +27,7 @@ let coderBId = 0
 let frontdeskUserId = 0
 let dxSystemId = 0
 let pcsSystemId = 0
+let sampleSystemId = 0 // SP6 Task 9 ruling: a SAMPLE- version (is_sample), never current
 const C: Record<string, number> = {}
 
 let PI: Session
@@ -69,9 +70,9 @@ describe.skipIf(!process.env.DATABASE_URL)('encounter coding (DB)', () => {
     CODER = { role: 'coder', name: PROBE_USER, userId: coderAId }
     CODER_B = { role: 'coder', name: PROBE_USER, userId: coderBId }
 
-    const system = async (kind: 'icd10' | 'icd10pcs', specs: CodeSpec[]) => {
+    const system = async (kind: 'icd10' | 'icd10pcs', specs: CodeSpec[], isSample = false) => {
       const [cs] = await db.insert(codeSystems).values({
-        kind, version: `TEST-SP6-${RUN}-${kind}`, name: 'TEST fictional set', licenceNote: 'Test licence', sourceFileName: 'test.csv',
+        kind, version: `${isSample ? 'SAMPLE-' : ''}TEST-SP6-${RUN}-${kind}`, isSample, name: 'TEST fictional set', licenceNote: 'Test licence', sourceFileName: 'test.csv',
         sourceSha256: 'x', codeCount: specs.length, importedByName: PROBE_USER,
       }).returning()
       const rows = await db.insert(codes).values(specs.map((s) => ({
@@ -82,6 +83,7 @@ describe.skipIf(!process.env.DATABASE_URL)('encounter coding (DB)', () => {
     }
     dxSystemId = await system('icd10', DX_CODES)
     pcsSystemId = await system('icd10pcs', PCS_CODES)
+    sampleSystemId = await system('icd10', [{ code: 'U6Z.0' }], true)
   })
 
   beforeEach(async () => { enc = await makeEncounter() })
@@ -102,8 +104,8 @@ describe.skipIf(!process.env.DATABASE_URL)('encounter coding (DB)', () => {
 
   afterAll(async () => {
     const db = getDb()
-    await db.delete(codes).where(inArray(codes.codeSystemId, [dxSystemId, pcsSystemId]))
-    await db.delete(codeSystems).where(inArray(codeSystems.id, [dxSystemId, pcsSystemId]))
+    await db.delete(codes).where(inArray(codes.codeSystemId, [dxSystemId, pcsSystemId, sampleSystemId]))
+    await db.delete(codeSystems).where(inArray(codeSystems.id, [dxSystemId, pcsSystemId, sampleSystemId]))
     await db.delete(users).where(inArray(users.id, [coderAId, coderBId, frontdeskUserId]))
     await db.delete(providers).where(eq(providers.id, providerId))
     await db.delete(patients).where(eq(patients.id, PATIENT))
@@ -388,5 +390,33 @@ describe.skipIf(!process.env.DATABASE_URL)('encounter coding (DB)', () => {
     expect(input!.diagnoses.map((d) => d.id)).toEqual([id(a)])
     expect(input!.diagnoses[0].code).toMatchObject({ id: C['U7Z.0'], kind: 'icd10', code: 'U7Z.0' })
     expect(await loadCodingRuleInput(getDb(), 2147483000)).toBeNull()
+  })
+
+  // SP6 Task 9 ruling 1: fictional SAMPLE- codes never land on a live record in production.
+  it('refuses a SAMPLE code version when NODE_ENV or VERCEL_ENV is production', async () => {
+    for (const [key, value] of [['VERCEL_ENV', 'production'], ['NODE_ENV', 'production']] as const) {
+      vi.stubEnv(key, value)
+      try {
+        expect(await addEncounterDiagnosis(enc.id, { codeId: C['U6Z.0'], type: 'primary' }, PI), key).toEqual({ ok: false, error: 'sample_code' })
+        expect(await addEncounterDiagnosis(enc.id, { codeId: C['U6Z.0'], type: 'primary' }, ADMIN), key).toEqual({ ok: false, error: 'sample_code' })
+        // A licensed (non-sample) code is unaffected.
+        const ok = await addEncounterDiagnosis(enc.id, { codeId: C['U7Z.0'], type: 'secondary' }, ADMIN)
+        expect(ok.ok, key).toBe(true)
+        await voidEncounterDiagnosis(enc.id, id(ok), ADMIN)
+      } finally {
+        vi.unstubAllEnvs()
+      }
+    }
+    expect(await getDb().select({ id: diagnoses.id }).from(diagnoses).where(and(eq(diagnoses.patientId, PATIENT), eq(diagnoses.codeId, C['U6Z.0'])))).toEqual([])
+    // Outside production (dev, tests, demo) the sample set is usable.
+    const r = await addEncounterDiagnosis(enc.id, { codeId: C['U6Z.0'], type: 'primary' }, PI)
+    expect(r).toMatchObject({ ok: true, value: { patientId: PATIENT } })
+  })
+
+  it('diagnosis writes report the patient id (the route invalidates its detail cache)', async () => {
+    const a = await addEncounterDiagnosis(enc.id, { codeId: C['U7Z.0'], type: 'primary' }, PI)
+    expect(a).toMatchObject({ ok: true, value: { patientId: PATIENT } })
+    expect(await updateEncounterDiagnosis(enc.id, id(a), { type: 'secondary' }, PI)).toMatchObject({ ok: true, value: { patientId: PATIENT } })
+    expect(await voidEncounterDiagnosis(enc.id, id(a), PI)).toEqual({ ok: true, value: { diagnosisId: id(a), patientId: PATIENT } })
   })
 })

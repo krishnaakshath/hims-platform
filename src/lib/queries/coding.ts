@@ -124,12 +124,21 @@ async function patientFacts(tx: WriteExecutor, patientId: string): Promise<{ gen
   return { gender: p.gender ?? null, dob: p.dob } // patients.id is an FK target: always present
 }
 
+/**
+ * True in a production deployment (NODE_ENV or VERCEL_ENV is "production"), where the fictional
+ * SAMPLE- code sets must never land on a live record (ruling 1; the seed guard uses the same test).
+ */
+export function refusesSampleCodes(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === 'production' || env.VERCEL_ENV === 'production'
+}
+
 /** Looks up a code and runs the write-time checks; errors refuse, warnings are returned. */
 async function checkCode(
   tx: WriteExecutor, codeId: number, entryKind: 'diagnosis' | 'procedure', onDate: string, patientId: string,
 ): Promise<CodingWriteResult<{ code: CodeDetail; warnings: CodingIssue[] }>> {
   const code = (await getCodesByIds([codeId], tx)).get(codeId)
   if (!code) return fail('code_not_found')
+  if (code.isSample && refusesSampleCodes()) return fail('sample_code')
   const issues = checkCodeForEntry(code, entryKind, { onDate, ...(await patientFacts(tx, patientId)) })
   if (hasBlockingIssues(issues)) return fail('code_invalid', issues.filter((i) => i.severity === 'error'))
   return { ok: true, value: { code, warnings: issues } }
@@ -151,7 +160,7 @@ async function hasOtherLivePrimary(tx: WriteExecutor, encounterId: number, excep
 
 export async function addEncounterDiagnosis(
   encounterId: number, input: AddDiagnosisRequest, session: Session, now: Date = new Date(),
-): Promise<CodingWriteResult<{ diagnosisId: number; warnings: CodingIssue[] }>> {
+): Promise<CodingWriteResult<{ diagnosisId: number; patientId: string; warnings: CodingIssue[] }>> {
   return runCodingTransaction(async (tx) => {
     const g = await guardEntryWrite(tx, encounterId, session)
     if (!g.ok) return g
@@ -188,7 +197,7 @@ export async function addEncounterDiagnosis(
     await finishEntryWrite(tx, g.value, session, now)
     await logAudit(session, 'coding: added diagnosis', encounter.patientId,
       `encounter=${encounterId} diagnosis=${row.id} status=${status} type=${input.type} code=${codeLabel(code?.kind ?? null, code?.code ?? null)}`, tx)
-    return { ok: true, value: { diagnosisId: row.id, warnings } }
+    return { ok: true, value: { diagnosisId: row.id, patientId: encounter.patientId, warnings } }
   })
 }
 
@@ -205,7 +214,7 @@ async function lockDiagnosis(tx: WriteExecutor, encounterId: number, diagnosisId
 
 export async function updateEncounterDiagnosis(
   encounterId: number, diagnosisId: number, input: UpdateDiagnosisRequest, session: Session, now: Date = new Date(),
-): Promise<CodingWriteResult<{ diagnosisId: number; warnings: CodingIssue[] }>> {
+): Promise<CodingWriteResult<{ diagnosisId: number; patientId: string; warnings: CodingIssue[] }>> {
   return runCodingTransaction(async (tx) => {
     const g = await guardEntryWrite(tx, encounterId, session)
     if (!g.ok) return g
@@ -236,13 +245,13 @@ export async function updateEncounterDiagnosis(
     await finishEntryWrite(tx, g.value, session, now)
     await logAudit(session, 'coding: changed diagnosis', encounter.patientId,
       `encounter=${encounterId} diagnosis=${diagnosisId} from=${codeLabel(row.codeSystemKind, row.code)} to=${to} type=${type ?? 'none'}`, tx)
-    return { ok: true, value: { diagnosisId, warnings } }
+    return { ok: true, value: { diagnosisId, patientId: encounter.patientId, warnings } }
   })
 }
 
 export async function voidEncounterDiagnosis(
   encounterId: number, diagnosisId: number, session: Session, now: Date = new Date(),
-): Promise<CodingWriteResult<{ diagnosisId: number }>> {
+): Promise<CodingWriteResult<{ diagnosisId: number; patientId: string }>> {
   return runCodingTransaction(async (tx) => {
     const g = await guardEntryWrite(tx, encounterId, session)
     if (!g.ok) return g
@@ -253,7 +262,7 @@ export async function voidEncounterDiagnosis(
     await finishEntryWrite(tx, g.value, session, now)
     await logAudit(session, 'coding: removed diagnosis', g.value.encounter.patientId,
       `encounter=${encounterId} diagnosis=${diagnosisId} code=${codeLabel(row.codeSystemKind, row.code)}`, tx)
-    return { ok: true, value: { diagnosisId } }
+    return { ok: true, value: { diagnosisId, patientId: g.value.encounter.patientId } }
   })
 }
 

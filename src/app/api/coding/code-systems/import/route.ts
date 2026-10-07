@@ -13,7 +13,8 @@ import { CODE_SYSTEM_ADMIN_ROLES } from '@/lib/role-policy'
 import { WEB_IMPORT_LIMITS, validateCodeSystemImport } from '@/lib/coding/import'
 import { codeSystemImportSchema } from '@/lib/coding/validation'
 import { readCappedBody } from '@/lib/http/read-capped-body'
-import { RETRY_MESSAGE, isRetryableConflict, isUniqueViolation, pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { isUniqueViolation } from '@/lib/db-errors'
+import { codingJson as json, codingServerError } from '@/lib/coding/route-responses'
 import {
   CodeSystemVersionExistsError, SampleOverLicensedError, commitCodeSystemImport, sha256Hex,
 } from '@/lib/queries/code-systems'
@@ -25,8 +26,6 @@ const SAMPLE_OVER_LICENSED = 'A sample code set cannot replace a licensed one'
 // JSON string escaping can at most double an ordinary CSV; the CSV itself is then held to
 // WEB_IMPORT_LIMITS.maxBytes exactly.
 const MAX_BODY_BYTES = 2 * WEB_IMPORT_LIMITS.maxBytes + 4096
-
-const json = (status: number, error: string) => NextResponse.json({ error }, { status })
 
 export async function POST(request: NextRequest) {
   const session = await requireSession()
@@ -68,8 +67,6 @@ export async function POST(request: NextRequest) {
     if (err instanceof CodeSystemVersionExistsError) return json(409, VERSION_EXISTS)
     if (err instanceof SampleOverLicensedError) return json(409, SAMPLE_OVER_LICENSED)
     if (isUniqueViolation(err, 'code_systems_kind_version_unique')) return json(409, VERSION_EXISTS)
-    if (isRetryableConflict(err)) return json(409, RETRY_MESSAGE)
-    console.error(`[coding] code-system import failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
-    return json(500, 'Could not load the code set; nothing was loaded')
+    return codingServerError('code-system import', err, 'Could not load the code set; nothing was loaded')
   }
 }

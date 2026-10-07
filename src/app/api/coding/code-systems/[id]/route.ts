@@ -7,11 +7,10 @@ import { requireSession } from '@/lib/auth'
 import { CODE_SYSTEM_ADMIN_ROLES } from '@/lib/role-policy'
 import { readJsonBody } from '@/lib/follow-ups/route-responses'
 import { parseId } from '@/lib/tariff/route-responses'
-import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { codingJson as json, codingServerError } from '@/lib/coding/route-responses'
 import { setCurrentCodeSystem } from '@/lib/queries/code-systems'
 
 const setCurrentSchema = z.object({ isCurrent: z.literal(true) }).strict()
-const json = (status: number, error: string) => NextResponse.json({ error }, { status })
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession()
@@ -30,8 +29,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (r === 'sample_over_licensed') return json(409, 'A sample code set cannot replace a licensed one')
     return NextResponse.json({ ok: true })
   } catch (err) {
-    if (isRetryableConflict(err)) return json(409, RETRY_MESSAGE)
-    console.error(`[coding] set current code system failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
-    return json(500, 'Could not change the current version')
+    return codingServerError('set current code system', err, 'Could not change the current version')
   }
 }
