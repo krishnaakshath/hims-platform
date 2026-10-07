@@ -163,6 +163,12 @@ export async function transitionEncounter(
   opts: { cancelReason?: string } = {},
 ): Promise<TransitionEncounterResult> {
   return getDb().transaction(async (tx): Promise<TransitionEncounterResult> => {
+    // Global lock order (I1): follow-up orders before the encounter. Only a
+    // cancel touches the orders this visit completed.
+    const completedOrders = to === 'cancelled'
+      ? await tx.select({ id: followUpOrders.id }).from(followUpOrders)
+        .where(eq(followUpOrders.completedEncounterId, id)).orderBy(asc(followUpOrders.id)).for('update')
+      : []
     const [current] = await tx.select().from(encounters).where(eq(encounters.id, id)).for('update')
     if (!current) return { ok: false, error: 'not_found' }
     if (!canTransitionEncounter(current.status, to)) return { ok: false, error: 'invalid_transition' }
@@ -172,10 +178,19 @@ export async function transitionEncounter(
       statusChangedAt: at,
       statusChangedByName: session.name,
       ...(to === 'completed' ? { completedAt: at } : {}),
-      ...(to === 'cancelled' ? { cancelReason: opts.cancelReason ?? null } : {}),
+      // A cancelled visit releases its appointment (unique link), so the patient can be checked in again.
+      ...(to === 'cancelled' ? { cancelReason: opts.cancelReason ?? null, appointmentId: null } : {}),
     }).where(eq(encounters.id, id)).returning()
     // The cancel reason is free text: it stays on the row, never in the audit log.
     await logAudit(session, `encounter status changed to ${to}`, current.patientId, `encounter=${id}`, tx)
+
+    // I6: the visit did not happen, so the follow-up it completed is open (booked) again.
+    for (const o of completedOrders) {
+      await tx.update(followUpOrders)
+        .set({ status: 'scheduled', completedAt: null, completedEncounterId: null, updatedAt: at })
+        .where(eq(followUpOrders.id, o.id))
+      await logAudit(session, 'reopened follow-up after visit cancelled', current.patientId, `followUp=${o.id} encounter=${id}`, tx)
+    }
     return { ok: true, encounter: updated }
   })
 }

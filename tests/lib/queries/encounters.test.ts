@@ -336,6 +336,41 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     expect(JSON.stringify(audit)).not.toContain('secret')
   })
 
+  it('cancelling a visit reopens the follow-up it completed and frees the appointment for a new check-in (I6)', async () => {
+    const appt = await makeAppointment()
+    const order = await makeOrder(appt.id)
+    const first = await checkInVisit(input({ appointmentId: appt.id }), SESSION, NOW)
+    if (!first.ok) throw new Error('check-in failed')
+    const c = await transitionEncounter(first.encounter.id, 'cancelled', SESSION, { cancelReason: 'TEST_SP3 wrong patient' })
+    expect(c.ok).toBe(true)
+    if (!c.ok) return
+    expect(c.encounter).toMatchObject({ status: 'cancelled', appointmentId: null })
+    const [reopened] = await getDb().select().from(followUpOrders).where(eq(followUpOrders.id, order.id))
+    expect(reopened).toMatchObject({ status: 'scheduled', completedAt: null, completedEncounterId: null, appointmentId: appt.id })
+    const audit = await getDb().select({ action: auditLog.action, details: auditLog.details }).from(auditLog).where(eq(auditLog.userName, PROBE_USER)).orderBy(auditLog.id)
+    expect(audit).toContainEqual({ action: 'reopened follow-up after visit cancelled', details: `followUp=${order.id} encounter=${first.encounter.id}` })
+    expect(JSON.stringify(audit)).not.toContain('wrong patient')
+
+    // The same appointment can be checked in again, and that visit completes the follow-up.
+    const again = await checkInVisit(input({ appointmentId: appt.id }), SESSION, NOW)
+    expect(again.ok && again.completedFollowUpOrderId).toBe(order.id)
+    if (!again.ok) return
+    const [done] = await getDb().select().from(followUpOrders).where(eq(followUpOrders.id, order.id))
+    expect(done).toMatchObject({ status: 'completed', completedEncounterId: again.encounter.id })
+  })
+
+  it('completing a visit, or a refused cancel, leaves the completed follow-up alone', async () => {
+    const appt = await makeAppointment()
+    const order = await makeOrder(appt.id)
+    const r = await checkInVisit(input({ appointmentId: appt.id }), SESSION, NOW)
+    if (!r.ok) throw new Error('check-in failed')
+    expect((await transitionEncounter(r.encounter.id, 'completed', SESSION)).ok).toBe(true)
+    expect(await transitionEncounter(r.encounter.id, 'cancelled', SESSION, { cancelReason: 'x' })).toEqual({ ok: false, error: 'invalid_transition' })
+    const [o] = await getDb().select().from(followUpOrders).where(eq(followUpOrders.id, order.id))
+    expect(o).toMatchObject({ status: 'completed', completedEncounterId: r.encounter.id })
+    expect((await getEncounterById(r.encounter.id))?.appointmentId).toBe(appt.id)
+  })
+
   it('getEncounterById and listEncountersForPatient read back, newest first', async () => {
     const a = await checkInVisit(input(), SESSION, NOW)
     const b = await checkInVisit(input(), SESSION, NOW2)
