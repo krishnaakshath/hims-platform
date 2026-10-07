@@ -38,6 +38,11 @@ describe('patient master schema', () => {
     patient_aadhaar: [],
   }
 
+  // SP5: columns added after SP1 by their own migration file (not by 2026-10-07-sp1-patient-master.sql).
+  const LATER_MIGRATION_COLUMNS: Record<string, { file: string; columns: string[] }[]> = {
+    patients: [{ file: '2026-10-08-sp5-lab-home-collection.sql', columns: ['notification_opt_out', 'notification_opt_out_at'] }],
+  }
+
   it.each([
     ['patients', patients],
     ['patient_contacts', patientContacts],
@@ -50,7 +55,13 @@ describe('patient master schema', () => {
     // The baseline must not exempt anything that no longer exists, and the table must have something new.
     expect(legacy.filter((c) => !columns.includes(c))).toEqual([])
     expect(columns.length).toBeGreaterThan(legacy.length)
-    expect(missingColumns(t, readMigration(MIGRATION)).filter((c) => !legacy.includes(c))).toEqual([])
+    // SP5: columns a later migration adds are checked against that file instead.
+    const later = LATER_MIGRATION_COLUMNS[n] ?? []
+    for (const { file, columns: cols } of later) {
+      for (const c of cols) expect(readMigration(file), c).toMatch(new RegExp(`ADD COLUMN IF NOT EXISTS ${c}\\b`))
+    }
+    const laterCols = later.flatMap((l) => l.columns)
+    expect(missingColumns(t, readMigration(MIGRATION)).filter((c) => !legacy.includes(c) && !laterCols.includes(c))).toEqual([])
   })
 
   it('missingColumns-based check catches a new column left out of the SQL', () => {

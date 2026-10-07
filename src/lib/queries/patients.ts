@@ -7,6 +7,8 @@ import {
   adverseEvents, drugAccountabilityEntries, signatures,
   // SP3
   encounters, followUpOrders,
+  // SP5
+  labRequisitions, homeCollectionVisits, labReports, notificationDeliveries,
 } from '@/db/schema'
 import { desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey } from '@/lib/cache'
@@ -514,6 +516,12 @@ export async function deletePatient(anonId: string): Promise<boolean> {
   }
   await db.delete(carePlans).where(eq(carePlans.patientId, anonId))
 
+  // SP5: notification_deliveries and lab_reports reference patients(id) (and lab_reports
+  // references lab_requisitions) with no ON DELETE action, so both go before the lab block.
+  await db.delete(notificationDeliveries).where(eq(notificationDeliveries.patientId, anonId))
+  await db.delete(labReports).where(eq(labReports.patientId, anonId))
+  // end SP5
+
   // lab_orders.patient_id is a NOT NULL FK to patients(id) with no ON DELETE
   // action, same gap as care_plans/medicationDispenses above. Children
   // (results) before parent (orders), scoped to this patient.
@@ -531,6 +539,11 @@ export async function deletePatient(anonId: string): Promise<boolean> {
     await db.update(documents).set({ labOrderId: null }).where(inArray(documents.labOrderId, labOrderIds))
   }
   await db.delete(labOrders).where(eq(labOrders.patientId, anonId))
+  // SP5: lab_orders.home_collection_visit_id is ON DELETE SET NULL and lab_orders.requisition_id
+  // has no ON DELETE action, so visits and requisitions go after this patient's orders.
+  await db.delete(homeCollectionVisits).where(eq(homeCollectionVisits.patientId, anonId))
+  await db.delete(labRequisitions).where(eq(labRequisitions.patientId, anonId))
+  // end SP5
 
   // adverse_events.patient_id (NOT NULL) and drug_accountability_entries.patient_id
   // (nullable) and signatures.patient_id (nullable, policy_acceptance only --

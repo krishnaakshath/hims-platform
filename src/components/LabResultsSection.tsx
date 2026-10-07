@@ -3,10 +3,11 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { OrderLabTestModal, type LabTestOption } from '@/components/OrderLabTestModal'
 import { ImagingAttachmentStrip, type AttachmentView } from '@/components/ImagingAttachmentStrip'
+import { LAB_STATUS_LABEL, PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status' // SP5
 
 export interface PatientLabOrder {
   id: number
-  status: 'ordered' | 'collected' | 'resulted' | 'cancelled'
+  status: LabOrderStatus // SP5: widened to every lab_order_status value
   // Passed straight from the Server Component (listOrdersForPatient()) --
   // real Date instances via RSC's Flight protocol, matching LabWorklist's
   // WorklistOrder precedent, not JSON strings.
@@ -53,10 +54,17 @@ function FlagPill({ flag }: { flag: 'normal' | 'abnormal' | 'critical' }) {
   )
 }
 
-const PENDING_STATUS_LABEL: Record<'ordered' | 'collected', string> = {
-  ordered: 'Ordered',
-  collected: 'Collected',
+// SP5: keyed by PRE_RESULT_STATUSES (every status before a result exists).
+type PreResultStatus = (typeof PRE_RESULT_STATUSES)[number]
+const PENDING_STATUS_LABEL: Record<PreResultStatus, string> = {
+  ordered: LAB_STATUS_LABEL.ordered,
+  scheduled: LAB_STATUS_LABEL.scheduled,
+  collected: LAB_STATUS_LABEL.collected,
+  received: LAB_STATUS_LABEL.received,
 }
+const isPreResult = (s: LabOrderStatus): s is PreResultStatus => (PRE_RESULT_STATUSES as readonly LabOrderStatus[]).includes(s)
+// Statuses in which an order carries a result.
+const HAS_RESULT_STATUSES: readonly LabOrderStatus[] = ['resulted', 'verified', 'reported']
 
 export function LabResultsSection({ patientId, orders, labTests, canOrder }: { patientId: string; orders: PatientLabOrder[]; labTests: LabTestOption[]; canOrder: boolean }) {
   const [ordering, setOrdering] = useState(false)
@@ -70,12 +78,12 @@ export function LabResultsSection({ patientId, orders, labTests, canOrder }: { p
   const resulted = orders
     .filter(
       (o): o is PatientLabOrder & { result: NonNullable<PatientLabOrder['result']> } =>
-        o.status === 'resulted' && o.result !== null
+        HAS_RESULT_STATUSES.includes(o.status) && o.result !== null
     )
     // Newest-first by when the order was resulted (spec §6), not by orderedAt.
     .sort((a, b) => b.result.resultedAt.getTime() - a.result.resultedAt.getTime())
   const pending = orders.filter(
-    (o) => o.status === 'ordered' || o.status === 'collected' || (o.status === 'resulted' && o.result === null)
+    (o) => isPreResult(o.status) || (HAS_RESULT_STATUSES.includes(o.status) && o.result === null)
   )
 
   return (
@@ -126,7 +134,7 @@ export function LabResultsSection({ patientId, orders, labTests, canOrder }: { p
                   <span>
                     {o.testName} <span className="text-xs">({o.testCode})</span>
                   </span>
-                  <span className="text-xs">{PENDING_STATUS_LABEL[o.status as 'ordered' | 'collected']} · {o.orderedAt.toLocaleDateString()}</span>
+                  <span className="text-xs">{isPreResult(o.status) ? PENDING_STATUS_LABEL[o.status] : LAB_STATUS_LABEL[o.status]} · {o.orderedAt.toLocaleDateString()}</span>
                 </div>
                 <ImagingAttachmentStrip attachments={o.attachments} />
               </li>

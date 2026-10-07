@@ -6,10 +6,11 @@ import { EnterLabResultModal } from '@/components/EnterLabResultModal'
 import { AttachImagingModal } from '@/components/AttachImagingModal'
 import { ImagingAttachmentStrip, type AttachmentView } from '@/components/ImagingAttachmentStrip'
 import type { Role } from '@/lib/auth'
+import { LAB_STATUS_LABEL, type LabOrderStatus } from '@/lib/labs/status' // SP5
 
 export interface WorklistOrder {
   id: number
-  status: 'ordered' | 'collected' | 'resulted' | 'cancelled'
+  status: LabOrderStatus // SP5: widened to every lab_order_status value
   // Passed straight from the Server Component (listWorklist()) without a
   // JSON round-trip, so these arrive as real Date instances (RSC's Flight
   // protocol serializes Date natively) rather than ISO strings -- unlike
@@ -38,11 +39,17 @@ interface LabTestOption {
 // Same dot + plain-text-label convention as StatusChip/AssignmentStatusChip/
 // MedStatusPill -- kept local since lab-order status isn't any of those
 // components' domain.
-const STATUS_CONFIG: Record<WorklistOrder['status'], { label: string; dotClassName: string; textClassName: string }> = {
-  ordered: { label: 'Ordered', dotClassName: 'bg-primary', textClassName: 'text-foreground' },
-  collected: { label: 'Collected', dotClassName: 'bg-warning', textClassName: 'text-warning' },
-  resulted: { label: 'Resulted', dotClassName: 'bg-success', textClassName: 'text-success' },
-  cancelled: { label: 'Cancelled', dotClassName: 'bg-muted-foreground', textClassName: 'text-muted-foreground' },
+// SP5: one entry per lab_order_status value; labels come from LAB_STATUS_LABEL, so a legacy
+// `resulted` order reads "Awaiting verification" (Ruling 5).
+const STATUS_CONFIG: Record<LabOrderStatus, { label: string; dotClassName: string; textClassName: string }> = {
+  ordered: { label: LAB_STATUS_LABEL.ordered, dotClassName: 'bg-primary', textClassName: 'text-foreground' },
+  scheduled: { label: LAB_STATUS_LABEL.scheduled, dotClassName: 'bg-primary', textClassName: 'text-foreground' },
+  collected: { label: LAB_STATUS_LABEL.collected, dotClassName: 'bg-warning', textClassName: 'text-warning' },
+  received: { label: LAB_STATUS_LABEL.received, dotClassName: 'bg-warning', textClassName: 'text-warning' },
+  resulted: { label: LAB_STATUS_LABEL.resulted, dotClassName: 'bg-warning', textClassName: 'text-warning' },
+  verified: { label: LAB_STATUS_LABEL.verified, dotClassName: 'bg-success', textClassName: 'text-success' },
+  reported: { label: LAB_STATUS_LABEL.reported, dotClassName: 'bg-success', textClassName: 'text-success' },
+  cancelled: { label: LAB_STATUS_LABEL.cancelled, dotClassName: 'bg-muted-foreground', textClassName: 'text-muted-foreground' },
 }
 
 function LabStatusPill({ status }: { status: WorklistOrder['status'] }) {

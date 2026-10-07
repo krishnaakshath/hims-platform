@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ImagingAttachmentStrip, type AttachmentView } from '@/components/ImagingAttachmentStrip'
 import type { LabPatientRosterRow } from '@/lib/queries/lab-orders'
+import { LAB_STATUS_LABEL, type LabOrderStatus } from '@/lib/labs/status' // SP5
 
 // The view arrives via fetch().json(), so every Date on the server-side
 // PatientLabOrderRow (and its nested ImagingAttachment) is really a
@@ -13,7 +14,7 @@ import type { LabPatientRosterRow } from '@/lib/queries/lab-orders'
 interface ReportAttachment extends Omit<AttachmentView, 'filedAt'> { filedAt: string | null }
 interface ReportOrder {
   id: number
-  status: 'ordered' | 'collected' | 'resulted' | 'cancelled'
+  status: LabOrderStatus // SP5: widened to every lab_order_status value
   orderedAt: string
   collectedAt: string | null
   testId: number
@@ -46,7 +47,8 @@ const FLAG_STYLES: Record<'normal' | 'abnormal' | 'critical', string> = {
   critical: 'border-destructive/30 bg-destructive/10 text-destructive',
 }
 const FLAG_LABEL: Record<'normal' | 'abnormal' | 'critical', string> = { normal: 'Normal', abnormal: 'Abnormal', critical: 'Critical' }
-const STATUS_LABEL: Record<ReportOrder['status'], string> = { ordered: 'Ordered', collected: 'Collected', resulted: 'Resulted', cancelled: 'Cancelled' }
+// SP5: labels for every status come from LAB_STATUS_LABEL (legacy `resulted` reads "Awaiting verification").
+const STATUS_LABEL: Record<LabOrderStatus, string> = LAB_STATUS_LABEL
 
 function toAttachmentView(attachments: ReportAttachment[]): AttachmentView[] {
   return attachments.map((a) => ({ ...a, filedAt: a.filedAt ? new Date(a.filedAt) : null }))

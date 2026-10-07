@@ -12,6 +12,13 @@
 --   /Users/k2a/.docker/bin/docker exec -i hims-local-pg psql -U postgres -d hims -v ON_ERROR_STOP=1 < scripts/migrations/2026-10-08-sp5-lab-enum-values.sql
 BEGIN;
 
+-- lab_order_status: pre-SP5 order is (ordered, collected, resulted, cancelled); the result is
+-- (ordered, scheduled, collected, received, resulted, verified, reported, cancelled) = LAB_ORDER_STATUSES.
+ALTER TYPE lab_order_status ADD VALUE IF NOT EXISTS 'scheduled' BEFORE 'collected';
+ALTER TYPE lab_order_status ADD VALUE IF NOT EXISTS 'received' AFTER 'collected';
+ALTER TYPE lab_order_status ADD VALUE IF NOT EXISTS 'reported' BEFORE 'cancelled';
+ALTER TYPE lab_order_status ADD VALUE IF NOT EXISTS 'verified' AFTER 'resulted';
+
 ALTER TYPE role ADD VALUE IF NOT EXISTS 'collector';
 
 COMMIT;

@@ -2,6 +2,7 @@ import { getDb } from '@/db/client'
 import { labOrders, labResults, labTests, patients, providers } from '@/db/schema'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { listImagingForOrders, type ImagingAttachment } from '@/lib/queries/documents'
+import { PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status' // SP5
 
 export interface CreateLabOrderInput {
   patientId: string
@@ -113,7 +114,7 @@ export async function cancelOrder(orderId: number, reason: string): Promise<Life
 
 export interface PatientLabOrderRow {
   id: number
-  status: 'ordered' | 'collected' | 'resulted' | 'cancelled'
+  status: LabOrderStatus // SP5: widened to every lab_order_status value
   orderedAt: Date
   collectedAt: Date | null
   testId: number
@@ -179,7 +180,7 @@ export async function listOrdersForPatient(patientId: string): Promise<PatientLa
 
 export interface WorklistRow {
   id: number
-  status: 'ordered' | 'collected' | 'resulted' | 'cancelled'
+  status: LabOrderStatus // SP5: widened to every lab_order_status value
   orderedAt: Date
   collectedAt: Date | null
   patientId: string
@@ -258,6 +259,9 @@ export interface LabPatientRosterRow {
  * cards (listOrdersForPatient already has everything a card needs: result
  * value/flag, reference range, and any imaging attachments).
  */
+// SP5: statuses in which the order carries a result.
+const RESULTED_STATUSES: readonly LabOrderStatus[] = ['resulted', 'verified', 'reported']
+
 export async function listPatientsWithLabOrders(): Promise<LabPatientRosterRow[]> {
   const rows = await getDb()
     .select({
@@ -271,8 +275,9 @@ export async function listPatientsWithLabOrders(): Promise<LabPatientRosterRow[]
   const byPatient = new Map<string, LabPatientRosterRow>()
   for (const r of rows) {
     const existing = byPatient.get(r.patientId) ?? { id: r.patientId, name: r.patientName, resultedCount: 0, pendingCount: 0 }
-    if (r.status === 'resulted') existing.resultedCount += 1
-    else if (r.status === 'ordered' || r.status === 'collected') existing.pendingCount += 1
+    // SP5: a result exists from `resulted` on; everything before it is pending.
+    if (RESULTED_STATUSES.includes(r.status)) existing.resultedCount += 1
+    else if ((PRE_RESULT_STATUSES as readonly LabOrderStatus[]).includes(r.status)) existing.pendingCount += 1
     byPatient.set(r.patientId, existing)
   }
   return [...byPatient.values()].sort((a, b) => a.name.localeCompare(b.name))
