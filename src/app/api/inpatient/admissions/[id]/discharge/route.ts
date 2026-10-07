@@ -98,6 +98,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     switch (result.error) {
       case 'Admission not found': return errorResponse(404, 'Admission not found')
       case 'conflict': return errorResponse(409, 'The attending provider already has an appointment during that time.')
+      case 'slot_in_past': return errorResponse(400, 'Pick a time later than now.')
       case 'due_date_invalid': return errorResponse(400, result.message ?? 'The follow-up date is not valid.')
       case 'provider_not_found': return errorResponse(409, 'The attending doctor is inactive, so a follow-up cannot be recorded.')
       default: return errorResponse(409, 'This admission has already been discharged')

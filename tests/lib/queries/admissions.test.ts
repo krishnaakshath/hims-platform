@@ -305,6 +305,14 @@ describe.skipIf(!process.env.DATABASE_URL)('dischargeAdmission: follow-up order 
     expect(o).toMatchObject({ status: 'scheduled', appointmentId: r.followUpAppointmentId, reason: 'Suture removal', planNotes: 'TEST_SP3 check flap', dueDate: addDaysIso(istDateOf(new Date()), 14) })
   })
 
+  it('a slot in the past is slot_in_past and rolls the whole discharge back (M10)', async () => {
+    const adm = await admit({ withRoom: true })
+    const r = await dischargeAdmission(adm.id, { ...FIVE_DS, followUp: slotAt(-1), followUpPlan: null }, SESSION)
+    expect(r).toEqual({ ok: false, error: 'slot_in_past' })
+    expect(await getAdmissionById(adm.id)).toMatchObject({ status: 'admitted', followUpAppointmentId: null, dischargedAt: null })
+    expect(await getDb().select().from(followUpOrders).where(eq(followUpOrders.patientId, PATIENT))).toEqual([])
+  })
+
   it('a slot conflict rolls the whole discharge back', async () => {
     const adm = await admit({ withRoom: true })
     const slot = slotAt(10)

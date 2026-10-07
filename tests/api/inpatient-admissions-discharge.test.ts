@@ -287,6 +287,16 @@ describe('POST /api/inpatient/admissions/[id]/discharge', () => {
     expect(notices).toHaveLength(1)
   })
 
+  it('400s a slot in the past like a follow-up booking does, and leaves the patient admitted (M10)', async () => {
+    const adm = await admitOnProvider1()
+    const start = new Date(Math.floor((Date.now() - 86400000) / 60000) * 60000)
+    const res = await post(adm.id, { ...FIVE, followUpStartsAt: start.toISOString(), followUpEndsAt: new Date(start.getTime() + 30 * 60000).toISOString() })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Pick a time later than now.' })
+    const [after] = await getDb().select().from(admissions).where(eq(admissions.id, adm.id))
+    expect(after.status).toBe('admitted')
+  })
+
   it('rejects a slot without an explicit UTC offset with a fixed 400 that does not echo input', async () => {
     const adm = await admitOnProvider1()
     const res = await post(adm.id, { ...FIVE, followUpStartsAt: '2099-10-21T10:00:00', followUpEndsAt: '2099-10-21T10:30:00' })

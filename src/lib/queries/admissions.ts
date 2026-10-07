@@ -176,6 +176,7 @@ export interface DischargeResult {
   /**
    * 'Admission not found' | 'This admission has already been discharged' (legacy
    * display strings), or the SP3 codes 'conflict' (the slot is taken),
+   * 'slot_in_past' (the slot is not later than now),
    * 'due_date_invalid' (fixed `message`) and 'provider_not_found' (the
    * attending doctor is inactive, so no follow-up can be prescribed).
    */
@@ -240,6 +241,8 @@ export async function dischargeAdmission(admissionId: number, input: DischargeIn
       let followUpAppointmentId: number | undefined
       if (input.followUp) {
         const providerId = admission.attendingProviderId
+        // M10: the same rule as bookFollowUp -- a follow-up slot must be later than now.
+        if (input.followUp.startsAt.getTime() <= dischargedAt.getTime()) throw new DischargeRollback({ ok: false, error: 'slot_in_past' })
         await lockProviderSchedule(tx, providerId)
         if (await hasSchedulingConflict(providerId, input.followUp.startsAt, input.followUp.endsAt, undefined, tx)) {
           throw new DischargeRollback({ ok: false, error: 'conflict' })
