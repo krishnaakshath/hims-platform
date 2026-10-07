@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getReview } from '@/lib/queries/reviews'
@@ -12,6 +13,8 @@ export default async function ExperienceSurveyDetailPage({ params }: { params: P
   // LeftNav.tsx:63 — { href: '/experience-surveys', roles: ['admin', 'crc'] }.
   // Must precede notFound() below, not follow it.
   if (!['admin', 'crc'].includes(session.role)) redirect('/')
+  // Wave B P1-21: demo-only page -- 404 unless DEMO_FEATURES is on (after the role gate, before any read).
+  if (!demoFeaturesEnabled()) notFound()
   const { id } = await params
   const review = await getReview(Number(id))
   if (!review) notFound()

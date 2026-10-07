@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { demoFeaturesEnabled, DEMO_NOT_CONFIGURED_BODY, DEMO_NOT_CONFIGURED_STATUS } from '@/lib/demo-features'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -19,6 +20,9 @@ export async function POST(request: NextRequest) {
   if (!['billing', 'admin', 'crc'].includes(session.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  // Wave B P1-22: hash-based simulated eligibility (SP8 replaces it with NHCX) --
+  // 503 unless DEMO_FEATURES is on (after the role gate, before parsing).
+  if (!demoFeaturesEnabled()) return NextResponse.json(DEMO_NOT_CONFIGURED_BODY, { status: DEMO_NOT_CONFIGURED_STATUS })
 
   const parsed = eligibilitySchema.safeParse(await request.json())
   if (!parsed.success) return NextResponse.json({ error: 'Invalid eligibility-check payload', details: parsed.error.flatten() }, { status: 400 })

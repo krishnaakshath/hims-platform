@@ -88,7 +88,9 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   { href: '/messages', label: 'Messages', icon: MessageSquare, roles: ['crc', 'pi', 'admin', 'pharmacy'] as Role[] },
 ]
 
-export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon }[] = [
+// `demo: true` (Wave B P1-21) = a simulated feature, listed only when
+// DEMO_FEATURES is on (src/lib/demo-features.ts) and labelled "Demo".
+export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon; demo?: boolean }[] = [
   // Wave B P0-01: the billing role's own home (its '/' redirects here, but
   // the billing-only nav hides the generic Home entry).
   { href: '/billing', label: 'Billing Home', icon: LayoutDashboard },
@@ -98,14 +100,14 @@ export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon }[] = 
   { href: '/billing/patient-collections', label: 'Patient Collections', icon: HandCoins },
   { href: '/billing/statements', label: 'Statements', icon: FileBarChart },
   { href: '/billing/analytics', label: 'Analytics', icon: BarChart3 },
-  { href: '/billing/pay', label: 'Virtual Card Payment (Demo)', icon: CreditCard },
+  { href: '/billing/pay', label: 'Virtual Card Payment', icon: CreditCard, demo: true },
 ]
 
-export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[] }[] = [
+export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[]; demo?: boolean }[] = [
   { href: '/reports', label: 'Reports', icon: FileBarChart2, roles: ['admin', 'crc'] as Role[] },
   { href: '/documents', label: 'Documents', icon: FolderOpen, roles: ['admin', 'crc', 'pi', 'frontdesk'] as Role[] },
-  { href: '/broadcasts', label: 'Broadcasts', icon: Megaphone, roles: ['admin', 'crc'] as Role[] },
-  { href: '/experience-surveys', label: 'Experience Surveys', icon: Star, roles: ['admin', 'crc'] as Role[] },
+  { href: '/broadcasts', label: 'Broadcasts', icon: Megaphone, roles: ['admin', 'crc'] as Role[], demo: true },
+  { href: '/experience-surveys', label: 'Experience Surveys', icon: Star, roles: ['admin', 'crc'] as Role[], demo: true },
   { href: '/pipeline-dashboard', label: 'Pipeline Dashboard', icon: Activity, roles: ['admin', 'crc'] as Role[] },
   { href: '/audit-log', label: 'Audit Log', icon: History, roles: ['admin'] as Role[] },
   // Tariffs: service catalogue and price lists -- admin and billing (TARIFF_MANAGE_ROLES). crc/frontdesk only use the lookup API.
@@ -131,7 +133,7 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 /** Count per nav href; `null` = badge intentionally suppressed (no pill). */
 export type NavBadges = Partial<Record<string, number | null>>
 
-function NavLink({ href, label, icon: Icon, active, badge }: { href: string; label: string; icon: Icon; active: boolean; badge?: number }) {
+function NavLink({ href, label, icon: Icon, active, badge, demo }: { href: string; label: string; icon: Icon; active: boolean; badge?: number; demo?: boolean }) {
   return (
     <Link
       href={href}
@@ -144,6 +146,7 @@ function NavLink({ href, label, icon: Icon, active, badge }: { href: string; lab
     >
       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
       <span className="truncate">{label}</span>
+      {demo && <span className="shrink-0 rounded-full border border-current/30 px-1.5 text-[10px] font-semibold uppercase tracking-wide opacity-80">Demo</span>}
       {badge !== undefined && badge > 0 && (
         <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-semibold text-accent-foreground">{badge}</span>
       )}
@@ -153,12 +156,13 @@ function NavLink({ href, label, icon: Icon, active, badge }: { href: string; lab
 
 export const BILLING_ROLES: Role[] = ['admin', 'crc', 'billing']
 
-export function LeftNav({ role, badges: initialBadges }: { role: Role; badges?: NavBadges }) {
+export function LeftNav({ role, badges: initialBadges, demoFeatures = false }: { role: Role; badges?: NavBadges; demoFeatures?: boolean }) {
   const pathname = usePathname()
   // Server-computed counts are the initial state; the hook keeps them live.
   const badges = useLiveNavBadges(initialBadges)
   const items = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role))
-  const trailingItems = NAV_TRAILING_ITEMS.filter((item) => !item.roles || item.roles.includes(role))
+  const trailingItems = NAV_TRAILING_ITEMS.filter((item) => (!item.roles || item.roles.includes(role)) && (!item.demo || demoFeatures))
+  const billingItems = NAV_BILLING_ITEMS.filter((item) => !item.demo || demoFeatures)
   const showBilling = BILLING_ROLES.includes(role)
   const billingActive = pathname?.startsWith('/billing') ?? false
   const [billingOpen, setBillingOpen] = useState(billingActive || role === 'billing')
@@ -215,10 +219,10 @@ export function LeftNav({ role, badges: initialBadges }: { role: Role; badges?: 
             )}
             {(billingOpen || isBillingOnly) && (
               <ul className={`mt-0.5 space-y-0.5 ${!isBillingOnly ? 'ps-3' : ''}`}>
-                {NAV_BILLING_ITEMS.map((item) => (
+                {billingItems.map((item) => (
                   <li key={item.href}>
                     {/* '/billing' is the parent of every other billing entry: exact match only. */}
-                    <NavLink href={item.href} label={item.label} icon={item.icon} active={item.href === '/billing' ? pathname === '/billing' : isActive(pathname, item.href)} badge={badges?.[item.href] ?? undefined} />
+                    <NavLink href={item.href} label={item.label} icon={item.icon} active={item.href === '/billing' ? pathname === '/billing' : isActive(pathname, item.href)} badge={badges?.[item.href] ?? undefined} demo={item.demo} />
                   </li>
                 ))}
               </ul>
@@ -234,7 +238,7 @@ export function LeftNav({ role, badges: initialBadges }: { role: Role; badges?: 
             <ul className="space-y-0.5">
               {trailingItems.map((item) => (
                 <li key={item.href}>
-                  <NavLink href={item.href} label={item.label} icon={item.icon} active={isActive(pathname, item.href)} badge={badges?.[item.href] ?? undefined} />
+                  <NavLink href={item.href} label={item.label} icon={item.icon} active={isActive(pathname, item.href)} badge={badges?.[item.href] ?? undefined} demo={item.demo} />
                 </li>
               ))}
             </ul>

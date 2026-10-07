@@ -18,7 +18,9 @@ const COLUMNS: DataGridColumn[] = [
   { key: 'actions', label: 'Actions' },
 ]
 
-export function PatientCollectionsTable({ rows, linkPatients = true }: { rows: Row[]; linkPatients?: boolean }) {
+// showCollectPayment (Wave B P1-21): the action opens the demo card form, so
+// the page passes demoFeaturesEnabled().
+export function PatientCollectionsTable({ rows, linkPatients = true, showCollectPayment = true }: { rows: Row[]; linkPatients?: boolean; showCollectPayment?: boolean }) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [visibleColumns, setVisibleColumns] = useState<string[]>(COLUMNS.map((c) => c.key))
@@ -63,7 +65,7 @@ export function PatientCollectionsTable({ rows, linkPatients = true }: { rows: R
                   {show('unapplied') && <td className="p-3 text-foreground">{r.unappliedCents > 0 ? formatCents(r.unappliedCents) : '—'}</td>}
                   {show('actions') && (
                     <td className="p-3">
-                      {r.balanceCents > 0 ? (
+                      {showCollectPayment && r.balanceCents > 0 ? (
                         <Link
                           href={`/billing/pay?patientId=${r.patientId}&amountCents=${r.balanceCents}`}
                           className="rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-secondary"

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import type { Role } from '@/lib/auth'
 
@@ -31,5 +31,23 @@ describe('/billing home', () => {
     role = 'crc'
     render(await BillingHomePage())
     expect(screen.queryByRole('link', { name: /tariffs/i })).not.toBeInTheDocument()
+  })
+})
+
+// Wave B P1-22: the simulated eligibility check follows DEMO_FEATURES.
+describe('/billing home eligibility check', () => {
+  const saved = process.env.DEMO_FEATURES
+  afterEach(() => { process.env.DEMO_FEATURES = saved })
+
+  it('hides Verify Insurance when DEMO_FEATURES is off', async () => {
+    process.env.DEMO_FEATURES = 'false'
+    render(await BillingHomePage())
+    expect(screen.queryByRole('button', { name: /verify insurance/i })).not.toBeInTheDocument()
+  })
+
+  it('labels Verify Insurance as Demo when DEMO_FEATURES is on', async () => {
+    process.env.DEMO_FEATURES = 'true'
+    render(await BillingHomePage())
+    expect(screen.getByRole('button', { name: /verify insurance.*demo/i })).toBeInTheDocument()
   })
 })

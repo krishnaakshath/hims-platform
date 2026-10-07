@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { DollarSign, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags } from 'lucide-react'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
+import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getArDashboardData } from '@/lib/queries/ar-dashboard'
@@ -59,7 +60,8 @@ export default async function BillingHomePage() {
         </div>
         {/* Insurance verification lives entirely in billing now -- front
             desk previously ran eligibility checks at check-in. */}
-        <EligibilityCheckButton />
+        {/* Wave B P1-22: simulated eligibility -- only with DEMO_FEATURES on. */}
+        {demoFeaturesEnabled() && <EligibilityCheckButton />}
       </div>
 
       {/* KPI Row — Mobbin-inspired: compact, data-dense tiles */}

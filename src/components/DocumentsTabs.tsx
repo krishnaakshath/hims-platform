@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation'
 
 const TABS = [
   { href: '/documents', label: 'Documents' },
-  { href: '/documents/fax-history', label: 'Fax History' },
+  { href: '/documents/fax-history', label: 'Fax History (Demo)' },
 ]
 
 // Fax History is admin/crc only (its page redirects everyone else), so the

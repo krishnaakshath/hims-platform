@@ -108,6 +108,25 @@ describe('LeftNav', () => {
     expect(screen.getByRole('link', { name: /my account/i })).toHaveAttribute('href', '/account')
   })
 
+  // Wave B P1-21: demo-only entries follow DEMO_FEATURES and say "Demo" when shown.
+  it('hides demo entries when demo features are off', () => {
+    const { unmount } = render(<LeftNav role="billing" demoFeatures={false} />)
+    expect(screen.queryByRole('link', { name: /virtual card payment/i })).not.toBeInTheDocument()
+    unmount()
+    render(<LeftNav role="admin" demoFeatures={false} />)
+    expect(screen.queryByRole('link', { name: /broadcasts/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /experience surveys/i })).not.toBeInTheDocument()
+  })
+
+  it('shows demo entries with a Demo label when demo features are on', () => {
+    const { unmount } = render(<LeftNav role="billing" demoFeatures />)
+    expect(screen.getByRole('link', { name: /virtual card payment.*demo/i })).toHaveAttribute('href', '/billing/pay')
+    unmount()
+    render(<LeftNav role="admin" demoFeatures />)
+    expect(screen.getByRole('link', { name: /broadcasts.*demo/i })).toHaveAttribute('href', '/broadcasts')
+    expect(screen.getByRole('link', { name: /experience surveys.*demo/i })).toHaveAttribute('href', '/experience-surveys')
+  })
+
   it('shows the decline pill on Assignments for frontdesk', () => {
     render(<LeftNav role="frontdesk" badges={{ '/front-desk/assignments': 2 }} />)
     expect(within(screen.getByRole('link', { name: /assignments/i })).getByText('2')).toBeInTheDocument()
