@@ -1,8 +1,7 @@
 // SP3: shared plumbing for the follow-up routes. The role gate is NOT here:
 // every route checks its allowlist inline, right after requireSession().
 import { NextResponse } from 'next/server'
-import { pgConstraint, pgErrorCode } from '@/lib/db-errors'
-import { RETRY_MESSAGE, isRetryableConflict } from '@/lib/tariff/route-responses'
+import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 
 const MAX_INT = 2_147_483_647
 

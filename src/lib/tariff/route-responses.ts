@@ -3,7 +3,7 @@
 // reviewer can see the gate precede any body parse or query without following an import.
 import { NextResponse } from 'next/server'
 import type { ZodError } from 'zod'
-import { isExclusionViolation, pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { RETRY_MESSAGE, isExclusionViolation, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 import { TariffOverlapError } from '@/lib/queries/tariff'
 
 export const forbidden = () => NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -46,14 +46,6 @@ export function parseId(raw: string): number | null {
   if (!/^\d{1,10}$/.test(raw)) return null
   const id = Number(raw)
   return id > 0 && id <= 2_147_483_647 ? id : null
-}
-
-export const RETRY_MESSAGE = 'Another change was being saved at the same time; please try again'
-
-/** Postgres deadlock (40P01) or serialization failure (40001): nothing was written; a retry can succeed. */
-export function isRetryableConflict(err: unknown): boolean {
-  const code = pgErrorCode(err)
-  return code === '40P01' || code === '40001'
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isUniqueViolation, isExclusionViolation, pgErrorCode, pgConstraint } from '@/lib/db-errors'
+import { isUniqueViolation, isExclusionViolation, isRetryableConflict, pgErrorCode, pgConstraint, RETRY_MESSAGE } from '@/lib/db-errors'
 
 describe('db-errors', () => {
   it('reads the code through a drizzle cause wrapper', () => {
@@ -14,5 +14,11 @@ describe('db-errors', () => {
   })
   it('handles non-objects', () => {
     expect(pgErrorCode(null)).toBeNull(); expect(pgErrorCode('x')).toBeNull(); expect(pgConstraint(undefined)).toBeNull()
+  })
+  it('treats a deadlock or serialization failure (also wrapped) as retryable', () => {
+    expect(isRetryableConflict({ code: '40P01' })).toBe(true)
+    expect(isRetryableConflict({ message: 'Failed query', cause: { code: '40001' } })).toBe(true)
+    expect(isRetryableConflict({ code: '23505' })).toBe(false)
+    expect(RETRY_MESSAGE).toMatch(/try again/)
   })
 })
