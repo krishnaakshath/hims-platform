@@ -591,16 +591,28 @@ export interface LikelyDuplicatePatient {
   id: string
   name: string
   dob: string
+  uhid: string | null
 }
 
 export async function findLikelyDuplicatePatients(name: string, dob: string): Promise<LikelyDuplicatePatient[]> {
   const rows = await getDb()
-    .select({ id: patients.id, name: patients.name, dob: patients.dob })
+    .select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid })
     .from(patients)
     .where(eq(patients.dob, dob))
 
   const needle = name.trim().toLowerCase()
   return rows
     .filter((r) => r.name.toLowerCase().includes(needle) || needle.includes(r.name.toLowerCase()))
-    .map((r) => ({ id: r.id, name: r.name, dob: r.dob }))
+    .map((r) => ({ id: r.id, name: r.name, dob: r.dob, uhid: r.uhid }))
+}
+
+/** Registration duplicate check by mobile (Wave B P1-10). `phone` must already
+ *  be normalised (normalizePhone), the same form registration stores. Never
+ *  returns the phone itself. */
+export async function findPatientsByPhone(phone: string): Promise<LikelyDuplicatePatient[]> {
+  return getDb()
+    .select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid })
+    .from(patients)
+    .where(eq(patients.phone, phone))
+    .limit(10)
 }
