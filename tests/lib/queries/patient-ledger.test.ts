@@ -189,6 +189,24 @@ describe.skipIf(!process.env.DATABASE_URL)('patient ledger (DB)', () => {
     expect(ledger!.unbilledPaise).toBe(500)
   })
 
+  it('a full receipt or refund series is a friendly refusal, nothing written', async () => {
+    const { pl, getDb, documentCounters, patientPayments, eq } = await m()
+    const adv = await pay({ amountPaise: 1000 })
+    if (!adv.ok) throw new Error('advance failed')
+    await getDb().update(documentCounters).set({ lastValue: 999_999 }).where(eq(documentCounters.series, 'receipt'))
+    expect(await pay({ amountPaise: 500 })).toEqual({ ok: false, error: 'series_exhausted' })
+    expect(await getDb().select().from(patientPayments).where(eq(patientPayments.patientId, PID))).toHaveLength(1)
+    await getDb().insert(documentCounters).values({ series: 'refund', financialYear: '2099-00', lastValue: 999_999 })
+    expect(await pl.issueRefund({ patientId: PID, mode: 'cash', amountPaise: 100, reason: 'Discharged early' }, billing, NOW))
+      .toEqual({ ok: false, error: 'series_exhausted' })
+  })
+
+  it('lists the patient\'s finalised invoices for the cash desk', async () => {
+    const { pl } = await m()
+    const id = await finalisedInvoice(50000)
+    expect(await pl.listPayableInvoices(PID)).toEqual([{ id, invoiceNumber: 'INV/99-00/000001', totalPaise: 50000 }])
+  })
+
   it('audit details carry no reference', async () => {
     const { getDb, auditLog, eq } = await m()
     const r = await pay({ mode: 'upi', reference: 'UTR412345678901', amountPaise: 7000 })

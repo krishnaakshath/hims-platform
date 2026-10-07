@@ -73,6 +73,16 @@ describe('payments and refunds routes', () => {
     expect((await postRefund(req('/api/billing/refunds', REFUND))).status).toBe(404)
   })
 
+  it('a full receipt or refund number series is a 409 with a plain message', async () => {
+    vi.mocked(recordPayment).mockResolvedValueOnce({ ok: false, error: 'series_exhausted' })
+    const p = await postPayment(req('/api/billing/payments', PAYMENT))
+    expect([p.status, await p.json()]).toEqual([409, { error: 'The receipt number series for this financial year is full' }])
+    role = 'billing'
+    vi.mocked(issueRefund).mockResolvedValueOnce({ ok: false, error: 'series_exhausted' })
+    const r = await postRefund(req('/api/billing/refunds', REFUND))
+    expect([r.status, await r.json()]).toEqual([409, { error: 'The refund number series for this financial year is full' }])
+  })
+
   it('bad JSON is a 400; a deadlock is a 409', async () => {
     const bad = await postPayment(req('/api/billing/payments', '{not json'))
     expect([bad.status, await bad.json()]).toEqual([400, { error: 'Invalid JSON' }])

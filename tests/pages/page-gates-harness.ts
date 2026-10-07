@@ -317,6 +317,10 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/billing/invoices', load: () => import('@/app/(dashboard)/billing/invoices/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
   { route: '/billing/invoices/[id]', load: () => import('@/app/(dashboard)/billing/invoices/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'crc', 'billing'] },
   { route: '/print/invoices/[id]', load: () => import('@/app/print/invoices/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'crc', 'billing'] },
+  { route: '/billing/rules', load: () => import('@/app/(dashboard)/billing/rules/page'), allowed: ['admin', 'crc', 'billing'] },
+  // LeftNav NAV_ITEMS /cash-desk -- CASH_DESK_ROLES (front desk takes money; billing reaches it from its own nav).
+  { route: '/cash-desk', load: () => import('@/app/(dashboard)/cash-desk/page'), props: { searchParams: Promise.resolve({ patientId: 'RD-0001' }) }, allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
+  { route: '/print/receipts/[id]', load: () => import('@/app/print/receipts/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
   // end SP4
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).

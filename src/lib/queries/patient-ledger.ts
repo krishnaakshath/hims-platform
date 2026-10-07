@@ -15,7 +15,7 @@ import { financialYearOf } from '@/lib/billing/numbering'
 import type { PaymentInput, RefundInput } from '@/lib/billing/validation'
 import { istDateOf } from '@/lib/india-time'
 import { lockPatientBilling } from './charge-capture'
-import { allocateDocumentNumber } from './document-numbers'
+import { SeriesExhaustedError, allocateDocumentNumber } from './document-numbers'
 import type { WriteExecutor } from './executor'
 
 /** Issued documents only: finalised/cancelled invoices, credit notes, advances, receipts, refunds. */
@@ -86,6 +86,23 @@ export async function findPatientForCashDesk(query: string): Promise<{ id: strin
   return [...exact, ...byName].filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true))).slice(0, 10)
 }
 
+/** A full number series rolls the whole transaction back and becomes a plain refusal. */
+async function withSeriesGuard<T>(run: () => Promise<T>): Promise<T | { ok: false; error: 'series_exhausted' }> {
+  try {
+    return await run()
+  } catch (err) {
+    if (err instanceof SeriesExhaustedError) return { ok: false, error: 'series_exhausted' }
+    throw err
+  }
+}
+
+/** The patient's finalised invoices, newest first, for taking a payment against one. */
+export async function listPayableInvoices(patientId: string): Promise<{ id: number; invoiceNumber: string; totalPaise: number }[]> {
+  const rows = await getDb().select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber, totalPaise: invoices.totalPaise }).from(invoices)
+    .where(and(eq(invoices.patientId, patientId), eq(invoices.status, 'finalised'))).orderBy(desc(invoices.finalisedAt), desc(invoices.id))
+  return rows.map((r) => ({ id: r.id, invoiceNumber: r.invoiceNumber ?? '', totalPaise: r.totalPaise ?? 0 }))
+}
+
 async function patientExists(patientId: string): Promise<boolean> {
   const [p] = await getDb().select({ id: patients.id }).from(patients).where(eq(patients.id, patientId)).limit(1)
   return Boolean(p)
@@ -98,9 +115,9 @@ async function admissionIsPatients(executor: WriteExecutor, admissionId: number,
 
 export async function recordPayment(
   input: PaymentInput, session: Session, now: Date = new Date(),
-): Promise<{ ok: true; receiptNumber: string; paymentId: number } | { ok: false; error: 'patient_not_found' | 'admission_mismatch' | 'invoice_not_payable' }> {
+): Promise<{ ok: true; receiptNumber: string; paymentId: number } | { ok: false; error: 'patient_not_found' | 'admission_mismatch' | 'invoice_not_payable' | 'series_exhausted' }> {
   if (!(await patientExists(input.patientId))) return { ok: false, error: 'patient_not_found' }
-  return getDb().transaction(async (tx) => {
+  return withSeriesGuard(() => getDb().transaction(async (tx) => {
     await lockPatientBilling(tx, input.patientId)
     if (input.admissionId !== undefined && !(await admissionIsPatients(tx, input.admissionId, input.patientId))) {
       return { ok: false as const, error: 'admission_mismatch' as const }
@@ -122,14 +139,14 @@ export async function recordPayment(
     await logAudit(session, `billing: recorded ${input.kind}`, input.patientId,
       `receipt=${receiptNumber} mode=${input.mode} amount=${input.amountPaise}`, tx)
     return { ok: true as const, receiptNumber, paymentId: row.id }
-  })
+  }))
 }
 
 export async function issueRefund(
   input: RefundInput, session: Session, now: Date = new Date(),
-): Promise<{ ok: true; refundNumber: string } | { ok: false; error: 'patient_not_found' | 'payment_mismatch' | 'admission_mismatch' | 'exceeds_credit'; creditPaise?: number }> {
+): Promise<{ ok: true; refundNumber: string } | { ok: false; error: 'patient_not_found' | 'payment_mismatch' | 'admission_mismatch' | 'exceeds_credit' | 'series_exhausted'; creditPaise?: number }> {
   if (!(await patientExists(input.patientId))) return { ok: false, error: 'patient_not_found' }
-  return getDb().transaction(async (tx) => {
+  return withSeriesGuard(() => getDb().transaction(async (tx) => {
     await lockPatientBilling(tx, input.patientId)
     if (input.againstPaymentId !== undefined) {
       const [p] = await tx.select({ id: patientPayments.id }).from(patientPayments)
@@ -152,7 +169,7 @@ export async function issueRefund(
     })
     await logAudit(session, 'billing: issued refund', input.patientId, `refund=${refundNumber} mode=${input.mode} amount=${input.amountPaise}`, tx)
     return { ok: true as const, refundNumber }
-  })
+  }))
 }
 
 export async function getReceipt(id: number): Promise<(PatientPaymentRow & { patientName: string; uhid: string | null }) | null> {

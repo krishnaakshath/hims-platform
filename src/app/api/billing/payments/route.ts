@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
         case 'patient_not_found': return billingError(404, 'Patient not found')
         case 'admission_mismatch': return billingError(400, "That admission is not this patient's")
         case 'invoice_not_payable': return billingError(409, 'Payments can only be taken against a finalised invoice of this patient')
+        case 'series_exhausted': return billingError(409, 'The receipt number series for this financial year is full')
       }
     }
     return NextResponse.json({ receiptNumber: result.receiptNumber, paymentId: result.paymentId }, { status: 201 })

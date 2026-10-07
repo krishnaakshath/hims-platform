@@ -10,11 +10,12 @@ import {
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
   UserCircle2, Calculator,
-  ClipboardPlus, // SP4
+  ClipboardPlus, Banknote, SlidersHorizontal, // SP4
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
 import { ACCOUNT_ROLES, TARIFF_LOOKUP_ROLES } from '@/lib/role-policy' // Wave B
+import { CASH_DESK_ROLES } from '@/lib/role-policy' // SP4
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -84,6 +85,9 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   // Booking requests — frontdesk / admin / crc
   { href: '/booking-requests', label: 'Booking Requests', icon: CalendarClock, roles: ['frontdesk', 'admin', 'crc', 'pi'] as Role[] },
 
+  // SP4 cash desk -- CASH_DESK_ROLES: front desk takes advances and receipts; billing reaches it from the billing-only nav.
+  { href: '/cash-desk', label: 'Cash Desk', icon: Banknote, roles: [...CASH_DESK_ROLES] },
+
   // Messages — clinical comms, plus pharmacy (to confirm a dispense with the
   // prescriber -- see PharmacyPatientLookup's own inline thread) (NOT billing, NOT frontdesk)
   { href: '/messages', label: 'Messages', icon: MessageSquare, roles: ['crc', 'pi', 'admin', 'pharmacy'] as Role[] },
@@ -105,6 +109,8 @@ export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon; demo?
   { href: '/billing/statements', label: 'Statements', icon: FileBarChart },
   { href: '/billing/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/billing/pay', label: 'Virtual Card Payment', icon: CreditCard, demo: true },
+  // SP4
+  { href: '/billing/rules', label: 'Rules & Settings', icon: SlidersHorizontal },
 ]
 
 export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[]; demo?: boolean }[] = [
@@ -175,6 +181,7 @@ export function LeftNav({ role, badges: initialBadges, demoFeatures = false }: {
 
   // Billing-only nav: only show the billing section, nothing else clinical
   const isBillingOnly = role === 'billing'
+  const billingNavItems = NAV_ITEMS.filter((item) => item.roles?.includes('billing'))
 
   return (
     <nav className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-card">
@@ -191,6 +198,20 @@ export function LeftNav({ role, badges: initialBadges, demoFeatures = false }: {
           badge included -- as one blob instead of keeping them pinned while
           only this middle section scrolls. */}
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {/* SP4: billing-only users see only the NAV_ITEMS that name billing explicitly (e.g. Cash Desk);
+            entries without roles (Home) stay hidden for them. */}
+        {isBillingOnly && billingNavItems.length > 0 && (
+          <>
+            <GroupLabel>Navigation</GroupLabel>
+            <ul className="space-y-0.5">
+              {billingNavItems.map((item) => (
+                <li key={item.href}>
+                  <NavLink href={item.href} label={item.label} icon={item.icon} active={isActive(pathname, item.href)} badge={badges?.[item.href] ?? undefined} />
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
         {!isBillingOnly && (
           <>
             <GroupLabel>Navigation</GroupLabel>
