@@ -21,7 +21,7 @@ import {
   TRIAL_CRITERIA_EDIT_ROLES,
   hasSearchScope,
 } from '@/lib/role-policy'
-import { CHECK_IN_ROLES, ENCOUNTER_STATUS_ROLES } from '@/lib/role-policy' // SP3
+import { CHECK_IN_ROLES, ENCOUNTER_STATUS_ROLES, FOLLOW_UP_PLAN_ROLES } from '@/lib/role-policy' // SP3
 import { gateIt } from '../pages/page-gates-harness'
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -396,6 +396,9 @@ import { POST as postTariffImport } from '@/app/api/tariff/import/route'
 // SP3
 import { POST as postCheckIn } from '@/app/api/front-desk/check-in/route'
 import { POST as postEncounterStatus } from '@/app/api/encounters/[id]/status/route'
+import { POST as postFollowUp } from '@/app/api/follow-ups/route'
+import { PATCH as patchFollowUp } from '@/app/api/follow-ups/[id]/route'
+import { POST as cancelFollowUp } from '@/app/api/follow-ups/[id]/cancel/route'
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -579,6 +582,10 @@ export const API_GATES: ApiGateCase[] = [
   // An allowed role's `{}` body fails validation before any query.
   { name: 'POST /api/front-desk/check-in', call: () => settle(() => postCheckIn(send('POST', '/api/front-desk/check-in'))), allowed: [...CHECK_IN_ROLES] },
   { name: 'POST /api/encounters/[id]/status', call: () => settle(() => postEncounterStatus(send('POST', `/api/encounters/${BOGUS_ID}/status`), ctx({ id: BOGUS_ID }))), allowed: [...ENCOUNTER_STATUS_ROLES] },
+  // SP3 follow-up plan (FOLLOW_UP_PLAN_ROLES): an allowed role's `{}` body fails validation before any query.
+  { name: 'POST /api/follow-ups', call: () => settle(() => postFollowUp(send('POST', '/api/follow-ups'))), allowed: [...FOLLOW_UP_PLAN_ROLES] },
+  { name: 'PATCH /api/follow-ups/[id]', call: () => settle(() => patchFollowUp(send('PATCH', `/api/follow-ups/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_PLAN_ROLES] },
+  { name: 'POST /api/follow-ups/[id]/cancel', call: () => settle(() => cancelFollowUp(send('POST', `/api/follow-ups/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_PLAN_ROLES] },
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
@@ -614,6 +621,9 @@ const SP2_WRITE_GATES: typeof SP1_WRITE_GATES = [
 const SP3_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/front-desk/check-in', call: () => postCheckIn(send('POST', '/api/front-desk/check-in', NOT_JSON)), allowed: CHECK_IN_ROLES },
   { name: 'POST /api/encounters/[id]/status', call: () => postEncounterStatus(send('POST', `/api/encounters/${BOGUS_ID}/status`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ENCOUNTER_STATUS_ROLES },
+  { name: 'POST /api/follow-ups', call: () => postFollowUp(send('POST', '/api/follow-ups', NOT_JSON)), allowed: FOLLOW_UP_PLAN_ROLES },
+  { name: 'PATCH /api/follow-ups/[id]', call: () => patchFollowUp(send('PATCH', `/api/follow-ups/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_PLAN_ROLES },
+  { name: 'POST /api/follow-ups/[id]/cancel', call: () => cancelFollowUp(send('POST', `/api/follow-ups/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_PLAN_ROLES },
 ]
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {

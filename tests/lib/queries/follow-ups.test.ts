@@ -4,7 +4,7 @@ import { getDb } from '@/db/client'
 import { appointments, auditLog, departments, encounters, followUpContactAttempts, followUpOrders, patients, providers } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 import {
-  cancelFollowUpOrder, createFollowUpOrder, getFollowUpById, getPortalFollowUps, listFollowUpsForPatient, updateFollowUpPlan,
+  cancelFollowUpOrder, createFollowUpOrder, getFollowUpById, getFollowUpView, getPortalFollowUps, listFollowUpsForPatient, updateFollowUpPlan,
   type CreateFollowUpOrderInput,
 } from '@/lib/queries/follow-ups'
 
@@ -259,6 +259,22 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
     const order = await created()
     expect((await getFollowUpById(order.id))?.id).toBe(order.id)
     expect(await getFollowUpById(2147483000)).toBeNull()
+  })
+
+  it('getFollowUpView returns one joined, role-redacted view or null', async () => {
+    const appt = await makeAppointment(new Date('2099-04-14T04:30:00Z'))
+    const order = await created({ appointmentId: appt.id, planNotes: 'TEST_SP3 SECRETWORD' })
+    await getDb().insert(followUpContactAttempts).values({ followUpOrderId: order.id, channel: 'phone', outcome: 'no_answer', attemptedByName: PROBE_USER })
+    const desk = await getFollowUpView(order.id, 'frontdesk', '2099-04-10')
+    expect(desk).toMatchObject({
+      id: order.id, status: 'scheduled', planNotes: null,
+      prescribedBy: { providerId, name: 'TEST_SP3 Dr Prescriber' },
+      appointment: { id: appt.id, providerName: 'TEST_SP3 Dr Booked' },
+    })
+    expect(desk?.contactAttempts).toHaveLength(1)
+    expect(JSON.stringify(desk)).not.toContain('SECRETWORD')
+    expect((await getFollowUpView(order.id, 'pi', '2099-04-10'))?.planNotes).toBe('TEST_SP3 SECRETWORD')
+    expect(await getFollowUpView(2147483000, 'admin')).toBeNull()
   })
 
   it('listFollowUpsForPatient joins names, includes closed orders newest first, redacts plan notes by role', async () => {

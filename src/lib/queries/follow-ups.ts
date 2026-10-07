@@ -325,6 +325,14 @@ export async function listFollowUpsForPatient(patientId: string, role: Role, tod
   return rows.map((r) => toFollowUpView({ ...r, contactAttempts: attempts.get(r.id) ?? [] }, today, role))
 }
 
+/** One order as the given role may see it (the response body of the SP3 write routes), or null. */
+export async function getFollowUpView(id: number, role: Role, today = todayIsoIn()): Promise<FollowUpView | null> {
+  const [row] = await selectJoinedOrders(eq(followUpOrders.id, id), [asc(followUpOrders.id)], 1)
+  if (!row) return null
+  const attempts = await contactAttemptsByOrder([row.id])
+  return toFollowUpView({ ...row, contactAttempts: attempts.get(row.id) ?? [] }, today, role)
+}
+
 /**
  * The portal card: open orders only (derived), soonest due first. Built through
  * the full view and then the portal projection, so no clinical field or reason
