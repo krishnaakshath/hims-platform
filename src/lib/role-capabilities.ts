@@ -22,6 +22,7 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Confirm a green trial-eligibility verdict, which automatically notifies the patient',
       'Log and manage a trial\'s adverse events, drug accountability entries, and regulatory binder documents',
       'Transfer an admitted patient between rooms',
+      'Record or update a patient\'s Aadhaar with consent, seeing only its last 4 digits',
     ],
   },
   pi: {
@@ -72,6 +73,7 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Order inpatient medications and record administrations on the MAR',
       'Transfer an admitted patient between rooms',
       'Discharge an admitted patient and sign the discharge summary',
+      'Manage the department master and the UHID prefix',
     ],
   },
   frontdesk: {
@@ -85,6 +87,7 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'View and manage the live bed/ward status board',
       'Confirm or decline public booking requests into real appointments',
       'Transfer an admitted patient between rooms',
+      'Record a patient\'s Aadhaar with consent or the reason it was declined (the number is never shown back)',
     ],
   },
   pharmacy: {

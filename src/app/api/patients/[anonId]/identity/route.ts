@@ -8,9 +8,12 @@ import { IDENTITY_VERIFY_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
 import { encryptSensitive } from '@/lib/crypto'
+import { KYC_DOC_TYPES } from '@/lib/india/reference'
 
 const verifySchema = z.object({
-  idType: z.enum(['drivers_license', 'state_id', 'passport']),
+  // Indian KYC documents (Aadhaar is never a KYC type). Existing 'state_id'
+  // rows stay readable: the DB enum value still exists.
+  idType: z.enum(KYC_DOC_TYPES),
   idNumber: z.string().min(1),
 }).strict()
 

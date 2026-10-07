@@ -75,4 +75,13 @@ describe('ROLE_CAPABILITIES', () => {
     expect(ROLE_CAPABILITIES.frontdesk.bullets.join(' ')).not.toContain('attach imaging')
     expect(ROLE_CAPABILITIES.crc.bullets.join(' ')).not.toContain('attach imaging')
   })
+
+  it('states the SP1 Aadhaar write and master-data capabilities the server grants', () => {
+    // aadhaar/route.ts: AADHAAR_WRITE_ROLES (admin, crc, frontdesk); masked read is admin/crc only
+    expect(has('crc', /Aadhaar with consent, seeing only its last 4 digits/)).toBe(true)
+    expect(has('frontdesk', /Aadhaar with consent or the reason it was declined \(the number is never shown back\)/)).toBe(true)
+    expect(has('pi', /Aadhaar/)).toBe(false)
+    // settings/uhid-prefix (MASTER_DATA_ADMIN_ROLES) and the department master
+    expect(has('admin', /department master and the UHID prefix/)).toBe(true)
+  })
 })
