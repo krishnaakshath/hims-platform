@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { getDb } from '@/db/client'
 import { patients, allergies, diagnoses, auditLog } from '@/db/schema'
 
-let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | null = 'crc'
+let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | null = 'crc'
 vi.mock('@/lib/auth', () => ({
   requireSession: vi.fn(async () =>
     sessionRole === null
@@ -131,7 +131,7 @@ describe('FHIR export routes -- session gating', () => {
   })
 
   it('403s frontdesk on all 8 routes (FHIR/C-CDA is CLINICAL_ROLES only)', async () => {
-    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs'] as const) {
+    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] as const) {
       sessionRole = role
       for (const { name, handler } of ROUTES) {
         const res = await callRoute(handler, patientAId)

@@ -256,7 +256,7 @@ describe('/patients/[anonId] detail', () => {
 })
 
 describe('roles without the patient directory never load patient data', () => {
-  it.each(['pharmacy', 'billing', 'labs'] as const)('%s is redirected from /patients before any query', async (role) => {
+  it.each(['pharmacy', 'billing', 'labs', 'coder'] as const)('%s is redirected from /patients before any query', async (role) => {
     const spies = mockCommon(role)
     const { default: PatientsPage } = await import('@/app/(dashboard)/patients/page')
     await expect(PatientsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow('NEXT_REDIRECT:/')
@@ -266,7 +266,7 @@ describe('roles without the patient directory never load patient data', () => {
     expect(spies.getDb).not.toHaveBeenCalled()
   })
 
-  it.each(['pharmacy', 'billing', 'labs'] as const)('%s is redirected from /patients/[anonId] before any query', async (role) => {
+  it.each(['pharmacy', 'billing', 'labs', 'coder'] as const)('%s is redirected from /patients/[anonId] before any query', async (role) => {
     const spies = mockCommon(role)
     const { default: PatientDetailPage } = await import('@/app/(dashboard)/patients/[anonId]/page')
     await expect(PatientDetailPage({ params: Promise.resolve({ anonId: 'RD-T1' }) })).rejects.toThrow('NEXT_REDIRECT:/')

@@ -54,9 +54,7 @@ export function doctorMayPropose(status: S): boolean {
   return status === 'uncoded' || status === 'in_progress' || status === 'queried'
 }
 
-// Task 1 adds 'coder' to Role; until then the union keeps this module type-correct on its own.
-type CodingRole = Role | 'coder'
-export const CODING_ACTION_ROLES: Record<CodingAction, readonly CodingRole[]> = {
+export const CODING_ACTION_ROLES: Record<CodingAction, readonly Role[]> = {
   claim: ['admin', 'coder'],
   assign: ['admin'],
   release: ['admin', 'coder'],

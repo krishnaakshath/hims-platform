@@ -73,7 +73,7 @@ describe('form-submissions role gate', () => {
     return Number(row.n)
   }
 
-  it.each(['frontdesk', 'pharmacy', 'billing', 'labs'] as const)('403s %s on GET list, POST, GET by id and PUT without creating or changing a row', async (role) => {
+  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] as const)('403s %s on GET list, POST, GET by id and PUT without creating or changing a row', async (role) => {
     const [existing] = await getDb().select().from(formSubmissions).limit(1)
     const templateId = await realTemplateId()
     const beforeCount = await submissionCount()

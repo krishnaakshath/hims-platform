@@ -50,6 +50,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Transfer an admitted patient between rooms',
       'Discharge an admitted patient and sign the discharge summary',
       'Set and change a patient\'s follow-up plan (due date or interval, window, reason and plan notes), and start or complete a visit',
+      // SP6
+      'Propose diagnosis and procedure codes for a visit on the chart, and answer coding queries',
     ],
   },
   admin: {
@@ -80,6 +82,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Book, reschedule or cancel follow-up appointments and log patient contact attempts from the follow-up recall list',
       'Manage the department master and the UHID prefix',
       'Manage the service catalogue, tariffs, packages and room categories, including CSV tariff import',
+      // SP6
+      'Load licensed code sets (ICD-10, ICD-10-PCS, SNOMED CT, LOINC, HBP packages) and choose the current version',
+      'Assign coding work to a coder',
     ],
   },
   frontdesk: {
@@ -134,4 +139,19 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'View lab results and imaging for every ordered test from the Lab worklist (no chart access)',
     ],
   },
+  // SP6
+  coder: {
+    label: 'Clinical Coder',
+    summary: 'Codes finished visits and discharges: assigns ICD-10 diagnosis and procedure/package codes, queries the treating doctor, and finalises coding for billing and claims. Sees only what coding needs; never edits clinical notes and has no chart or patient-directory access.',
+    bullets: [
+      'Work the coding worklist: claim finished visits and discharges awaiting coding',
+      'Assign and correct diagnosis codes (primary, secondary, provisional) and procedure or package codes from the loaded code sets',
+      'Read the signed clinical notes of the visit being coded (read-only)',
+      'Send a coding query to the treating doctor and log the replies',
+      'Mark a visit coded, finalise it, or reopen a finalised visit with a reason',
+      'Map service-catalogue procedures and packages to procedure codes',
+      'View the coding productivity and backlog report',
+    ],
+  },
+  // end SP6
 }

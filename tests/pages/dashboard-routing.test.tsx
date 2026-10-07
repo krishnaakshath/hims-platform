@@ -45,4 +45,20 @@ describe('dashboard role routing', () => {
     expect(screen.getByText(/rooms available/i)).toBeInTheDocument()
     expect(screen.getByText('Test visit')).toBeInTheDocument()
   })
+
+  // SP6 (ruling 4/5): the coder's home is /coding. Without this redirect the coder
+  // would fall through to the coordinator dashboard (patient names, appointments).
+  it('redirects a coder session to /coding before loading any dashboard data', async () => {
+    vi.resetModules()
+    const redirectThrows = vi.fn(() => { throw new Error('NEXT_REDIRECT') })
+    const listPatients = vi.fn(async () => [])
+    vi.doMock('next/navigation', () => ({ redirect: redirectThrows }))
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'coder', name: 'Asha Menon' })) }))
+    vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: listPatients }))
+    const { default: Page } = await import('@/app/(dashboard)/page')
+    await expect(Page()).rejects.toThrow('NEXT_REDIRECT')
+    expect(redirectThrows).toHaveBeenCalledWith('/coding')
+    expect(listPatients).not.toHaveBeenCalled()
+  })
+  // end SP6
 })

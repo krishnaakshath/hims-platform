@@ -1068,6 +1068,8 @@ export async function seed() {
     { name: 'Robin Shah', email: seedEmail('pharmacy'), role: 'pharmacy', passwordHash: demoHash },
     { name: 'Alex Billing', email: seedEmail('billing'), role: 'billing', passwordHash: demoHash },
     { name: 'Morgan Lee', email: seedEmail('labs'), role: 'labs', passwordHash: demoHash },
+    // SP6
+    { name: 'Asha Menon', email: seedEmail('coder'), role: 'coder', passwordHash: demoHash },
   ])
 
   for (const p of HERO_PATIENTS) {

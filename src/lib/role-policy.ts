@@ -8,7 +8,7 @@ import type { Role } from '@/lib/auth'
 // Every check built on these is an allowlist, so an unknown/future role is
 // denied by default.
 
-export const ALL_ROLES = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs'] as const
+export const ALL_ROLES = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] as const // SP6: + coder
 
 // Compile-time guard: adding a Role without adding it to ALL_ROLES fails tsc.
 type MissingFromAllRoles = Exclude<Role, (typeof ALL_ROLES)[number]>
@@ -77,6 +77,23 @@ export const CHECK_IN_ROLES: readonly Role[] = ['frontdesk', 'admin', 'crc']
 export const ENCOUNTER_STATUS_ROLES: readonly Role[] = ['admin', 'pi', 'frontdesk', 'crc']
 export const DISCHARGE_ROLES: readonly Role[] = ['admin', 'pi']
 // end SP3
+
+// SP6 clinical coding. Coding = /coding* pages (except code systems), the
+// workspace, status actions, raising/closing queries and service-code mapping
+// writes. Entry = the gate of the diagnosis/procedure write routes (behaviour
+// differs by role: a pi proposes, a coder decides). Propose = the chart's
+// "propose code" UI. Query respond = reply on a coding query. Lookup = code
+// search and service-code lookup (no PHI). Code-system admin = import / set
+// current and /coding/code-systems. The coder is deliberately in neither
+// CLINICAL_ROLES nor PATIENT_DIRECTORY_ROLES: no chart, no /patients, no
+// global search. Per-action status roles live in src/lib/coding/status.ts.
+export const CODING_ROLES: readonly Role[] = ['admin', 'coder']
+export const CODING_ENTRY_ROLES: readonly Role[] = ['admin', 'coder', 'pi']
+export const CODE_PROPOSE_ROLES: readonly Role[] = ['admin', 'pi']
+export const CODING_QUERY_RESPOND_ROLES: readonly Role[] = ['admin', 'pi', 'coder']
+export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc', 'billing']
+export const CODE_SYSTEM_ADMIN_ROLES: readonly Role[] = ['admin']
+// end SP6
 
 export type SearchScopes = { patients: boolean; trials: boolean; formTemplates: boolean }
 

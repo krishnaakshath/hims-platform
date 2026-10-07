@@ -403,6 +403,10 @@ import { PUT as putFollowUpBooking } from '@/app/api/follow-ups/[id]/booking/rou
 import { POST as unbookFollowUp } from '@/app/api/follow-ups/[id]/unbook/route'
 import { POST as postFollowUpContact } from '@/app/api/follow-ups/[id]/contact-attempts/route'
 import { POST as postDischarge } from '@/app/api/inpatient/admissions/[id]/discharge/route'
+// SP6: the clinical-note write routes (the coder must never write or sign a note)
+import { POST as postNote } from '@/app/api/patients/[anonId]/notes/route'
+import { PUT as signNoteRoute } from '@/app/api/patients/[anonId]/notes/[id]/sign/route'
+// end SP6
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -596,6 +600,11 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => settle(() => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_BOOKING_ROLES] },
   // SP3 discharge (DISCHARGE_ROLES): `{}` fails validation before any query.
   { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => settle(() => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`), ctx({ id: BOGUS_ID }))), allowed: [...DISCHARGE_ROLES] },
+  // SP6 (ruling 4): clinical notes are written and signed by pi/admin only -- the coder reads
+  // signed notes in the coding workspace but is 403'd here. Inline allowlists in both routes.
+  { name: 'POST /api/patients/[anonId]/notes', call: () => settle(() => postNote(send('POST', `/api/patients/${BOGUS_PATIENT}/notes`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'pi'] },
+  { name: 'PUT /api/patients/[anonId]/notes/[id]/sign', call: () => settle(() => signNoteRoute(send('PUT', `/api/patients/${BOGUS_PATIENT}/notes/${BOGUS_ID}/sign`), ctx({ anonId: BOGUS_PATIENT, id: BOGUS_ID }))), allowed: ['admin', 'pi'] },
+  // end SP6
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
