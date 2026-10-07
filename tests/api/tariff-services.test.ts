@@ -68,6 +68,20 @@ describe('GET /api/tariff/services', () => {
     }
   })
 
+  it.each([['hex', '0x10'], ['exponent', '1e3'], ['zero', '0'], ['beyond int4', '2147483648'], ['fraction', '1.5'], ['blank', '']])(
+    'GET services rejects a %s departmentId with a fixed 400', async (_l, v) => {
+      const res = await listRoute(req('GET', `/api/tariff/services?departmentId=${v}`))
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Invalid service search' })
+      expect(listServices).not.toHaveBeenCalled()
+    })
+
+  it('GET services accepts a plain departmentId', async () => {
+    vi.mocked(listServices).mockResolvedValue([])
+    expect((await listRoute(req('GET', '/api/tariff/services?departmentId=2147483647'))).status).toBe(200)
+    expect(vi.mocked(listServices).mock.lastCall?.[0]).toMatchObject({ departmentId: 2147483647 })
+  })
+
   it('returns exactly the listed service fields', async () => {
     vi.mocked(listServices).mockResolvedValue([service] as never)
     const res = await listRoute(req('GET', '/api/tariff/services'))

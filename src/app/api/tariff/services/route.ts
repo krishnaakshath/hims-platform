@@ -6,14 +6,16 @@ import { createService, listServices } from '@/lib/queries/tariff'
 import { getDepartmentById } from '@/lib/queries/departments'
 import { SERVICE_CATEGORIES, serviceCreateSchema, type ServiceCategory } from '@/lib/tariff/validation'
 import { isUniqueViolation } from '@/lib/db-errors'
-import { badRequest, conflict, forbidden, invalid, serverError } from '@/lib/tariff/route-responses'
+import { badRequest, conflict, forbidden, invalid, parseId, serverError } from '@/lib/tariff/route-responses'
 
 const CATEGORY_CODES = SERVICE_CATEGORIES.map((c) => c.code) as [ServiceCategory, ...ServiceCategory[]]
 
 // URLSearchParams values are strings; unknown params are rejected (.strict()).
 const listQuerySchema = z.object({
   q: z.string().trim().max(100).optional(),
-  departmentId: z.coerce.number().int().positive().optional(),
+  // Plain positive int4 digits only (same rule as /api/tariff/resolve): z.coerce alone accepts
+  // '0x10', '1e3' and values beyond the column range.
+  departmentId: z.string().transform((v, ctx) => parseId(v) ?? (ctx.addIssue({ code: 'custom', message: 'Invalid department' }), z.NEVER)).optional(),
   category: z.enum(CATEGORY_CODES).optional(),
   includeInactive: z.enum(['0', '1', 'true', 'false']).optional(),
 }).strict()
