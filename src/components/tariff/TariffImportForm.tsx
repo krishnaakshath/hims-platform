@@ -76,7 +76,8 @@ export function TariffImportForm() {
     a.href = url
     a.download = `${kind}-template.csv`
     a.click()
-    URL.revokeObjectURL(url)
+    // Some browsers start the download asynchronously; revoking at once can cancel it.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   const lbl = 'mb-1 block text-xs font-medium text-muted-foreground'

@@ -377,11 +377,6 @@ export async function listRoomCategories(includeInactive = false): Promise<RoomC
   return (includeInactive ? q : q.where(eq(roomCategories.isActive, true))).orderBy(asc(roomCategories.name))
 }
 
-export async function getRoomCategoryByCode(code: string): Promise<RoomCategory | null> {
-  const [row] = await getDb().select().from(roomCategories).where(eq(roomCategories.code, code)).limit(1)
-  return row ?? null
-}
-
 export async function createRoomCategory(input: { code: string; name: string }, audit?: TariffAudit): Promise<RoomCategory> {
   return inTx(audit, async (tx) => {
     const [row] = await tx.insert(roomCategories).values({ code: input.code, name: input.name }).returning()

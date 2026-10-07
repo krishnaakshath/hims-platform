@@ -8,6 +8,8 @@
  * Money is integer paise.
  */
 
+import { isoDate } from './validation'
+
 export type TariffScope = 'base' | 'department' | 'payer'
 
 export interface ServiceForPricing {
@@ -67,17 +69,6 @@ export function normalizeWard(ward: string): string {
   return ward.trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
-function isIsoDate(s: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
-  if (!m) return false
-  const y = Number(m[1])
-  const mo = Number(m[2])
-  const d = Number(m[3])
-  if (mo < 1 || mo > 12 || d < 1) return false
-  const dim = new Date(Date.UTC(y, mo, 0)).getUTCDate()
-  return d <= dim
-}
-
 const normalizeCategory = (c: string) => c.trim().toLowerCase()
 
 interface Ranked {
@@ -98,7 +89,7 @@ export function resolvePrice(
   ctx: { service: ServiceForPricing | null; rates: TariffRateCandidate[] },
 ): PriceResolution {
   const { onDate } = query
-  if (typeof onDate !== 'string' || !isIsoDate(onDate)) return { ok: false, reason: 'invalid_date' }
+  if (typeof onDate !== 'string' || !isoDate.safeParse(onDate).success) return { ok: false, reason: 'invalid_date' }
   const service = ctx.service
   if (!service) return { ok: false, reason: 'service_not_found' }
   if (!service.isActive) return { ok: false, reason: 'service_inactive' }

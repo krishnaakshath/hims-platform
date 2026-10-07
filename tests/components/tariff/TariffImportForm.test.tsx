@@ -112,4 +112,27 @@ describe('TariffImportForm', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/choose a csv file or paste/i)
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it('revokes the template object URL only after the download has started', () => {
+    vi.useFakeTimers()
+    const createObjectURL = vi.fn(() => 'blob:template')
+    const revokeObjectURL = vi.fn()
+    const original = { createObjectURL: URL.createObjectURL, revokeObjectURL: URL.revokeObjectURL }
+    Object.assign(URL, { createObjectURL, revokeObjectURL })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    try {
+      render(<TariffImportForm />)
+      fireEvent.click(screen.getByRole('button', { name: /template/i }))
+      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      expect(click).toHaveBeenCalledTimes(1)
+      expect(revokeObjectURL).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1000)
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:template')
+    } finally {
+      click.mockRestore()
+      Object.assign(URL, original)
+      vi.useRealTimers()
+    }
+  })
 })
+

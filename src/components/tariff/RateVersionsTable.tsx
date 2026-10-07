@@ -21,7 +21,6 @@ export interface RateListItem {
   deactivated: boolean
 }
 
-export { rateStatus, type RateStatus } from './status'
 import { rateStatus, type RateStatus } from './status'
 
 const STATUS_LABEL: Record<RateStatus, string> = { current: 'Current', scheduled: 'Scheduled', ended: 'Ended', deactivated: 'Deactivated' }
