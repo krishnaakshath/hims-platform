@@ -18,6 +18,14 @@ function createRedis() {
   })
 }
 
+// A deployment (or a local dev/CI database) with no Redis configured simply
+// has no cache: reads go straight to the database and invalidation is a no-op,
+// instead of every cache call waiting out the request timeout. Rate limits,
+// OTP and MFA are NOT part of this -- they need Redis and keep failing closed.
+export function isCacheConfigured(): boolean {
+  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN)
+}
+
 let _redis: Redis | null = null
 export function getRedis() {
   if (!_redis) _redis = createRedis()
@@ -41,6 +49,7 @@ function errKind(e: unknown): string {
  * errors still propagate.
  */
 export async function getOrSetCache<T>(key: string, ttlSeconds: number, loader: () => Promise<T>): Promise<T> {
+  if (!isCacheConfigured()) return loader()
   try {
     const cached = await getRedis().get<T>(key)
     if (cached !== null && cached !== undefined) return cached
@@ -60,6 +69,7 @@ export async function getOrSetCache<T>(key: string, ttlSeconds: number, loader: 
 // them already succeeded), but they are logged at error level because stale
 // data can be served until the key's TTL expires.
 export async function invalidateCache(key: string): Promise<void> {
+  if (!isCacheConfigured()) return
   try {
     await getRedis().del(key)
   } catch (e) {
@@ -76,6 +86,7 @@ export async function invalidateCache(key: string): Promise<void> {
  * real scale (a handful of keys per prefix, not thousands).
  */
 export async function invalidateCacheByPrefix(prefix: string): Promise<void> {
+  if (!isCacheConfigured()) return
   try {
     const keys = await getRedis().keys(`${prefix}*`)
     if (keys.length > 0) await getRedis().del(...keys)
