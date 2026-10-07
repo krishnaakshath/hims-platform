@@ -19,3 +19,16 @@ export function billingServerError(tag: string, err: unknown, message: string) {
   console.error(`[billing] ${tag} failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
   return billingError(500, message)
 }
+
+export type CaptureErrorCode = 'context_not_found' | 'context_cancelled' | 'no_payer' | 'price_override_forbidden' | 'blocked'
+
+/** The exact HTTP mapping of a charge preview/capture refusal (plan Task 8). */
+export function captureErrorResponse(error: CaptureErrorCode, violations?: unknown[]) {
+  switch (error) {
+    case 'context_not_found': return billingError(404, 'Visit or admission not found')
+    case 'context_cancelled': return billingError(409, 'This visit was cancelled; charges cannot be added')
+    case 'no_payer': return billingError(400, 'This patient has no primary payer on file')
+    case 'price_override_forbidden': return billingError(403, 'Only billing or admin staff can override a price')
+    case 'blocked': return NextResponse.json({ error: 'This charge breaks billing rules', violations: violations ?? [] }, { status: 422 })
+  }
+}

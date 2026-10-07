@@ -22,7 +22,7 @@ import {
   hasSearchScope,
 } from '@/lib/role-policy'
 import { CHECK_IN_ROLES, DISCHARGE_ROLES, ENCOUNTER_STATUS_ROLES, FOLLOW_UP_BOOKING_ROLES, FOLLOW_UP_PLAN_ROLES } from '@/lib/role-policy' // SP3
-import { BILLING_CONFIG_ROLES } from '@/lib/role-policy' // SP4
+import { BILLING_CONFIG_ROLES, CHARGE_CAPTURE_ROLES } from '@/lib/role-policy' // SP4
 import { gateIt } from '../pages/page-gates-harness'
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -408,6 +408,9 @@ import { POST as postDischarge } from '@/app/api/inpatient/admissions/[id]/disch
 import { PUT as putBillingSettings } from '@/app/api/billing/settings/route'
 import { PUT as putBillingRule } from '@/app/api/billing/rules/[code]/route'
 import { PUT as putPayerFlags } from '@/app/api/billing/payers/[id]/route'
+import { POST as postChargeLine } from '@/app/api/billing/charge-lines/route'
+import { POST as previewChargeLineRoute } from '@/app/api/billing/charge-lines/preview/route'
+import { POST as voidChargeLineRoute } from '@/app/api/billing/charge-lines/[id]/void/route'
 // end SP4
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
@@ -606,6 +609,10 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PUT /api/billing/settings', call: () => settle(() => putBillingSettings(send('PUT', '/api/billing/settings'))), allowed: [...BILLING_CONFIG_ROLES] },
   { name: 'PUT /api/billing/rules/[code]', call: () => settle(() => putBillingRule(send('PUT', '/api/billing/rules/duplicate_charge'), ctx({ code: 'duplicate_charge' }))), allowed: [...BILLING_CONFIG_ROLES] },
   { name: 'PUT /api/billing/payers/[id]', call: () => settle(() => putPayerFlags(send('PUT', `/api/billing/payers/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...BILLING_CONFIG_ROLES] },
+  // SP4 charge lines (CHARGE_CAPTURE_ROLES): `{}` fails validation before any query.
+  { name: 'POST /api/billing/charge-lines', call: () => settle(() => postChargeLine(send('POST', '/api/billing/charge-lines'))), allowed: [...CHARGE_CAPTURE_ROLES] },
+  { name: 'POST /api/billing/charge-lines/preview', call: () => settle(() => previewChargeLineRoute(send('POST', '/api/billing/charge-lines/preview'))), allowed: [...CHARGE_CAPTURE_ROLES] },
+  { name: 'POST /api/billing/charge-lines/[id]/void', call: () => settle(() => voidChargeLineRoute(send('POST', `/api/billing/charge-lines/${BOGUS_ID}/void`), ctx({ id: BOGUS_ID }))), allowed: [...CHARGE_CAPTURE_ROLES] },
   // end SP4
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
@@ -657,6 +664,9 @@ const SP4_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PUT /api/billing/settings', call: () => putBillingSettings(send('PUT', '/api/billing/settings', NOT_JSON)), allowed: BILLING_CONFIG_ROLES },
   { name: 'PUT /api/billing/rules/[code]', call: () => putBillingRule(send('PUT', '/api/billing/rules/duplicate_charge', NOT_JSON), ctx({ code: 'duplicate_charge' })), allowed: BILLING_CONFIG_ROLES },
   { name: 'PUT /api/billing/payers/[id]', call: () => putPayerFlags(send('PUT', `/api/billing/payers/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: BILLING_CONFIG_ROLES },
+  { name: 'POST /api/billing/charge-lines', call: () => postChargeLine(send('POST', '/api/billing/charge-lines', NOT_JSON)), allowed: CHARGE_CAPTURE_ROLES },
+  { name: 'POST /api/billing/charge-lines/preview', call: () => previewChargeLineRoute(send('POST', '/api/billing/charge-lines/preview', NOT_JSON)), allowed: CHARGE_CAPTURE_ROLES },
+  { name: 'POST /api/billing/charge-lines/[id]/void', call: () => voidChargeLineRoute(send('POST', `/api/billing/charge-lines/${BOGUS_ID}/void`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CHARGE_CAPTURE_ROLES },
 ]
 // end SP4
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES])('$name (deny before parse)', (c) => {
