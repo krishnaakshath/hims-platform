@@ -407,6 +407,13 @@ import { POST as postDischarge } from '@/app/api/inpatient/admissions/[id]/disch
 import { POST as postNote } from '@/app/api/patients/[anonId]/notes/route'
 import { PUT as signNoteRoute } from '@/app/api/patients/[anonId]/notes/[id]/sign/route'
 // end SP6
+// SP6: code systems and code search
+import { CODE_LOOKUP_ROLES, CODE_SYSTEM_ADMIN_ROLES, CODING_ROLES } from '@/lib/role-policy'
+import { GET as getCodes } from '@/app/api/coding/codes/route'
+import { GET as listCodeSystemsRoute } from '@/app/api/coding/code-systems/route'
+import { POST as postCodeImport } from '@/app/api/coding/code-systems/import/route'
+import { PATCH as patchCodeSystem } from '@/app/api/coding/code-systems/[id]/route'
+// end SP6
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -605,6 +612,13 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/patients/[anonId]/notes', call: () => settle(() => postNote(send('POST', `/api/patients/${BOGUS_PATIENT}/notes`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'pi'] },
   { name: 'PUT /api/patients/[anonId]/notes/[id]/sign', call: () => settle(() => signNoteRoute(send('PUT', `/api/patients/${BOGUS_PATIENT}/notes/${BOGUS_ID}/sign`), ctx({ anonId: BOGUS_PATIENT, id: BOGUS_ID }))), allowed: ['admin', 'pi'] },
   // end SP6
+  // SP6 code systems: code search (no PHI) for CODE_LOOKUP_ROLES, the version list for CODING_ROLES,
+  // import / set current for CODE_SYSTEM_ADMIN_ROLES. Allowed roles' bodies fail validation before any write.
+  { name: 'GET /api/coding/codes', call: () => settle(() => getCodes(get('/api/coding/codes'))), allowed: [...CODE_LOOKUP_ROLES] },
+  { name: 'GET /api/coding/code-systems', call: () => settle(() => listCodeSystemsRoute()), allowed: [...CODING_ROLES] },
+  { name: 'POST /api/coding/code-systems/import', call: () => settle(() => postCodeImport(send('POST', '/api/coding/code-systems/import'))), allowed: [...CODE_SYSTEM_ADMIN_ROLES] },
+  { name: 'PATCH /api/coding/code-systems/[id]', call: () => settle(() => patchCodeSystem(send('PATCH', `/api/coding/code-systems/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...CODE_SYSTEM_ADMIN_ROLES] },
+  // end SP6
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
@@ -648,7 +662,14 @@ const SP3_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_BOOKING_ROLES },
   { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: DISCHARGE_ROLES },
 ]
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES])('$name (deny before parse)', (c) => {
+// SP6 writes: the same deny-before-parse contract.
+const SP6_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  // The import route 415s anything but application/json, so this row declares it (as the tariff import row does).
+  { name: 'POST /api/coding/code-systems/import', call: () => postCodeImport(new NextRequest(url('/api/coding/code-systems/import'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: NOT_JSON })), allowed: CODE_SYSTEM_ADMIN_ROLES },
+  { name: 'PATCH /api/coding/code-systems/[id]', call: () => patchCodeSystem(send('PATCH', `/api/coding/code-systems/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CODE_SYSTEM_ADMIN_ROLES },
+]
+// end SP6
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP6_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role

@@ -9,6 +9,7 @@ import {
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
+  BookOpenCheck, // SP6
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
@@ -105,6 +106,9 @@ export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; role
   { href: '/audit-log', label: 'Audit Log', icon: History, roles: ['admin'] as Role[] },
   // Tariffs: service catalogue and price lists -- admin and billing (TARIFF_MANAGE_ROLES). crc/frontdesk only use the lookup API.
   { href: '/tariffs', label: 'Tariffs', icon: Tags, roles: ['admin', 'billing'] as Role[] },
+  // SP6: code-system versions and import -- admin only (CODE_SYSTEM_ADMIN_ROLES).
+  { href: '/coding/code-systems', label: 'Code Systems', icon: BookOpenCheck, roles: ['admin'] as Role[] },
+  // end SP6
   // Settings: admin and the PI only, no other role -- explicit product direction.
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['admin', 'pi'] as Role[] },
 ]

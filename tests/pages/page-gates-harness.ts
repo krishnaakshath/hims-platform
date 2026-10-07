@@ -308,6 +308,9 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/tariffs/room-categories', load: () => import('@/app/(dashboard)/tariffs/room-categories/page'), allowed: ['admin', 'billing'] },
   { route: '/tariffs/import', load: () => import('@/app/(dashboard)/tariffs/import/page'), allowed: ['admin', 'billing'] },
   { route: '/settings', load: () => import('@/app/(dashboard)/settings/page'), allowed: ['admin', 'pi'] },
+  // SP6: LeftNav NAV_TRAILING_ITEMS /coding/code-systems -- CODE_SYSTEM_ADMIN_ROLES
+  { route: '/coding/code-systems', load: () => import('@/app/(dashboard)/coding/code-systems/page'), allowed: ['admin'] },
+  // end SP6
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).
   {
