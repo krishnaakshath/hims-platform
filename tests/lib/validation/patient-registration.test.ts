@@ -33,6 +33,16 @@ describe('patientRegistrationSchema', () => {
     expect(patientRegistrationSchema.safeParse(valid({ aadhaar: { status: 'declined', reason: 'other', note: '  lost card ' } })).success).toBe(true)
     expect(aadhaarInputSchema.safeParse({ status: 'declined', reason: 'bogus' }).success).toBe(false)
   })
+  it('rejects a decline note holding an Aadhaar number, without echoing it', () => {
+    for (const note of ['card 2345 6789 0124', '2345.6789.0124', '234567890124']) {
+      const r = aadhaarInputSchema.safeParse({ status: 'declined', reason: 'other', note })
+      expect(r.success).toBe(false)
+      expect(JSON.stringify(r.error!.issues)).toContain('Do not enter an Aadhaar number in the note')
+      expect(JSON.stringify(r.error!.issues)).not.toMatch(/2345|6789/)
+    }
+    expect(abhaInputSchema.safeParse({ status: 'unavailable', reason: 'other', note: 'aadhaar 2345-6789-0124' }).success).toBe(false)
+    expect(aadhaarInputSchema.safeParse({ status: 'declined', reason: 'other', note: 'ref 234567890125' }).success).toBe(true)
+  })
   it('rejects a registration with no aadhaar key at all (mandatory)', () => {
     const rest: Record<string, unknown> = valid(); delete rest.aadhaar
     expect(patientRegistrationSchema.safeParse(rest).success).toBe(false)

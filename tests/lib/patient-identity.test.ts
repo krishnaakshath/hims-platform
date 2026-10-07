@@ -17,12 +17,11 @@ afterEach(() => {
   vi.unstubAllEnvs()
 })
 
-// Any run of 4+ consecutive digits from the plaintext number.
+// Any 4-digit window of the plaintext number, anywhere in the text. Strict:
+// callers remove the explicitly-stored last4 field before serialising.
 function containsAadhaarFragment(text: string): boolean {
   for (let i = 0; i + 4 <= AADHAAR.length; i++) {
-    const frag = AADHAAR.slice(i, i + 4)
-    if (frag === '0124') continue // last4 is allowed where explicitly stored
-    if (text.includes(frag)) return true
+    if (text.includes(AADHAAR.slice(i, i + 4))) return true
   }
   return false
 }
@@ -44,7 +43,9 @@ describe('buildAadhaarRow', () => {
 
   it('the provided row carries no plaintext fragment outside last4', () => {
     const row = buildAadhaarRow('TEST-SP1-1', { status: 'provided', number: AADHAAR, consent: true }, 'Asha', NOW)
-    expect(containsAadhaarFragment(JSON.stringify(row))).toBe(false)
+    const { aadhaarLast4: _last4, ...rest } = row
+    void _last4
+    expect(containsAadhaarFragment(JSON.stringify(rest))).toBe(false)
   })
 
   it('normalises a spaced/hyphenated number defensively before encrypting', () => {
@@ -86,6 +87,32 @@ describe('buildAadhaarRow', () => {
     const row = buildAadhaarRow('TEST-SP1-1', { status: 'declined', reason: 'other', note: 'Lost card' }, 'Asha', NOW)
     expect(row).toMatchObject({ declineReason: 'other', declineNote: 'Lost card', updatedAt: NOW })
   })
+
+  it('throws a fixed message for an unknown decline reason (runtime guard beyond the type)', () => {
+    const input = { status: 'declined', reason: AADHAAR } as unknown as AadhaarInput
+    let err: unknown
+    try { buildAadhaarRow('TEST-SP1-1', input, 'Asha', NOW) } catch (e) { err = e }
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe('Invalid Aadhaar decline reason')
+    // The stack has file line numbers, so check for the value itself.
+    expect(String((err as Error).stack)).not.toContain(AADHAAR)
+  })
+
+  it('throws a fixed message for reason other without a non-empty note', () => {
+    for (const note of [undefined, '', '   ']) {
+      const input = { status: 'declined', reason: 'other', note } as unknown as AadhaarInput
+      expect(() => buildAadhaarRow('TEST-SP1-1', input, 'Asha', NOW)).toThrow(/^A note is required when the reason is other$/)
+    }
+  })
+
+  it('redacts an Aadhaar number from a decline note that bypassed the schema', () => {
+    for (const n of [AADHAAR, '2345 6789 0124', '2345.6789.0124', '2345/6789/0124']) {
+      const input = { status: 'declined', reason: 'other', note: `card ${n} lost` } as AadhaarInput
+      const row = buildAadhaarRow('TEST-SP1-1', input, 'Asha', NOW)
+      expect(row.declineNote).toBe('card [redacted] lost')
+      expect(containsAadhaarFragment(JSON.stringify(row))).toBe(false)
+    }
+  })
 })
 
 describe('toAadhaarSummary / toAadhaarView', () => {
@@ -125,6 +152,14 @@ describe('toAadhaarSummary / toAadhaarView', () => {
     expect(toAadhaarView(onFile(), 'patient' as Role).masked).toBeNull()
   })
 
+  it('shows the decline reason only to admin and crc; everyone else sees status only', () => {
+    const declined = toAadhaarSummary({ aadhaarLast4: null, declineReason: 'foreign_national', consentRecordedAt: null, recordedByName: 'Asha' })
+    for (const r of ['pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'patient'] as Role[]) {
+      expect(toAadhaarView(declined, r)).toEqual({ status: 'declined', masked: null, declineReason: null })
+    }
+    expect(toAadhaarView(declined, 'admin').declineReason).toBe('foreign_national')
+  })
+
   it('the view never carries recordedByName, consent time or raw last4 fields', () => {
     expect(Object.keys(toAadhaarView(onFile(), 'admin')).sort()).toEqual(['declineReason', 'masked', 'status'])
   })
@@ -132,6 +167,7 @@ describe('toAadhaarSummary / toAadhaarView', () => {
   it('never masks a declined or not-recorded summary', () => {
     const declined: AadhaarSummary = { status: 'declined', last4: '0124', declineReason: 'emergency', consentRecordedAt: null, recordedByName: 'Asha' }
     expect(toAadhaarView(declined, 'admin')).toEqual({ status: 'declined', masked: null, declineReason: 'emergency' })
+    expect(toAadhaarView(declined, 'crc')).toEqual({ status: 'declined', masked: null, declineReason: 'emergency' })
     expect(toAadhaarView(toAadhaarSummary(null), 'crc')).toEqual({ status: 'not_recorded', masked: null, declineReason: null })
   })
 })

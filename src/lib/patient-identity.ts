@@ -1,7 +1,7 @@
 import type { patientAadhaar } from '@/db/schema'
 import type { Role } from '@/lib/auth'
 import { encryptSensitive } from '@/lib/crypto'
-import { normalizeAadhaar, isValidAadhaar, aadhaarLast4, maskAadhaarLast4 } from '@/lib/india/aadhaar'
+import { normalizeAadhaar, isValidAadhaar, aadhaarLast4, maskAadhaarLast4, redactAadhaarLike } from '@/lib/india/aadhaar'
 import { AADHAAR_DECLINE_REASONS, ABHA_UNAVAILABLE_REASONS } from '@/lib/india/reference'
 import { AADHAAR_MASKED_READ_ROLES } from '@/lib/role-policy'
 import type { AadhaarInput } from '@/lib/validation/patient-registration'
@@ -13,6 +13,9 @@ import type { AadhaarInput } from '@/lib/validation/patient-registration'
 // reason codes only -- never an Aadhaar or ABHA value.
 
 export type NewPatientAadhaarRow = typeof patientAadhaar.$inferInsert
+
+const AADHAAR_DECLINE_CODES: readonly string[] = AADHAAR_DECLINE_REASONS.map((r) => r.code)
+const ABHA_UNAVAILABLE_CODES: readonly string[] = ABHA_UNAVAILABLE_REASONS.map((r) => r.code)
 
 export function buildAadhaarRow(patientId: string, input: AadhaarInput, recordedByName: string, now: Date): NewPatientAadhaarRow {
   if (input.status === 'provided') {
@@ -33,6 +36,12 @@ export function buildAadhaarRow(patientId: string, input: AadhaarInput, recorded
       updatedAt: now,
     }
   }
+  // Same runtime guard for a decline: known reason code, and a non-empty note
+  // for 'other'. The note is redacted as defence in depth (the zod schema
+  // already rejects a note holding an Aadhaar number).
+  if (!(AADHAAR_DECLINE_CODES as readonly unknown[]).includes(input.reason)) throw new Error('Invalid Aadhaar decline reason')
+  const declineNote = typeof input.note === 'string' && input.note.trim() !== '' ? redactAadhaarLike(input.note.trim()) : null
+  if (input.reason === 'other' && declineNote === null) throw new Error('A note is required when the reason is other')
   return {
     patientId,
     aadhaarEncrypted: null,
@@ -40,7 +49,7 @@ export function buildAadhaarRow(patientId: string, input: AadhaarInput, recorded
     consentGiven: false,
     consentRecordedAt: null,
     declineReason: input.reason,
-    declineNote: input.note ?? null,
+    declineNote,
     recordedByName,
     updatedAt: now,
   }
@@ -81,12 +90,12 @@ export interface AadhaarView {
   declineReason: string | null
 }
 
-// What a viewer may see. masked (`XXXX XXXX 1234`) only for
-// AADHAAR_MASKED_READ_ROLES and only when on file; every other role (and any
-// unknown role) gets the status alone. The decline reason is a code, not
-// Aadhaar data, and is shown with the Declined status.
+// What a viewer may see. Only AADHAAR_MASKED_READ_ROLES get detail: masked
+// (`XXXX XXXX 1234`) when on file, the decline reason code when declined.
+// Every other role (and any unknown role, allowlist) gets the status alone.
 export function toAadhaarView(summary: AadhaarSummary, role: Role): AadhaarView {
-  const masked = summary.status === 'on_file' && AADHAAR_MASKED_READ_ROLES.includes(role) && summary.last4 !== null && /^\d{4}$/.test(summary.last4)
+  if (!AADHAAR_MASKED_READ_ROLES.includes(role)) return { status: summary.status, masked: null, declineReason: null }
+  const masked = summary.status === 'on_file' && summary.last4 !== null && /^\d{4}$/.test(summary.last4)
     ? maskAadhaarLast4(summary.last4)
     : null
   return {
@@ -106,9 +115,6 @@ export interface IdentitySnapshot {
 }
 
 export interface IdentityAuditEntry { action: string; details: string | null }
-
-const AADHAAR_DECLINE_CODES: readonly string[] = AADHAAR_DECLINE_REASONS.map((r) => r.code)
-const ABHA_UNAVAILABLE_CODES: readonly string[] = ABHA_UNAVAILABLE_REASONS.map((r) => r.code)
 
 // Only a known reason code ever reaches audit details.
 function reasonDetails(code: string | null, known: readonly string[]): string {

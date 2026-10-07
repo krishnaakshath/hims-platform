@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { normalizeAadhaar, isValidAadhaar } from '@/lib/india/aadhaar'
+import { normalizeAadhaar, isValidAadhaar, containsAadhaarLike } from '@/lib/india/aadhaar'
 import { normalizeAbhaNumber, isValidAbhaNumber, normalizeAbhaAddress, isValidAbhaAddress } from '@/lib/india/abha'
 import {
   isIndianStateCode, isValidPinCode, KYC_DOC_TYPES, AADHAAR_DECLINE_REASONS, ABHA_UNAVAILABLE_REASONS,
@@ -13,7 +13,9 @@ import { todayIsoIn, ageOnDate } from '@/lib/india-time'
 // enforced here.
 const codes = <T extends readonly { code: string }[]>(list: T) => list.map((x) => x.code) as [T[number]['code'], ...T[number]['code'][]]
 
-const note = z.string().trim().min(1).max(500)
+// Free-text notes (Aadhaar decline, ABHA unavailable) must never hold an
+// Aadhaar number. Fixed message: never echo the submitted text.
+const note = z.string().trim().min(1).max(500).refine((v) => !containsAadhaarLike(v), 'Do not enter an Aadhaar number in the note')
 
 export const aadhaarInputSchema = z.discriminatedUnion('status', [
   z.object({

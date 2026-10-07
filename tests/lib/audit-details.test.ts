@@ -23,7 +23,7 @@ describe('logAudit details', () => {
   })
 
   it('redacts an Aadhaar-shaped number from action and details (defence in depth)', async () => {
-    for (const form of ['234567890124', '2345 6789 0124', '2345-6789-0124']) {
+    for (const form of ['234567890124', '2345 6789 0124', '2345-6789-0124', '2345.6789.0124', '2345  6789  0124', '2345/6789/0124', '2345 - 6789 . 0124']) {
       await logAudit(session, `looked up ${form}`, 'P', `number=${form};`)
       const v = valuesSpy.mock.lastCall![0]
       expect(JSON.stringify(v)).not.toMatch(/2345|6789/)
@@ -32,6 +32,8 @@ describe('logAudit details', () => {
     }
   })
 
+  // Known false positive (documented): any Verhoeff-valid 12-digit run starting
+  // 2-9 is redacted even if it is not an Aadhaar, e.g. some +91 phone numbers.
   it('leaves non-Aadhaar digit runs alone (checksum-invalid, wrong length, leading 0/1)', async () => {
     await logAudit(session, 'invoice 234567890125 and 12345678901234 and 123456789012', 'P', 'TEST-SP1-1')
     const v = valuesSpy.mock.lastCall![0]
