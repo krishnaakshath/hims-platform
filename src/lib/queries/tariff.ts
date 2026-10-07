@@ -108,10 +108,23 @@ async function rateById(e: Exec, id: number): Promise<RateRow | null> {
   return row ?? null
 }
 
-/** Serialises rate writes per service (createRate / reviseRate) so the app overlap check is reliable. */
+/**
+ * Serialises writes per service (rates, package items) so the app overlap check is reliable.
+ * Lock order everywhere: service row(s) first, ascending id, then rate rows.
+ */
 async function lockService(tx: Tx, serviceId: number): Promise<void> {
   const [row] = await tx.select({ id: serviceCatalog.id }).from(serviceCatalog).where(eq(serviceCatalog.id, serviceId)).for('update')
   if (!row) throw new Error('Service not found')
+}
+
+/**
+ * Lock several services in one statement, in ascending id order, so two multi-service writers
+ * (or an import and a single-service write) cannot deadlock. Missing ids are left to the FK.
+ */
+async function lockServices(tx: Tx, serviceIds: number[]): Promise<void> {
+  const ids = [...new Set(serviceIds)]
+  if (ids.length === 0) return
+  await tx.select({ id: serviceCatalog.id }).from(serviceCatalog).where(inArray(serviceCatalog.id, ids)).orderBy(asc(serviceCatalog.id)).for('update')
 }
 
 async function liveRates(e: Exec, serviceId: number): Promise<TariffRateRow[]> {
@@ -278,8 +291,19 @@ export async function reviseRate(
   })
 }
 
+/**
+ * Set (or move) a version's end date. The overlap check runs here, under the service lock, so a
+ * concurrent create/revise cannot slip a version in between the check and the update.
+ */
 export async function endRate(id: number, validTo: string, audit?: TariffAudit): Promise<RateRow | null> {
   return inTx(audit, async (tx) => {
+    const [peek] = await tx.select({ serviceId: tariffRates.serviceId }).from(tariffRates).where(eq(tariffRates.id, id))
+    if (!peek) return null
+    await lockService(tx, peek.serviceId)
+    const [current] = await tx.select().from(tariffRates).where(eq(tariffRates.id, id)).for('update')
+    const others = (await liveRates(tx, current.serviceId)).filter((r) => r.id !== id).map(toDatedRate)
+    const conflict = findOverlap({ ...toDatedRate(current), validTo }, others)
+    if (conflict) throw new TariffOverlapError(conflict.id ?? null)
     const [row] = await tx.update(tariffRates).set({ validTo }).where(eq(tariffRates.id, id)).returning({ id: tariffRates.id })
     return row ? rateById(tx, row.id) : null
   })
@@ -361,6 +385,7 @@ export async function listPackageItems(packageServiceId: number): Promise<{ item
 /** Replace a package's whole item list in one transaction (delete + insert). */
 export async function replacePackageItems(packageServiceId: number, items: PackageItemsInput['items'], audit?: TariffAudit): Promise<void> {
   await inTx(audit, async (tx) => {
+    await lockService(tx, packageServiceId)
     await tx.delete(servicePackageItems).where(eq(servicePackageItems.packageServiceId, packageServiceId))
     if (items.length > 0) {
       await tx.insert(servicePackageItems).values(items.map((it) => ({ packageServiceId, itemServiceId: it.serviceId, quantity: it.quantity })))
@@ -414,6 +439,8 @@ const RATE_INSERT_CHUNK = 1000
 export async function commitRateImport(rows: RateCreateInput[], byName: string, audit?: TariffAudit): Promise<number> {
   if (rows.length === 0) return 0
   return inTx(audit, async (tx) => {
+    // Same lock as createRate/reviseRate, taken in ascending id order before any insert.
+    await lockServices(tx, rows.map((r) => r.serviceId))
     const values = rows.map((r) => ({
       serviceId: r.serviceId, scope: r.scope, departmentId: r.departmentId ?? null, payerId: r.payerId ?? null,
       roomCategoryId: r.roomCategoryId ?? null, ward: wardOrNull(r.ward), amountPaise: r.amountPaise,

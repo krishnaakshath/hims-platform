@@ -48,8 +48,20 @@ export function parseId(raw: string): number | null {
   return id > 0 && id <= 2_147_483_647 ? id : null
 }
 
-/** Generic 500: logs only the pg error code and constraint, never the message or input. */
+export const RETRY_MESSAGE = 'Another change was being saved at the same time; please try again'
+
+/** Postgres deadlock (40P01) or serialization failure (40001): nothing was written; a retry can succeed. */
+export function isRetryableConflict(err: unknown): boolean {
+  const code = pgErrorCode(err)
+  return code === '40P01' || code === '40001'
+}
+
+/**
+ * Fallback for an unexpected error: a 409 asking to try again for a deadlock/serialization failure,
+ * otherwise a generic 500. Logs only the pg error code and constraint, never the message or input.
+ */
 export function serverError(tag: string, err: unknown, message: string) {
+  if (isRetryableConflict(err)) return conflict(RETRY_MESSAGE)
   console.error(`[tariff] ${tag} failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
   return NextResponse.json({ error: message }, { status: 500 })
 }

@@ -306,6 +306,13 @@ describe('POST /api/tariff/import: validate and commit', () => {
     expect(await res.json()).toEqual(conflict)
   })
 
+  it.each([['deadlock', '40P01'], ['serialization failure', '40001']])('a commit-time %s is a 409 asking to try again', async (_l, code) => {
+    vi.mocked(commitRateImport).mockRejectedValue(pgErr(code))
+    const res = await postTariffImport(post({ kind: 'rates', csv: goodRates, commit: true }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'Another change was being saved at the same time; please try again' })
+  })
+
   it('any other commit failure is a generic 500 that logs no row data', async () => {
     vi.mocked(commitRateImport).mockRejectedValue(pgErr('57P01'))
     const res = await postTariffImport(post({ kind: 'rates', csv: goodRates, commit: true }))

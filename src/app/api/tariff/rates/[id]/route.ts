@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
-import { deactivateRate, endRate, getRate, listRatesForService, toDatedRate } from '@/lib/queries/tariff'
-import { findOverlap } from '@/lib/tariff/versions'
+import { deactivateRate, endRate, getRate } from '@/lib/queries/tariff'
 import { ratePatchSchema } from '@/lib/tariff/validation'
 import { pgErrorCode } from '@/lib/db-errors'
 import {
@@ -34,10 +33,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     if (current.deactivatedAt !== null) return badRequest('The rate is deactivated')
     if (patch.validTo < current.validFrom) return badRequest('Valid-to cannot be before valid-from')
-    // App-level check (the DB exclusion is the backstop): moving the end later can run into the next version.
-    const others = (await listRatesForService(current.serviceId)).map(toDatedRate)
-    if (findOverlap({ ...toDatedRate(current), validTo: patch.validTo }, others)) return conflict(OVERLAP_MESSAGE)
-
+    // endRate checks overlap with later versions under the service lock (TariffOverlapError -> 409);
+    // the DB exclusion is the backstop.
     const row = await endRate(id, patch.validTo, { session, action: `tariff: ended rate #${id}` })
     return row ? NextResponse.json(row) : notFound('Rate not found')
   } catch (err) {

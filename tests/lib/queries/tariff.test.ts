@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { auditLog, departments, payers, roomCategories, serviceCatalog, servicePackageItems, tariffRates } from '@/db/schema'
@@ -6,9 +6,16 @@ import { isExclusionViolation } from '@/lib/db-errors'
 import { resolvePrice } from '@/lib/tariff/resolve'
 import type { Session } from '@/lib/auth'
 import {
-  TariffOverlapError, commitRateImport, countServices, commitServiceImport, createRate, getRate, getServiceByCode, listPackageItems,
+  TariffOverlapError, commitRateImport, countServices, endRate, commitServiceImport, createRate, getRate, getServiceByCode, listPackageItems,
   listRatesForService, listServices, listServicesWithCurrentPrices, loadPricingContext, replacePackageItems, reviseRate,
 } from '@/lib/queries/tariff'
+
+// Real logAudit by default; a test can make the audit insert itself fail.
+vi.mock('@/lib/audit', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/audit')>('@/lib/audit')
+  return { ...actual, logAudit: vi.fn(actual.logAudit) }
+})
+import { logAudit } from '@/lib/audit'
 
 const RUN = `${Date.now()}`
 const PROBE_USER = `TEST_SP2_Q7-${RUN}`
@@ -239,5 +246,83 @@ describe.skipIf(!process.env.DATABASE_URL)('tariff query layer (DB)', () => {
     expect((await listServices({ departmentId: deptId, limit: 2 })).map((s) => s.id)).toEqual([serviceId, b])
     expect((await listServices({ departmentId: deptId, limit: 2, offset: 2 })).map((s) => s.id)).toEqual([c])
     expect((await listServicesWithCurrentPrices({ departmentId: deptId, limit: 2, offset: 2 }, '2026-05-01')).map((s) => s.id)).toEqual([c])
+  })
+
+  // ---- final-review fix wave: audit failure, locking ----
+
+  it('when the audit insert itself fails, createRate, reviseRate and commitRateImport write nothing', async () => {
+    const { serviceId, deptId } = await fixtures()
+    const audit = { session: SESSION, action: 'tariff: probe' }
+    const auditDown = () => vi.mocked(logAudit).mockRejectedValueOnce(new Error('audit insert failed'))
+
+    auditDown()
+    await expect(createRate({ serviceId, scope: 'base', amountPaise: 10000, validFrom: '2026-01-01' }, 'tester', audit)).rejects.toThrow('audit insert failed')
+    expect(await listRatesForService(serviceId)).toEqual([])
+
+    const cur = await createRate({ serviceId, scope: 'base', amountPaise: 10000, validFrom: '2026-01-01' }, 'tester')
+    auditDown()
+    await expect(reviseRate(cur.id, { amountPaise: 15000, effectiveFrom: '2026-04-01' }, 'reviser', audit)).rejects.toThrow('audit insert failed')
+    expect((await listRatesForService(serviceId)).map((r) => [r.id, r.validTo])).toEqual([[cur.id, null]])
+
+    auditDown()
+    await expect(commitRateImport([
+      { serviceId, scope: 'payer', payerId: await makePayer('TEST_SP2_Q7_PA'), amountPaise: 1, validFrom: '2026-01-01' },
+      { serviceId, scope: 'department', departmentId: deptId, amountPaise: 2, validFrom: '2026-01-01' },
+    ], 'importer', audit)).rejects.toThrow('audit insert failed')
+    expect(await listRatesForService(serviceId)).toHaveLength(1)
+    expect(await probeAudit()).toEqual([])
+  })
+
+  it('endRate checks overlap itself, under the service lock: running into the next version is a TariffOverlapError', async () => {
+    const { serviceId } = await fixtures()
+    const first = await createRate({ serviceId, scope: 'base', amountPaise: 10000, validFrom: '2026-01-01', validTo: '2026-03-31' }, 'tester')
+    await createRate({ serviceId, scope: 'base', amountPaise: 12000, validFrom: '2026-04-01' }, 'tester')
+    const err = await errorOf(endRate(first.id, '2026-04-15', { session: SESSION, action: 'tariff: ended' }))
+    expect(err).toBeInstanceOf(TariffOverlapError)
+    expect((await getRate(first.id))?.validTo).toBe('2026-03-31')
+    expect(await probeAudit()).toEqual([])
+    expect((await endRate(first.id, '2026-02-28'))?.validTo).toBe('2026-02-28')
+    expect(await endRate(2_000_000_000, '2026-02-28')).toBeNull()
+  })
+
+  /** Runs `run` while another transaction holds the service row lock; reports whether it had to wait. */
+  async function whileServiceLocked<T>(serviceId: number, run: () => Promise<T>): Promise<{ waited: boolean; result: T }> {
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    let markLocked!: () => void
+    const locked = new Promise<void>((r) => { markLocked = r })
+    const holder = getDb().transaction(async (tx) => {
+      await tx.select({ id: serviceCatalog.id }).from(serviceCatalog).where(eq(serviceCatalog.id, serviceId)).for('update')
+      markLocked()
+      await gate
+    })
+    await locked
+    let settled = false
+    const pending = run().finally(() => { settled = true })
+    await new Promise((r) => setTimeout(r, 300))
+    const waited = !settled
+    release()
+    await holder
+    return { waited, result: await pending }
+  }
+
+  it('commitRateImport, endRate and replacePackageItems take the service lock (same order as createRate)', async () => {
+    const { deptId, serviceId } = await fixtures()
+    const s2 = await makeService('TEST_SP2_Q7_S2', deptId)
+    const imp = await whileServiceLocked(s2, () => commitRateImport([
+      { serviceId, scope: 'base', amountPaise: 1, validFrom: '2026-01-01', validTo: '2026-01-31' },
+      { serviceId: s2, scope: 'base', amountPaise: 2, validFrom: '2026-01-01' },
+    ], 'importer'))
+    expect(imp).toEqual({ waited: true, result: 2 })
+
+    const [rate] = await listRatesForService(serviceId)
+    const end = await whileServiceLocked(serviceId, () => endRate(rate.id, '2026-01-15'))
+    expect(end.waited).toBe(true)
+    expect(end.result?.validTo).toBe('2026-01-15')
+
+    const pkg = await makeService('TEST_SP2_Q7_PKG', deptId, 'package')
+    const items = await whileServiceLocked(pkg, () => replacePackageItems(pkg, [{ serviceId, quantity: 1 }]))
+    expect(items.waited).toBe(true)
+    expect((await listPackageItems(pkg)).map((i) => i.itemServiceId)).toEqual([serviceId])
   })
 })

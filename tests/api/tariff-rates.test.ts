@@ -240,13 +240,24 @@ describe('PATCH /api/tariff/rates/[id]', () => {
     expect(endRate).toHaveBeenCalledTimes(1)
   })
 
-  it('409s an end date that would overlap a later version, before writing', async () => {
+  it('409s an end date that would overlap a later version (checked inside endRate, under the service lock)', async () => {
     vi.mocked(getRate).mockResolvedValue(rate({ validTo: '2026-03-31' }) as never)
-    vi.mocked(listRatesForService).mockResolvedValue([rate({ id: 9, validFrom: '2026-04-01' })] as never)
+    vi.mocked(endRate).mockRejectedValue(new TariffOverlapError(9))
     const res = await patch({ validTo: '2026-12-31' })
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual(OVERLAP)
-    expect(endRate).not.toHaveBeenCalled()
+    // The route no longer runs its own unlocked pre-check.
+    expect(listRatesForService).not.toHaveBeenCalled()
+  })
+
+  it.each([['deadlock', '40P01'], ['serialization failure', '40001']])('maps a %s to a 409 asking to try again', async (_l, code) => {
+    vi.mocked(getRate).mockResolvedValue(rate() as never)
+    vi.mocked(endRate).mockRejectedValue(Object.assign(new Error('x'), { cause: { code } }))
+    const res = await patch({ validTo: '2026-12-31' })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'Another change was being saved at the same time; please try again' })
+    vi.mocked(createRate).mockRejectedValue(Object.assign(new Error('x'), { cause: { code } }))
+    expect((await POST(req(validRate()))).status).toBe(409)
   })
 
   it('maps the DB exclusion on end to 409, refuses a deactivated rate, 404s and 400s', async () => {
