@@ -3,6 +3,7 @@ import { eq, desc, inArray } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { getDb } from '@/db/client'
 import { patients, allergies, diagnoses, auditLog } from '@/db/schema'
+import { encounterProcedures, encounters, providers } from '@/db/schema' // SP6
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | null = 'crc'
 vi.mock('@/lib/auth', () => ({
@@ -21,6 +22,10 @@ import { GET as getMedicationDispense } from '@/app/api/patients/[anonId]/fhir/M
 import { GET as getObservation } from '@/app/api/patients/[anonId]/fhir/Observation/route'
 import { GET as getBundle } from '@/app/api/patients/[anonId]/fhir/Bundle/route'
 import { GET as getCcda } from '@/app/api/patients/[anonId]/ccda/route'
+// SP6
+import { GET as getProcedure } from '@/app/api/patients/[anonId]/fhir/Procedure/route'
+import { GET as getEncounter } from '@/app/api/patients/[anonId]/fhir/Encounter/route'
+// end SP6
 
 const ROUTES = [
   { name: 'Patient', handler: getPatient, auditAction: 'exported FHIR Patient resource' },
@@ -31,6 +36,9 @@ const ROUTES = [
   { name: 'Observation', handler: getObservation, auditAction: 'exported FHIR Observation bundle' },
   { name: 'Bundle', handler: getBundle, auditAction: 'exported full FHIR Bundle' },
   { name: 'CCDA', handler: getCcda, auditAction: 'exported C-CDA document' },
+  // SP6
+  { name: 'Procedure', handler: getProcedure, auditAction: 'exported FHIR Procedure bundle' },
+  { name: 'Encounter', handler: getEncounter, auditAction: 'exported FHIR Encounter bundle' },
 ] as const
 
 const EMPTY_BUNDLE_ROUTES = [
@@ -39,6 +47,8 @@ const EMPTY_BUNDLE_ROUTES = [
   { name: 'MedicationRequest', handler: getMedicationRequest },
   { name: 'MedicationDispense', handler: getMedicationDispense },
   { name: 'Observation', handler: getObservation },
+  { name: 'Procedure', handler: getProcedure }, // SP6
+  { name: 'Encounter', handler: getEncounter }, // SP6
 ] as const
 
 function req() {
@@ -130,7 +140,7 @@ describe('FHIR export routes -- session gating', () => {
     }
   })
 
-  it('403s frontdesk on all 8 routes (FHIR/C-CDA is CLINICAL_ROLES only)', async () => {
+  it('403s frontdesk, coder and the other non-clinical roles on all 10 routes (FHIR/C-CDA is CLINICAL_ROLES only)', async () => {
     for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] as const) {
       sessionRole = role
       for (const { name, handler } of ROUTES) {
@@ -301,3 +311,49 @@ describe('spec §5 -- every export route audit-logs its own action string', () =
     }
   })
 })
+
+// SP6 Task 15: the Procedure and Encounter routes return their resources for a clinical role.
+describe('FHIR export routes -- Procedure and Encounter (SP6)', () => {
+  let providerId = 0
+  let encounterId = 0
+  beforeAll(async () => {
+    const db = getDb()
+    const [p] = await db.insert(providers).values({ name: 'TEST_SP6 Dr Route', specialty: 'Test', colorTag: '#000000' }).returning()
+    providerId = p.id
+    const [e] = await db.insert(encounters).values({
+      patientId: 'RD-FHIR-ROUTES-A', encounterType: 'opd', status: 'completed', encounterDate: '2099-03-01', providerId,
+      checkedInByName: 'TEST_SP6', completedAt: new Date('2099-03-01T08:00:00Z'),
+    }).returning()
+    encounterId = e.id
+    await db.insert(encounterProcedures).values({
+      encounterId, patientId: 'RD-FHIR-ROUTES-A', description: 'Dressing-RouteA', performedOn: '2099-03-01', performedByProviderId: providerId, createdByName: 'TEST_SP6',
+    })
+  })
+  afterAll(async () => {
+    const db = getDb()
+    await db.delete(encounterProcedures).where(eq(encounterProcedures.encounterId, encounterId))
+    await db.delete(encounters).where(eq(encounters.id, encounterId))
+    await db.delete(providers).where(eq(providers.id, providerId))
+  })
+
+  it('admin gets a Procedure bundle and an Encounter bundle for the patient, and B gets none of A\'s', async () => {
+    sessionRole = 'admin'
+    const proc = await (await callRoute(getProcedure, patientAId)).json()
+    expect(proc.total).toBe(1)
+    expect(proc.entry[0].resource).toMatchObject({
+      resourceType: 'Procedure', status: 'completed', subject: { reference: `Patient/${patientAId}` },
+      encounter: { reference: `Encounter/encounter-${encounterId}` }, code: { text: 'Dressing-RouteA' }, performedDateTime: '2099-03-01',
+      performer: [{ actor: { display: 'TEST_SP6 Dr Route' } }],
+    })
+    expect(proc.entry[0].resource.code).not.toHaveProperty('coding')
+    const enc = await (await callRoute(getEncounter, patientAId)).json()
+    expect(enc.entry.map((x: { resource: { id: string } }) => x.resource.id)).toEqual([`encounter-${encounterId}`])
+    expect(enc.entry[0].resource).toMatchObject({ status: 'finished', class: { code: 'AMB' } })
+    const bundle = JSON.stringify(await (await callRoute(getBundle, patientAId)).json())
+    expect(bundle).toContain(`"id":"procedure-`)
+    expect(bundle).toContain(`"id":"encounter-${encounterId}"`)
+    const procB = await (await callRoute(getProcedure, patientBId)).json()
+    expect(procB.total).toBe(0)
+  })
+})
+

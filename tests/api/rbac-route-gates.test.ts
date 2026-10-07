@@ -428,6 +428,10 @@ import { POST as postCodingQueryResponse } from '@/app/api/coding/queries/[query
 // SP6: service <-> procedure-code map
 import { GET as getServiceCodes, PUT as putServiceCodes } from '@/app/api/coding/services/[serviceId]/procedure-codes/route'
 // end SP6
+// SP6: FHIR Procedure and Encounter exports
+import { GET as getFhirProcedure } from '@/app/api/patients/[anonId]/fhir/Procedure/route'
+import { GET as getFhirEncounter } from '@/app/api/patients/[anonId]/fhir/Encounter/route'
+// end SP6
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -476,6 +480,10 @@ export const API_GATES: ApiGateCase[] = [
   fhir('MedicationRequest', getFhirMedicationRequest),
   fhir('Observation', getFhirObservation),
   fhir('Patient', getFhirPatient),
+  // SP6: same CLINICAL_ROLES gate as the other FHIR exports (the coder is denied)
+  fhir('Procedure', getFhirProcedure),
+  fhir('Encounter', getFhirEncounter),
+  // end SP6
   // POLICY.md: Identity PUT -- admin, crc, frontdesk
   {
     name: 'PUT /api/patients/[anonId]/identity',

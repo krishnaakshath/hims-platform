@@ -1,9 +1,10 @@
+// Procedure bundle (SP6 Task 15; CLINICAL_ROLES, same gate and audit pattern as the Condition route).
 import { NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { gatherPatientFhirData } from '@/lib/fhir/gather'
-import { observationsToFhir } from '@/lib/fhir/observation'
+import { proceduresToFhir } from '@/lib/fhir/procedure'
 import { buildBundle } from '@/lib/fhir/bundle'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ anonId: string }> }) {
@@ -15,11 +16,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ano
   const data = await gatherPatientFhirData(anonId)
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  await logAudit(session, 'exported FHIR Observation bundle', anonId)
-  return new NextResponse(JSON.stringify(buildBundle(observationsToFhir(data.patient.id, data.labOrderRows, data.loincBindings))), {
+  await logAudit(session, 'exported FHIR Procedure bundle', anonId)
+  return new NextResponse(JSON.stringify(buildBundle(proceduresToFhir(data.procedureRows))), {
     headers: {
       'Content-Type': 'application/fhir+json; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${anonId}-fhir-observation.json"`,
+      'Content-Disposition': `attachment; filename="${anonId}-fhir-procedure.json"`,
     },
   })
 }

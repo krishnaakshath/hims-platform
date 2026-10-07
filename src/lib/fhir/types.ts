@@ -3,5 +3,5 @@
 // this plan actually need.
 
 export interface FhirReference { reference: string }
-export interface FhirCoding { system?: string; code: string; display?: string }
+export interface FhirCoding { system?: string; version?: string; code: string; display?: string } // SP6: + version
 export interface FhirCodeableConcept { text?: string; coding?: FhirCoding[] }

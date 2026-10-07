@@ -44,6 +44,7 @@ const EXPORT_PATHS = [
   'src/lib/queries/coding-workspace.ts',
   'src/lib/queries/coding-queries.ts',
   'src/lib/queries/coding-worklist.ts',
+  'src/lib/queries/service-procedure-codes.ts',
   // end SP6
 ]
 
