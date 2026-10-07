@@ -140,6 +140,12 @@ describe('LeftNav', () => {
     }
   })
 
+  it('shows the unread-messages and pending-booking pills (Wave B P1-25)', () => {
+    render(<LeftNav role="crc" badges={{ '/messages': 4, '/booking-requests': 2 }} />)
+    expect(within(screen.getByRole('link', { name: /messages/i })).getByText('4')).toBeInTheDocument()
+    expect(within(screen.getByRole('link', { name: /booking requests/i })).getByText('2')).toBeInTheDocument()
+  })
+
   it('shows the decline pill on Assignments for frontdesk', () => {
     render(<LeftNav role="frontdesk" badges={{ '/front-desk/assignments': 2 }} />)
     expect(within(screen.getByRole('link', { name: /assignments/i })).getByText('2')).toBeInTheDocument()

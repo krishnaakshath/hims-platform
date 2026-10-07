@@ -2,8 +2,15 @@ import type { Session } from '@/lib/auth'
 import type { NavBadges } from '@/components/LeftNav'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { countPendingAssignmentsForProvider, countUnacknowledgedDeclines } from '@/lib/queries/doctor-assignments'
+import { getUnreadCountForProvider } from '@/lib/queries/messages'
+import { countPendingBookingRequests } from '@/lib/queries/booking-requests'
 
+// Each badge only for the roles whose LeftNav shows that href (and whose page
+// gate admits them); every count is an existing single count(*) query.
 const DECLINE_BADGE_ROLES: Session['role'][] = ['frontdesk', 'admin', 'crc']
+// Wave B P1-25 -- LeftNav /messages and /booking-requests roles.
+const MESSAGES_BADGE_ROLES: Session['role'][] = ['crc', 'pi', 'admin', 'pharmacy']
+const BOOKING_BADGE_ROLES: Session['role'][] = ['frontdesk', 'admin', 'crc', 'pi']
 
 export interface NavBadgesResult {
   badges: NavBadges
@@ -39,13 +46,16 @@ export async function getNavBadges(session: Session): Promise<NavBadges> {
 }
 
 async function computeNavBadges(session: Session): Promise<NavBadges> {
-  if (session.role === 'pi') {
-    const provider = await resolveDoctorQueueProvider(session)
-    if (!provider) return { '/doctor': null }
-    return { '/doctor': await countPendingAssignmentsForProvider(provider.id) }
+  const role = session.role
+  const entries: Promise<[string, number | null]>[] = []
+  if (role === 'pi') {
+    entries.push((async (): Promise<[string, number | null]> => {
+      const provider = await resolveDoctorQueueProvider(session)
+      return ['/doctor', provider ? await countPendingAssignmentsForProvider(provider.id) : null]
+    })())
   }
-  if (DECLINE_BADGE_ROLES.includes(session.role)) {
-    return { '/front-desk/assignments': await countUnacknowledgedDeclines() }
-  }
-  return {}
+  if (DECLINE_BADGE_ROLES.includes(role)) entries.push(countUnacknowledgedDeclines().then((n) => ['/front-desk/assignments', n]))
+  if (MESSAGES_BADGE_ROLES.includes(role)) entries.push(getUnreadCountForProvider().then((n) => ['/messages', n]))
+  if (BOOKING_BADGE_ROLES.includes(role)) entries.push(countPendingBookingRequests().then((n) => ['/booking-requests', n]))
+  return Object.fromEntries(await Promise.all(entries))
 }

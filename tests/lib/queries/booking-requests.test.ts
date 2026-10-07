@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { bookingRequests, appointments, patients } from '@/db/schema'
-import { createBookingRequest, confirmBookingRequest, declineBookingRequest } from '@/lib/queries/booking-requests'
+import { createBookingRequest, confirmBookingRequest, declineBookingRequest, countPendingBookingRequests } from '@/lib/queries/booking-requests'
 import { listActiveProviders } from '@/lib/queries/providers'
 
 const createdIds: number[] = []
@@ -162,5 +162,20 @@ describe('declineBookingRequest', () => {
 
     const second = await declineBookingRequest(request.id, { reason: 'Second decline', reviewedByName: 'Front Desk Staff' })
     expect(second.ok).toBe(false)
+  })
+})
+
+// Wave B P1-25: nav badge count.
+describe('countPendingBookingRequests', () => {
+  it('counts pending requests only', async () => {
+    const before = await countPendingBookingRequests()
+    const row = await createBookingRequest({
+      requesterName: 'Badge Count Test', requesterDob: '1990-01-01', requesterEmail: 'badge@example.com', requesterPhone: null,
+      preferredProviderId: null, preferredDateRangeStart: '2026-11-01', preferredDateRangeEnd: '2026-11-10', reason: 'Badge count',
+    })
+    createdIds.push(row.id)
+    expect(await countPendingBookingRequests()).toBe(before + 1)
+    await declineBookingRequest(row.id, { reason: 'test', reviewedByName: 'T' })
+    expect(await countPendingBookingRequests()).toBe(before)
   })
 })

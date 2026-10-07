@@ -1,6 +1,6 @@
 import { getDb } from '@/db/client'
 import { bookingRequests, appointments } from '@/db/schema'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { hasSchedulingConflict, lockProviderSchedule } from '@/lib/queries/appointments'
 
 export type BookingRequestRow = typeof bookingRequests.$inferSelect
@@ -23,6 +23,15 @@ export async function createBookingRequest(input: CreateBookingRequestInput) {
 
 export async function listBookingRequests() {
   return getDb().select().from(bookingRequests).orderBy(desc(bookingRequests.submittedAt))
+}
+
+/** Pending public booking requests -- the /booking-requests nav badge (Wave B P1-25). */
+export async function countPendingBookingRequests(): Promise<number> {
+  const [row] = await getDb()
+    .select({ count: sql<number>`count(*)::int` })
+    .from(bookingRequests)
+    .where(eq(bookingRequests.status, 'pending'))
+  return row?.count ?? 0
 }
 
 export async function getBookingRequestById(id: number) {
