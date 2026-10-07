@@ -576,6 +576,31 @@ export const departments = pgTable('departments', {
 
 export type Department = typeof departments.$inferSelect
 
+// SP2 service/charge master (scripts/migrations/2026-10-07-sp2-service-catalog.sql).
+export const serviceCategoryEnum = pgEnum('service_category', [
+  'consultation', 'procedure', 'investigation_lab', 'investigation_imaging', 'room_rent',
+  'nursing', 'pharmacy', 'consumable', 'package', 'other',
+])
+
+export const serviceCatalog = pgTable('service_catalog', {
+  id: serial('id').primaryKey(),
+  code: text('code').notNull().unique(),          // ^[A-Z][A-Z0-9_]{1,15}$
+  name: text('name').notNull(),
+  departmentId: integer('department_id').notNull().references(() => departments.id),
+  category: serviceCategoryEnum('category').notNull(),
+  hsnSac: text('hsn_sac').notNull(),
+  // GST in basis points (1800 = 18%); CGST/SGST/IGST split is SP4.
+  gstRateBp: integer('gst_rate_bp').default(0).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  check('service_catalog_gst_rate_bp_allowed', sql`${t.gstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`),
+  index('service_catalog_department_idx').on(t.departmentId),
+])
+
+export type ServiceCatalogRow = typeof serviceCatalog.$inferSelect
+
 export const appointments = pgTable('appointments', {
   id: serial('id').primaryKey(),
   patientId: text('patient_id').notNull().references(() => patients.id),
@@ -637,6 +662,17 @@ export const bookingRequests = pgTable('booking_requests', {
 
 export const roomStatusEnum = pgEnum('room_status', ['available', 'occupied', 'dirty', 'blocked'])
 
+// SP2 tariff master (scripts/migrations/2026-10-07-sp2-service-catalog.sql).
+export const roomCategories = pgTable('room_categories', {
+  id: serial('id').primaryKey(),
+  code: text('code').notNull().unique(),          // ^[A-Z][A-Z0-9_]{1,15}$
+  name: text('name').notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+export type RoomCategory = typeof roomCategories.$inferSelect
+
 export const rooms = pgTable('rooms', {
   id: serial('id').primaryKey(),
   ward: text('ward').notNull(),
@@ -645,6 +681,8 @@ export const rooms = pgTable('rooms', {
   status: roomStatusEnum('status').default('available').notNull(),
   blockedReason: text('blocked_reason'),
   occupiedByPatientId: text('occupied_by_patient_id').references(() => patients.id),
+  // SP2: tariff room category (nullable; rooms predate categories).
+  roomCategoryId: integer('room_category_id').references(() => roomCategories.id),
 })
 
 export const doctorAssignmentVisitTypeEnum = pgEnum('doctor_assignment_visit_type', ['inpatient', 'outpatient'])
