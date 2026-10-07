@@ -27,4 +27,5 @@ export const PROPS = {
   todayIso: '2026-10-20',
   can: { plan: false, book: false, checkIn: false, startOrComplete: false, cancelVisit: false },
   isPi: false,
+  selfProviderId: null as number | null,
 }

@@ -32,7 +32,9 @@ export function BookFollowUpModal({
   const router = useRouter()
   const uid = useId()
   const rescheduling = followUp.appointment?.status === 'scheduled'
-  const [providerId, setProviderId] = useState(String(rescheduling ? followUp.appointment!.providerId : followUp.prescribedBy.providerId))
+  // Never preselect a doctor who is not in the active list: the server would answer 404.
+  const preferred = rescheduling ? followUp.appointment!.providerId : followUp.prescribedBy.providerId
+  const [providerId, setProviderId] = useState(providers.some((p) => p.id === preferred) ? String(preferred) : '')
   const [date, setDate] = useState(followUp.dueDate > todayIso ? followUp.dueDate : todayIso)
   const [time, setTime] = useState('09:00')
   const [duration, setDuration] = useState(15)
@@ -44,7 +46,7 @@ export function BookFollowUpModal({
 
   async function submit() {
     setError(null)
-    if (!providerId) { setError('Choose a doctor.'); return }
+    if (!providerId || !providers.some((p) => String(p.id) === providerId)) { setError('Choose a doctor.'); return }
     if (!date || !time) { setError('Choose a date and time.'); return }
     if (date < todayIso) { setError('The appointment cannot be in the past.'); return }
     const end = addMinutes(time, duration)
@@ -71,6 +73,7 @@ export function BookFollowUpModal({
           <div>
             <label htmlFor={id('doctor')} className={LABEL}>Doctor</label>
             <select id={id('doctor')} value={providerId} onChange={(e) => setProviderId(e.target.value)} className={FIELD}>
+              {providerId === '' && <option value="">Select doctor</option>}
               {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>

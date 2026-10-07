@@ -129,7 +129,10 @@ export function FollowUpPlanModal({
     onClose()
   }
 
-  const err = (k: string) => errors[k] && <p className="mt-1 text-xs text-destructive">{errors[k]}</p>
+  // Field errors are tied to their input (aria-invalid + aria-describedby) and announced (role=alert).
+  const errId = (k: string) => id(`${k}-err`)
+  const err = (k: string) => errors[k] && <p id={errId(k)} role="alert" className="mt-1 text-xs text-destructive">{errors[k]}</p>
+  const a11y = (k: string) => (errors[k] ? { 'aria-invalid': true as const, 'aria-describedby': errId(k) } : {})
 
   if (outsideNotice) {
     return (
@@ -157,7 +160,7 @@ export function FollowUpPlanModal({
                 <input type="radio" name={id('kind')} checked={timingKind === 'interval'} onChange={() => setTimingKind('interval')} />
                 In
               </label>
-              <input aria-label="Number" type="number" min={1} max={365} value={value} onChange={(e) => setValue(e.target.value)} disabled={timingKind !== 'interval'} className={`${FIELD} !w-20`} />
+              <input aria-label="Number" type="number" min={1} max={365} value={value} onChange={(e) => setValue(e.target.value)} disabled={timingKind !== 'interval'} className={`${FIELD} !w-20`} {...a11y('timing')} />
               <select aria-label="Unit" value={unit} onChange={(e) => setUnit(e.target.value as IntervalUnit)} disabled={timingKind !== 'interval'} className={`${FIELD} !w-28`}>
                 {INTERVAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
               </select>
@@ -167,7 +170,7 @@ export function FollowUpPlanModal({
                 <input type="radio" name={id('kind')} checked={timingKind === 'date'} onChange={() => setTimingKind('date')} />
                 On date
               </label>
-              <input aria-label="Follow-up date" type="date" min={todayIso} value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={timingKind !== 'date'} className={`${FIELD} !w-44`} />
+              <input aria-label="Follow-up date" type="date" min={todayIso} value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={timingKind !== 'date'} className={`${FIELD} !w-44`} {...a11y('timing')} />
             </div>
             {initial && <p className="text-xs text-muted-foreground">Currently due {formatIsoDate(initial.dueDate)}.</p>}
             {err('timing')}
@@ -175,29 +178,29 @@ export function FollowUpPlanModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor={id('before')} className={LABEL}>Window: days before</label>
-              <input id={id('before')} type="number" min={0} max={30} value={before} onChange={(e) => setBefore(e.target.value)} className={FIELD} />
+              <input id={id('before')} type="number" min={0} max={30} value={before} onChange={(e) => setBefore(e.target.value)} className={FIELD} {...a11y('before')} />
               {err('before')}
             </div>
             <div>
               <label htmlFor={id('after')} className={LABEL}>Window: days after</label>
-              <input id={id('after')} type="number" min={0} max={60} value={after} onChange={(e) => setAfter(e.target.value)} className={FIELD} />
+              <input id={id('after')} type="number" min={0} max={60} value={after} onChange={(e) => setAfter(e.target.value)} className={FIELD} {...a11y('after')} />
               {err('after')}
             </div>
           </div>
           <div>
-            <label htmlFor={id('reason')} className={LABEL}>Reason (shown to front desk and patient reminders)</label>
-            <input id={id('reason')} value={reason} maxLength={VISIT_REASON_MAX_LENGTH} onChange={(e) => setReason(e.target.value)} className={FIELD} required />
+            <label htmlFor={id('reason')} className={LABEL}>Reason (shown to front desk and in patient reminders)</label>
+            <input id={id('reason')} value={reason} maxLength={VISIT_REASON_MAX_LENGTH} onChange={(e) => setReason(e.target.value)} className={FIELD} required {...a11y('reason')} />
             {err('reason')}
           </div>
           <div>
-            <label htmlFor={id('notes')} className={LABEL}>Clinical plan notes (doctors and admin only)</label>
-            <textarea id={id('notes')} value={planNotes} maxLength={2000} rows={3} onChange={(e) => setPlanNotes(e.target.value)} className={FIELD} />
+            <label htmlFor={id('notes')} className={LABEL}>Clinical plan notes (visible to doctors, admin and CRC)</label>
+            <textarea id={id('notes')} value={planNotes} maxLength={2000} rows={3} onChange={(e) => setPlanNotes(e.target.value)} className={FIELD} {...a11y('planNotes')} />
             {err('planNotes')}
           </div>
           {!isPi && (
             <div>
               <label htmlFor={id('presc')} className={LABEL}>Prescribing doctor</label>
-              <select id={id('presc')} value={prescriber} onChange={(e) => setPrescriber(e.target.value)} className={FIELD}>
+              <select id={id('presc')} value={prescriber} onChange={(e) => setPrescriber(e.target.value)} className={FIELD} {...a11y('prescriber')}>
                 <option value="">Select doctor</option>
                 {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
@@ -207,7 +210,11 @@ export function FollowUpPlanModal({
           <div>
             <label htmlFor={id('dept')} className={LABEL}>Department</label>
             <select id={id('dept')} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className={FIELD}>
-              <option value="">Doctor&apos;s department</option>
+              {/* In edit mode a set department stays set: there is no blank choice that would clear it. */}
+              {!initial?.department && <option value="">Doctor&apos;s department</option>}
+              {initial?.department && !departments.some((d) => d.id === initial.department!.id) && (
+                <option value={initial.department.id}>{initial.department.name}</option>
+              )}
               {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </div>

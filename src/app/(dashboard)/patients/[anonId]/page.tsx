@@ -16,7 +16,7 @@ import { PatientProfilePanel } from '@/components/patient-profile/PatientProfile
 import { CopyUhidButton } from '@/components/patient-profile/CopyUhidButton'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { FollowUpPanel } from '@/components/follow-ups/FollowUpPanel'
-import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
+import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
 import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
 import { todayIsoIn } from '@/lib/india-time'
 import { toAadhaarView } from '@/lib/patient-identity'
@@ -24,6 +24,7 @@ import { logAudit } from '@/lib/audit'
 import { getPatientDetail } from '@/lib/queries/patients'
 import { listAdmissionsForPatient } from '@/lib/queries/admissions'
 import { listAvailableRooms } from '@/lib/queries/rooms'
+import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { listFollowUpsForPatient } from '@/lib/queries/follow-ups'
 import { listEncountersForPatient } from '@/lib/queries/encounters'
 import { listActiveProviders } from '@/lib/queries/providers'
@@ -62,7 +63,7 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
   if (!patient) notFound()
   await logAudit(session, 'viewed patient detail', anonId)
 
-  const [admissionHistory, availableRooms, followUps, encounterRows, activeProviders, activeDepartments] = await Promise.all([
+  const [admissionHistory, availableRooms, followUps, encounterRows, activeProviders, activeDepartments, selfProvider] = await Promise.all([
     listAdmissionsForPatient(anonId),
     listAvailableRooms(),
     // The role decides which fields the view carries (no plan notes or cancel reason for front desk).
@@ -70,6 +71,8 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
     listEncountersForPatient(anonId),
     listActiveProviders(),
     listDepartments({ activeOnly: true }),
+    // A pi changes only their own follow-ups and visits; resolve who they are on the server.
+    session.role === 'pi' ? resolveDoctorQueueProvider(session) : Promise.resolve(null),
   ])
   const todayIso = todayIsoIn()
 
@@ -224,6 +227,7 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
         cancelVisit: ENCOUNTER_TRANSITION_ROLES.cancelled.includes(session.role),
       }}
       isPi={session.role === 'pi'}
+      selfProviderId={selfProvider?.id ?? null}
     />
   )
 
@@ -277,7 +281,7 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
           { id: 'screening', label: 'Screening', content: screeningTab },
         ]),
         { id: 'identity', label: 'Verification', content: identityAndPortalTab },
-        { id: 'follow-up', label: 'Visits & follow-up', content: followUpTab },
+        ...(FOLLOW_UP_VIEW_ROLES.includes(session.role) ? [{ id: 'follow-up', label: 'Visits & follow-up', content: followUpTab }] : []),
         ...(admissionHistory.length > 0 ? [{ id: 'inpatient', label: <span className="inline-flex items-center gap-1.5"><BedDouble className="h-3.5 w-3.5" aria-hidden="true" />Inpatient History</span>, content: inpatientTab }] : []),
       ]} />
     </div>

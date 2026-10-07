@@ -66,4 +66,14 @@ describe('BookFollowUpModal', () => {
     expect(body.startsAt).toBe('2026-10-21T10:30:00+05:30')
     expect(body.endsAt).toBe('2026-10-21T11:00:00+05:30')
   })
+
+  it('does not preselect a prescriber who is not an active doctor, and requires a choice', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    render(<BookFollowUpModal followUp={{ ...FU, prescribedBy: { providerId: 99, name: 'Dr. Gone' } }} providers={PROVIDERS} todayIso="2026-10-20" onClose={vi.fn()} />)
+    expect(screen.getByLabelText(/doctor/i)).toHaveValue('')
+    fireEvent.click(screen.getByRole('button', { name: /^book appointment/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/choose a doctor/i)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })

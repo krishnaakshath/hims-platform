@@ -19,7 +19,7 @@ describe('FollowUpPanel', () => {
   })
 
   it('pi sees plan actions and notes, no booking actions', () => {
-    render(<FollowUpPanel {...PROPS} can={{ ...NONE, plan: true }} isPi />)
+    render(<FollowUpPanel {...PROPS} selfProviderId={7} can={{ ...NONE, plan: true }} isPi />)
     expect(screen.getByRole('button', { name: /set follow-up/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /change plan/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /cancel follow-up/i })).toBeInTheDocument()
@@ -59,7 +59,7 @@ describe('FollowUpPanel', () => {
   it('cancelling a follow-up asks for a reason first and surfaces a server error in an alert', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'This follow-up is already completed or cancelled.' }), { status: 409 }))
     vi.stubGlobal('fetch', fetchMock)
-    render(<FollowUpPanel {...PROPS} can={{ ...NONE, plan: true }} isPi />)
+    render(<FollowUpPanel {...PROPS} selfProviderId={7} can={{ ...NONE, plan: true }} isPi />)
     fireEvent.click(screen.getByRole('button', { name: /cancel follow-up/i }))
     expect(fetchMock).not.toHaveBeenCalled()
     fireEvent.change(await screen.findByLabelText(/reason/i), { target: { value: 'Patient moved' } })
@@ -106,5 +106,35 @@ describe('FollowUpPanel', () => {
     expect(screen.getByRole('button', { name: /start consultation/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /complete visit/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /cancel visit/i })).toBeInTheDocument()
+  })
+
+  it('a pi who did not prescribe the follow-up sees a read-only note, not plan actions', () => {
+    render(<FollowUpPanel {...PROPS} selfProviderId={8} can={{ ...NONE, plan: true }} isPi />)
+    expect(screen.queryByRole('button', { name: /change plan|cancel follow-up/i })).toBeNull()
+    expect(screen.getByText(/Prescribed by Dr\. K/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /set follow-up/i })).toBeInTheDocument()
+  })
+
+  it('a pi with no linked provider cannot set or change follow-ups', () => {
+    render(<FollowUpPanel {...PROPS} selfProviderId={null} can={{ ...NONE, plan: true }} isPi />)
+    expect(screen.queryByRole('button', { name: /set follow-up|change plan|cancel follow-up/i })).toBeNull()
+  })
+
+  it('admin may change any prescriber\'s plan', () => {
+    render(<FollowUpPanel {...PROPS} selfProviderId={null} can={{ ...NONE, plan: true }} isPi={false} />)
+    expect(screen.getByRole('button', { name: /change plan/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /cancel follow-up/i })).toBeInTheDocument()
+  })
+
+  it('a pi only starts or completes their own visits', () => {
+    const can = { ...NONE, startOrComplete: true }
+    render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[ENC]} selfProviderId={7} isPi can={can} />)
+    expect(screen.getByRole('button', { name: /start consultation/i })).toBeInTheDocument()
+    cleanup()
+    render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[ENC]} selfProviderId={8} isPi can={can} />)
+    expect(screen.queryByRole('button', { name: /start consultation|complete visit/i })).toBeNull()
+    cleanup()
+    render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[ENC]} selfProviderId={null} isPi={false} can={can} />)
+    expect(screen.getByRole('button', { name: /complete visit/i })).toBeInTheDocument()
   })
 })

@@ -23,6 +23,8 @@ export interface FollowUpPanelProps {
   todayIso: string
   can: { plan: boolean; book: boolean; checkIn: boolean; startOrComplete: boolean; cancelVisit: boolean }
   isPi: boolean
+  /** The signed-in doctor's own provider id (pi only; null for admin or an unlinked login). */
+  selfProviderId: number | null
 }
 
 type Dialog =
@@ -33,11 +35,16 @@ type Dialog =
   | { kind: 'unbook'; fu: FollowUpView }
   | { kind: 'contact'; fu: FollowUpView }
 
-export function FollowUpPanel({ patientId, followUps, encounters, providers, departments, todayIso, can, isPi }: FollowUpPanelProps) {
+export function FollowUpPanel({ patientId, followUps, encounters, providers, departments, todayIso, can, isPi, selfProviderId }: FollowUpPanelProps) {
   const router = useRouter()
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Server rule: only the prescribing doctor (or an admin) changes or cancels a plan.
+  // A pi with no linked provider profile cannot prescribe at all.
+  const canCreate = can.plan && (!isPi || selfProviderId !== null)
+  const ownsPlan = (fu: FollowUpView) => can.plan && (!isPi || fu.prescribedBy.providerId === selfProviderId)
 
   const ordered = [...followUps.filter((f) => isOpenFollowUp(f.status)), ...followUps.filter((f) => !isOpenFollowUp(f.status))]
   const close = () => setDialog(null)
@@ -57,7 +64,7 @@ export function FollowUpPanel({ patientId, followUps, encounters, providers, dep
       <section aria-labelledby="fu-heading">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 id="fu-heading" className="border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Follow-ups</h2>
-          {can.plan && <Button size="sm" onClick={() => setDialog({ kind: 'create' })}>Set follow-up</Button>}
+          {canCreate && <Button size="sm" onClick={() => setDialog({ kind: 'create' })}>Set follow-up</Button>}
         </div>
         {error && <p role="alert" className="mb-2 text-sm text-destructive">{error}</p>}
         {ordered.length === 0 ? (
@@ -67,6 +74,7 @@ export function FollowUpPanel({ patientId, followUps, encounters, providers, dep
             {ordered.map((fu) => {
               const open = isOpenFollowUp(fu.status)
               const booked = fu.status === 'scheduled' && fu.appointment?.status === 'scheduled' ? fu.appointment : null
+              const owner = ownsPlan(fu)
               const checkInToday = !!booked && istDateIso(booked.startsAt) === todayIso && !encounters.some((e) => e.appointmentId === booked.id)
               return (
                 <li key={fu.id} className="rounded-lg border border-border bg-card p-4">
@@ -92,14 +100,17 @@ export function FollowUpPanel({ patientId, followUps, encounters, providers, dep
                     </Row>
                     {fu.cancelReason !== null && fu.status === 'cancelled' && <Row label="Cancel reason">{fu.cancelReason}</Row>}
                   </dl>
-                  {open && (can.plan || can.book || can.checkIn) && (
+                  {open && can.plan && !owner && (
+                    <p className="mt-3 text-xs text-muted-foreground">Prescribed by {fu.prescribedBy.name}. Only they or an admin can change this plan.</p>
+                  )}
+                  {open && (owner || can.book || can.checkIn) && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {can.checkIn && checkInToday && <Button size="sm" disabled={busyId === fu.id} onClick={() => void checkIn(fu)}>Check in</Button>}
                       {can.book && <Button size="sm" variant="outline" onClick={() => setDialog({ kind: 'book', fu })}>{booked ? 'Reschedule' : 'Book'}</Button>}
                       {can.book && booked && <Button size="sm" variant="destructive" onClick={() => setDialog({ kind: 'unbook', fu })}>Cancel booking</Button>}
                       {can.book && <Button size="sm" variant="outline" onClick={() => setDialog({ kind: 'contact', fu })}>Log contact</Button>}
-                      {can.plan && <Button size="sm" variant="outline" onClick={() => setDialog({ kind: 'edit', fu })}>Change plan</Button>}
-                      {can.plan && <Button size="sm" variant="destructive" onClick={() => setDialog({ kind: 'cancel', fu })}>Cancel follow-up</Button>}
+                      {owner && <Button size="sm" variant="outline" onClick={() => setDialog({ kind: 'edit', fu })}>Change plan</Button>}
+                      {owner && <Button size="sm" variant="destructive" onClick={() => setDialog({ kind: 'cancel', fu })}>Cancel follow-up</Button>}
                     </div>
                   )}
                 </li>
@@ -111,7 +122,7 @@ export function FollowUpPanel({ patientId, followUps, encounters, providers, dep
 
       <section aria-labelledby="visits-heading">
         <h2 id="visits-heading" className="mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Visits</h2>
-        <EncounterList encounters={encounters} can={{ startOrComplete: can.startOrComplete, cancelVisit: can.cancelVisit }} />
+        <EncounterList encounters={encounters} can={{ startOrComplete: can.startOrComplete, cancelVisit: can.cancelVisit }} ownProviderOnly={isPi} selfProviderId={selfProviderId} />
       </section>
 
       {dialog?.kind === 'create' && (

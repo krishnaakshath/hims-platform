@@ -14,11 +14,12 @@ const DETAIL = {
   overallStatus: null, selectionConfirmedAt: null, chartDataAsOf: new Date('2026-01-01'), currentProvider: null, mfaEnabled: false, portalConfigured: false,
 }
 
-async function renderAs(role: string) {
+async function renderAs(role: string, selfId: number | null = 7) {
   vi.resetModules()
   const listFollowUps = vi.fn(async (_id: string, r: string) => [{ ...FU, planNotes: ['admin', 'crc', 'pi'].includes(r) ? FU.planNotes : null }])
   vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Tester' })) }))
   vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+  vi.doMock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => (selfId === null ? null : { id: selfId, name: 'Self' })) }))
   vi.doMock('@/lib/queries/rooms', () => ({ listAvailableRooms: vi.fn(async () => []) }))
   vi.doMock('@/lib/queries/patients', () => ({ getPatientDetail: vi.fn(async () => DETAIL) }))
   vi.doMock('@/lib/queries/admissions', () => ({ listAdmissionsForPatient: vi.fn(async () => []) }))
@@ -67,5 +68,20 @@ describe('Patient detail: Visits & follow-up tab', () => {
   it('does not leak provider fields beyond id and name to the client', async () => {
     const { container } = await renderAs('admin')
     expect(container.innerHTML).not.toMatch(/secret@x\.in/)
+  })
+
+  it('pi who is not the prescriber sees no plan actions; the prescriber does; admin does', async () => {
+    const other = await renderAs('pi', 8)
+    fireEvent.click(other.screen.getByRole('button', { name: 'Visits & follow-up' }))
+    expect(other.screen.queryByRole('button', { name: /change plan|cancel follow-up/i })).toBeNull()
+    expect(other.screen.getByText(/Prescribed by Dr\. K/)).toBeInTheDocument()
+    cleanup()
+    const owner = await renderAs('pi', 7)
+    fireEvent.click(owner.screen.getByRole('button', { name: 'Visits & follow-up' }))
+    expect(owner.screen.getByRole('button', { name: /change plan/i })).toBeInTheDocument()
+    cleanup()
+    const admin = await renderAs('admin', null)
+    fireEvent.click(admin.screen.getByRole('button', { name: 'Visits & follow-up' }))
+    expect(admin.screen.getByRole('button', { name: /change plan/i })).toBeInTheDocument()
   })
 })

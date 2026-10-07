@@ -15,10 +15,13 @@ const TYPE_LABEL: Record<EncounterListRow['encounterType'], string> = { opd: 'Ou
 const VISIT_LABEL: Record<EncounterListRow['visitType'], string> = { new: 'New', follow_up: 'Follow-up', review: 'Review', emergency: 'Emergency' }
 
 export function EncounterList({
-  encounters, can,
+  encounters, can, ownProviderOnly = false, selfProviderId = null,
 }: {
   encounters: EncounterListRow[]
   can: { startOrComplete: boolean; cancelVisit: boolean }
+  /** A pi moves only their own visits (server rule); admin is unrestricted. */
+  ownProviderOnly?: boolean
+  selfProviderId?: number | null
 }) {
   const router = useRouter()
   const [cancelling, setCancelling] = useState<EncounterListRow | null>(null)
@@ -52,6 +55,7 @@ export function EncounterList({
           </thead>
           <tbody>
             {encounters.map((e) => {
+              const mayMove = can.startOrComplete && (!ownProviderOnly || e.providerId === selfProviderId)
               const active = e.status === 'checked_in' || e.status === 'in_consultation'
               return (
                 <tr key={e.id} className="border-b border-border last:border-b-0">
@@ -63,10 +67,10 @@ export function EncounterList({
                   <td className="p-3">{STATUS_LABEL[e.status]}</td>
                   <td className="p-3">
                     <div className="flex flex-wrap gap-2">
-                      {can.startOrComplete && e.status === 'checked_in' && (
+                      {mayMove && e.status === 'checked_in' && (
                         <Button size="sm" variant="outline" disabled={busyId === e.id} onClick={() => void move(e, 'in_consultation')}>Start consultation</Button>
                       )}
-                      {can.startOrComplete && active && (
+                      {mayMove && active && (
                         <Button size="sm" variant="outline" disabled={busyId === e.id} onClick={() => void move(e, 'completed')}>Complete visit</Button>
                       )}
                       {can.cancelVisit && e.status === 'checked_in' && (
