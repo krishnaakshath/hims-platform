@@ -298,6 +298,10 @@ export const PAGE_GATES: PageGateCase[] = [
   // LeftNav NAV_TRAILING_ITEMS /tariffs -- TARIFF_MANAGE_ROLES
   { route: '/tariffs', load: () => import('@/app/(dashboard)/tariffs/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'billing'] },
   { route: '/tariffs/services/[id]', load: () => import('@/app/(dashboard)/tariffs/services/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'billing'] },
+  { route: '/tariffs/room-categories', load: () => import('@/app/(dashboard)/tariffs/room-categories/page'), allowed: ['admin', 'billing'] },
+  { route: '/tariffs/import', load: () => import('@/app/(dashboard)/tariffs/import/page'), allowed: ['admin', 'billing'] },
+  { route: '/tariffs/room-categories', load: () => import('@/app/(dashboard)/tariffs/room-categories/page'), allowed: ['admin', 'billing'] },
+  { route: '/tariffs/import', load: () => import('@/app/(dashboard)/tariffs/import/page'), allowed: ['admin', 'billing'] },
   { route: '/settings', load: () => import('@/app/(dashboard)/settings/page'), allowed: ['admin', 'pi'] },
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).

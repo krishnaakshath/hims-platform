@@ -21,15 +21,8 @@ export interface RateListItem {
   deactivated: boolean
 }
 
-export type RateStatus = 'current' | 'scheduled' | 'ended' | 'deactivated'
-
-/** Inclusive on both ends: a rate whose valid_to is today is still current. ISO dates compare lexicographically. */
-export function rateStatus(r: Pick<RateListItem, 'validFrom' | 'validTo' | 'deactivated'>, today: string): RateStatus {
-  if (r.deactivated) return 'deactivated'
-  if (r.validTo !== null && r.validTo < today) return 'ended'
-  if (r.validFrom > today) return 'scheduled'
-  return 'current'
-}
+export { rateStatus, type RateStatus } from './status'
+import { rateStatus, type RateStatus } from './status'
 
 const STATUS_LABEL: Record<RateStatus, string> = { current: 'Current', scheduled: 'Scheduled', ended: 'Ended', deactivated: 'Deactivated' }
 const SCOPES = [
