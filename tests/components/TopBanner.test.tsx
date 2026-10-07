@@ -26,13 +26,28 @@ describe('TopBanner', () => {
     expect(screen.getByLabelText('Notifications')).toBeInTheDocument()
   })
 
-  it.each(['billing', 'pharmacy', 'labs', 'collector'] as const)('hides the search box for %s', (role) => {
+  it.each(['pharmacy', 'labs', 'collector'] as const)('hides the search box for %s', (role) => {
     render(<TopBanner userName="Jamie Ruiz" role={role} />)
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
 
-  it.each(['admin', 'crc', 'pi', 'frontdesk'] as const)('shows the search box for %s', (role) => {
+  it.each(['admin', 'crc', 'pi', 'frontdesk', 'billing'] as const)('shows the search box for %s', (role) => {
     render(<TopBanner userName="Jamie Ruiz" role={role} />)
-    expect(screen.getByRole('textbox')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: /search/i })).toBeInTheDocument()
+  })
+
+  // Wave B P1-24: the placeholder only names what the role can find.
+  it.each([
+    ['frontdesk', /^search patients by name, uhid or mobile/i],
+    ['billing', /^search services/i],
+  ] as const)('gives %s a role-specific placeholder', (role, re) => {
+    render(<TopBanner userName="Jamie Ruiz" role={role} />)
+    expect(screen.getByRole('combobox', { name: /search/i }).getAttribute('placeholder')).toMatch(re)
+  })
+
+  // Wave B P1-01: every role reaches its own account page from the top bar.
+  it.each(['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs'] as const)('links %s to My account', (role) => {
+    render(<TopBanner userName="Jamie Ruiz" role={role} />)
+    expect(screen.getByRole('link', { name: /my account/i })).toHaveAttribute('href', '/account')
   })
 })

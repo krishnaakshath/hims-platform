@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { DollarSign, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3 } from 'lucide-react'
+import { DollarSign, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags } from 'lucide-react'
+import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
+import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getArDashboardData } from '@/lib/queries/ar-dashboard'
@@ -58,7 +60,8 @@ export default async function BillingHomePage() {
         </div>
         {/* Insurance verification lives entirely in billing now -- front
             desk previously ran eligibility checks at check-in. */}
-        <EligibilityCheckButton />
+        {/* Wave B P1-22: simulated eligibility -- only with DEMO_FEATURES on. */}
+        {demoFeaturesEnabled() && <EligibilityCheckButton />}
       </div>
 
       {/* KPI Row — Mobbin-inspired: compact, data-dense tiles */}
@@ -145,6 +148,8 @@ export default async function BillingHomePage() {
               { href: '/billing/patient-collections', icon: HandCoins, label: 'Patient Collections', sub: 'Balances & statements' },
               { href: '/billing/statements', icon: DollarSign, label: 'Statements', sub: 'Generate patient statements' },
               { href: '/billing/analytics', icon: BarChart3, label: 'Analytics', sub: 'Revenue trends & reports' },
+              // Wave B P0-01: Tariffs only for the roles its page admits (TARIFF_MANAGE_ROLES).
+              ...(TARIFF_MANAGE_ROLES.includes(session.role) ? [{ href: '/tariffs', icon: Tags, label: 'Tariffs', sub: 'Service catalogue & price lists' }] : []),
             ].map(({ href, icon: Icon, label, sub }) => (
               <Link key={href} href={href} className="flex items-center gap-3 px-5 py-3.5 hover:bg-muted/40">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">

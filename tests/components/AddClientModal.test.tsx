@@ -109,4 +109,19 @@ describe('AddClientModal', () => {
       expect(await screen.findByText(/already registered/i)).toBeInTheDocument()
     })
   })
+
+  // Wave B P1-10: the duplicate check runs inside registration.
+  it('warns about a possible existing patient while registering', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/payers') return new Response('[]', { status: 200 })
+      if (url.startsWith('/api/front-desk/patient-lookup')) return new Response(JSON.stringify([{ id: 'RD-0001', name: 'Asha Rao', dob: '1990-05-01', uhid: 'UH000001' }]), { status: 200 })
+      return new Response('{}', { status: 500 })
+    }))
+    render(<AddClientModal onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Asha Rao' } })
+    fireEvent.change(screen.getByLabelText('Date of birth'), { target: { value: '1990-05-01' } })
+    await screen.findByText(/possible existing patient/i)
+    expect(screen.getByRole('status')).toHaveTextContent('UH000001')
+    vi.unstubAllGlobals()
+  })
 })

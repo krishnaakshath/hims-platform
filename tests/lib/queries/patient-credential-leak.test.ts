@@ -79,7 +79,7 @@ describe.skipIf(!process.env.DATABASE_URL)('patient credential columns never lea
     expectClean('fhir gather', await gatherPatientFhirData(id))
     expectClean('workbook', await listWorkbookRows())
     expectClean('collections', await listPatientCollections())
-    expectClean('search', await searchAll(`TEST-SP1 Cred ${RUN}`, { patients: true, trials: false, formTemplates: false }))
+    expectClean('search', await searchAll(`TEST-SP1 Cred ${RUN}`, { patients: true, trials: false, formTemplates: false, services: false }))
   })
 
   it('GET /api/patients and GET /api/patients/[anonId] JSON carry neither', async () => {

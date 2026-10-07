@@ -12,7 +12,7 @@ vi.mock('@/lib/queries/form-templates', () => ({ listFormTemplates: vi.fn(async 
 import { searchAll } from '@/lib/queries/search'
 import { listPatientsWithStatus } from '@/lib/queries/patients'
 
-const ALL = { patients: true, trials: true, formTemplates: true }
+const ALL = { patients: true, trials: true, formTemplates: true, services: false }
 
 describe('searchAll by UHID', () => {
   it('matches a UHID prefix and the exact UHID, case-insensitively', async () => {
@@ -34,7 +34,7 @@ describe('searchAll by UHID', () => {
   })
   it('does not load the patient list without the patients scope', async () => {
     vi.mocked(listPatientsWithStatus).mockClear()
-    const r = await searchAll('UH0000', { patients: false, trials: false, formTemplates: false })
+    const r = await searchAll('UH0000', { patients: false, trials: false, formTemplates: false, services: false })
     expect(r.patients).toEqual([])
     expect(listPatientsWithStatus).not.toHaveBeenCalled()
   })

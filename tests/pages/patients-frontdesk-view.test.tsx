@@ -183,6 +183,40 @@ async function captureListProps(role: Role): Promise<TableProps> {
   return captured[captured.length - 1]
 }
 
+// Wave B P1-08: server-side filter (name / UHID / mobile / id) and pagination.
+describe('/patients list -- server filter and pagination', () => {
+  async function propsFor(role: Role, sp: Record<string, string>, rows: Record<string, unknown>[]) {
+    const spies = mockCommon(role)
+    spies.listPatientsWithStatus.mockResolvedValue(rows as never)
+    const captured: (TableProps & { directory?: Record<string, unknown> })[] = []
+    vi.doMock('@/components/PatientsTable', () => ({ PatientsTable: (props: TableProps) => { captured.push(props); return null } }))
+    const { default: PatientsPage } = await import('@/app/(dashboard)/patients/page')
+    const { render } = await import('@testing-library/react')
+    render(await PatientsPage({ searchParams: Promise.resolve(sp) }))
+    return captured[captured.length - 1]
+  }
+  const many = Array.from({ length: 45 }, (_, i) => ({ ...LIST_ROW, id: `RD-${String(i).padStart(4, '0')}`, name: `Patient ${i}`, uhid: `UH${String(i).padStart(6, '0')}`, phone: i === 7 ? '+919812300077' : null }))
+
+  it('sends one page of rows with UHID and mobile, and the total', async () => {
+    const props = await propsFor('frontdesk', { page: '2' }, many)
+    expect(props.patients).toHaveLength(15)
+    expect(props.patients[0]).toMatchObject({ id: 'RD-0030', uhid: 'UH000030', phone: null })
+    expect(props.directory).toMatchObject({ page: 2, pageSize: 30, total: 45, query: '' })
+  })
+
+  it('filters by mobile on the server before paging', async () => {
+    const props = await propsFor('admin', { q: '98123 00077' }, many)
+    expect(props.patients.map((p) => p.id)).toEqual(['RD-0007'])
+    expect(props.directory).toMatchObject({ total: 1, query: '98123 00077' })
+  })
+
+  it('filters by UHID and keeps the trial filter in the paging params for clinical roles', async () => {
+    const props = await propsFor('crc', { q: 'uh000044', trialId: 'trial-a' }, many)
+    expect(props.patients.map((p) => p.id)).toEqual(['RD-0044'])
+    expect(props.directory).toMatchObject({ params: { trialId: 'trial-a' } })
+  })
+})
+
 describe('/patients list -- props sent to the client', () => {
   it('frontdesk rows carry no overallStatus or criteriaSummary key, and screening/chart link are off', async () => {
     const props = await captureListProps('frontdesk')

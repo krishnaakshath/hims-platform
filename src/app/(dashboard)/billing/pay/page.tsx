@@ -1,9 +1,11 @@
-import { redirect } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
+import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { listCharges } from '@/lib/queries/charges'
 import { VirtualCardPaymentForm } from '@/components/VirtualCardPaymentForm'
+import { DemoBadge } from '@/components/DemoBadge'
 
 export default async function VirtualCardPaymentPage({
   searchParams,
@@ -13,6 +15,8 @@ export default async function VirtualCardPaymentPage({
   const session = await requireSessionOrRedirect()
   // LeftNav.tsx:98 — the Billing group is rendered for admin/crc/frontdesk only.
   if (!['admin', 'crc', 'billing'].includes(session.role)) redirect('/')
+  // Wave B P1-21: demo-only page -- 404 unless DEMO_FEATURES is on (after the role gate, before any read).
+  if (!demoFeaturesEnabled()) notFound()
   const { patientId, amountCents } = await searchParams
   const [patients, charges] = await Promise.all([listPatientsWithStatus(null), listCharges()])
   await logAudit(session, 'viewed virtual card payment form (demo)', patientId ?? null)
@@ -28,7 +32,7 @@ export default async function VirtualCardPaymentPage({
 
   return (
     <div className="max-w-xl">
-      <h1 className="mb-6 text-2xl font-bold text-foreground">Virtual Card Payment</h1>
+      <h1 className="mb-6 text-2xl font-bold text-foreground">Virtual Card Payment<DemoBadge /></h1>
       <VirtualCardPaymentForm
         patients={billablePatients.map((p) => ({ id: p.id, name: p.name }))}
         initialPatientId={patientId}

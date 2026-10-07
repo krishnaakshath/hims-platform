@@ -7,6 +7,9 @@ vi.mock('@/lib/queries/doctor-assignments', () => ({
   countPendingAssignmentsForProvider: vi.fn(),
   countUnacknowledgedDeclines: vi.fn(),
 }))
+// Wave B P1-25: unread patient messages and pending booking requests.
+vi.mock('@/lib/queries/messages', () => ({ getUnreadCountForProvider: vi.fn(async () => 5) }))
+vi.mock('@/lib/queries/booking-requests', () => ({ countPendingBookingRequests: vi.fn(async () => 6) }))
 
 import { GET } from '@/app/api/nav-badges/route'
 import { requireSession } from '@/lib/auth'
@@ -37,7 +40,7 @@ describe('GET /api/nav-badges', () => {
     const res = await GET()
     expect(res.status).toBe(200)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
-    expect(await res.json()).toEqual({ badges: { '/doctor': 4 }, degraded: false })
+    expect(await res.json()).toEqual({ badges: { '/doctor': 4, '/messages': 5, '/booking-requests': 6 }, degraded: false })
     expect(pendingMock).toHaveBeenCalledWith(7)
   })
 
@@ -45,7 +48,7 @@ describe('GET /api/nav-badges', () => {
     sessionMock.mockResolvedValueOnce({ role: 'frontdesk', name: 'Taylor Nguyen', userId: null })
     declinesMock.mockResolvedValue(2)
     const res = await GET()
-    expect(await res.json()).toEqual({ badges: { '/front-desk/assignments': 2 }, degraded: false })
+    expect(await res.json()).toEqual({ badges: { '/front-desk/assignments': 2, '/booking-requests': 6 }, degraded: false })
   })
 
   it('returns {} for a role with no badge (billing), running no query', async () => {
@@ -64,7 +67,7 @@ describe('GET /api/nav-badges', () => {
     resolveMock.mockResolvedValue(null)
     const res = await GET()
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ badges: { '/doctor': null }, degraded: false })
+    expect(await res.json()).toEqual({ badges: { '/doctor': null, '/messages': 5, '/booking-requests': 6 }, degraded: false })
     expect(pendingMock).not.toHaveBeenCalled()
   })
 

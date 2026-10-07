@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { demoFeaturesEnabled, DEMO_NOT_CONFIGURED_BODY, DEMO_NOT_CONFIGURED_STATUS } from '@/lib/demo-features'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { reviews, formSubmissions } from '@/db/schema'
@@ -38,6 +39,8 @@ export async function POST(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   if (!['admin', 'crc'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // Wave B P1-21: simulated survey delivery -- 503 unless DEMO_FEATURES is on (after the role gate, before parsing).
+  if (!demoFeaturesEnabled()) return NextResponse.json(DEMO_NOT_CONFIGURED_BODY, { status: DEMO_NOT_CONFIGURED_STATUS })
 
   const parsed = sendSurveySchema.safeParse(await request.json())
   if (!parsed.success) return NextResponse.json({ error: 'Invalid send-survey payload', details: parsed.error.flatten() }, { status: 400 })

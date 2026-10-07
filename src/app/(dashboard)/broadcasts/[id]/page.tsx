@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { notFound, redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -9,6 +10,8 @@ export default async function BroadcastDetailPage({ params }: { params: Promise<
   // LeftNav.tsx:62 — { href: '/broadcasts', roles: ['admin', 'crc'] }. Must
   // precede notFound() below, not follow it.
   if (!['admin', 'crc'].includes(session.role)) redirect('/')
+  // Wave B P1-21: demo-only page -- 404 unless DEMO_FEATURES is on (after the role gate, before any read).
+  if (!demoFeaturesEnabled()) notFound()
   const { id } = await params
   const broadcast = await getBroadcast(Number(id))
   if (!broadcast) notFound()

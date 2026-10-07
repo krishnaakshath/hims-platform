@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Search, FileText } from 'lucide-react'
 import { StatusChip } from '@/components/StatusChip'
+import { formatPhoneForDisplay, matchesDirectoryQuery } from '@/lib/patient-directory'
 import { PatientAvatar } from '@/components/PatientAvatar'
 
 export interface CriteriaSummaryLike {
@@ -21,6 +22,26 @@ export interface PatientRow {
   referralType: string | null
   lastCommunication: string | null
   criteriaSummary?: CriteriaSummaryLike
+  // Wave B P1-08 -- every PATIENT_DIRECTORY_ROLES role may see both (SP1 profile).
+  uhid?: string | null
+  phone?: string | null
+}
+
+/** Server-driven mode (/patients): the page filtered and paged already; the
+ *  search box becomes a GET form and Prev/Next links keep `params` + `q`. */
+export interface DirectoryPaging {
+  query: string
+  page: number
+  pageSize: number
+  total: number
+  params: Record<string, string>
+}
+
+function directoryHref(d: DirectoryPaging, page: number): string {
+  const sp = new URLSearchParams(d.params)
+  if (d.query) sp.set('q', d.query)
+  sp.set('page', String(page))
+  return `/patients?${sp.toString()}`
 }
 
 const STATUS_ACCENT: Record<'green' | 'yellow' | 'red', string> = {
@@ -88,7 +109,8 @@ function PatientCard({ patient, showMedicalRecordLink, showScreening }: { patien
           <PatientAvatar name={name} />
           <div className="min-w-0">
             <p className="truncate font-semibold text-foreground group-hover:text-primary">{name}</p>
-            <p className="truncate text-xs text-muted-foreground">{patient.id} · {dob}</p>
+            <p className="truncate text-xs text-muted-foreground">{patient.uhid ? `${patient.uhid} · ` : ''}{patient.id} · {dob}</p>
+            {patient.phone && <p className="truncate text-xs text-muted-foreground">{formatPhoneForDisplay(patient.phone)}</p>}
           </div>
         </div>
         {showScreening && <StatusChip status={status} />}
@@ -116,54 +138,103 @@ function PatientCard({ patient, showMedicalRecordLink, showScreening }: { patien
   )
 }
 
-export function PatientsTable({ patients, showMedicalRecordLink = true, showScreening = true }: { patients: PatientRow[]; showMedicalRecordLink?: boolean; showScreening?: boolean }) {
+export function PatientsTable({ patients, showMedicalRecordLink = true, showScreening = true, directory }: { patients: PatientRow[]; showMedicalRecordLink?: boolean; showScreening?: boolean; directory?: DirectoryPaging }) {
   const [search, setSearch] = useState('')
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    if (directory) return patients
+    const q = search.trim()
     if (!q) return patients
-    return patients.filter((p) => {
-      const name = p.name.toLowerCase()
-      return name.includes(q) || p.id.toLowerCase().includes(q)
-    })
-  }, [search, patients])
+    return patients.filter((p) => matchesDirectoryQuery(p, q))
+  }, [search, patients, directory])
+
+  const activeQuery = directory ? directory.query : search
+  const pageCount = directory ? Math.max(1, Math.ceil(directory.total / directory.pageSize)) : 1
+  const first = directory && directory.total > 0 ? (directory.page - 1) * directory.pageSize + 1 : 0
+  const last = directory ? first + patients.length - (patients.length > 0 ? 1 : 0) : 0
 
   return (
     <div>
       <div className="mb-4">
-        <div className="relative max-w-sm">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or anon #…"
-            aria-label="Search patients"
-            className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch('')}
-              aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground hover:text-foreground"
-            >
-              Clear
-            </button>
-          )}
-        </div>
+        {directory ? (
+          <form role="search" action="/patients" method="get" className="flex max-w-md items-center gap-2">
+            {Object.entries(directory.params).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <input
+                type="search"
+                name="q"
+                defaultValue={directory.query}
+                placeholder="Name, UHID, mobile or anon #…"
+                aria-label="Search patients"
+                className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none"
+              />
+            </div>
+            <button type="submit" className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-secondary">Search</button>
+            {directory.query && (
+              <Link href={directoryHref({ ...directory, query: '' }, 1)} className="text-xs font-medium text-muted-foreground hover:text-foreground">Clear</Link>
+            )}
+          </form>
+        ) : (
+          <div className="relative max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, UHID, mobile or anon #…"
+              aria-label="Search patients"
+              className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {filtered.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No patients match &quot;{search}&quot;.</p>
+        <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          {activeQuery ? <>No patients match &quot;{activeQuery}&quot;.</> : 'No patients yet.'}
+        </p>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((p) => <PatientCard key={p.id} patient={p} showMedicalRecordLink={showMedicalRecordLink} showScreening={showScreening} />)}
         </div>
       )}
 
-      <p className="mt-4 text-xs text-muted-foreground">
-        {filtered.length} of {patients.length} record{patients.length === 1 ? '' : 's'}{search ? ' shown' : ''}
-      </p>
+      {directory ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            {directory.total === 0 ? '0 records' : `Showing ${first}–${last} of ${directory.total} record${directory.total === 1 ? '' : 's'}`}
+          </p>
+          {pageCount > 1 && (
+            <nav aria-label="Pagination" className="flex items-center gap-2 text-sm">
+              {directory.page > 1 ? (
+                <Link rel="prev" href={directoryHref(directory, directory.page - 1)} className="rounded-md border border-border px-3 py-1.5 font-medium text-foreground hover:bg-secondary">Previous</Link>
+              ) : (
+                <span aria-disabled="true" className="rounded-md border border-border px-3 py-1.5 font-medium text-muted-foreground opacity-50">Previous</span>
+              )}
+              <span className="text-xs text-muted-foreground">Page {directory.page} of {pageCount}</span>
+              {directory.page < pageCount ? (
+                <Link rel="next" href={directoryHref(directory, directory.page + 1)} className="rounded-md border border-border px-3 py-1.5 font-medium text-foreground hover:bg-secondary">Next</Link>
+              ) : (
+                <span aria-disabled="true" className="rounded-md border border-border px-3 py-1.5 font-medium text-muted-foreground opacity-50">Next</span>
+              )}
+            </nav>
+          )}
+        </div>
+      ) : (
+        <p className="mt-4 text-xs text-muted-foreground">
+          {filtered.length} of {patients.length} record{patients.length === 1 ? '' : 's'}{search ? ' shown' : ''}
+        </p>
+      )}
     </div>
   )
 }

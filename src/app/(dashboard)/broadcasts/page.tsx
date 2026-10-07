@@ -1,15 +1,19 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
+import { demoFeaturesEnabled } from '@/lib/demo-features'
+import { notFound, redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { listBroadcasts } from '@/lib/queries/broadcasts'
 import { listAllTrials } from '@/lib/queries/trials'
 import { BroadcastWizard } from '@/components/BroadcastWizard'
+import { DemoBadge } from '@/components/DemoBadge'
 
 export default async function BroadcastsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const session = await requireSessionOrRedirect()
   // LeftNav.tsx:62 — { href: '/broadcasts', roles: ['admin', 'crc'] }
   if (!['admin', 'crc'].includes(session.role)) redirect('/')
+  // Wave B P1-21: demo-only page -- 404 unless DEMO_FEATURES is on (after the role gate, before any read).
+  if (!demoFeaturesEnabled()) notFound()
   const { tab } = await searchParams
   const activeTab = tab === 'history' ? 'history' : 'send'
   await logAudit(session, `viewed broadcasts (${activeTab})`, null)
@@ -19,7 +23,7 @@ export default async function BroadcastsPage({ searchParams }: { searchParams: P
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-bold text-foreground">Patient Broadcast</h1>
+      <h1 className="mb-1 text-2xl font-bold text-foreground">Patient Broadcast<DemoBadge /></h1>
       <p className="mb-6 text-sm text-muted-foreground">Simulated delivery only — no SMS or email is ever sent to a real patient.</p>
       <div className="mb-6 flex w-fit gap-1 rounded-lg bg-secondary p-1 text-sm">
         <Link href="/broadcasts?tab=send" className={`rounded-md px-4 py-1.5 font-medium transition-colors ${activeTab === 'send' ? 'bg-card text-primary shadow-none' : 'text-muted-foreground hover:text-foreground'}`}>Send Broadcast</Link>

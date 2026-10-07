@@ -664,6 +664,8 @@ const SP1_WRITE_GATES: { name: string; call: () => Promise<Response>; allowed: r
   { name: 'PATCH /api/departments/[id]', call: () => patchDepartment(send('PATCH', `/api/departments/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MASTER_DATA_ADMIN_ROLES },
   { name: 'PUT /api/providers/[id]', call: () => putProvider(send('PUT', `/api/providers/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MASTER_DATA_ADMIN_ROLES },
   { name: 'PUT /api/settings/uhid-prefix', call: () => putUhidPrefix(send('PUT', '/api/settings/uhid-prefix', NOT_JSON)), allowed: MASTER_DATA_ADMIN_ROLES },
+  // Wave B P1-09: identity verification now has a UI; pin its deny-before-parse too.
+  { name: 'PUT /api/patients/[anonId]/identity', call: () => putIdentity(send('PUT', `/api/patients/${BOGUS_PATIENT}/identity`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: IDENTITY_VERIFY_ROLES },
 ]
 // SP2 tariff writes: the same deny-before-parse contract.
 const SP2_WRITE_GATES: typeof SP1_WRITE_GATES = [

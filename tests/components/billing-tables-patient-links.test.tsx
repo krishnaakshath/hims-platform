@@ -38,3 +38,15 @@ describe.each(tables)('$name patient links', ({ el }) => {
     expect(link).toHaveTextContent(/Zzprobe Quillfeather/)
   })
 })
+
+// Wave B P1-21: "Collect Payment" opens the demo card form -- hidden when DEMO_FEATURES is off.
+describe('PatientCollectionsTable Collect Payment', () => {
+  it('links to the demo card payment by default', () => {
+    render(<PatientCollectionsTable rows={rows} />)
+    expect(screen.getByRole('link', { name: /collect payment/i })).toHaveAttribute('href', expect.stringContaining('/billing/pay'))
+  })
+  it('hides the link when showCollectPayment is false', () => {
+    render(<PatientCollectionsTable rows={rows} showCollectPayment={false} />)
+    expect(screen.queryByRole('link', { name: /collect payment/i })).not.toBeInTheDocument()
+  })
+})

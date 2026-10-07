@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, medicationEpisodes } from '@/db/schema'
-import { findLikelyDuplicatePatients, listPharmacyPatientRoster } from '@/lib/queries/patients'
+import { findLikelyDuplicatePatients, findPatientsByPhone, listPharmacyPatientRoster } from '@/lib/queries/patients'
 
 // findLikelyDuplicatePatients used to check both the Tebra- and
 // IntakeQ-sourced name/dob column pairs (pre-unified-patient-record). These
@@ -85,5 +85,31 @@ describe('findLikelyDuplicatePatients', () => {
     const ids = matches.map((m) => m.id)
     expect(ids).not.toContain(TEST_ID_A)
     expect(ids).not.toContain(TEST_ID_B)
+  })
+})
+
+// Wave B P1-10: the registration duplicate check also matches the mobile.
+describe('findPatientsByPhone', () => {
+  const PHONE_ID = 'RD-DUP-TEST-PHONE'
+  beforeAll(async () => {
+    await getDb().insert(patients).values({ id: PHONE_ID, name: 'Phone Dup Test', dob: '1991-02-03', phone: '+919812300077' })
+  })
+  afterAll(async () => {
+    await getDb().delete(patients).where(eq(patients.id, PHONE_ID))
+  })
+
+  it('finds a patient by the normalised mobile, returning id/name/dob/uhid only', async () => {
+    const matches = await findPatientsByPhone('+919812300077')
+    const m = matches.find((r) => r.id === PHONE_ID)
+    expect(m).toEqual({ id: PHONE_ID, name: 'Phone Dup Test', dob: '1991-02-03', uhid: null })
+  })
+
+  it('finds nothing for a different number', async () => {
+    expect((await findPatientsByPhone('+919812300078')).some((r) => r.id === PHONE_ID)).toBe(false)
+  })
+
+  it('includes uhid in name+dob duplicate matches', async () => {
+    const [a] = (await findLikelyDuplicatePatients('Jordan Rivera', '1988-04-12')).filter((m) => m.id === TEST_ID_A)
+    expect(a).toEqual({ id: TEST_ID_A, name: 'Jordan Rivera', dob: '1988-04-12', uhid: null })
   })
 })

@@ -28,13 +28,18 @@ vi.mock('@/lib/cache', () => ({
   invalidateCacheByPrefix: vi.fn(async () => undefined),
 }))
 const dbInserts: unknown[] = []
-vi.mock('@/db/client', () => ({
+// The identity route first checks the patient exists (Wave B P1-09): the
+// patients select returns ANON's row, every other select returns nothing.
+vi.mock('@/db/client', async () => {
+  const schema = await vi.importActual<typeof import('@/db/schema')>('@/db/schema')
+  return {
   getDb: () => ({
-    select: () => ({ from: () => ({ where: async () => [] }) }),
+    select: () => ({ from: (t: unknown) => ({ where: async () => (t === schema.patients ? [{ id: 'RD-0001' }] : []) }) }),
     insert: () => ({ values: async (v: unknown) => { dbInserts.push(v) } }),
     update: () => ({ set: () => ({ where: async () => undefined }) }),
   }),
-}))
+  }
+})
 
 import * as auth from '@/lib/auth'
 import { PATCH as patchProfile } from '@/app/api/patients/[anonId]/profile/route'

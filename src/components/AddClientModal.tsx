@@ -8,6 +8,7 @@ import { DemographicsSection } from '@/components/registration/DemographicsSecti
 import { AddressSection } from '@/components/registration/AddressSection'
 import { NationalIdSection } from '@/components/registration/NationalIdSection'
 import { ContactsSection } from '@/components/registration/ContactsSection'
+import { FrontDeskDuplicateWarning } from '@/components/FrontDeskPatientSearch'
 import {
   EMPTY_REGISTRATION_FORM, toRegistrationPayload, fieldErrors, serverFieldErrors, type RegistrationFormState,
 } from '@/components/registration/registration-form-state'
@@ -102,6 +103,8 @@ export function AddClientModal({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-4">
           <DemographicsSection form={form} update={update} errors={errors} />
+          {/* Wave B P1-10: advisory duplicate check (name + DOB, or mobile). */}
+          <FrontDeskDuplicateWarning name={form.name} dob={form.dob} phone={form.phone} />
           <AddressSection form={form} update={update} errors={errors} />
           <NationalIdSection form={form} update={update} errors={errors} />
           <ContactsSection form={form} update={update} errors={errors} />

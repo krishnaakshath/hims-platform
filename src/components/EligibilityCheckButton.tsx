@@ -8,7 +8,7 @@ export function EligibilityCheckButton() {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}><ShieldCheck className="h-4 w-4" aria-hidden="true" /> Verify Insurance</Button>
+      <Button variant="outline" onClick={() => setOpen(true)}><ShieldCheck className="h-4 w-4" aria-hidden="true" /> Verify Insurance (Demo)</Button>
       {open && <EligibilityCheckModal onClose={() => setOpen(false)} />}
     </>
   )
