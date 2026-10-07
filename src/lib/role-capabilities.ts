@@ -80,6 +80,7 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Book, reschedule or cancel follow-up appointments and log patient contact attempts from the follow-up recall list',
       'Manage the department master and the UHID prefix',
       'Manage the service catalogue, tariffs, packages and room categories, including CSV tariff import',
+      'Correct a patient\'s name or date of birth after registration (with a recorded reason), and clear a medico-legal (MLC) flag',
     ],
   },
   frontdesk: {
@@ -97,13 +98,14 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Look up the current price of a service',
       'View every follow-up and work the follow-up recall list: book, reschedule or cancel the follow-up appointment and log contact attempts (the clinical plan stays with the doctor)',
       'Check a patient in against a booked follow-up appointment, which issues the OPD token',
+      'Find a patient by name, UHID, mobile number or chart ID, and print the OPD token slip and the registration slip / UHID card',
     ],
   },
   pharmacy: {
     label: 'Pharmacy',
     summary: 'Works the dispensing counter: looks a patient up by ID, reads what their doctor prescribed, dispenses from practice stock, and logs the bill — never prescribes, never edits a prescription, and never approves a charge.',
     bullets: [
-      'Look up any patient by their patient ID to see their prescribed medications',
+      'Look up any patient by name, UHID, mobile number or chart ID to see their prescribed medications',
       'View a patient\'s active medication episodes as the prescriber entered them (read-only)',
       'Dispense a medication from practice stock against a specific prescription',
       'Log a bill for a dispense as a draft charge for the billing team to review',

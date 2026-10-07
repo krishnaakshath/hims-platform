@@ -103,4 +103,15 @@ describe('SP3 follow-up capabilities', () => {
     expect(has('frontdesk', /recall list/i)).toBe(true); expect(has('frontdesk', /follow-up plan/i)).toBe(false)
     expect(has('crc', /recall list \(read-only\)/i)).toBe(true)
   })
+
+  // Wave C: patient identification and front-desk flow.
+  it('states the Wave C identification and correction capabilities', () => {
+    expect(has('frontdesk', /UHID, mobile/i)).toBe(true)
+    expect(has('frontdesk', /token slip/i)).toBe(true)
+    expect(has('pharmacy', /name, UHID, mobile/i)).toBe(true)
+    expect(has('admin', /correct a patient's name or date of birth/i)).toBe(true)
+    for (const role of ['crc', 'frontdesk', 'pi', 'pharmacy', 'billing', 'labs'] as Role[]) {
+      expect(has(role, /correct a patient's name or date of birth/i), role).toBe(false)
+    }
+  })
 })
