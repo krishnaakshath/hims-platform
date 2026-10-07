@@ -76,13 +76,15 @@ or populated one; for later schema changes, apply additive SQL by hand
 (`scripts/apply-sql.mjs`, see the README). Verify the tables exist before
 continuing.
 
-Then apply every file in `scripts/migrations/` dated after the schema baseline,
-in name order (`node --env-file=.env.local scripts/apply-sql.mjs <file>`). They
-are idempotent. Some constraints (for example `tariff_rates_no_overlap`, an
-`EXCLUDE USING gist` that also needs the `btree_gist` extension) cannot be
-expressed in `schema.ts` and exist only there. Because `drizzle-kit push` does
-not know about them, do not re-run `db:push` against a database that already
-has them: it would offer to drop them.
+Then apply every file in `scripts/migrations/`, in name order
+(`node --env-file=.env.local scripts/apply-sql.mjs <file>`). They are
+idempotent, so applying one that `db:push` already covered is harmless.
+
+Do not rely on `db:push` to manage the SP2 exclusion constraint
+`tariff_rates_no_overlap` (an `EXCLUDE USING gist` that also needs the
+`btree_gist` extension): it cannot be expressed in `schema.ts` and exists only
+in the migrations. Do not re-run `db:push` against a database that already has
+it, because `db:push` would offer to drop it.
 
 To avoid a local `.env.local`, you can pass the variable inline instead:
 `DATABASE_URL=... npx drizzle-kit push`.
