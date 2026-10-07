@@ -3,7 +3,7 @@ import { getDb } from '@/db/client'
 import { patients, patientContacts, patientAadhaar } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
-import { identityAuditEntries, toAadhaarSummary, type IdentitySnapshot, type NewPatientAadhaarRow } from '@/lib/patient-identity'
+import { aadhaarConflictSet, identityAuditEntries, toAadhaarSummary, type IdentitySnapshot, type NewPatientAadhaarRow } from '@/lib/patient-identity'
 import type { ContactInput, PatientProfileUpdateInput } from '@/lib/validation/patient-registration'
 
 // Post-registration writes to the patient master (SP1). Each write runs in
@@ -14,7 +14,7 @@ import type { ContactInput, PatientProfileUpdateInput } from '@/lib/validation/p
 // produce a wrong set-/changed-/removed- entry.
 //
 // Aadhaar: only aadhaarLast4 / declineReason (and the summary fields) are
-// ever selected here -- never aadhaarEncrypted. Nothing here logs; errors
+// ever selected here -- never the ciphertext. Nothing here logs; errors
 // propagate unchanged for the route to map or report by pg code only.
 
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
@@ -52,6 +52,13 @@ async function readIdentity(db: Executor, anonId: string, lock: boolean): Promis
 
 export async function getIdentitySnapshot(anonId: string): Promise<{ dob: string; snapshot: IdentitySnapshot } | null> {
   return readIdentity(getDb(), anonId, false)
+}
+
+// Status-only probe for viewers that may know nothing more than "on file"
+// (the patient portal). Selects last4 solely to test presence; returns a bool.
+export async function isAadhaarOnFile(anonId: string): Promise<boolean> {
+  const [a] = await getDb().select({ aadhaarLast4: patientAadhaar.aadhaarLast4 }).from(patientAadhaar).where(eq(patientAadhaar.patientId, anonId))
+  return a?.aadhaarLast4 != null
 }
 
 // false = no such patient (nothing written, nothing audited). Only keys
@@ -126,16 +133,7 @@ export async function upsertPatientAadhaar(anonId: string, row: NewPatientAadhaa
     const before = await readIdentity(tx, anonId, true)
     await tx.insert(patientAadhaar).values({ ...row, patientId: anonId }).onConflictDoUpdate({
       target: patientAadhaar.patientId,
-      set: {
-        aadhaarEncrypted: row.aadhaarEncrypted ?? null,
-        aadhaarLast4: row.aadhaarLast4 ?? null,
-        consentGiven: row.consentGiven ?? false,
-        consentRecordedAt: row.consentRecordedAt ?? null,
-        declineReason: row.declineReason ?? null,
-        declineNote: row.declineNote ?? null,
-        recordedByName: row.recordedByName,
-        updatedAt: row.updatedAt ?? new Date(),
-      },
+      set: aadhaarConflictSet(row),
     })
     if (!before) return // unreachable in practice: the insert's FK fails first
     const after: IdentitySnapshot = {

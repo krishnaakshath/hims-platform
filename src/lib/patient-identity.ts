@@ -55,6 +55,23 @@ export function buildAadhaarRow(patientId: string, input: AadhaarInput, recorded
   }
 }
 
+// The ON CONFLICT set for an upsert of a buildAadhaarRow result: every column
+// is overwritten, so switching declined <-> on_file clears the other side.
+// Lives here so this module stays the only one that names the ciphertext
+// column (pinned by tests/lib/no-aadhaar-leak.test.ts).
+export function aadhaarConflictSet(row: NewPatientAadhaarRow): Omit<NewPatientAadhaarRow, 'patientId'> {
+  return {
+    aadhaarEncrypted: row.aadhaarEncrypted ?? null,
+    aadhaarLast4: row.aadhaarLast4 ?? null,
+    consentGiven: row.consentGiven ?? false,
+    consentRecordedAt: row.consentRecordedAt ?? null,
+    declineReason: row.declineReason ?? null,
+    declineNote: row.declineNote ?? null,
+    recordedByName: row.recordedByName,
+    updatedAt: row.updatedAt ?? new Date(),
+  }
+}
+
 export type AadhaarStatus = 'on_file' | 'declined' | 'not_recorded'
 
 export interface AadhaarSummary {

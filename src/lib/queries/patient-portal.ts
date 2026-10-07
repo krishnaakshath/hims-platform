@@ -1,8 +1,50 @@
 import { getDb } from '@/db/client'
-import { patients, diagnoses, medicationEpisodes, appointments, providers, formSubmissions, formTemplates, formSubmissionConsents } from '@/db/schema'
+import { patients, patientContacts, diagnoses, medicationEpisodes, appointments, providers, formSubmissions, formTemplates, formSubmissionConsents } from '@/db/schema'
 import { eq, desc, asc, gte, lt, and, sql } from 'drizzle-orm'
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { getUnreadCountForPatient } from '@/lib/queries/messages'
+import { isAadhaarOnFile } from '@/lib/queries/patient-profile'
+import { stateName } from '@/lib/india/reference'
+
+/**
+ * The patient's own identity details for the portal's "Your details"
+ * section. Aadhaar is a bare on-file flag -- the portal never sees last4,
+ * the decline reason or anything else from the Aadhaar record (spec §3).
+ * The ABHA number is masked to its last 4.
+ */
+export interface PortalProfile {
+  uhid: string | null
+  abhaAddress: string | null
+  abhaNumberMasked: string | null
+  addressSummary: string | null
+  emergencyContactName: string | null
+  aadhaarOnFile: boolean
+}
+
+type ProfileSource = Pick<typeof patients.$inferSelect, 'uhid' | 'abhaAddress' | 'abhaNumber' | 'city' | 'district' | 'stateCode' | 'pinCode'>
+
+function addressSummary(p: ProfileSource): string | null {
+  const state = p.stateCode ? stateName(p.stateCode) : null
+  if (!p.city || !p.district || !state || !p.pinCode) return null
+  return `${p.city}, ${p.district}, ${state} ${p.pinCode}`
+}
+
+async function getPortalProfile(patient: ProfileSource, patientId: string): Promise<PortalProfile> {
+  const [emergency] = await getDb()
+    .select({ name: patientContacts.name })
+    .from(patientContacts)
+    .where(and(eq(patientContacts.patientId, patientId), eq(patientContacts.kind, 'emergency')))
+    .orderBy(desc(patientContacts.isPrimary), asc(patientContacts.id))
+    .limit(1)
+  return {
+    uhid: patient.uhid,
+    abhaAddress: patient.abhaAddress,
+    abhaNumberMasked: patient.abhaNumber && /^\d{14}$/.test(patient.abhaNumber) ? `XX-XXXX-XXXX-${patient.abhaNumber.slice(-4)}` : null,
+    addressSummary: addressSummary(patient),
+    emergencyContactName: emergency?.name ?? null,
+    aadhaarOnFile: await isAadhaarOnFile(patientId),
+  }
+}
 
 /**
  * Everything a patient is allowed to see about themselves through the
@@ -54,6 +96,7 @@ export async function getPatientPortalData(patientId: string) {
     .orderBy(desc(formSubmissions.sentDate))
 
   const unreadMessageCount = await getUnreadCountForPatient(patientId)
+  const profile = await getPortalProfile(patient, patientId)
 
   return {
     id: patient.id,
@@ -68,6 +111,7 @@ export async function getPatientPortalData(patientId: string) {
     pastAppointments: past,
     forms,
     unreadMessageCount,
+    profile,
   }
 }
 

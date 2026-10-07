@@ -11,6 +11,7 @@ import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCache
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
+import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
 
 export interface CriteriaSummary {
   inclusionMet: number
@@ -154,6 +155,22 @@ export async function getPatientDetail(anonId: string) {
 
     const discrepancies = await listDiscrepanciesForPatient(anonId)
 
+    const contacts = await getDb().select().from(patientContacts).where(eq(patientContacts.patientId, anonId)).orderBy(patientContacts.id)
+    // Aadhaar: the four summary columns ONLY -- never the ciphertext or the
+    // free-text decline note. This object is cached and serialized, so the
+    // summary (last4 included) must be turned into a role view
+    // (toAadhaarView) by every caller before it reaches a client or the wire.
+    const [aadhaarRow] = await getDb()
+      .select({
+        aadhaarLast4: patientAadhaar.aadhaarLast4,
+        declineReason: patientAadhaar.declineReason,
+        consentRecordedAt: patientAadhaar.consentRecordedAt,
+        recordedByName: patientAadhaar.recordedByName,
+      })
+      .from(patientAadhaar)
+      .where(eq(patientAadhaar.patientId, anonId))
+    const aadhaar: AadhaarSummary = toAadhaarSummary(aadhaarRow ?? null)
+
     return {
       ...withoutMfaSecret(patient),
       mfaEnabled: patient.mfaEnabled,
@@ -168,6 +185,8 @@ export async function getPatientDetail(anonId: string) {
       identityVerification: identity ?? null,
       portalConfigured: !!patient.portalPasswordHash,
       discrepancies,
+      contacts,
+      aadhaar,
     }
   })
 }
