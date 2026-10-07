@@ -411,6 +411,7 @@ import { PUT as putPayerFlags } from '@/app/api/billing/payers/[id]/route'
 import { POST as postChargeLine } from '@/app/api/billing/charge-lines/route'
 import { POST as previewChargeLineRoute } from '@/app/api/billing/charge-lines/preview/route'
 import { POST as voidChargeLineRoute } from '@/app/api/billing/charge-lines/[id]/void/route'
+import { POST as postRoomRentRoute } from '@/app/api/billing/admissions/[id]/room-rent/route'
 // end SP4
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
@@ -613,6 +614,8 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/billing/charge-lines', call: () => settle(() => postChargeLine(send('POST', '/api/billing/charge-lines'))), allowed: [...CHARGE_CAPTURE_ROLES] },
   { name: 'POST /api/billing/charge-lines/preview', call: () => settle(() => previewChargeLineRoute(send('POST', '/api/billing/charge-lines/preview'))), allowed: [...CHARGE_CAPTURE_ROLES] },
   { name: 'POST /api/billing/charge-lines/[id]/void', call: () => settle(() => voidChargeLineRoute(send('POST', `/api/billing/charge-lines/${BOGUS_ID}/void`), ctx({ id: BOGUS_ID }))), allowed: [...CHARGE_CAPTURE_ROLES] },
+  // SP4 room rent (CHARGE_CAPTURE_ROLES): the bogus admission is a 404 for an allowed role.
+  { name: 'POST /api/billing/admissions/[id]/room-rent', call: () => settle(() => postRoomRentRoute(send('POST', `/api/billing/admissions/${BOGUS_ID}/room-rent`), ctx({ id: BOGUS_ID }))), allowed: [...CHARGE_CAPTURE_ROLES] },
   // end SP4
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
@@ -667,6 +670,7 @@ const SP4_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/billing/charge-lines', call: () => postChargeLine(send('POST', '/api/billing/charge-lines', NOT_JSON)), allowed: CHARGE_CAPTURE_ROLES },
   { name: 'POST /api/billing/charge-lines/preview', call: () => previewChargeLineRoute(send('POST', '/api/billing/charge-lines/preview', NOT_JSON)), allowed: CHARGE_CAPTURE_ROLES },
   { name: 'POST /api/billing/charge-lines/[id]/void', call: () => voidChargeLineRoute(send('POST', `/api/billing/charge-lines/${BOGUS_ID}/void`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CHARGE_CAPTURE_ROLES },
+  { name: 'POST /api/billing/admissions/[id]/room-rent', call: () => postRoomRentRoute(send('POST', `/api/billing/admissions/${BOGUS_ID}/room-rent`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CHARGE_CAPTURE_ROLES },
 ]
 // end SP4
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES])('$name (deny before parse)', (c) => {
