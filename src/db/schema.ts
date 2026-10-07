@@ -491,6 +491,19 @@ export const providers = pgTable('providers', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
+export const departmentKindEnum = pgEnum('department_kind', ['clinical', 'diagnostic', 'support', 'administrative'])
+
+export const departments = pgTable('departments', {
+  id: serial('id').primaryKey(),
+  code: text('code').notNull().unique(),          // ^[A-Z][A-Z0-9_]{1,15}$
+  name: text('name').notNull(),
+  kind: departmentKindEnum('kind').default('clinical').notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+export type Department = typeof departments.$inferSelect
+
 export const appointments = pgTable('appointments', {
   id: serial('id').primaryKey(),
   patientId: text('patient_id').notNull().references(() => patients.id),
