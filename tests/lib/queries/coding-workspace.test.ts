@@ -198,6 +198,10 @@ describe.skipIf(!process.env.DATABASE_URL)('coding workspace and chart loaders (
     const n = list.find((e) => e.encounterId === newer.id)!
     expect(n).toMatchObject({ codingStatus: 'uncoded' })
     expect(n.diagnoses[0]).toMatchObject({ codeId: null, kind: null, code: '', display: null, version: null, isSample: false, codingStatus: 'uncoded', description: 'TEST newer free text' })
-    expect((await listEncounterCodingForPatient(PATIENT, 1)).map((e) => e.encounterId)).toEqual([bare.id])
+    // Beyond the limit, a visit with an open/answered coding query is still listed (the doctor's
+    // /doctor link points here for the reply), after the recent ones.
+    const limited = await listEncounterCodingForPatient(PATIENT, 1)
+    expect(limited.map((e) => e.encounterId)).toEqual([bare.id, enc.id])
+    expect(limited[1].openQueries.map((q) => q.id)).toEqual([openQueryId])
   })
 })

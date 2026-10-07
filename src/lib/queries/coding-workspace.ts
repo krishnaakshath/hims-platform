@@ -2,7 +2,7 @@
 // PHI (ruling 4): the coder-facing workspace reads the patient by NAMED columns — id, name,
 // uhid, gender, dob — and returns only id, name, uhid, gender and ageYears; dob is used for the
 // age and never returned. No contact, address, ABHA, insurance or national-ID column is read.
-import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, notInArray, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import {
@@ -320,25 +320,43 @@ export async function getCodingWorkspace(encounterId: number): Promise<CodingWor
 }
 
 // ---------------------------------------------------------------------------------------------
-// Chart (doctor-facing): the patient's recent visits with their coding
+// Chart (doctor-facing): the patient's recent visits (and any with an open query) with their coding
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * The patient's `limit` most recent non-cancelled visits, plus any older visit that still has an
+ * open or answered coding query (the doctor's /doctor list links to this panel for the reply), so a
+ * query is never out of reach. Newest first.
+ */
 export async function listEncounterCodingForPatient(patientId: string, limit = 10): Promise<ChartEncounterCoding[]> {
-  const rows = await getDb()
-    .select({
-      encounterId: encounters.id,
-      encounterDate: encounters.encounterDate,
-      encounterType: encounters.encounterType,
-      encounterStatus: encounters.status,
-      providerName: providers.name,
-      codingStatus: encounterCoding.status,
-    })
+  const columns = {
+    encounterId: encounters.id,
+    encounterDate: encounters.encounterDate,
+    encounterType: encounters.encounterType,
+    encounterStatus: encounters.status,
+    providerName: providers.name,
+    codingStatus: encounterCoding.status,
+  }
+  const base = () => getDb()
+    .select(columns)
     .from(encounters)
     .innerJoin(providers, eq(providers.id, encounters.providerId))
     .leftJoin(encounterCoding, eq(encounterCoding.encounterId, encounters.id))
+  const recent = await base()
     .where(and(eq(encounters.patientId, patientId), ne(encounters.status, 'cancelled')))
     .orderBy(desc(encounters.encounterDate), desc(encounters.id))
     .limit(limit)
+  const recentIds = recent.map((r) => r.encounterId)
+  const withOpenQueries = await base()
+    .where(and(
+      eq(encounters.patientId, patientId),
+      ne(encounters.status, 'cancelled'),
+      recentIds.length ? notInArray(encounters.id, recentIds) : undefined,
+      inArray(encounters.id, getDb().select({ id: codingQueries.encounterId }).from(codingQueries)
+        .where(and(eq(codingQueries.patientId, patientId), inArray(codingQueries.status, ['open', 'answered'])))),
+    ))
+    .orderBy(desc(encounters.encounterDate), desc(encounters.id))
+  const rows = [...recent, ...withOpenQueries]
   const ids = rows.map((r) => r.encounterId)
   const [dx, procs, queries] = await Promise.all([loadDiagnoses(ids), loadProcedures(ids), loadQueries(ids, ['open', 'answered'])])
   return rows.map((r) => ({
