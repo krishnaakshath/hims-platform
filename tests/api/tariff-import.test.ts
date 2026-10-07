@@ -146,10 +146,11 @@ describe('POST /api/tariff/import: transport limits', () => {
     expect(getImportLookups).not.toHaveBeenCalled()
   })
 
+  // One status for every oversize case: 413, before parse (transport cap) and after (parsed CSV).
   it('rejects a CSV over 1 MB', async () => {
     const big = `${RATE_HEADER}\n${'x'.repeat(MAX_IMPORT_BYTES)}`
     const res = await postTariffImport(post({ kind: 'rates', csv: big, commit: false }))
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(413)
     expect(await res.json()).toEqual({ error: 'CSV is larger than 1 MB' })
     expect(getImportLookups).not.toHaveBeenCalled()
   })
@@ -158,7 +159,7 @@ describe('POST /api/tariff/import: transport limits', () => {
     const big = '₹'.repeat(Math.ceil(MAX_IMPORT_BYTES / 3) + 1) // ~333k chars, >1 MB of UTF-8
     expect(big.length).toBeLessThan(MAX_IMPORT_BYTES)
     const res = await postTariffImport(post({ kind: 'rates', csv: big, commit: false }))
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(413)
     expect(await res.json()).toEqual({ error: 'CSV is larger than 1 MB' })
   })
 
@@ -231,6 +232,11 @@ describe('POST /api/tariff/import: validate and commit', () => {
     const ok = await postTariffImport(post({ kind: 'rates', csv: `${RATE_HEADER}\nCONS-GEN,base,,,,,"1,00,00,000",2026-10-07,\n`, commit: true }))
     expect(ok.status).toBe(200)
     expect(vi.mocked(commitRateImport).mock.calls[0][0][0].amountPaise).toBe(1_000_000_000)
+  })
+
+  it('ignores Excel blank rows of only commas', async () => {
+    const res = await postTariffImport(post({ kind: 'rates', csv: `${RATE_HEADER}\r\nCONS-GEN,base,,,,,500,2026-10-07,\r\n,,,,,,,,\r\n , , ,,,,,,\r\n`, commit: false }))
+    expect(await res.json()).toEqual({ kind: 'rates', rowCount: 1, issues: [], committed: false })
   })
 
   it('a header or syntax problem is a line-numbered issue, not an error', async () => {

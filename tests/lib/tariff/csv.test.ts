@@ -8,7 +8,8 @@ describe('parseCsv', () => {
   })
   it('handles LF endings, no trailing newline and empty cells', () => {
     expect(parseCsv('a,b,c\n1,,3')).toEqual({ header: ['a', 'b', 'c'], rows: [{ line: 2, cells: ['1', '', '3'] }] })
-    expect(parseCsv('a,b\n,\n')).toEqual({ header: ['a', 'b'], rows: [{ line: 2, cells: ['', ''] }] })
+    // A row of only separators is an Excel blank row (final-review ruling 9), not a record of empty cells.
+    expect(parseCsv('a,b\n,\n')).toEqual({ header: ['a', 'b'], rows: [] })
   })
   it('keeps a newline inside quotes and reports the record start line', () => {
     const r = parseCsv('a,b\n1,"x\ny"\n2,z\n')
@@ -23,6 +24,11 @@ describe('parseCsv', () => {
   })
   it('rejects text after a closing quote', () => {
     expect(() => parseCsv('a,b\n"x"y,2\n')).toThrow(CsvSyntaxError)
+  })
+  it('treats rows of only commas and whitespace (Excel blanks) as blank, but keeps a quoted empty row', () => {
+    const r = parseCsv('a,b,c\r\n1,2,3\r\n,,\r\n , ,\t\r\n4,5,6\r\n,,\r\n,,\r\n')
+    expect(r.rows).toEqual([{ line: 2, cells: ['1', '2', '3'] }, { line: 5, cells: ['4', '5', '6'] }])
+    expect(parseCsv('a,b\n"",\n').rows).toEqual([{ line: 2, cells: ['', ''] }])
   })
   it('returns an empty header for empty input', () => {
     expect(parseCsv('')).toEqual({ header: [], rows: [] })

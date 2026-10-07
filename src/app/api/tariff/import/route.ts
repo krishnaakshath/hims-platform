@@ -81,7 +81,8 @@ export async function POST(request: NextRequest) {
   const parsed = importBodySchema.safeParse(body)
   if (!parsed.success) return badRequest(INVALID)
   const { kind, csv, commit } = parsed.data
-  if (csv.length > MAX_IMPORT_BYTES || new TextEncoder().encode(csv).byteLength > MAX_IMPORT_BYTES) return badRequest(TOO_LARGE)
+  // Same 413 as the transport cap above, so every oversize case looks the same to the client.
+  if (csv.length > MAX_IMPORT_BYTES || new TextEncoder().encode(csv).byteLength > MAX_IMPORT_BYTES) return tooLarge()
 
   let lookups
   try {

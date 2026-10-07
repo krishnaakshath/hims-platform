@@ -12,7 +12,7 @@ export interface CsvRecord { line: number; cells: string[] }
 
 /**
  * Handles quoted fields, "" escapes, embedded commas/newlines in quotes, CRLF/LF, a leading BOM,
- * and skips fully blank lines. `line` is the 1-based physical line on which a record starts.
+ * and skips blank lines, including rows of only commas/whitespace. `line` is the 1-based physical line on which a record starts.
  * Error messages never include the input text.
  */
 export function parseCsv(input: string): { header: string[]; rows: CsvRecord[] } {
@@ -30,7 +30,8 @@ export function parseCsv(input: string): { header: string[]; rows: CsvRecord[] }
   const endCell = () => { cells.push(cell); cell = ''; afterQuote = false }
   const endRecord = () => {
     endCell()
-    const blank = cells.length === 1 && cells[0] === '' && !wasQuoted
+    // Excel writes blank rows as ',,,' (sometimes with stray spaces): only-separator rows are blank too.
+    const blank = !wasQuoted && cells.every((c) => c.trim() === '')
     if (!blank) records.push({ line: recordLine, cells })
     cells = []; wasQuoted = false
   }
