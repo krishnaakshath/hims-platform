@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pencil } from 'lucide-react'
@@ -52,21 +53,17 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
       if (consultationFeePaise === null) { setError('Enter a valid fee in rupees.'); return }
     }
     setSaving(true)
-    const res = await fetch(`/api/providers/${provider.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        departmentId: departmentId === '' ? null : Number(departmentId),
-        registrationCouncil: council === '' ? null : council,
-        registrationStateCode: council === 'smc' ? stateCode || null : null,
-        registrationNumber: regNumber.trim() === '' ? null : regNumber.trim(),
-        consultationFeePaise,
-      }),
+    const res = await sendJson(`/api/providers/${provider.id}`, 'PUT', {
+      name,
+      departmentId: departmentId === '' ? null : Number(departmentId),
+      registrationCouncil: council === '' ? null : council,
+      registrationStateCode: council === 'smc' ? stateCode || null : null,
+      registrationNumber: regNumber.trim() === '' ? null : regNumber.trim(),
+      consultationFeePaise,
     })
     setSaving(false)
     if (res.status === 409) { setError('Conflicts with an existing provider.'); return }
-    if (!res.ok) { setError('Could not save.'); return }
+    if (!res.ok) { setError(res.error); return }
     setEditing(false)
     // provider.name is a prop from the server-rendered roster -- without
     // this, the row immediately snaps back to displaying the pre-edit name
@@ -131,7 +128,7 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
       </div>
       {isAdmin && (
         <div className="flex shrink-0 items-center gap-2">
-          {error && <span className="text-xs text-destructive">{error}</span>}
+          {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
           {editing ? (
             <>
               <button onClick={save} disabled={saving} className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">

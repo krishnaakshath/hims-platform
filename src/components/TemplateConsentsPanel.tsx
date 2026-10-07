@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { AttachedConsentRow } from '@/lib/queries/form-template-consents'
@@ -21,14 +22,9 @@ export function TemplateConsentsPanel({ templateId, attached, allDocuments }: {
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch(`/api/form-templates/${templateId}/consents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consentDocumentId: Number(selected) }),
-      })
+      const res = await sendJson(`/api/form-templates/${templateId}/consents`, 'POST', { consentDocumentId: Number(selected) })
       if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        setError(body?.error ?? 'Could not attach this consent document.')
+        setError(res.error)
         return
       }
       setSelected('')
@@ -52,10 +48,9 @@ export function TemplateConsentsPanel({ templateId, attached, allDocuments }: {
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch(`/api/form-templates/${templateId}/consents/${row.consentDocumentId}`, { method: 'DELETE' })
+      const res = await sendJson(`/api/form-templates/${templateId}/consents/${row.consentDocumentId}`, 'DELETE')
       if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        setError(body?.error ?? 'Could not detach this consent document.')
+        setError(res.error)
         return
       }
       router.refresh()

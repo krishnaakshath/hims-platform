@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
@@ -16,16 +17,12 @@ export function ConsentDocumentEditor({ document }: { document: ConsentDocumentR
     setSaving(true)
     setMessage(null)
     try {
-      const res = await fetch(`/api/consent-documents/${document.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), bodyText, legalReviewStatus: status }),
-      })
+      const res = await sendJson(`/api/consent-documents/${document.id}`, 'PUT', { name: name.trim(), bodyText, legalReviewStatus: status })
       if (res.ok) {
         setMessage({ kind: 'ok', text: 'Saved.' })
         router.refresh()
       } else {
-        setMessage({ kind: 'error', text: 'Could not save. Check that name and wording are not empty.' })
+        setMessage({ kind: 'error', text: res.status === 400 ? 'Could not save. Check that name and wording are not empty.' : res.error })
       }
     } catch {
       setMessage({ kind: 'error', text: 'Could not save. Please check your connection and try again.' })
@@ -72,7 +69,7 @@ export function ConsentDocumentEditor({ document }: { document: ConsentDocumentR
         <button onClick={save} disabled={saving || !name.trim() || !bodyText.trim()} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
           {saving ? 'Saving…' : 'Save'}
         </button>
-        {message && <p className={message.kind === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>{message.text}</p>}
+        {message && <p role={message.kind === 'error' ? 'alert' : 'status'} className={message.kind === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>{message.text}</p>}
       </div>
     </div>
   )

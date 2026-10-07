@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 
 // Lost-device recovery while still holding a trusted, signed-in session --
@@ -16,15 +17,10 @@ export function StaffMfaSelfResetForm({ email }: { email: string }) {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const res = await fetch('/api/account/mfa/reset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
+    const res = await sendJson('/api/account/mfa/reset', 'POST', { email, password })
     setBusy(false)
     if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not reset MFA.')
+      setError(res.error)
       return
     }
     setDone(true)
@@ -56,7 +52,7 @@ export function StaffMfaSelfResetForm({ email }: { email: string }) {
           className="w-full rounded-md border border-border px-2 py-1.5 text-sm"
         />
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <div className="flex items-center gap-3">
         <button type="submit" disabled={busy} className="rounded-md bg-destructive px-3 py-1.5 text-xs font-semibold text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
           Reset MFA

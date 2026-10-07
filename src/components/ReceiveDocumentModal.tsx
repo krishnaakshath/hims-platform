@@ -1,4 +1,5 @@
 'use client'
+import { fetchJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -53,11 +54,10 @@ export function ReceiveDocumentModal({ patientOptions, activeAdmissions, onClose
       formData.set('patientId', patientId)
       if (associateAdmission && matchedAdmission) formData.set('admissionId', String(matchedAdmission.admissionId))
     }
-    const res = await fetch('/api/documents', { method: 'POST', body: formData })
+    const res = await fetchJson('/api/documents', { method: 'POST', body: formData })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not receive this document.')
+    setError(res.error)
   }
 
   const canSubmit = Boolean(file) && name.trim() !== '' && documentDate !== '' && receivedFrom.trim() !== '' && !submitting
@@ -99,7 +99,7 @@ export function ReceiveDocumentModal({ patientOptions, activeAdmissions, onClose
               <p className="text-xs text-muted-foreground">Outpatient</p>
             )
           )}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

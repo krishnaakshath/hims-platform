@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
@@ -16,16 +17,12 @@ export function NewConsentDocumentButton() {
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch('/api/consent-documents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), bodyText }),
-      })
+      const res = await sendJson<{ id: number }>('/api/consent-documents', 'POST', { name: name.trim(), bodyText })
       if (res.ok) {
-        const created = await res.json()
+        const created = res.data
         router.push('/consent-documents/' + created.id)
       } else {
-        setError('Could not create consent document. Please try again.')
+        setError(res.error)
       }
     } catch {
       setError('Could not create consent document. Please check your connection and try again.')
@@ -54,7 +51,7 @@ export function NewConsentDocumentButton() {
         disabled={saving}
         className="rounded-md border border-border bg-background p-2 text-sm"
       />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <div className="flex gap-2">
         <button onClick={create} disabled={saving || !name.trim() || !bodyText.trim()} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
           {saving ? 'Creating…' : 'Create'}

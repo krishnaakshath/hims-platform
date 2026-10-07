@@ -1,20 +1,20 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 
 export function AutoClassifyToggle({ initialEnabled, isAdmin }: { initialEnabled: boolean; isAdmin: boolean }) {
   const [enabled, setEnabled] = useState(initialEnabled)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function toggle() {
     const next = !enabled
     setSaving(true)
-    const res = await fetch('/api/settings/auto-classify', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: next }),
-    })
+    setError(null)
+    const res = await sendJson('/api/settings/auto-classify', 'PUT', { enabled: next })
     setSaving(false)
     if (res.ok) setEnabled(next)
+    else setError(res.error)
   }
 
   return (
@@ -27,6 +27,7 @@ export function AutoClassifyToggle({ initialEnabled, isAdmin }: { initialEnabled
       >
         {enabled ? 'On' : 'Off'}
       </button>
+      {error && <span role="alert" className="ml-3 text-xs text-destructive">{error}</span>}
     </div>
   )
 }

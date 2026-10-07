@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 
 interface Patient { id: string; name: string }
@@ -26,26 +27,21 @@ export function VirtualCardPaymentForm({
     setSubmitting(true)
     setError(null)
     setOutcome(null)
-    const res = await fetch('/api/mock-payments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        patientId,
-        chargeId: null,
-        amountCents: Math.round(Number(amount) * 100),
-        cardNumber,
-        expMonth: Number(expMonth),
-        expYear: Number(expYear),
-        cvc,
-      }),
+    const res = await sendJson<{ result: 'success' | 'failed'; cardLast4: string }>('/api/mock-payments', 'POST', {
+      patientId,
+      chargeId: null,
+      amountCents: Math.round(Number(amount) * 100),
+      cardNumber,
+      expMonth: Number(expMonth),
+      expYear: Number(expYear),
+      cvc,
     })
     setSubmitting(false)
     if (res.ok) {
-      const body = await res.json()
+      const body = res.data
       setOutcome({ result: body.result, cardLast4: body.cardLast4 })
     } else {
-      const body = await res.json()
-      setError(body.error ?? 'Could not record this demo payment.')
+      setError(res.error)
     }
   }
 
@@ -71,7 +67,7 @@ export function VirtualCardPaymentForm({
         </div>
       ) : (
         <div className="space-y-3">
-          {error && <p className="text-sm font-medium text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm font-medium text-destructive">{error}</p>}
 
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Patient</label>

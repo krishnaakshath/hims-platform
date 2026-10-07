@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -30,18 +31,13 @@ export function NewChargeModal({ patients }: { patients: { id: string; name: str
   async function submit() {
     setSaving(true)
     setError(null)
-    const res = await fetch('/api/charges', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patientId, providerName, dateOfService, diagnosisCodes: dx, procedureCodes: proc }),
-    })
+    const res = await sendJson('/api/charges', 'POST', { patientId, providerName, dateOfService, diagnosisCodes: dx, procedureCodes: proc })
     setSaving(false)
     if (res.ok) {
       setOpen(false)
       router.refresh()
     } else {
-      const body = await res.json()
-      setError(body.error ?? 'Failed to create charge.')
+      setError(res.error)
     }
   }
 
@@ -53,7 +49,7 @@ export function NewChargeModal({ patients }: { patients: { id: string; name: str
           <DialogHeader>
             <DialogTitle>New Charge</DialogTitle>
           </DialogHeader>
-          {error && <p className="text-sm font-medium text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm font-medium text-destructive">{error}</p>}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

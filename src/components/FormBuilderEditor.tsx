@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useEffect, useState, type ComponentProps } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -138,11 +139,7 @@ export function FormBuilderEditor({
         optionScores: q.optionScores ? keepIndices.map((i) => q.optionScores![i]) : q.optionScores,
       }
     })
-    const res = await fetch(`/api/form-templates/${templateId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, category, diagnosisTag, folderId, questions: cleaned }),
-    })
+    const res = await sendJson(`/api/form-templates/${templateId}`, 'PUT', { name, category, diagnosisTag, folderId, questions: cleaned })
     setSaving(false)
     if (res.ok) {
       setQuestions(cleaned)
@@ -150,23 +147,17 @@ export function FormBuilderEditor({
       setLastSavedAt(new Date())
       router.refresh()
     } else {
-      const body = await res.json().catch(() => null)
-      setSaveError(body?.error ?? 'Could not save this form. Please try again.')
+      setSaveError(res.error)
     }
   }
 
   async function archive() {
     setSaveError(null)
-    const res = await fetch(`/api/form-templates/${templateId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: false }),
-    })
+    const res = await sendJson(`/api/form-templates/${templateId}`, 'PUT', { isActive: false })
     if (res.ok) {
       router.push('/forms')
     } else {
-      const body = await res.json().catch(() => null)
-      setSaveError(body?.error ?? 'Could not archive this form. Please try again.')
+      setSaveError(res.error)
     }
   }
 
@@ -279,7 +270,7 @@ export function FormBuilderEditor({
 
       )}
 
-      {saveError && <p className="mt-3 text-sm text-destructive">{saveError}</p>}
+      {saveError && <p role="alert" className="mt-3 text-sm text-destructive">{saveError}</p>}
     </div>
 
     <aside className="w-64 shrink-0 space-y-3 rounded-xl border border-primary/10 bg-card/80 p-4 text-sm shadow-sm">

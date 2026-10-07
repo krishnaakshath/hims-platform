@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 
 export function QueueDisplayPinForm({ isAdmin, configured }: { isAdmin: boolean; configured: boolean }) {
@@ -12,13 +13,9 @@ export function QueueDisplayPinForm({ isAdmin, configured }: { isAdmin: boolean;
     setSaving(true)
     setError(null)
     setSavedAt(null)
-    const res = await fetch('/api/settings/queue-display-pin', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
-    })
+    const res = await sendJson('/api/settings/queue-display-pin', 'PUT', { pin })
     setSaving(false)
-    if (!res.ok) { setError('Could not save the queue display PIN.'); return }
+    if (!res.ok) { setError(res.error); return }
     setPinConfigured(true)
     setPin('')
     setSavedAt(Date.now())
@@ -52,7 +49,7 @@ export function QueueDisplayPinForm({ isAdmin, configured }: { isAdmin: boolean;
             {saving ? 'Saving…' : 'Save'}
           </button>
           {savedAt && <span className="text-xs text-muted-foreground">Saved</span>}
-          {error && <span className="text-xs text-destructive">{error}</span>}
+          {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
         </div>
       )}
     </div>

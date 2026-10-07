@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -11,16 +12,12 @@ export function CreateFormButton({ folderId }: { folderId: number | null }) {
     setCreating(true)
     setError(null)
     try {
-      const res = await fetch('/api/form-templates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Untitled Form', category: 'Uncategorized', diagnosisTag: 'General', questions: [], folderId }),
-      })
+      const res = await sendJson<{ id: number }>('/api/form-templates', 'POST', { name: 'Untitled Form', category: 'Uncategorized', diagnosisTag: 'General', questions: [], folderId })
       if (res.ok) {
-        const created = await res.json()
+        const created = res.data
         router.push(`/forms/${created.id}`)
       } else {
-        setError('Could not create form. Please try again.')
+        setError(res.error)
       }
     } catch {
       setError('Could not create form. Please check your connection and try again.')
@@ -34,7 +31,7 @@ export function CreateFormButton({ folderId }: { folderId: number | null }) {
       <button onClick={create} disabled={creating} className="rounded-lg border-2 border-dashed border-border p-5 text-sm font-medium text-muted-foreground transition-colors hover:border-primary hover:text-foreground disabled:opacity-50">
         + Create New Form
       </button>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }
