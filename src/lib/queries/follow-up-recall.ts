@@ -5,28 +5,12 @@ import { appointments, departments, followUpContactAttempts, followUpOrders, pat
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { todayIsoIn } from '@/lib/india-time'
-import { MISSED_GRACE_DAYS, UPCOMING_HORIZON_DAYS, addDaysIso, deriveFollowUpStatus, followUpVisitReason, type ApptStatus, type FollowUpStatus } from '@/lib/follow-ups/rules'
+import { MISSED_GRACE_DAYS, UPCOMING_HORIZON_DAYS, addDaysIso, followUpVisitReason } from '@/lib/follow-ups/rules'
 import type { ContactAttemptRequest } from '@/lib/follow-ups/validation'
 import { toFollowUpView, type ContactAttemptView, type FollowUpJoinedRow } from '@/lib/follow-ups/view'
 import { MISSED_ROW_CAP, WORKLIST_ROW_CAP, type WorklistRow } from '@/lib/follow-ups/worklist'
 import { hasSchedulingConflict, lockProviderSchedule } from './appointments'
-import type { WriteExecutor } from './executor'
-import type { FollowUpOrder } from './follow-ups'
-
-type LinkedAppointment = { id: number; status: ApptStatus; startsAt: Date; providerId: number }
-
-/** The order's derived status (IST today) and its linked appointment, read on the caller's executor. */
-async function derive(ex: WriteExecutor, order: FollowUpOrder, todayIso: string): Promise<{ status: FollowUpStatus; appointment: LinkedAppointment | null }> {
-  let appointment: LinkedAppointment | null = null
-  if (order.appointmentId !== null) {
-    const [a] = await ex
-      .select({ id: appointments.id, status: appointments.status, startsAt: appointments.startsAt, providerId: appointments.providerId })
-      .from(appointments)
-      .where(eq(appointments.id, order.appointmentId))
-    appointment = a ?? null
-  }
-  return { status: deriveFollowUpStatus({ status: order.status, windowEnd: order.windowEnd, appointment }, todayIso), appointment }
-}
+import { deriveOnExecutor, type FollowUpOrder } from './follow-ups'
 
 // ---------------------------------------------------------------------------
 // Book / reschedule / unbook
@@ -44,8 +28,8 @@ export type BookFollowUpResult =
  * row). The transaction-scoped advisory lock on the provider serialises every
  * follow-up booking for that doctor, so the conflict check below sees any
  * booking committed before it and two clerks cannot double-book a slot.
- * Calendar bookings (POST /api/appointments) do not take this lock (plan:
- * pre-existing hazard).
+ * Every other booking writer (calendar, front-desk schedule, booking-request
+ * confirmation, discharge) takes the same lock (lockProviderSchedule).
  */
 export async function bookFollowUp(
   id: number,
@@ -57,7 +41,7 @@ export async function bookFollowUp(
     // 1-2. Lock the order and derive its status.
     const [order] = await tx.select().from(followUpOrders).where(eq(followUpOrders.id, id)).for('update')
     if (!order) return { ok: false, error: 'not_found' }
-    const { status, appointment } = await derive(tx, order, todayIsoIn(undefined, now))
+    const { status, appointment } = await deriveOnExecutor(tx, order, todayIsoIn(undefined, now))
     if (status !== 'planned' && status !== 'scheduled' && status !== 'missed') return { ok: false, error: 'not_bookable' }
 
     // 3. The provider must exist and be active.
@@ -160,7 +144,7 @@ export async function recordContactAttempt(id: number, input: ContactAttemptRequ
     // Share lock: a concurrent cancel/complete waits until this attempt is in.
     const [order] = await tx.select().from(followUpOrders).where(eq(followUpOrders.id, id)).for('share')
     if (!order) return { ok: false, error: 'not_found' }
-    const { status } = await derive(tx, order, todayIsoIn())
+    const { status } = await deriveOnExecutor(tx, order, todayIsoIn())
     if (status === 'completed' || status === 'cancelled') return { ok: false, error: 'closed' }
 
     const note = input.note?.trim() ? input.note.trim() : null

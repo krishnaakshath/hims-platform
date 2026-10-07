@@ -34,6 +34,13 @@ export function addDaysIso(dateIso: string, days: number): string {
   return fmt(Date.UTC(y, m - 1, d + days))
 }
 
+/** Whole calendar days from `fromIso` to `toIso` (YYYY-MM-DD; negative when earlier). */
+export function daysBetweenIso(fromIso: string, toIso: string): number {
+  const [fy, fm, fd] = parts(fromIso)
+  const [ty, tm, td] = parts(toIso)
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000)
+}
+
 export function addMonthsIso(dateIso: string, months: number): string {
   const [y, m, d] = parts(dateIso)
   const first = new Date(Date.UTC(y, m - 1 + months, 1))

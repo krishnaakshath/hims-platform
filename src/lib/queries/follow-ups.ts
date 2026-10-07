@@ -6,8 +6,8 @@ import { logAudit } from '@/lib/audit'
 import type { Role, Session } from '@/lib/auth'
 import { istDateOf, todayIsoIn } from '@/lib/india-time'
 import {
-  DEFAULT_WINDOW_DAYS_AFTER, DEFAULT_WINDOW_DAYS_BEFORE, addDaysIso, deriveFollowUpStatus, dueDateProblem, isOpenFollowUp, resolveFollowUpDates,
-  type FollowUpStatus, type FollowUpTiming,
+  DEFAULT_WINDOW_DAYS_AFTER, DEFAULT_WINDOW_DAYS_BEFORE, addDaysIso, daysBetweenIso, deriveFollowUpStatus, dueDateProblem, isOpenFollowUp, resolveFollowUpDates,
+  type ApptStatus, type FollowUpStatus, type FollowUpTiming,
 } from '@/lib/follow-ups/rules'
 import type { UpdateFollowUpPlanRequest } from '@/lib/follow-ups/validation'
 import { toFollowUpView, toPortalFollowUp, type ContactAttemptView, type FollowUpJoinedRow, type FollowUpView, type PortalFollowUp } from '@/lib/follow-ups/view'
@@ -16,10 +16,6 @@ import type { WriteExecutor } from './executor'
 
 export type FollowUpOrder = FollowUpOrderRow
 
-const DAY_MS = 24 * 60 * 60 * 1000
-function daysBetween(fromIso: string, toIso: string): number {
-  return Math.round((Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / DAY_MS)
-}
 
 /** Empty plan notes are stored as NULL. */
 function normalizeNotes(notes: string | null | undefined): string | null {
@@ -27,12 +23,14 @@ function normalizeNotes(notes: string | null | undefined): string | null {
   return t ? t : null
 }
 
-/** The derived status of a locked order, read on the same executor. */
-async function deriveOnExecutor(ex: WriteExecutor, order: FollowUpOrder, todayIso: string): Promise<{ status: FollowUpStatus; appointment: { id: number; status: 'scheduled' | 'completed' | 'cancelled' | 'no_show'; startsAt: Date } | null }> {
-  let appointment: { id: number; status: 'scheduled' | 'completed' | 'cancelled' | 'no_show'; startsAt: Date } | null = null
+export type LinkedAppointment = { id: number; status: ApptStatus; startsAt: Date; providerId: number }
+
+/** The derived status of a (locked) order and its linked appointment, read on the caller's executor. */
+export async function deriveOnExecutor(ex: WriteExecutor, order: FollowUpOrder, todayIso: string): Promise<{ status: FollowUpStatus; appointment: LinkedAppointment | null }> {
+  let appointment: LinkedAppointment | null = null
   if (order.appointmentId !== null) {
     const [a] = await ex
-      .select({ id: appointments.id, status: appointments.status, startsAt: appointments.startsAt })
+      .select({ id: appointments.id, status: appointments.status, startsAt: appointments.startsAt, providerId: appointments.providerId })
       .from(appointments)
       .where(eq(appointments.id, order.appointmentId))
     appointment = a ?? null
@@ -166,8 +164,8 @@ export async function updateFollowUpPlan(
     if (!isOpenFollowUp(status)) return { ok: false, error: 'not_editable' }
 
     const changed = new Set<string>()
-    const currentBefore = daysBetween(order.windowStart, order.dueDate)
-    const currentAfter = daysBetween(order.dueDate, order.windowEnd)
+    const currentBefore = daysBetweenIso(order.windowStart, order.dueDate)
+    const currentAfter = daysBetweenIso(order.dueDate, order.windowEnd)
     const before = patch.windowDaysBefore ?? currentBefore
     const after = patch.windowDaysAfter ?? currentAfter
     if (before !== currentBefore) changed.add('windowDaysBefore')

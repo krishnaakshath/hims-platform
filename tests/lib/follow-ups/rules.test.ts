@@ -71,3 +71,13 @@ describe('follow-up rules', () => {
   it('followUpVisitReason prefixes', () => { expect(followUpVisitReason('BP review')).toBe('Follow-up: BP review') })
   it('istSlotString carries +05:30', () => { expect(istSlotString('2026-10-21', '09:30')).toBe('2026-10-21T09:30:00+05:30') })
 })
+
+import { daysBetweenIso as sharedDaysBetween } from '@/lib/follow-ups/rules'
+describe('daysBetweenIso (M3: the one shared calendar-day difference)', () => {
+  it('counts whole calendar days, across month and year ends, either direction', () => {
+    expect(sharedDaysBetween('2026-01-31', '2026-03-01')).toBe(29)
+    expect(sharedDaysBetween('2026-12-30', '2027-01-02')).toBe(3)
+    expect(sharedDaysBetween('2026-10-21', '2026-10-18')).toBe(-3)
+    expect(sharedDaysBetween('2026-10-21', '2026-10-21')).toBe(0)
+  })
+})

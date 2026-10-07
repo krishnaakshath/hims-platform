@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import type { FollowUpView } from '@/lib/follow-ups/view'
-import { istSlotString } from '@/lib/follow-ups/rules'
+import { addDaysIso, istSlotString } from '@/lib/follow-ups/rules'
 import { bookFollowUpSlot } from './api'
 import { FIELD, LABEL, formatIsoDate } from './format'
 
@@ -18,9 +18,7 @@ function addMinutes(hhmm: string, minutes: number): { hhmm: string; nextDay: boo
   return { hhmm: `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`, nextDay: total >= 24 * 60 }
 }
 
-function nextDayIso(dateIso: string): string {
-  return new Date(Date.parse(`${dateIso}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
-}
+const nextDayIso = (dateIso: string): string => addDaysIso(dateIso, 1)
 
 /** Book (or reschedule) a follow-up's appointment. Times are sent as IST with an explicit +05:30 offset. */
 export function BookFollowUpModal({

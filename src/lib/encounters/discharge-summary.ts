@@ -7,7 +7,7 @@ import type { Role } from '@/lib/auth'
 import { formatAbhaNumber } from '@/lib/india/abha'
 import { GENDERS, stateName } from '@/lib/india/reference'
 import { ageOnDate, istDateOf } from '@/lib/india-time'
-import type { FollowUpStatus } from '@/lib/follow-ups/rules'
+import { daysBetweenIso, type FollowUpStatus } from '@/lib/follow-ups/rules'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 
 export interface DischargeSummaryData {
@@ -48,12 +48,8 @@ export interface DischargeSummarySource {
   signature: { signerTypedName: string; signedAt: Date } | null
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000
 const GENDER_LABEL = new Map<string, string>(GENDERS.map((g) => [g.code, g.label]))
 
-function daysBetween(fromIso: string, toIso: string): number {
-  return Math.round((Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / DAY_MS)
-}
 
 function registration(a: DischargeSummarySource['attending']): string | null {
   if (!a.registrationNumber) return null
@@ -102,7 +98,7 @@ export function buildDischargeSummary(src: DischargeSummarySource, now: Date, vi
       admissionType: a.admissionType,
       admittedOn,
       dischargedOn,
-      lengthOfStayDays: Math.max(1, daysBetween(admittedOn, dischargedOn)),
+      lengthOfStayDays: Math.max(1, daysBetweenIso(admittedOn, dischargedOn)),
       lastWard: src.lastWard,
     },
     attending: { providerId: doc.providerId, name: doc.name, registration: registration(doc), departmentName: doc.departmentName },

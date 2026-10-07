@@ -34,10 +34,8 @@ export function formatIstDateTime(instant: Date | string): string {
   return `${p.day} ${MONTHS[p.mo]} ${p.y}, ${h12}:${String(p.mi).padStart(2, '0')} ${p.h < 12 ? 'am' : 'pm'}`
 }
 
-/** Whole days from a to b (YYYY-MM-DD), UTC maths. */
-export function daysBetweenIso(a: string, b: string): number {
-  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000)
-}
+/** Whole days from a to b (YYYY-MM-DD): the one shared rule. */
+export { daysBetweenIso } from '@/lib/follow-ups/rules'
 
 export const CHANNEL_LABEL: Record<ContactChannel, string> = {
   phone: 'Phone', sms: 'SMS', whatsapp: 'WhatsApp', email: 'Email', in_person: 'In person',
