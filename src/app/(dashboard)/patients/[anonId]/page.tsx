@@ -14,6 +14,8 @@ import { DeletePatientButton } from '@/components/DeletePatientButton'
 import { InpatientHistoryPanel } from '@/components/InpatientHistoryPanel'
 import { PatientProfilePanel } from '@/components/patient-profile/PatientProfilePanel'
 import { CopyUhidButton } from '@/components/patient-profile/CopyUhidButton'
+import { VerifyIdentityButton } from '@/components/patient-profile/VerifyIdentityButton' // Wave B
+import { IDENTITY_VERIFY_ROLES } from '@/lib/role-policy' // Wave B
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { FollowUpPanel } from '@/components/follow-ups/FollowUpPanel'
 import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
@@ -159,6 +161,12 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
           <div className="flex items-center gap-2 text-sm">
             <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden="true" />
             <span className="text-foreground">Verification pending{patient.identityVerification ? ` (${patient.identityVerification.idType.replace('_', ' ')} on file)` : ' — no ID on file'}</span>
+          </div>
+        )}
+        {/* Wave B P1-09: record the KYC document checked at the desk. */}
+        {IDENTITY_VERIFY_ROLES.includes(session.role) && (
+          <div className="mt-3">
+            <VerifyIdentityButton anonId={patient.id} verified={!!patient.identityVerification?.verified} />
           </div>
         )}
       </section>

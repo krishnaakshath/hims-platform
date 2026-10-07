@@ -73,4 +73,20 @@ describe('PUT /api/patients/[anonId]/identity', () => {
     const [row] = await getDb().select().from(identityVerifications).where(eq(identityVerifications.patientId, TEST_PATIENT_ID))
     expect(row.verified).toBe(true)
   })
+
+  // Wave B P1-09
+  it('404s an unknown patient without writing anything', async () => {
+    sessionRole = 'frontdesk'
+    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ idType: 'voter_id', idNumber: 'ABC1234567' }) })
+    const res = await PUT(req as never, { params: Promise.resolve({ anonId: TEST_PATIENT_ID }) })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Patient not found' })
+    expect(await getDb().select().from(identityVerifications).where(eq(identityVerifications.patientId, TEST_PATIENT_ID))).toHaveLength(0)
+  })
+
+  it('rejects an over-long id number', async () => {
+    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ idType: 'passport', idNumber: 'X'.repeat(41) }) })
+    const res = await PUT(req as never, { params: Promise.resolve({ anonId: TEST_PATIENT_ID }) })
+    expect(res.status).toBe(400)
+  })
 })
