@@ -6,7 +6,7 @@ import { notifyFollowUpSafely } from '@/lib/follow-ups/notifier'
 import { getFollowUpView, updateFollowUpPlan } from '@/lib/queries/follow-ups'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import {
-  DOCTOR_NOT_FOUND, FOLLOW_UP_CLOSED, FOLLOW_UP_NOT_FOUND, NOT_LINKED_TO_DOCTOR,
+  DEPARTMENT_NOT_FOUND, DOCTOR_NOT_FOUND, FOLLOW_UP_CLOSED, FOLLOW_UP_NOT_FOUND, NOT_LINKED_TO_DOCTOR,
   errorResponse, followUpServerError, invalidFollowUpId, parseFollowUpId, readJsonBody,
 } from '@/lib/follow-ups/route-responses'
 
@@ -46,6 +46,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         case 'not_owner': return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         case 'not_editable': return errorResponse(409, FOLLOW_UP_CLOSED)
         case 'provider_not_found': return errorResponse(404, DOCTOR_NOT_FOUND)
+        case 'department_not_found': return errorResponse(400, DEPARTMENT_NOT_FOUND)
         case 'due_date_invalid': return errorResponse(400, result.message ?? 'Invalid follow-up date')
       }
     }

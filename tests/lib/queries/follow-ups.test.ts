@@ -267,6 +267,23 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up orders (DB)', () => {
     expect(await cancelFollowUpOrder(2147483000, 'x', SESSION, otherProviderId)).toEqual({ ok: false, error: 'not_found' })
   })
 
+  it('an unknown or inactive department is department_not_found on create and update, with nothing written (M6)', async () => {
+    const [inactive] = await getDb().insert(departments).values({ code: `${DEPT_CODE}X`, name: 'TEST_SP3 closed dept', kind: 'clinical', isActive: false }).returning()
+    try {
+      for (const departmentId of [2147483000, inactive.id]) {
+        expect(await createFollowUpOrder(input({ departmentId }), SESSION, { today: '2099-04-02' })).toEqual({ ok: false, error: 'department_not_found' })
+      }
+      expect(await ordersOf(PATIENT)).toEqual([])
+      const order = await created()
+      expect(await updateFollowUpPlan(order.id, { departmentId: 2147483000 }, SESSION, null, '2099-04-02')).toEqual({ ok: false, error: 'department_not_found' })
+      expect((await getFollowUpById(order.id))?.departmentId).toBe(deptId)
+      expect(await updateFollowUpPlan(order.id, { departmentId: null }, SESSION, null, '2099-04-02')).toMatchObject({ ok: true, changedFields: ['departmentId'] })
+    } finally {
+      await getDb().delete(followUpOrders).where(eq(followUpOrders.patientId, PATIENT))
+      await getDb().delete(departments).where(eq(departments.id, inactive.id))
+    }
+  })
+
   it('getFollowUpById returns the row or null', async () => {
     const order = await created()
     expect((await getFollowUpById(order.id))?.id).toBe(order.id)

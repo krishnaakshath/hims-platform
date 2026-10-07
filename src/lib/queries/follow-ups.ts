@@ -17,6 +17,11 @@ import type { WriteExecutor } from './executor'
 export type FollowUpOrder = FollowUpOrderRow
 
 
+async function isActiveDepartment(ex: WriteExecutor, id: number): Promise<boolean> {
+  const [d] = await ex.select({ isActive: departments.isActive }).from(departments).where(eq(departments.id, id))
+  return !!d?.isActive
+}
+
 /** Empty plan notes are stored as NULL. */
 function normalizeNotes(notes: string | null | undefined): string | null {
   const t = notes?.trim()
@@ -59,7 +64,7 @@ export interface CreateFollowUpOrderInput {
 
 export type CreateFollowUpResult =
   | { ok: true; order: FollowUpOrder }
-  | { ok: false; error: 'patient_not_found' | 'provider_not_found' | 'encounter_not_found' | 'encounter_mismatch' | 'due_date_invalid'; message?: string }
+  | { ok: false; error: 'patient_not_found' | 'provider_not_found' | 'department_not_found' | 'encounter_not_found' | 'encounter_mismatch' | 'due_date_invalid'; message?: string }
 
 /**
  * Creates a follow-up order. With `opts.executor` it runs inside the caller's
@@ -82,6 +87,7 @@ export async function createFollowUpOrder(
       .from(providers)
       .where(eq(providers.id, input.prescribedByProviderId))
     if (!provider || !provider.isActive) return { ok: false, error: 'provider_not_found' }
+    if (input.departmentId != null && !(await isActiveDepartment(ex, input.departmentId))) return { ok: false, error: 'department_not_found' }
 
     let baseDate = today
     if (input.originatingEncounterId !== null) {
@@ -138,7 +144,7 @@ export type UpdateFollowUpPlanInput = UpdateFollowUpPlanRequest
 
 export type UpdateFollowUpPlanResult =
   | { ok: true; order: FollowUpOrder; changedFields: string[]; bookingOutsideWindow: boolean }
-  | { ok: false; error: 'not_found' | 'not_owner' | 'not_editable' | 'provider_not_found' | 'due_date_invalid'; message?: string }
+  | { ok: false; error: 'not_found' | 'not_owner' | 'not_editable' | 'provider_not_found' | 'department_not_found' | 'due_date_invalid'; message?: string }
 
 /**
  * Changes the clinical plan of an open order. A new timing is resolved from
@@ -201,7 +207,10 @@ export async function updateFollowUpPlan(
       changed.add('prescribedByProviderId')
     }
     const departmentId = patch.departmentId !== undefined ? patch.departmentId : order.departmentId
-    if (departmentId !== order.departmentId) changed.add('departmentId')
+    if (departmentId !== order.departmentId) {
+      if (departmentId !== null && !(await isActiveDepartment(tx, departmentId))) return { ok: false, error: 'department_not_found' }
+      changed.add('departmentId')
+    }
 
     const booked = order.status === 'scheduled' && appointment?.status === 'scheduled' ? appointment : null
     const bookingDay = booked ? istDateOf(booked.startsAt) : null

@@ -5,7 +5,7 @@ import { createFollowUpSchema } from '@/lib/follow-ups/validation'
 import { notifyFollowUpSafely } from '@/lib/follow-ups/notifier'
 import { createFollowUpOrder, getFollowUpView } from '@/lib/queries/follow-ups'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
-import { DOCTOR_NOT_FOUND, NOT_LINKED_TO_DOCTOR, errorResponse, followUpServerError, readJsonBody } from '@/lib/follow-ups/route-responses'
+import { DEPARTMENT_NOT_FOUND, DOCTOR_NOT_FOUND, NOT_LINKED_TO_DOCTOR, errorResponse, followUpServerError, readJsonBody } from '@/lib/follow-ups/route-responses'
 
 // SP3: a doctor (pi) or admin sets a patient's follow-up plan. A pi always
 // prescribes as their own linked provider profile; an admin names the doctor.
@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
       switch (result.error) {
         case 'patient_not_found': return errorResponse(404, 'Patient not found')
         case 'provider_not_found': return errorResponse(404, DOCTOR_NOT_FOUND)
+        case 'department_not_found': return errorResponse(400, DEPARTMENT_NOT_FOUND)
         case 'encounter_not_found': return errorResponse(404, 'Visit not found')
         case 'encounter_mismatch': return errorResponse(409, 'That visit belongs to a different patient.')
         case 'due_date_invalid': return errorResponse(400, result.message ?? 'Invalid follow-up date')

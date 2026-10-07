@@ -149,6 +149,23 @@ describe('POST /api/follow-ups', () => {
     expect(notifyFollowUpSafely).not.toHaveBeenCalled()
   })
 
+  it('department_not_found and a foreign-key violation (23503) are a fixed 400 (M6)', async () => {
+    role = 'admin'
+    vi.mocked(createFollowUpOrder).mockResolvedValueOnce({ ok: false, error: 'department_not_found' })
+    const missing = await POST(send('POST', '/api/follow-ups', { ...VALID, prescribedByProviderId: 9, departmentId: 77 }))
+    expect(missing.status).toBe(400)
+    expect(await missing.json()).toEqual({ error: 'Department not found or inactive' })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(createFollowUpOrder).mockRejectedValueOnce(Object.assign(new Error('fk SECRET'), { code: '23503', constraint: 'follow_up_orders_department_id_fk' }))
+    const fk = await POST(send('POST', '/api/follow-ups', { ...VALID, prescribedByProviderId: 9, departmentId: 77 }))
+    expect(fk.status).toBe(400)
+    expect(await fk.json()).toEqual({ error: 'A linked record does not exist.' })
+    vi.mocked(updateFollowUpPlan).mockResolvedValueOnce({ ok: false, error: 'department_not_found' })
+    expect((await PATCH(send('PATCH', '/api/follow-ups/3', { departmentId: 77 }), ctx({ id: '3' }))).status).toBe(400)
+    vi.mocked(updateFollowUpPlan).mockRejectedValueOnce(Object.assign(new Error('fk'), { code: '23503' }))
+    expect((await PATCH(send('PATCH', '/api/follow-ups/3', { departmentId: 77 }), ctx({ id: '3' }))).status).toBe(400)
+  })
+
   it('a schema error is a fixed 400 that does not echo input', async () => {
     const res = await POST(send('POST', '/api/follow-ups', { ...VALID, sneaky: 'ECHO-ME' }))
     expect(res.status).toBe(400)
@@ -163,12 +180,12 @@ describe('POST /api/follow-ups', () => {
     const retry = await POST(send('POST', '/api/follow-ups', VALID))
     expect(retry.status).toBe(409)
     expect((await retry.json()).error).toMatch(/try again/)
-    vi.mocked(createFollowUpOrder).mockRejectedValueOnce(Object.assign(new Error('boom SECRET'), { code: '23503', constraint: 'fk_x' }))
+    vi.mocked(createFollowUpOrder).mockRejectedValueOnce(Object.assign(new Error('boom SECRET'), { code: '23514', constraint: 'ck_x' }))
     const failed = await POST(send('POST', '/api/follow-ups', VALID))
     expect(failed.status).toBe(500)
     expect(JSON.stringify(await failed.json())).not.toContain('SECRET')
     const logged = spy.mock.calls.flat().map(String).join(' ')
-    expect(logged).toContain('23503')
+    expect(logged).toContain('23514')
     expect(logged).not.toContain('SECRET')
     expect(notifyFollowUpSafely).not.toHaveBeenCalled()
   })
