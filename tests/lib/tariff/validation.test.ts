@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { serviceCategoryEnum, TARIFF_SCOPES } from '@/db/schema'
 import {
+  AMOUNT_CAP_MESSAGE, MAX_AMOUNT_PAISE,
   RATE_SCOPES, SERVICE_CATEGORIES, GST_RATES_BP, gstPercentToBp, hsnSacKind, hsnSacProblem,
   serviceCreateSchema, serviceUpdateSchema, rateCreateSchema, rateRevisionSchema, ratePatchSchema,
   roomCategoryCreateSchema, roomCategoryUpdateSchema, roomAssignmentSchema, packageItemsSchema,
@@ -53,6 +54,14 @@ describe('tariff validation', () => {
     expect(rateCreateSchema.safeParse({ ...base, scope: 'base', validFrom: '2026-02-30' }).success).toBe(false)
     expect(rateCreateSchema.safeParse({ ...base, scope: 'base', amountPaise: -1 }).success).toBe(false)
     expect(rateCreateSchema.safeParse({ ...base, scope: 'base', amountPaise: 10_000_000_001 }).success).toBe(false)
+    // int4 column: the cap is ₹1 crore (1_000_000_000 paise), with a fixed, passable message.
+    expect(MAX_AMOUNT_PAISE).toBe(1_000_000_000)
+    expect(rateCreateSchema.safeParse({ ...base, scope: 'base', amountPaise: 1_000_000_000 }).success).toBe(true)
+    const over = rateCreateSchema.safeParse({ ...base, scope: 'base', amountPaise: 1_000_000_001 })
+    expect(over.success).toBe(false)
+    expect(over.error?.issues[0]).toMatchObject({ code: 'custom', message: AMOUNT_CAP_MESSAGE })
+    expect(rateRevisionSchema.safeParse({ amountPaise: 1_000_000_000, effectiveFrom: '2026-10-08' }).success).toBe(true)
+    expect(rateRevisionSchema.safeParse({ amountPaise: 1_000_000_001, effectiveFrom: '2026-10-08' }).error?.issues[0].message).toBe(AMOUNT_CAP_MESSAGE)
     expect(rateCreateSchema.safeParse({ ...base, scope: 'base', amountPaise: 1.5 }).success).toBe(false)
     expect(rateCreateSchema.safeParse({ ...base, scope: 'base', ward: '' }).success).toBe(false)
   })

@@ -62,6 +62,12 @@ export const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYY
 
 const positiveInt = z.number().int().positive()
 
+/** tariff_rates.amount_paise is int4: amounts are capped at ₹1 crore (1_000_000_000 paise). */
+export const MAX_AMOUNT_PAISE = 1_000_000_000
+export const AMOUNT_CAP_MESSAGE = 'Amount cannot exceed ₹1,00,00,000'
+// A refinement (code 'custom') so the routes pass the fixed message on rather than a generic one.
+const amountPaise = z.number().int().min(0).refine((v) => v <= MAX_AMOUNT_PAISE, AMOUNT_CAP_MESSAGE)
+
 const serviceBase = z.object({
   code: z.string().trim().toUpperCase().regex(SERVICE_CODE_PATTERN, 'Code must be 2-24 chars: A-Z, 0-9, . _ -'),
   name: z.string().trim().min(1).max(200),
@@ -92,7 +98,7 @@ export const rateCreateSchema = z.object({
   payerId: positiveInt.optional(),
   roomCategoryId: positiveInt.optional(),
   ward: z.string().trim().min(1).max(60).optional(),
-  amountPaise: z.number().int().min(0).max(10_000_000_000),
+  amountPaise,
   validFrom: isoDate,
   validTo: isoDate.optional(),
 }).strict().superRefine((v, ctx) => {
@@ -109,7 +115,7 @@ export const rateCreateSchema = z.object({
 })
 
 export const rateRevisionSchema = z.object({
-  amountPaise: z.number().int().min(0).max(10_000_000_000),
+  amountPaise,
   effectiveFrom: isoDate,
 }).strict()
 

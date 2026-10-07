@@ -127,6 +127,18 @@ describe('POST /api/tariff/rates', () => {
     expect(createRate).not.toHaveBeenCalled()
   })
 
+  it('caps amounts at ₹1 crore (int4 column): 1_000_000_000 ok, one paisa more is a fixed 400', async () => {
+    vi.mocked(createRate).mockResolvedValue(rate({ amountPaise: 1_000_000_000 }) as never)
+    expect((await POST(req(validRate({ amountPaise: 1_000_000_000 })))).status).toBe(201)
+    for (const amountPaise of [1_000_000_001, 2_147_483_648, 10_000_000_000]) {
+      vi.mocked(createRate).mockClear()
+      const res = await POST(req(validRate({ amountPaise })))
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Amount cannot exceed ₹1,00,00,000' })
+      expect(createRate).not.toHaveBeenCalled()
+    }
+  })
+
   it('500s generically, logging only the pg code and constraint', async () => {
     vi.mocked(createRate).mockRejectedValue(Object.assign(new Error('secret detail'), { cause: { code: '08006' } }))
     const res = await POST(req(validRate()))
@@ -170,6 +182,17 @@ describe('POST /api/tariff/rates/[id]/revise', () => {
     expect((await revise(req({ amountPaise: 1, effectiveFrom: '2026-05-01' }), ctx('5'))).status).toBe(409)
     vi.mocked(reviseRate).mockRejectedValueOnce({ cause: { code: '23P01', constraint: 'tariff_rates_no_overlap' } })
     expect(await (await revise(req({ amountPaise: 1, effectiveFrom: '2026-05-01' }), ctx('5'))).json()).toEqual(OVERLAP)
+  })
+
+  it('caps the revised amount at ₹1 crore with a fixed 400', async () => {
+    vi.mocked(getRate).mockResolvedValue(rate() as never)
+    vi.mocked(reviseRate).mockResolvedValue({ closed: rate({ validTo: '2026-04-30' }), created: rate({ id: 6, amountPaise: 1_000_000_000 }) } as never)
+    expect((await revise(req({ amountPaise: 1_000_000_000, effectiveFrom: '2026-05-01' }), ctx('5'))).status).toBe(200)
+    vi.mocked(reviseRate).mockClear()
+    const res = await revise(req({ amountPaise: 1_000_000_001, effectiveFrom: '2026-05-01' }), ctx('5'))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Amount cannot exceed ₹1,00,00,000' })
+    expect(reviseRate).not.toHaveBeenCalled()
   })
 
   it('returns closed and created and audits inside the write', async () => {

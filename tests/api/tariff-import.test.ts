@@ -222,6 +222,17 @@ describe('POST /api/tariff/import: validate and commit', () => {
     expect((await res.json()).issues[0].message).toBe(`Unknown service code ${payload.slice(0, 40)}…`)
   })
 
+  it('caps an imported amount at ₹1 crore: 1,00,00,000 ok, one paisa more is a line-numbered issue', async () => {
+    const csv = `${RATE_HEADER}\nCONS-GEN,base,,,,,"1,00,00,000",2026-10-07,2026-12-31\nCONS-GEN,base,,,,,10000000.01,2027-01-01,\n`
+    const res = await postTariffImport(post({ kind: 'rates', csv, commit: true }))
+    expect(res.status).toBe(422)
+    expect((await res.json()).issues).toEqual([{ line: 3, column: 'amount_inr', message: 'Amount cannot exceed ₹1,00,00,000' }])
+    nothingWritten()
+    const ok = await postTariffImport(post({ kind: 'rates', csv: `${RATE_HEADER}\nCONS-GEN,base,,,,,"1,00,00,000",2026-10-07,\n`, commit: true }))
+    expect(ok.status).toBe(200)
+    expect(vi.mocked(commitRateImport).mock.calls[0][0][0].amountPaise).toBe(1_000_000_000)
+  })
+
   it('a header or syntax problem is a line-numbered issue, not an error', async () => {
     const res = await postTariffImport(post({ kind: 'services', csv: 'code,name\nA,B\n', commit: false }))
     expect(res.status).toBe(200)
