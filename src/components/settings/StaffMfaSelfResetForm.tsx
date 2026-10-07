@@ -17,7 +17,7 @@ export function StaffMfaSelfResetForm({ email }: { email: string }) {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const res = await sendJson('/api/account/mfa/reset', 'POST', { email, password })
+    const res = await sendJson('/api/account/mfa/reset', 'POST', { email, password }, { passThrough: [401] })
     setBusy(false)
     if (!res.ok) {
       setError(res.error)

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { BrandLogo } from '@/components/BrandLogo'
@@ -16,19 +17,14 @@ export default function PatientPortalLoginPage() {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/patient-portal/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patientId, password }),
-    })
+    // 401 carries the route's own sign-in message ("Invalid patient ID or password").
+    const res = await sendJson<{ mfaRequired?: boolean }>('/api/patient-portal/login', 'POST', { patientId, password }, { passThrough: [401] })
     setSubmitting(false)
     if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not sign in.')
+      setError(res.error)
       return
     }
-    const body = await res.json()
-    if (body.mfaRequired) {
+    if (res.data?.mfaRequired) {
       setNeedsMfa(true)
       return
     }
@@ -36,15 +32,8 @@ export default function PatientPortalLoginPage() {
   }
 
   async function submitMfaCode(code: string): Promise<string | null> {
-    const res = await fetch('/api/patient-portal/login/mfa', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    })
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      return body?.error ?? 'Could not verify that code.'
-    }
+    const res = await sendJson('/api/patient-portal/login/mfa', 'POST', { code }, { passThrough: [401] })
+    if (!res.ok) return res.error
     router.push('/patient-portal')
     return null
   }
@@ -110,7 +99,7 @@ export default function PatientPortalLoginPage() {
                 </div>
                 
                 {error && (
-                  <div className="rounded-md bg-destructive/10 p-3 text-sm font-medium text-destructive">
+                  <div role="alert" className="rounded-md bg-destructive/10 p-3 text-sm font-medium text-destructive">
                     {error}
                   </div>
                 )}

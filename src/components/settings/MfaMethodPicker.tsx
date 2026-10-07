@@ -14,7 +14,7 @@ export function MfaMethodPicker({ email, currentMethod, currentPhone }: { email:
     setSaving(true)
     setError(null)
     setSaved(false)
-    const res = await sendJson('/api/account/mfa-method', 'PUT', { method, email, password, ...(method === 'sms' && phone ? { phone } : {}) })
+    const res = await sendJson('/api/account/mfa-method', 'PUT', { method, email, password, ...(method === 'sms' && phone ? { phone } : {}) }, { passThrough: [401] })
     setSaving(false)
     if (!res.ok) {
       setError(res.error)
