@@ -154,7 +154,7 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
   })
 }
 
-export type TransitionEncounterResult = { ok: true; encounter: Encounter } | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' }
+export type TransitionEncounterResult = { ok: true; encounter: Encounter } | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' | 'admission_active' }
 
 export async function transitionEncounter(
   id: number,
@@ -174,6 +174,12 @@ export async function transitionEncounter(
     // A doctor (pi) acts as their own provider profile: only the visit's doctor moves it on.
     if (opts.actingProviderId != null && current.providerId !== opts.actingProviderId) return { ok: false, error: 'not_owner' }
     if (!canTransitionEncounter(current.status, to)) return { ok: false, error: 'invalid_transition' }
+    // M8: an inpatient stay is ended by discharge; the front desk cannot cancel
+    // the IPD visit while its admission is still active.
+    if (to === 'cancelled' && session.role === 'frontdesk' && current.encounterType === 'ipd' && current.admissionId !== null) {
+      const [adm] = await tx.select({ status: admissions.status }).from(admissions).where(eq(admissions.id, current.admissionId))
+      if (adm?.status === 'admitted') return { ok: false, error: 'admission_active' }
+    }
     const at = new Date()
     const [updated] = await tx.update(encounters).set({
       status: to,

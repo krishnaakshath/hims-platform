@@ -345,6 +345,19 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     expect((await transitionEncounter(r.encounter.id, 'completed', SESSION, { actingProviderId: null })).ok).toBe(true)
   })
 
+  it('the front desk cannot cancel an IPD visit while its admission is active; admin can (M8)', async () => {
+    const r = await checkInVisit(input({ visitType: 'inpatient', createAdmission: true }), SESSION, NOW)
+    if (!r.ok) throw new Error('check-in failed')
+    expect(await transitionEncounter(r.encounter.id, 'cancelled', SESSION, { cancelReason: 'x' })).toEqual({ ok: false, error: 'admission_active' })
+    expect((await getEncounterById(r.encounter.id))?.status).toBe('checked_in')
+    // An IPD visit with no admission is not blocked.
+    const bare = await checkInVisit(input({ visitType: 'inpatient', createAdmission: false }), SESSION, NOW)
+    if (!bare.ok) throw new Error('check-in failed')
+    expect((await transitionEncounter(bare.encounter.id, 'cancelled', SESSION, { cancelReason: 'x' })).ok).toBe(true)
+    const admin: Session = { ...SESSION, role: 'admin' }
+    expect((await transitionEncounter(r.encounter.id, 'cancelled', admin, { cancelReason: 'x' })).ok).toBe(true)
+  })
+
   it('cancelling a visit reopens the follow-up it completed and frees the appointment for a new check-in (I6)', async () => {
     const appt = await makeAppointment()
     const order = await makeOrder(appt.id)

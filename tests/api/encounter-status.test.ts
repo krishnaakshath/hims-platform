@@ -83,6 +83,13 @@ describe('POST /api/encounters/[id]/status', () => {
     expect(resolveDoctorQueueProvider).not.toHaveBeenCalled()
   })
 
+  it('maps admission_active to 409 with a fixed message (M8)', async () => {
+    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'admission_active' })
+    const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'This patient is still admitted. Discharge them before cancelling the visit.' })
+  })
+
   it('maps invalid_transition to 409 and not_found to 404', async () => {
     role = 'admin'
     vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'invalid_transition' })

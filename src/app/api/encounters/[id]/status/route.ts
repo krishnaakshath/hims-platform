@@ -47,6 +47,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!result.ok) {
       if (result.error === 'not_found') return NextResponse.json({ error: 'Not found' }, { status: 404 })
       if (result.error === 'not_owner') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (result.error === 'admission_active') return NextResponse.json({ error: 'This patient is still admitted. Discharge them before cancelling the visit.' }, { status: 409 })
       return NextResponse.json({ error: 'This visit can no longer change to that status.' }, { status: 409 })
     }
     // Explicit projection (M7): no free text (cancel reason) and no internal links ride along.
