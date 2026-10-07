@@ -34,6 +34,10 @@ import {
   roomCategories,
   tariffRates,
   servicePackageItems,
+  // SP3
+  encounters,
+  followUpOrders,
+  followUpContactAttempts,
   appointments,
   rooms,
   documents,
@@ -932,6 +936,10 @@ async function clearExistingData() {
   // form_templates.folder_id references form_template_folders.
   await db.delete(formTemplateFolders)
   await db.delete(consentDocuments)
+  // SP3: contact attempts -> follow-up orders -> encounters, all before appointments/patients.
+  await db.delete(followUpContactAttempts)
+  await db.delete(followUpOrders)
+  await db.delete(encounters)
   await db.delete(appointments)
   await db.delete(patients)
   // staffCredentials/staffMembers FK into providers/users, so both must be

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, date, boolean, jsonb, integer, pgEnum, serial, uniqueIndex, index, pgSequence, check } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, date, boolean, jsonb, integer, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
@@ -791,6 +791,108 @@ export const admissionTransfers = pgTable('admission_transfers', {
   transferredByName: text('transferred_by_name').notNull(),
   transferredAt: timestamp('transferred_at').defaultNow().notNull(),
 })
+
+// SP3 encounters & follow-up (scripts/migrations/2026-10-07-sp3-encounters-follow-up.sql)
+export const encounterTypeEnum = pgEnum('encounter_type', ['opd', 'ipd', 'lab'])
+export const encounterVisitTypeEnum = pgEnum('encounter_visit_type', ['new', 'follow_up', 'review', 'emergency'])
+export const encounterStatusEnum = pgEnum('encounter_status', ['checked_in', 'in_consultation', 'completed', 'cancelled'])
+export const followUpStatusEnum = pgEnum('follow_up_status', ['planned', 'scheduled', 'completed', 'missed', 'cancelled'])
+export const followUpSourceEnum = pgEnum('follow_up_source', ['encounter', 'discharge', 'lab_report', 'manual'])
+export const followUpIntervalUnitEnum = pgEnum('follow_up_interval_unit', ['days', 'weeks', 'months'])
+export const followUpContactChannelEnum = pgEnum('follow_up_contact_channel', ['phone', 'sms', 'whatsapp', 'email', 'in_person'])
+export const followUpContactOutcomeEnum = pgEnum('follow_up_contact_outcome', ['reached_booked', 'reached_will_call_back', 'reached_declined', 'no_answer', 'wrong_number', 'message_left'])
+
+// SP3: one row per visit (OPD) or stay (IPD), created at check-in. encounter_date is the
+// Asia/Kolkata business date; the OPD token restarts per IST date.
+export const encounters = pgTable('encounters', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  encounterType: encounterTypeEnum('encounter_type').notNull(),
+  visitType: encounterVisitTypeEnum('visit_type').default('new').notNull(),
+  status: encounterStatusEnum('status').default('checked_in').notNull(),
+  encounterDate: date('encounter_date').notNull(),
+  opdToken: integer('opd_token'),
+  departmentId: integer('department_id').references(() => departments.id),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  appointmentId: integer('appointment_id').references(() => appointments.id, { onDelete: 'set null' }).unique(),
+  admissionId: integer('admission_id').references(() => admissions.id, { onDelete: 'set null' }).unique(),
+  doctorAssignmentId: integer('doctor_assignment_id').references(() => doctorAssignments.id, { onDelete: 'set null' }).unique(),
+  checkedInByName: text('checked_in_by_name').notNull(),
+  checkedInAt: timestamp('checked_in_at').defaultNow().notNull(),
+  statusChangedAt: timestamp('status_changed_at'),
+  statusChangedByName: text('status_changed_by_name'),
+  completedAt: timestamp('completed_at'),
+  cancelReason: text('cancel_reason'),
+}, (t) => [
+  uniqueIndex('encounters_date_token_unique').on(t.encounterDate, t.opdToken),
+  index('encounters_patient_id_idx').on(t.patientId),
+  check('encounters_token_positive', sql`${t.opdToken} IS NULL OR ${t.opdToken} > 0`),
+])
+
+// SP3: a prescribed return visit. Provenance links are ON DELETE SET NULL so deleting an
+// appointment/admission/encounter never trips on a follow-up; the derived status
+// (deriveFollowUpStatus) treats a scheduled order whose appointment vanished as planned.
+export const followUpOrders = pgTable('follow_up_orders', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  source: followUpSourceEnum('source').notNull(),
+  status: followUpStatusEnum('status').default('planned').notNull(),
+  prescribedByProviderId: integer('prescribed_by_provider_id').notNull().references(() => providers.id),
+  departmentId: integer('department_id').references(() => departments.id),
+  baseDate: date('base_date').notNull(),          // the date the interval counts from
+  dueDate: date('due_date').notNull(),
+  windowStart: date('window_start').notNull(),
+  windowEnd: date('window_end').notNull(),
+  intervalValue: integer('interval_value'),
+  intervalUnit: followUpIntervalUnitEnum('interval_unit'),
+  reason: text('reason').notNull(),
+  planNotes: text('plan_notes'),
+  originatingEncounterId: integer('originating_encounter_id').references(() => encounters.id, { onDelete: 'set null' }),
+  originatingAdmissionId: integer('originating_admission_id').references(() => admissions.id, { onDelete: 'set null' }),
+  // SP5 placeholder: SP3 never writes this.
+  originatingLabOrderId: integer('originating_lab_order_id').references(() => labOrders.id, { onDelete: 'set null' }),
+  appointmentId: integer('appointment_id').references(() => appointments.id, { onDelete: 'set null' }).unique(),
+  completedEncounterId: integer('completed_encounter_id').references(() => encounters.id, { onDelete: 'set null' }),
+  createdByName: text('created_by_name').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  planUpdatedAt: timestamp('plan_updated_at'),
+  planUpdatedByName: text('plan_updated_by_name'),
+  scheduledAt: timestamp('scheduled_at'),
+  scheduledByName: text('scheduled_by_name'),
+  scheduledByUserId: integer('scheduled_by_user_id').references(() => users.id),
+  completedAt: timestamp('completed_at'),
+  cancelledAt: timestamp('cancelled_at'),
+  cancelledByName: text('cancelled_by_name'),
+  cancelReason: text('cancel_reason'),
+}, (t) => [
+  index('follow_up_orders_patient_id_idx').on(t.patientId),
+  index('follow_up_orders_status_window_idx').on(t.status, t.windowEnd),
+  check('follow_up_orders_window_order', sql`${t.windowStart} <= ${t.dueDate} AND ${t.dueDate} <= ${t.windowEnd}`),
+  check('follow_up_orders_interval_pair', sql`(${t.intervalValue} IS NULL) = (${t.intervalUnit} IS NULL) AND (${t.intervalValue} IS NULL OR ${t.intervalValue} > 0)`),
+  check('follow_up_orders_cancel_reason', sql`${t.status} <> 'cancelled' OR ${t.cancelReason} IS NOT NULL`),
+])
+
+export const followUpContactAttempts = pgTable('follow_up_contact_attempts', {
+  id: serial('id').primaryKey(),
+  followUpOrderId: integer('follow_up_order_id').notNull(),
+  channel: followUpContactChannelEnum('channel').notNull(),
+  outcome: followUpContactOutcomeEnum('outcome').notNull(),
+  note: text('note'),
+  attemptedByName: text('attempted_by_name').notNull(),
+  attemptedByUserId: integer('attempted_by_user_id').references(() => users.id),
+  attemptedAt: timestamp('attempted_at').defaultNow().notNull(),
+}, (t) => [
+  // Explicit name: drizzle's default would be 68 characters, over Postgres's 63-character limit.
+  foreignKey({ name: 'follow_up_contact_attempts_order_id_fk', columns: [t.followUpOrderId], foreignColumns: [followUpOrders.id] }).onDelete('cascade'),
+  index('follow_up_contact_attempts_order_idx').on(t.followUpOrderId),
+  check('follow_up_contact_attempts_note_len', sql`${t.note} IS NULL OR char_length(${t.note}) <= 500`),
+])
+
+export type EncounterRow = typeof encounters.$inferSelect
+export type FollowUpOrderRow = typeof followUpOrders.$inferSelect
+export type FollowUpContactAttemptRow = typeof followUpContactAttempts.$inferSelect
 
 export const noteTypeEnum = pgEnum('note_type', ['progress', 'nursing', 'intake'])
 export const noteStatusEnum = pgEnum('note_status', ['draft', 'signed'])
