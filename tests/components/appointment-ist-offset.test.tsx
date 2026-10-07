@@ -24,8 +24,8 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 describe('appointment-creating UIs send +05:30', () => {
   it('NewEventModal', async () => {
     const fetchMock = stubFetch()
-    render(<NewEventModal patients={[{ id: 'RD-0001', name: 'Asha' }]} providers={[{ id: 7, name: 'Dr. Rao' }]} defaultDate="2026-11-03" onClose={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('Patient'), { target: { value: 'RD-0001' } })
+    // Wave C: the patient comes from the PatientPicker; preselect it here.
+    render(<NewEventModal initialPatient={{ id: 'RD-0001', name: 'Asha', uhid: null }} providers={[{ id: 7, name: 'Dr. Rao' }]} defaultDate="2026-11-03" onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Doctor'), { target: { value: '7' } })
     fireEvent.change(screen.getByLabelText('Start time (IST)'), { target: { value: '09:00' } })
     fireEvent.change(screen.getByLabelText('End time (IST)'), { target: { value: '09:30' } })
@@ -39,12 +39,18 @@ describe('appointment-creating UIs send +05:30', () => {
     const fetchMock = stubFetch()
     const request = { id: 5, requesterName: 'Morgan', reason: 'Checkup', preferredProviderId: 7, preferredDateRangeStart: '2026-11-01', preferredDateRangeEnd: '2026-11-10' } as unknown as BookingRequestRow
     render(<ConfirmBookingRequestModal request={request} providers={[{ id: 7, name: 'Dr. Rao' }]} onClose={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('Patient ID'), { target: { value: 'RD-0001' } })
+    // Wave C: the patient is picked in the PatientPicker.
+    fetchMock.mockImplementation(async (url: string) => (url.startsWith('/api/patients/lookup')
+      ? new Response(JSON.stringify({ results: [{ id: 'RD-0001', name: 'Asha', uhid: null, gender: null, ageYears: null }], page: 1, pageSize: 10, hasMore: false }), { status: 200 })
+      : new Response('[]', { status: 200 })))
+    fireEvent.change(screen.getByRole('combobox', { name: /patient/i }), { target: { value: 'asha' } })
+    fireEvent.click(await screen.findByRole('option', { name: /asha/i }))
     fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '14:15' } })
     fireEvent.change(screen.getByLabelText('End time'), { target: { value: '14:45' } })
     fireEvent.click(screen.getByText('Confirm'))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    expect(sentBody(fetchMock)).toMatchObject({ startsAt: '2026-11-01T14:15:00+05:30', endsAt: '2026-11-01T14:45:00+05:30' })
+    const confirmIdx = () => fetchMock.mock.calls.findIndex(([u]) => u === '/api/booking-requests/5/confirm')
+    await waitFor(() => expect(confirmIdx()).toBeGreaterThanOrEqual(0))
+    expect(sentBody(fetchMock, confirmIdx())).toMatchObject({ patientId: 'RD-0001', startsAt: '2026-11-01T14:15:00+05:30', endsAt: '2026-11-01T14:45:00+05:30' })
   })
 
   it('AssignmentScheduleModal defaults to the IST date and sends +05:30', async () => {

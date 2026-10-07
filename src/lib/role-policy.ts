@@ -104,6 +104,25 @@ export const CODE_SYSTEM_ADMIN_ROLES: readonly Role[] = ['admin']
 export const ACCOUNT_ROLES: readonly Role[] = ALL_ROLES
 // end Wave B
 
+// Wave C: patient identification and front-desk flow.
+// Picker = the patient typeahead (GET /api/patients/lookup) used by check-in,
+// booking, the pharmacy counter and billing's eligibility check: the
+// directory roles plus the two counters that already look a patient up by
+// id (pharmacy dispensing, billing eligibility/charges). Labs is not a
+// picker role (its worklist is its lookup). Results are a minimal projection
+// (name, UHID, chart id, age, gender); the mobile number is returned only to
+// PATIENT_DIRECTORY_ROLES, the roles that already see it on /patients.
+export const PATIENT_PICKER_ROLES: readonly Role[] = ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing']
+export const PATIENT_PICKER_PHONE_ROLES: readonly Role[] = PATIENT_DIRECTORY_ROLES
+// OPD token slip (/print/token/[encounterId]) = whoever may check in.
+// Registration slip / UHID card (/print/registration/[anonId]) = registration roles.
+// Name / date-of-birth correction after registration (P1-11): admin only.
+export const DEMOGRAPHICS_CORRECTION_ROLES: readonly Role[] = ['admin']
+// Clearing the MLC flag once set (P2-11): admin only; anyone who edits a
+// profile may still set it.
+export const MLC_UNFLAG_ROLES: readonly Role[] = ['admin']
+// end Wave C
+
 // Global search (TopBanner). Patients only for PATIENT_DIRECTORY_ROLES (no
 // directory for pharmacy/billing/labs); services = the tariff catalogue for
 // TARIFF_MANAGE_ROLES (Wave B P1-24). Pharmacy and labs have no global

@@ -5,9 +5,16 @@ import { listServices } from '@/lib/queries/tariff'
 import type { SearchScopes } from '@/lib/role-policy'
 import { phoneQueryDigits } from '@/lib/patient-directory'
 
-import { EMPTY_SEARCH_RESULTS, type SearchResult, type SearchResults } from '@/lib/queries/search-types'
+import {
+  EMPTY_SEARCH_RESULTS, type SearchResult, type SearchResults, type PatientLookupPage, type PatientLookupResult,
+  PATIENT_LOOKUP_MIN_QUERY, PATIENT_LOOKUP_MAX_QUERY, PATIENT_LOOKUP_DEFAULT_PAGE_SIZE, PATIENT_LOOKUP_MAX_PAGE_SIZE, PATIENT_LOOKUP_MAX_PAGE,
+} from '@/lib/queries/search-types'
+import { asc, or, sql, type SQL } from 'drizzle-orm'
+import { getDb } from '@/db/client'
+import { patients } from '@/db/schema'
+import { ageOnDate, todayIsoIn } from '@/lib/india-time'
 
-export { EMPTY_SEARCH_RESULTS, type SearchResult, type SearchResults }
+export { EMPTY_SEARCH_RESULTS, type SearchResult, type SearchResults, type PatientLookupPage, type PatientLookupResult, PATIENT_LOOKUP_MAX_PAGE_SIZE }
 
 const MAX_RESULTS_PER_CATEGORY = 8
 // The global search bar in TopBanner -- one query fanned out across every
@@ -60,4 +67,78 @@ export async function searchAll(rawQuery: string, scopes: SearchScopes): Promise
     .map((s) => ({ id: String(s.id), label: s.name, detail: s.departmentName ? `${s.code} · ${s.departmentName}` : s.code, href: `/tariffs/services/${s.id}` }))
 
   return { patients, trials, formTemplates, services: serviceResults }
+}
+
+// ---- Wave C P0-04: patient picker lookup ---------------------------------
+// One SQL query (not the cached full list) so the picker stays cheap at any
+// directory size. Matches name (substring), UHID (prefix, so the exact UHID
+// too), anonymous chart id (prefix) -- all case-insensitive -- and mobile
+// (national digits: the last 10 digits when a full number is typed, else a
+// digit substring of at least 5). Exact UHID / chart id / mobile hits rank
+// first, then name-prefix hits, then the rest, by name.
+
+
+/** Escape LIKE metacharacters so a query is matched literally (default escape char is backslash). */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`)
+}
+
+const clamp = (n: number | undefined, lo: number, hi: number, dflt: number) =>
+  Number.isInteger(n) ? Math.min(Math.max(n as number, lo), hi) : dflt
+
+export async function lookupPatients(
+  rawQuery: string,
+  opts: { includePhone: boolean; page?: number; pageSize?: number },
+): Promise<PatientLookupPage> {
+  const pageSize = clamp(opts.pageSize, 1, PATIENT_LOOKUP_MAX_PAGE_SIZE, PATIENT_LOOKUP_DEFAULT_PAGE_SIZE)
+  const page = clamp(opts.page, 1, PATIENT_LOOKUP_MAX_PAGE, 1)
+  const term = rawQuery.trim().slice(0, PATIENT_LOOKUP_MAX_QUERY)
+  if (term.length < PATIENT_LOOKUP_MIN_QUERY) return { results: [], page, pageSize, hasMore: false }
+
+  const upper = term.toUpperCase()
+  const esc = escapeLike(term)
+  const escUpper = escapeLike(upper)
+  const phoneDigits = sql`regexp_replace(coalesce(${patients.phone}, ''), '[^0-9]', '', 'g')`
+  const digits = phoneQueryDigits(term)
+  const last10 = digits !== null && digits.length >= 10 ? digits.slice(-10) : null
+
+  const matches: SQL[] = [
+    sql`${patients.name} ilike ${`%${esc}%`}`,
+    sql`upper(${patients.uhid}) like ${`${escUpper}%`}`,
+    sql`upper(${patients.id}) like ${`${escUpper}%`}`,
+  ]
+  if (last10 !== null) matches.push(sql`right(${phoneDigits}, 10) = ${last10}`)
+  else if (digits !== null) matches.push(sql`${phoneDigits} like ${`%${digits}%`}`)
+
+  const exact: SQL[] = [sql`upper(${patients.uhid}) = ${upper}`, sql`upper(${patients.id}) = ${upper}`]
+  if (last10 !== null) exact.push(sql`right(${phoneDigits}, 10) = ${last10}`)
+  const rank = sql<number>`case when ${or(...exact)} then 0 when ${patients.name} ilike ${`${esc}%`} then 1 else 2 end`
+
+  const rows = await getDb()
+    .select({ id: patients.id, name: patients.name, uhid: patients.uhid, gender: patients.gender, dob: patients.dob, phone: patients.phone })
+    .from(patients)
+    .where(or(...matches))
+    .orderBy(rank, asc(patients.name), asc(patients.id))
+    .limit(pageSize + 1)
+    .offset((page - 1) * pageSize)
+
+  const today = todayIsoIn()
+  const results: PatientLookupResult[] = rows.slice(0, pageSize).map((r) => ({
+    id: r.id,
+    name: r.name,
+    uhid: r.uhid ?? null,
+    gender: r.gender ?? null,
+    ageYears: r.dob ? ageOnDate(String(r.dob), today) : null,
+    ...(opts.includePhone ? { phone: r.phone ?? null } : {}),
+  }))
+  return { results, page, pageSize, hasMore: rows.length > pageSize }
+}
+
+/** A known chart id -> the picker's minimal { id, name, uhid } (quick paths that preselect a patient). */
+export async function getPickedPatient(anonId: string): Promise<{ id: string; name: string; uhid: string | null } | null> {
+  const [row] = await getDb()
+    .select({ id: patients.id, name: patients.name, uhid: patients.uhid })
+    .from(patients)
+    .where(sql`${patients.id} = ${anonId}`)
+  return row ? { id: row.id, name: row.name.trim(), uhid: row.uhid ?? null } : null
 }

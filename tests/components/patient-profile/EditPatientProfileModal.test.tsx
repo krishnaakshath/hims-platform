@@ -159,4 +159,69 @@ describe('EditPatientProfileModal', () => {
     expect(await screen.findByText(/Nothing was saved/)).toBeInTheDocument()
     expect(refresh).not.toHaveBeenCalled()
   })
+
+  // ---- Wave C P2-11 ----
+  const PRIMARY = { kind: 'next_of_kin' as const, name: 'Ravi Rao', relationship: 'spouse', phone: '+919811111111', addressText: null, isPrimary: true }
+
+  it('keeps a contact\'s primary flag when contacts are edited', async () => {
+    const fetchMock = vi.fn(async () => new Response('{"ok":true}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await open({ ...patient, contacts: [PRIMARY] })
+    fireEvent.change(screen.getByLabelText(/contact 1 name/i), { target: { value: 'Ravi K Rao' } })
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+    const put = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find(([u]) => u.endsWith('/contacts'))!
+    expect(JSON.parse(put[1].body as string).contacts[0]).toMatchObject({ name: 'Ravi K Rao', isPrimary: true })
+  })
+
+  it('treats an untouched primary contact as unchanged', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await open({ ...patient, contacts: [PRIMARY] })
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+    await waitFor(() => expect(screen.queryByLabelText('City')).toBeNull())
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('prefills the ABHA-unavailable reason and note on file', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await open({ ...patient, abhaUnavailableReason: 'other', abhaUnavailableNote: 'Will create at next visit' })
+    expect((screen.getByLabelText('Reason ABHA is not available') as HTMLSelectElement).value).toBe('other')
+    expect(screen.getByLabelText(/note/i)).toHaveValue('Will create at next visit')
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+    await waitFor(() => expect(screen.queryByLabelText('City')).toBeNull())
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('edits nationality (required by the schema, now has an input)', async () => {
+    const fetchMock = vi.fn(async () => new Response('{"ok":true}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await open()
+    fireEvent.change(screen.getByLabelText(/nationality/i), { target: { value: 'np' } })
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+    expect(sentBody(fetchMock)).toEqual({ nationality: 'NP' })
+  })
+
+  it('unticking MLC (admin) clears the number and sends only the flag', async () => {
+    const fetchMock = vi.fn(async () => new Response('{"ok":true}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<PatientProfilePanel patient={{ ...patient, isMlc: true, mlcNumber: 'MLC-1' }} aadhaar={{ status: 'not_recorded', masked: null, declineReason: null }} canEdit canWriteAadhaar={false} canUnflagMlc />)
+    fireEvent.click(screen.getByRole('button', { name: /edit profile/i }))
+    await screen.findByLabelText('City')
+    fireEvent.change(screen.getByLabelText('MLC number'), { target: { value: 'MLC-2' } })
+    fireEvent.click(screen.getByLabelText(/medico-legal case/i))
+    expect(screen.queryByLabelText('MLC number')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+    expect(sentBody(fetchMock)).toEqual({ isMlc: false })
+  })
+
+  it('a non-admin cannot untick MLC once it is on file', async () => {
+    await open({ ...patient, isMlc: true, mlcNumber: 'MLC-1' })
+    const box = screen.getByLabelText(/medico-legal case/i)
+    expect(box).toBeDisabled()
+    expect(screen.getByText(/only an administrator can clear the mlc flag/i)).toBeInTheDocument()
+  })
 })

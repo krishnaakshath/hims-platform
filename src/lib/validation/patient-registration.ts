@@ -158,3 +158,13 @@ export type PatientProfileUpdateInput = z.output<typeof patientProfileUpdateSche
 export type AadhaarInput = z.output<typeof aadhaarInputSchema>
 export type AbhaInput = z.output<typeof abhaInputSchema>
 export type ContactInput = z.output<typeof contactInputSchema>
+
+// Wave C P1-11: admin-only correction of the two fields fixed at registration
+// (a typo in the name or DOB), always with a reason that is audited.
+export const demographicsCorrectionSchema = z.object({
+  name: demographicsShape.name.optional(),
+  dob: demographicsShape.dob.optional(),
+  reason: safeText(z.string().trim().min(5, 'Give a reason of at least 5 characters').max(500)),
+}).strict().refine((v) => v.name !== undefined || v.dob !== undefined, 'Change the name or the date of birth')
+
+export type DemographicsCorrectionInput = z.output<typeof demographicsCorrectionSchema>

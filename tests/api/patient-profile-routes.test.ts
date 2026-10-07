@@ -190,6 +190,32 @@ describe('PATCH /api/patients/[anonId]/profile', () => {
   })
 })
 
+// Wave C P2-11: clearing the MLC flag once set is admin-only (MLC_UNFLAG_ROLES).
+describe('PATCH /api/patients/[anonId]/profile MLC un-flag', () => {
+  const mlc = { dob: '1990-01-01', snapshot: { ...SNAPSHOT, isMlc: true } }
+  it.each(['frontdesk', 'crc'] as const)('403s %s clearing the MLC flag, writing nothing', async (role) => {
+    sessionRole = role
+    vi.mocked(getIdentitySnapshot).mockResolvedValue(mlc)
+    const res = await patchProfile(req('PATCH', 'profile', { isMlc: false }), ctx)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'Only an administrator can clear the MLC flag' })
+    expect(updatePatientProfile).not.toHaveBeenCalled()
+  })
+
+  it('lets admin clear the MLC flag', async () => {
+    sessionRole = 'admin'
+    vi.mocked(getIdentitySnapshot).mockResolvedValue(mlc)
+    const res = await patchProfile(req('PATCH', 'profile', { isMlc: false }), ctx)
+    expect(res.status).toBe(200)
+    expect(updatePatientProfile).toHaveBeenCalledWith(ANON, { isMlc: false }, expect.objectContaining({ role: 'admin' }))
+  })
+
+  it('still lets frontdesk set the flag, or send isMlc:false on a non-MLC patient', async () => {
+    expect((await patchProfile(req('PATCH', 'profile', { isMlc: true, mlcNumber: 'MLC-9' }), ctx)).status).toBe(200)
+    expect((await patchProfile(req('PATCH', 'profile', { isMlc: false }), ctx)).status).toBe(200)
+  })
+})
+
 describe('PUT /api/patients/[anonId]/contacts', () => {
   const guardian = { kind: 'guardian', name: 'Ravi Rao', relationship: 'parent', phone: '9876543210' }
 

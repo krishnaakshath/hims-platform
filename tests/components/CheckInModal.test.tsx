@@ -1,7 +1,10 @@
-import { formatIstDate } from '@/lib/india-time'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { CheckInModal } from '@/components/CheckInModal'
+
+// Wave C P0-04 / P1-14: the patient comes from the PatientPicker (name, UHID,
+// mobile) and the ticket links to the printable token slip.
+const ASHA = { id: 'RD-0001', name: 'Asha Rao', uhid: 'UH00000042' }
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 
@@ -21,18 +24,24 @@ describe('CheckInModal', () => {
     expect(screen.getByLabelText(/room/i)).toBeInTheDocument()
   })
 
-  it('submits a check-in with the selected provider and visit type', async () => {
-    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({ id: 1 }), { status: 201 }))
+  it('finds the patient by UHID/name/mobile in the picker and checks in by chart id', async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async (url) => (
+      url.startsWith('/api/patients/lookup')
+        ? new Response(JSON.stringify({ results: [{ ...ASHA, gender: 'female', ageYears: 34 }], page: 1, pageSize: 10, hasMore: false }), { status: 200 })
+        : new Response(JSON.stringify({ id: 1 }), { status: 201 })
+    ))
     vi.stubGlobal('fetch', fetchMock)
 
     render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText(/patient id/i), { target: { value: 'RD-0001' } })
+    expect(screen.queryByPlaceholderText(/RD-0001/)).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: /patient/i }), { target: { value: 'UH0000' } })
+    fireEvent.click(await screen.findByRole('option', { name: /asha rao/i }))
     fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Follow-up' } })
     fireEvent.click(screen.getByText('Check In'))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    const [, init] = fetchMock.mock.calls[0]
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => u === '/api/front-desk/check-in')).toBe(true))
+    const [, init] = fetchMock.mock.calls.find(([u]) => u === '/api/front-desk/check-in')!
     const body = JSON.parse(init!.body as string)
     expect(body.patientId).toBe('RD-0001')
     expect(body.visitType).toBe('outpatient')
@@ -40,10 +49,22 @@ describe('CheckInModal', () => {
     vi.unstubAllGlobals()
   })
 
+  it('cannot submit until a patient is picked', () => {
+    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Follow-up' } })
+    expect(screen.getByText('Check In')).toBeDisabled()
+  })
+
+  it('starts with a preselected patient (quick path from the patient page)', () => {
+    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} initialPatient={ASHA} onClose={vi.fn()} />)
+    expect(screen.getByText('Asha Rao')).toBeInTheDocument()
+    expect(screen.getByText(/UH00000042/)).toBeInTheDocument()
+  })
+
   it('allows submitting an inpatient check-in with no room selected when no rooms exist', () => {
-    render(<CheckInModal providers={PROVIDERS} rooms={[]} onClose={vi.fn()} />)
+    render(<CheckInModal providers={PROVIDERS} rooms={[]} initialPatient={ASHA} onClose={vi.fn()} />)
     fireEvent.click(screen.getByLabelText(/inpatient/i))
-    fireEvent.change(screen.getByLabelText(/patient id/i), { target: { value: 'RD-0001' } })
     fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Admission' } })
 
@@ -51,9 +72,8 @@ describe('CheckInModal', () => {
   })
 
   it('disables submit for an inpatient visit when rooms exist but none is selected', () => {
-    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
+    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} initialPatient={ASHA} onClose={vi.fn()} />)
     fireEvent.click(screen.getByLabelText(/inpatient/i))
-    fireEvent.change(screen.getByLabelText(/patient id/i), { target: { value: 'RD-0001' } })
     fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Admission' } })
 
@@ -61,8 +81,8 @@ describe('CheckInModal', () => {
   })
 
   describe('check-in ticket', () => {
-    async function checkInSuccessfully(overrides?: { roomId?: number; patientId?: string; providerId?: number }) {
-      const patientId = overrides?.patientId ?? 'RD-0001'
+    async function checkInSuccessfully(overrides?: { roomId?: number; providerId?: number }) {
+      const patientId = ASHA.id
       const providerId = overrides?.providerId ?? 1
       const roomId = overrides?.roomId
 
@@ -75,13 +95,14 @@ describe('CheckInModal', () => {
         urgency: 'routine',
         reason: 'Follow-up',
         roomId: roomId ?? null,
+        encounterId: 9,
+        opdToken: 42,
       }
       const fetchMock = vi.fn(async () => new Response(JSON.stringify(apiResponse), { status: 201 }))
       vi.stubGlobal('fetch', fetchMock)
 
-      render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
+      render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} initialPatient={ASHA} onClose={vi.fn()} />)
 
-      fireEvent.change(screen.getByLabelText(/patient id/i), { target: { value: patientId } })
       fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: String(providerId) } })
       fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Follow-up' } })
 
@@ -98,12 +119,13 @@ describe('CheckInModal', () => {
 
     it('shows the queue number on the ticket after a successful check-in', async () => {
       await checkInSuccessfully()
-      await waitFor(() => expect(screen.getByText(/42/)).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByText('42')).toBeInTheDocument())
     })
 
-    it('shows the patient name on the ticket', async () => {
-      await checkInSuccessfully({ patientId: 'RD-0001' })
-      await waitFor(() => expect(screen.getByText('RD-0001')).toBeInTheDocument())
+    it('shows the patient name and UHID on the ticket, not only the chart id', async () => {
+      await checkInSuccessfully()
+      await waitFor(() => expect(screen.getByText('Asha Rao')).toBeInTheDocument())
+      expect(screen.getByText(/UH00000042/)).toBeInTheDocument()
     })
 
     it('shows the assigned room on the ticket for inpatient visits', async () => {
@@ -111,33 +133,17 @@ describe('CheckInModal', () => {
       await waitFor(() => expect(screen.getByText(/Ward A.*101.*A/)).toBeInTheDocument())
     })
 
-    it('shows the current date on the ticket', async () => {
-      await checkInSuccessfully()
-      // IST date with an explicit IST label (Wave A), e.g. "8 Oct 2026, 9:00 am IST".
-      const today = formatIstDate(new Date())
-      await waitFor(() => expect(screen.getByText(new RegExp(`${today}, .* IST`))).toBeInTheDocument())
-    })
-
-    it('shows a Print button on the ticket', async () => {
-      await checkInSuccessfully()
-      await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeInTheDocument())
-    })
-
-    it('calls window.print when the Print button is clicked', async () => {
+    it('links to the printable token slip instead of printing the whole page', async () => {
       await checkInSuccessfully()
       const printMock = vi.fn()
       vi.stubGlobal('print', printMock)
-
-      await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeInTheDocument())
-      fireEvent.click(screen.getByRole('button', { name: /print/i }))
-      expect(printMock).toHaveBeenCalledTimes(1)
-
+      const link = await screen.findByRole('link', { name: /print token slip/i })
+      expect(link).toHaveAttribute('href', '/print/token/9')
+      expect(link).toHaveAttribute('target', '_blank')
+      fireEvent.click(link)
+      expect(printMock).not.toHaveBeenCalled()
+      expect(document.getElementById('print-ticket')).toBeNull()
       vi.unstubAllGlobals()
-    })
-
-    it('wraps the ticket in a printable div with id="print-ticket"', async () => {
-      await checkInSuccessfully()
-      await waitFor(() => expect(document.getElementById('print-ticket')).not.toBeNull())
     })
   })
 
