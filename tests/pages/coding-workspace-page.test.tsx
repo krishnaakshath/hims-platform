@@ -118,6 +118,28 @@ describe('/coding/encounters/[id]', () => {
     expect(screen.queryByRole('button', { name: 'Reopen' })).toBeNull()
   })
 
+  it('a coder who does not hold the claim sees no actions the server would refuse', async () => {
+    const other = (status: EncounterCodingStatus) => {
+      const w = workspace(status)
+      return { ...w, coding: { ...w.coding, assignedToUserId: 99, assignedToName: 'Other Coder' } }
+    }
+    const inProgress = await renderPage({ data: other('in_progress') })
+    expect(buttonNames(inProgress.container)).not.toEqual(expect.arrayContaining(['Mark coded']))
+    for (const name of ['Mark coded', 'Release', 'Raise query', 'Claim']) expect(inProgress.screen.queryByRole('button', { name })).toBeNull()
+    expect(inProgress.screen.queryByRole('button', { name: /^close the query/i })).toBeNull()
+    // Replying stays open to every coding role.
+    expect(inProgress.screen.getByRole('button', { name: 'Send reply' })).toBeInTheDocument()
+    cleanup()
+    const finalised = await renderPage({ data: other('finalised') })
+    expect(buttonNames(finalised.container)).toEqual([])
+  })
+
+  it('a visit that is not completed offers no coding actions', async () => {
+    const w = workspace('uncoded')
+    const { container } = await renderPage({ data: { ...w, encounter: { ...w.encounter, status: 'in_consultation', completedAt: null }, coding: { ...w.coding, assignedToUserId: null, assignedToName: null }, queries: [] } })
+    expect(buttonNames(container)).toEqual([])
+  })
+
   it('an admin sees Assign with a coder-only select that carries no email', async () => {
     const { screen, container, listAllUsers } = await renderPage({ role: 'admin', status: 'in_progress' })
     expect(listAllUsers).toHaveBeenCalled()

@@ -69,7 +69,7 @@ export function CodingWorkspaceView({ view, role, userId, coders, providers, tod
   const finalised = coding.status === 'finalised'
   const holdsClaim = role === 'admin' || (userId !== null && coding.assignedToUserId === userId)
   const canEdit = !finalised && encounter.isCompleted && holdsClaim
-  const canRaise = !finalised && encounter.isCompleted && codingActionAvailable(coding.status, 'raise_query', role)
+  const canRaise = !finalised && encounter.isCompleted && holdsClaim && codingActionAvailable(coding.status, 'raise_query', role)
 
   return (
     <div className="space-y-6">
@@ -90,7 +90,10 @@ export function CodingWorkspaceView({ view, role, userId, coders, providers, tod
           {coding.codedLine && <div><dt className="text-xs text-muted-foreground">Coded</dt><dd>{coding.codedLine}</dd></div>}
           {coding.finalisedLine && <div><dt className="text-xs text-muted-foreground">Finalised</dt><dd>{coding.finalisedLine}</dd></div>}
         </dl>
-        <CodingActions encounterId={view.encounterId} status={coding.status} role={role} assignedToUserId={coding.assignedToUserId} coders={coders} />
+        <CodingActions
+          encounterId={view.encounterId} status={coding.status} role={role} assignedToUserId={coding.assignedToUserId}
+          holdsClaim={holdsClaim} isCompleted={encounter.isCompleted} coders={coders}
+        />
       </header>
 
       {finalised && (
@@ -121,6 +124,7 @@ export function CodingWorkspaceView({ view, role, userId, coders, providers, tod
             defaultProviderId={encounter.providerId}
             canRaise={canRaise}
             canManage={!finalised}
+            canClose={!finalised && holdsClaim}
           />
         </div>
         <div className="space-y-6">

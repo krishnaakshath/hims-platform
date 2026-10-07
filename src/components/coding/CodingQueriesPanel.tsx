@@ -1,7 +1,8 @@
 'use client'
 // Coding queries to the treating doctors: raise a query (the encounter moves to "Query open"), read
 // the thread of responses, reply, and close or withdraw. Question and reply text are shown as plain
-// text. Read-only (no controls) when !canManage, e.g. once coding is finalised.
+// text. Read-only (no controls) when !canManage, e.g. once coding is finalised. Close/withdraw need
+// the claim (canClose); replying does not.
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { CodingQueryStatus } from '@/lib/coding/status'
@@ -37,7 +38,7 @@ function ReplyForm({ query, busy, onSend }: { query: QueryView; busy: boolean; o
   )
 }
 
-export function CodingQueriesPanel({ encounterId, queries, providers, defaultProviderId, canRaise, canManage }: {
+export function CodingQueriesPanel({ encounterId, queries, providers, defaultProviderId, canRaise, canManage, canClose }: {
   encounterId: number
   queries: QueryView[]
   /** Active doctors (id and name only). */
@@ -45,6 +46,7 @@ export function CodingQueriesPanel({ encounterId, queries, providers, defaultPro
   defaultProviderId: number | null
   canRaise: boolean
   canManage: boolean
+  canClose: boolean
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -124,12 +126,12 @@ export function CodingQueriesPanel({ encounterId, queries, providers, defaultPro
                 {canManage && live && (
                   <div className="space-y-2">
                     <ReplyForm query={q} busy={busy} onSend={(body) => act(() => replyToCodingQuery(q.id, body))} />
-                    <div className="flex gap-2">
+                    {canClose && <div className="flex gap-2">
                       <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => act(() => closeCodingQuery(q.id, 'close'))} aria-label={`Close the query to ${q.addressedToName}`}>Close</Button>
                       {q.status === 'open' && (
                         <Button type="button" size="xs" variant="ghost" disabled={busy} onClick={() => act(() => closeCodingQuery(q.id, 'withdraw'))} aria-label={`Withdraw the query to ${q.addressedToName}`}>Withdraw</Button>
                       )}
-                    </div>
+                    </div>}
                   </div>
                 )}
               </li>

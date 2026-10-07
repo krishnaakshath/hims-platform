@@ -2,7 +2,8 @@
 // Encounter coding status actions. A button shows only when the status machine allows the action
 // from the current status (nextCodingStatus) AND the role may take it (CODING_ACTION_ROLES; assign
 // is admin-only), so a coder never sees Assign. Claim shows only while unclaimed and Release only
-// while claimed. Reopen asks for a reason in a dialog. A refusal (409 incl. the retry message, 422
+// while claimed. Every other action needs the claim (ruling 7; admin is exempt), and nothing shows
+// before the visit is completed, so no button is offered that the server would refuse. Reopen asks for a reason in a dialog. A refusal (409 incl. the retry message, 422
 // with the blocking rule issues, 403) is shown in an alert.
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -27,11 +28,15 @@ export function codingActionAvailable(status: EncounterCodingStatus, action: Cod
   return nextCodingStatus(status, action) !== null && CODING_ACTION_ROLES[action].includes(role)
 }
 
-export function CodingActions({ encounterId, status, role, assignedToUserId, coders }: {
+export function CodingActions({ encounterId, status, role, assignedToUserId, holdsClaim, isCompleted, coders }: {
   encounterId: number
   status: EncounterCodingStatus
   role: Role
   assignedToUserId: number | null
+  /** Admin, or the coder the encounter is assigned to. */
+  holdsClaim: boolean
+  /** Coding actions apply to completed visits only. */
+  isCompleted: boolean
   /** Staff with the coder role (id and name only); loaded for an admin only. */
   coders: { id: number; name: string }[]
 }) {
@@ -43,8 +48,10 @@ export function CodingActions({ encounterId, status, role, assignedToUserId, cod
   const [reason, setReason] = useState('')
 
   const available = (a: CodingAction) => {
-    if (!codingActionAvailable(status, a, role)) return false
+    if (!isCompleted || !codingActionAvailable(status, a, role)) return false
     if (a === 'claim') return assignedToUserId === null
+    if (a === 'assign') return true
+    if (!holdsClaim) return false
     if (a === 'release') return assignedToUserId !== null
     return true
   }
