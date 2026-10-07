@@ -386,6 +386,10 @@ import { PATCH as patchTariffService } from '@/app/api/tariff/services/[id]/rout
 import { GET as listRoomCategoriesRoute, POST as postRoomCategory } from '@/app/api/tariff/room-categories/route'
 import { PATCH as patchRoomCategory } from '@/app/api/tariff/room-categories/[id]/route'
 import { PUT as putRoomCategory } from '@/app/api/tariff/rooms/[id]/category/route'
+import { POST as postTariffRate } from '@/app/api/tariff/rates/route'
+import { PATCH as patchTariffRate } from '@/app/api/tariff/rates/[id]/route'
+import { POST as reviseTariffRate } from '@/app/api/tariff/rates/[id]/revise/route'
+import { PUT as putPackageItems } from '@/app/api/tariff/packages/[id]/items/route'
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -558,6 +562,10 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/tariff/room-categories', call: () => settle(() => postRoomCategory(send('POST', '/api/tariff/room-categories'))), allowed: [...TARIFF_MANAGE_ROLES] },
   { name: 'PATCH /api/tariff/room-categories/[id]', call: () => settle(() => patchRoomCategory(send('PATCH', `/api/tariff/room-categories/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
   { name: 'PUT /api/tariff/rooms/[id]/category', call: () => settle(() => putRoomCategory(send('PUT', `/api/tariff/rooms/${BOGUS_ID}/category`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'POST /api/tariff/rates', call: () => settle(() => postTariffRate(send('POST', '/api/tariff/rates'))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'POST /api/tariff/rates/[id]/revise', call: () => settle(() => reviseTariffRate(send('POST', `/api/tariff/rates/${BOGUS_ID}/revise`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'PATCH /api/tariff/rates/[id]', call: () => settle(() => patchTariffRate(send('PATCH', `/api/tariff/rates/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
+  { name: 'PUT /api/tariff/packages/[id]/items', call: () => settle(() => putPackageItems(send('PUT', `/api/tariff/packages/${BOGUS_ID}/items`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
@@ -582,6 +590,10 @@ const SP2_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/tariff/room-categories', call: () => postRoomCategory(send('POST', '/api/tariff/room-categories', NOT_JSON)), allowed: TARIFF_MANAGE_ROLES },
   { name: 'PATCH /api/tariff/room-categories/[id]', call: () => patchRoomCategory(send('PATCH', `/api/tariff/room-categories/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
   { name: 'PUT /api/tariff/rooms/[id]/category', call: () => putRoomCategory(send('PUT', `/api/tariff/rooms/${BOGUS_ID}/category`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'POST /api/tariff/rates', call: () => postTariffRate(send('POST', '/api/tariff/rates', NOT_JSON)), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'POST /api/tariff/rates/[id]/revise', call: () => reviseTariffRate(send('POST', `/api/tariff/rates/${BOGUS_ID}/revise`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'PATCH /api/tariff/rates/[id]', call: () => patchTariffRate(send('PATCH', `/api/tariff/rates/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
+  { name: 'PUT /api/tariff/packages/[id]/items', call: () => putPackageItems(send('PUT', `/api/tariff/packages/${BOGUS_ID}/items`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: TARIFF_MANAGE_ROLES },
 ]
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {

@@ -3,7 +3,8 @@
 // reviewer can see the gate precede any body parse or query without following an import.
 import { NextResponse } from 'next/server'
 import type { ZodError } from 'zod'
-import { pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { isExclusionViolation, pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { TariffOverlapError } from '@/lib/queries/tariff'
 
 export const forbidden = () => NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 export const badRequest = (error: string) => NextResponse.json({ error }, { status: 400 })
@@ -11,6 +12,23 @@ export const notFound = (error = 'Not found') => NextResponse.json({ error }, { 
 export const conflict = (error: string) => NextResponse.json({ error }, { status: 409 })
 
 export const OVERLAP_MESSAGE = 'This rate overlaps an existing rate for the same service, scope and room/ward'
+
+/**
+ * Every message `planRevision` (src/lib/tariff/versions.ts) can return. `reviseRate` rethrows them
+ * as plain Errors; only these exact texts are passed to the client (tests/api/tariff-rates.test.ts
+ * derives the set from planRevision itself, so a new message there fails until it is listed here).
+ */
+export const REVISION_ERRORS: readonly string[] = [
+  'The rate is deactivated',
+  'New rate must start after the current rate starts',
+  'The current rate ends before that date; add a new rate instead',
+  'The new amount equals the current amount',
+]
+
+/** App-level overlap (TariffOverlapError) or the DB backstop `tariff_rates_no_overlap` (23P01). */
+export function isRateOverlap(err: unknown): boolean {
+  return err instanceof TariffOverlapError || isExclusionViolation(err, 'tariff_rates_no_overlap')
+}
 
 /**
  * 400 for a failed zod parse. Only messages the schemas author themselves (refinements and
