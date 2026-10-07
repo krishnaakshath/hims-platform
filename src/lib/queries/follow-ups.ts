@@ -72,7 +72,7 @@ export type CreateFollowUpResult =
 export async function createFollowUpOrder(
   input: CreateFollowUpOrderInput,
   session: Session,
-  opts: { executor?: WriteExecutor; today?: string } = {},
+  opts: { executor?: WriteExecutor; today?: string; baseDate?: string } = {},
 ): Promise<CreateFollowUpResult> {
   const today = opts.today ?? todayIsoIn()
   const run = async (ex: WriteExecutor): Promise<CreateFollowUpResult> => {
@@ -92,6 +92,9 @@ export async function createFollowUpOrder(
       if (encounter.patientId !== input.patientId) return { ok: false, error: 'encounter_mismatch' }
       baseDate = encounter.encounterDate
     }
+    // Discharge (Task 10) counts an interval from the discharge day, not from
+    // the IPD encounter's (admission) date.
+    if (opts.baseDate) baseDate = opts.baseDate
 
     const dates = resolveFollowUpDates(input.timing, baseDate, input.windowDaysBefore ?? DEFAULT_WINDOW_DAYS_BEFORE, input.windowDaysAfter ?? DEFAULT_WINDOW_DAYS_AFTER)
     const problem = dueDateProblem(dates.dueDate, today)

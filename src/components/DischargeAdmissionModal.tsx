@@ -4,6 +4,19 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { SignatureCapture } from '@/components/SignatureCapture'
+import { VISIT_REASON_MAX_LENGTH } from '@/lib/notification-templates'
+import { INTERVAL_UNITS, istSlotString, type IntervalUnit } from '@/lib/follow-ups/rules'
+
+const SLOT_MINUTES = 30
+
+/** `HH:MM` plus minutes on the same day, or null when it would cross midnight. */
+function addMinutesToHhmm(hhmm: string, minutes: number): string | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(hhmm)
+  if (!m) return null
+  const total = Number(m[1]) * 60 + Number(m[2]) + minutes
+  if (total >= 24 * 60) return null
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
 
 type Step = 'summary' | 'followup' | 'confirmation'
 
@@ -23,26 +36,48 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
   const [dischargeSummaryNotes, setDischargeSummaryNotes] = useState('')
   const [followUpDate, setFollowUpDate] = useState('')
   const [followUpTime, setFollowUpTime] = useState('')
+  const [planTiming, setPlanTiming] = useState<'interval' | 'date'>('interval')
+  const [planValue, setPlanValue] = useState('')
+  const [planUnit, setPlanUnit] = useState<IntervalUnit>('weeks')
+  const [planDate, setPlanDate] = useState('')
+  const [planReason, setPlanReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [followUpCreated, setFollowUpCreated] = useState(false)
+  const [followUpPlanned, setFollowUpPlanned] = useState(false)
 
   const summaryComplete = Boolean(dischargeDiagnosis && dischargeDrugs && dischargeDevices && dischargeDiet && dischargeSummaryNotes)
 
   async function submit(typedName: string) {
-    setSubmitting(true)
     setError(null)
-    let followUpStartsAt: string | undefined
-    let followUpEndsAt: string | undefined
+    // The slot is composed in IST (+05:30), never the browser's local zone.
+    let slot: { followUpStartsAt: string; followUpEndsAt: string } | null = null
     if (followUpDate && followUpTime) {
-      const start = new Date(`${followUpDate}T${followUpTime}`)
-      followUpStartsAt = start.toISOString()
-      followUpEndsAt = new Date(start.getTime() + 30 * 60 * 1000).toISOString()
+      const end = addMinutesToHhmm(followUpTime, SLOT_MINUTES)
+      if (!end) {
+        setError('The follow-up appointment must end by midnight. Pick an earlier time.')
+        return
+      }
+      slot = { followUpStartsAt: istSlotString(followUpDate, followUpTime), followUpEndsAt: istSlotString(followUpDate, end) }
     }
+    // The plan is sent only when a reason is entered.
+    const reason = planReason.trim()
+    let followUp: { timing: { kind: 'interval'; interval: { value: number; unit: IntervalUnit } } | { kind: 'date'; dueDate: string }; reason: string } | null = null
+    if (reason) {
+      if (planTiming === 'date') {
+        if (!planDate) { setError('Pick the follow-up date, or clear the follow-up reason.'); return }
+        followUp = { timing: { kind: 'date', dueDate: planDate }, reason }
+      } else {
+        const value = Number(planValue)
+        if (!Number.isInteger(value) || value < 1) { setError('Enter how many days, weeks or months until the follow-up, or clear the follow-up reason.'); return }
+        followUp = { timing: { kind: 'interval', interval: { value, unit: planUnit } }, reason }
+      }
+    }
+    setSubmitting(true)
     const res = await fetch(`/api/inpatient/admissions/${admissionId}/discharge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dischargeDiagnosis, dischargeDrugs, dischargeDevices, dischargeDiet, dischargeSummaryNotes, typedName, ...(followUpStartsAt ? { followUpStartsAt, followUpEndsAt } : {}) }),
+      body: JSON.stringify({ dischargeDiagnosis, dischargeDrugs, dischargeDevices, dischargeDiet, dischargeSummaryNotes, typedName, ...(slot ?? {}), ...(followUp ? { followUp } : {}) }),
     })
     setSubmitting(false)
     if (!res.ok) {
@@ -52,6 +87,7 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
     }
     const body = await res.json()
     setFollowUpCreated(Boolean(body.followUpAppointmentId))
+    setFollowUpPlanned(Boolean(body.followUpOrderId))
     setStep('confirmation')
     router.refresh()
   }
@@ -83,8 +119,27 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
 
         {step === 'followup' && (
           <div className="space-y-4">
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">Follow-up plan</legend>
+              <p className="text-xs text-muted-foreground">Optional — recorded only when a reason is entered.</p>
+              <select value={planTiming} onChange={(e) => setPlanTiming(e.target.value === 'date' ? 'date' : 'interval')} aria-label="Plan timing" className="w-full rounded-md border border-border px-3 py-2 text-sm">
+                <option value="interval">After</option>
+                <option value="date">On date</option>
+              </select>
+              {planTiming === 'interval' ? (
+                <div className="flex gap-2">
+                  <input type="number" min={1} value={planValue} onChange={(e) => setPlanValue(e.target.value)} aria-label="Follow-up in" placeholder="e.g. 2" className="w-24 rounded-md border border-border px-3 py-2 text-sm" />
+                  <select value={planUnit} onChange={(e) => setPlanUnit(e.target.value as IntervalUnit)} aria-label="Follow-up unit" className="flex-1 rounded-md border border-border px-3 py-2 text-sm">
+                    {INTERVAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <input type="date" value={planDate} onChange={(e) => setPlanDate(e.target.value)} aria-label="Follow-up on date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+              )}
+              <input value={planReason} onChange={(e) => setPlanReason(e.target.value)} aria-label="Follow-up reason" placeholder="Reason (shown to the front desk)" maxLength={VISIT_REASON_MAX_LENGTH} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+            </fieldset>
             <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">Optional — schedule a follow-up with the attending provider.</p>
+              <p className="text-xs text-muted-foreground">Optional — book a follow-up slot with the attending provider (IST).</p>
               <input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} aria-label="Follow-up date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
               <input type="time" value={followUpTime} onChange={(e) => setFollowUpTime(e.target.value)} aria-label="Follow-up time" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
             </div>
@@ -103,6 +158,7 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
             <p className="flex items-center gap-2 font-semibold text-success"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-success/15">✓</span> Patient discharged</p>
             <p className="text-muted-foreground">The room has been freed and marked for cleaning.</p>
             {followUpCreated && <p className="text-muted-foreground">A follow-up appointment was scheduled with the attending provider.</p>}
+            {followUpPlanned && !followUpCreated && <p className="text-muted-foreground">A follow-up plan was recorded for the front desk to book.</p>}
           </div>
         )}
 

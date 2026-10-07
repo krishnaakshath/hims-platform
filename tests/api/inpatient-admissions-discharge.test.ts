@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { eq, ne, and } from 'drizzle-orm'
+import { eq, ne, and, like, or } from 'drizzle-orm'
 import { POST } from '@/app/api/inpatient/admissions/[id]/discharge/route'
 import { getDb } from '@/db/client'
-import { admissions, patients, appointments, providers, signatures } from '@/db/schema'
+import { admissions, patients, appointments, providers, signatures, auditLog, followUpOrders } from '@/db/schema'
 import { createAdmission } from '@/lib/queries/admissions'
 
 let sessionRole: 'admin' | 'pi' | 'frontdesk' = 'pi'
 let sessionName = 'Dr. Chen'
-vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: sessionName })) }))
+vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: sessionName, userId: null })) }))
 vi.mock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 1, name: 'Dr. Chen', credentials: null, specialty: 'Internal Medicine', colorTag: '#000', isActive: true }]) }))
 
 const createdAdmissionIds: number[] = []
@@ -18,8 +18,19 @@ afterEach(async () => {
   while (createdAppointmentIds.length > 0) await getDb().delete(appointments).where(eq(appointments.id, createdAppointmentIds.pop()!))
   while (createdAdmissionIds.length > 0) {
     const admissionId = createdAdmissionIds.pop()!
-    await getDb().delete(signatures).where(and(eq(signatures.signableType, 'admission_discharge'), eq(signatures.signableId, admissionId)))
-    await getDb().delete(admissions).where(eq(admissions.id, admissionId))
+    // SP3: the discharge may have created a follow-up order (and its booked
+    // appointment) plus in-transaction and notifier audit rows; remove them by id.
+    const db = getDb()
+    const orders = await db.select({ id: followUpOrders.id }).from(followUpOrders).where(eq(followUpOrders.originatingAdmissionId, admissionId))
+    const [adm] = await db.select({ followUpAppointmentId: admissions.followUpAppointmentId }).from(admissions).where(eq(admissions.id, admissionId))
+    await db.delete(followUpOrders).where(eq(followUpOrders.originatingAdmissionId, admissionId))
+    await db.delete(auditLog).where(or(
+      and(eq(auditLog.action, 'discharged patient'), eq(auditLog.details, `admission=${admissionId}`)),
+      ...orders.map((o) => like(auditLog.details, `followUp=${o.id} %`)),
+    ))
+    await db.delete(signatures).where(and(eq(signatures.signableType, 'admission_discharge'), eq(signatures.signableId, admissionId)))
+    await db.delete(admissions).where(eq(admissions.id, admissionId))
+    if (adm?.followUpAppointmentId) await db.delete(appointments).where(eq(appointments.id, adm.followUpAppointmentId))
   }
 })
 
@@ -219,6 +230,111 @@ describe('POST /api/inpatient/admissions/[id]/discharge', () => {
       expect(rows).toHaveLength(0)
     } finally {
       vi.doUnmock('@/lib/queries/signatures')
+      vi.resetModules()
+    }
+  })
+  // ---------------------------------------------------------------------------
+  // SP3 Task 10
+  // ---------------------------------------------------------------------------
+  const FIVE = { dischargeDiagnosis: 'A', dischargeDrugs: 'B', dischargeDevices: 'C', dischargeDiet: 'D', dischargeSummaryNotes: 'E', typedName: 'Dr. Chen' }
+  const post = (admissionId: number, body: unknown) => POST(new Request('http://localhost', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) }) as never, { params: Promise.resolve({ id: String(admissionId) }) })
+  async function admitOnProvider1() {
+    const [patientRow] = await getDb().select().from(patients).limit(1)
+    const admission = await createAdmission({ patientId: patientRow.id, roomId: null, attendingProviderId: 1, admissionType: 'elective', createdFromAssignmentId: null })
+    createdAdmissionIds.push(admission.id)
+    return admission
+  }
+
+  it('returns followUpOrderId and 400s a past plan date', async () => {
+    const ok = await admitOnProvider1()
+    const res = await post(ok.id, { ...FIVE, followUp: { timing: { kind: 'interval', interval: { value: 2, unit: 'weeks' } }, reason: 'Wound check', planNotes: 'TEST_SP3 plan' } })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.ok).toBe(true)
+    expect(body.followUpAppointmentId).toBeNull()
+    expect(typeof body.followUpOrderId).toBe('number')
+    const [o] = await getDb().select().from(followUpOrders).where(eq(followUpOrders.id, body.followUpOrderId))
+    expect(o).toMatchObject({ source: 'discharge', status: 'planned', originatingAdmissionId: ok.id })
+    // The log-only notice ran after commit (ids only).
+    const notices = await getDb().select().from(auditLog).where(eq(auditLog.details, `followUp=${o.id} kind=planned delivered=false`))
+    expect(notices).toHaveLength(1)
+
+    const past = await admitOnProvider1()
+    const res400 = await post(past.id, { ...FIVE, followUp: { timing: { kind: 'date', dueDate: '2020-01-01' }, reason: 'Wound check' } })
+    expect(res400.status).toBe(400)
+    expect(await res400.json()).toEqual({ error: 'The follow-up date cannot be in the past.' })
+    const [after] = await getDb().select().from(admissions).where(eq(admissions.id, past.id))
+    expect(after.status).toBe('admitted')
+  })
+
+  it('responds followUpOrderId: null when no follow-up is given', async () => {
+    const adm = await admitOnProvider1()
+    const res = await post(adm.id, FIVE)
+    expect(await res.json()).toEqual({ ok: true, followUpAppointmentId: null, followUpOrderId: null })
+  })
+
+  it('a slot creates a scheduled order linked to the booked appointment', async () => {
+    const adm = await admitOnProvider1()
+    // A minute-aligned slot 400 days out keeps clear of seeded appointments.
+    const start = new Date(Math.floor((Date.now() + 400 * 86400000) / 60000) * 60000 + 17 * 60000)
+    const end = new Date(start.getTime() + 30 * 60000)
+    const res = await post(adm.id, { ...FIVE, followUpStartsAt: start.toISOString(), followUpEndsAt: end.toISOString() })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    const [o] = await getDb().select().from(followUpOrders).where(eq(followUpOrders.id, body.followUpOrderId))
+    expect(o).toMatchObject({ status: 'scheduled', appointmentId: body.followUpAppointmentId })
+    const notices = await getDb().select().from(auditLog).where(eq(auditLog.details, `followUp=${o.id} kind=booked delivered=false`))
+    expect(notices).toHaveLength(1)
+  })
+
+  it('rejects a slot without an explicit UTC offset with a fixed 400 that does not echo input', async () => {
+    const adm = await admitOnProvider1()
+    const res = await post(adm.id, { ...FIVE, followUpStartsAt: '2099-10-21T10:00:00', followUpEndsAt: '2099-10-21T10:30:00' })
+    expect(res.status).toBe(400)
+    const text = await res.text()
+    expect(JSON.parse(text)).toEqual({ error: 'Invalid discharge payload' })
+    expect(text).not.toContain('2099')
+    const [after] = await getDb().select().from(admissions).where(eq(admissions.id, adm.id))
+    expect(after.status).toBe('admitted')
+  })
+
+  it('rejects a slot with only one end', async () => {
+    const adm = await admitOnProvider1()
+    const res = await post(adm.id, { ...FIVE, followUpStartsAt: '2099-10-21T10:00:00+05:30' })
+    expect(res.status).toBe(400)
+  })
+
+  it('400s a body that is not JSON', async () => {
+    const adm = await admitOnProvider1()
+    const res = await post(adm.id, '{not json')
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid JSON' })
+  })
+
+  it('403s frontdesk before reading the body', async () => {
+    sessionRole = 'frontdesk' as typeof sessionRole
+    const adm = await admitOnProvider1()
+    const res = await post(adm.id, '{not json')
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'Forbidden' })
+  })
+
+  it('maps a deadlock / serialization failure to 409 try again', async () => {
+    const adm = await admitOnProvider1()
+    vi.doMock('@/lib/queries/admissions', async () => {
+      const actual = await vi.importActual<typeof import('@/lib/queries/admissions')>('@/lib/queries/admissions')
+      return { ...actual, dischargeAdmission: vi.fn(async () => { throw Object.assign(new Error('deadlock detected'), { code: '40P01' }) }) }
+    })
+    vi.resetModules()
+    try {
+      const { POST: postDeadlock } = await import('@/app/api/inpatient/admissions/[id]/discharge/route')
+      const res = await postDeadlock(new Request('http://localhost', { method: 'POST', body: JSON.stringify(FIVE) }) as never, { params: Promise.resolve({ id: String(adm.id) }) })
+      expect(res.status).toBe(409)
+      const body = await res.json()
+      expect(body.error).toMatch(/try again/i)
+      expect(JSON.stringify(body)).not.toMatch(/deadlock/)
+    } finally {
+      vi.doUnmock('@/lib/queries/admissions')
       vi.resetModules()
     }
   })
