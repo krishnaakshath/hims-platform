@@ -16,7 +16,7 @@ import { PatientProfilePanel } from '@/components/patient-profile/PatientProfile
 import { CopyUhidButton } from '@/components/patient-profile/CopyUhidButton'
 import { VerifyIdentityButton } from '@/components/patient-profile/VerifyIdentityButton' // Wave B
 import { IDENTITY_VERIFY_ROLES } from '@/lib/role-policy' // Wave B
-import { REGISTRATION_ROLES, SCHEDULING_ROLES } from '@/lib/role-policy' // Wave C
+import { REGISTRATION_ROLES, SCHEDULING_ROLES, MLC_UNFLAG_ROLES } from '@/lib/role-policy' // Wave C
 import { PatientQuickActions, RegisteredBanner } from '@/components/patient-profile/PatientQuickActions' // Wave C
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { FollowUpPanel } from '@/components/follow-ups/FollowUpPanel'
@@ -95,12 +95,14 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         addressLine1: patient.addressLine1, addressLine2: patient.addressLine2, city: patient.city, district: patient.district,
         stateCode: patient.stateCode, pinCode: patient.pinCode, phone: patient.phone, email: patient.email,
         abhaNumber: patient.abhaNumber, abhaAddress: patient.abhaAddress, abhaUnavailableReason: patient.abhaUnavailableReason,
+        abhaUnavailableNote: patient.abhaUnavailableNote ?? null, // Wave C P2-11
         isMlc: patient.isMlc, mlcNumber: patient.mlcNumber,
         contacts: patient.contacts.map((c) => ({ kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, addressText: c.addressText, isPrimary: c.isPrimary })),
       }}
       aadhaar={aadhaarView}
       canEdit={PATIENT_PROFILE_EDIT_ROLES.includes(session.role)}
       canWriteAadhaar={AADHAAR_WRITE_ROLES.includes(session.role)}
+      canUnflagMlc={MLC_UNFLAG_ROLES.includes(session.role)}
     />
   )
 
