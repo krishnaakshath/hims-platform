@@ -4,6 +4,8 @@ import type { FollowUpView } from '@/lib/follow-ups/view'
 
 /** The worklist query returns at most this many rows; the page tells the user when the cap is hit. */
 export const WORKLIST_ROW_CAP = 500
+/** Long-missed follow-ups come from a separate query, most recent first, capped at this many. */
+export const MISSED_ROW_CAP = 200
 
 export const WORKLIST_BUCKETS = ['due', 'overdue', 'upcoming', 'scheduled', 'missed'] as const
 export type WorklistBucket = (typeof WORKLIST_BUCKETS)[number]

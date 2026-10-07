@@ -1,14 +1,14 @@
-import { and, asc, count, desc, eq, getTableColumns, inArray, lte, sql, type SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, getTableColumns, gte, inArray, lt, lte, or, sql, type SQL } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import { appointments, departments, followUpContactAttempts, followUpOrders, patients, providers, type FollowUpContactAttemptRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { todayIsoIn } from '@/lib/india-time'
-import { UPCOMING_HORIZON_DAYS, addDaysIso, deriveFollowUpStatus, followUpVisitReason, type ApptStatus, type FollowUpStatus } from '@/lib/follow-ups/rules'
+import { MISSED_GRACE_DAYS, UPCOMING_HORIZON_DAYS, addDaysIso, deriveFollowUpStatus, followUpVisitReason, type ApptStatus, type FollowUpStatus } from '@/lib/follow-ups/rules'
 import type { ContactAttemptRequest } from '@/lib/follow-ups/validation'
 import { toFollowUpView, type ContactAttemptView, type FollowUpJoinedRow } from '@/lib/follow-ups/view'
-import { WORKLIST_ROW_CAP, type WorklistRow } from '@/lib/follow-ups/worklist'
+import { MISSED_ROW_CAP, WORKLIST_ROW_CAP, type WorklistRow } from '@/lib/follow-ups/worklist'
 import { hasSchedulingConflict } from './appointments'
 import type { WriteExecutor } from './executor'
 import type { FollowUpOrder } from './follow-ups'
@@ -188,27 +188,19 @@ export async function recordContactAttempt(id: number, input: ContactAttemptRequ
 const { planNotes: _planNotes, cancelReason: _cancelReason, ...worklistOrderColumns } = getTableColumns(followUpOrders)
 const worklistApptProvider = alias(providers, 'worklist_appt_provider')
 
-/**
- * The recall worklist. SQL does the narrowing: open stored statuses, windows
- * starting within UPCOMING_HORIZON_DAYS, the optional department / prescriber
- * filters, due-date order and the row cap. Patients contribute only id, name,
- * UHID and phone. Contact attempts add two queries (count, latest), never N+1.
- * Rows whose derived status is closed are dropped; bucket filtering and
- * per-bucket sorting are `filterAndSortWorklist`.
- */
-export async function listFollowUpWorklist(
-  today = todayIsoIn(),
-  filters: { departmentId?: number | null; providerId?: number | null } = {},
-): Promise<WorklistRow[]> {
-  const db = getDb()
-  const conditions: SQL[] = [
-    inArray(followUpOrders.status, ['planned', 'scheduled']),
-    lte(followUpOrders.windowStart, addDaysIso(today, UPCOMING_HORIZON_DAYS)),
-  ]
-  if (filters.departmentId != null) conditions.push(eq(followUpOrders.departmentId, filters.departmentId))
-  if (filters.providerId != null) conditions.push(eq(followUpOrders.prescribedByProviderId, filters.providerId))
+export interface WorklistResult {
+  rows: WorklistRow[]
+  /** The live query hit its cap (raw SQL rows, before closed ones are dropped). */
+  capped: boolean
+  /** The separate missed query hit its own cap. */
+  missedCapped: boolean
+}
 
-  const rows = await db
+/** Live rows whose window ended longer ago than this are served only by the missed query. */
+const LIVE_LOOKBACK_DAYS = MISSED_GRACE_DAYS + 90
+
+function selectWorklistRows(where: SQL | undefined, orderBy: SQL[], limit: number) {
+  return getDb()
     .select({
       order: worklistOrderColumns,
       patientName: patients.name,
@@ -229,10 +221,64 @@ export async function listFollowUpWorklist(
     .leftJoin(departments, eq(departments.id, followUpOrders.departmentId))
     .leftJoin(appointments, eq(appointments.id, followUpOrders.appointmentId))
     .leftJoin(worklistApptProvider, eq(worklistApptProvider.id, appointments.providerId))
-    .where(and(...conditions))
-    .orderBy(asc(followUpOrders.dueDate), asc(followUpOrders.id))
-    .limit(WORKLIST_ROW_CAP)
-  if (rows.length === 0) return []
+    .where(where)
+    .orderBy(...orderBy)
+    .limit(limit)
+}
+
+/**
+ * The recall worklist, as two SQL-narrowed queries so long-missed orders can
+ * never crowd live ones out of the cap (I2):
+ * - **live**: open stored statuses, windows starting within
+ *   UPCOMING_HORIZON_DAYS and ending no more than MISSED_GRACE_DAYS + 90 days
+ *   ago, due-date order, capped at `caps.main`;
+ * - **missed**: open or missed stored statuses whose window ended more than
+ *   MISSED_GRACE_DAYS ago (or whose appointment was a no-show), most recent
+ *   first, capped at `caps.missed`.
+ * Both take the optional department / prescriber filters. Each cap flag comes
+ * from the raw SQL row count (one extra row is fetched), not from the rows
+ * left after dropping derived-closed ones. Patients contribute only id, name,
+ * UHID and phone. Contact attempts add two queries (count, latest), never N+1.
+ * Bucket filtering and per-bucket sorting are `filterAndSortWorklist`.
+ */
+export async function listFollowUpWorklist(
+  today = todayIsoIn(),
+  filters: { departmentId?: number | null; providerId?: number | null } = {},
+  caps: { main: number; missed: number } = { main: WORKLIST_ROW_CAP, missed: MISSED_ROW_CAP },
+): Promise<WorklistResult> {
+  const db = getDb()
+  const scope: SQL[] = []
+  if (filters.departmentId != null) scope.push(eq(followUpOrders.departmentId, filters.departmentId))
+  if (filters.providerId != null) scope.push(eq(followUpOrders.prescribedByProviderId, filters.providerId))
+
+  const liveRaw = await selectWorklistRows(
+    and(
+      inArray(followUpOrders.status, ['planned', 'scheduled']),
+      lte(followUpOrders.windowStart, addDaysIso(today, UPCOMING_HORIZON_DAYS)),
+      gte(followUpOrders.windowEnd, addDaysIso(today, -LIVE_LOOKBACK_DAYS)),
+      ...scope,
+    ),
+    [asc(followUpOrders.dueDate), asc(followUpOrders.id)],
+    caps.main + 1,
+  )
+  const missedRaw = await selectWorklistRows(
+    and(
+      inArray(followUpOrders.status, ['planned', 'scheduled', 'missed']),
+      or(lt(followUpOrders.windowEnd, addDaysIso(today, -MISSED_GRACE_DAYS)), eq(appointments.status, 'no_show')),
+      ...scope,
+    ),
+    [desc(followUpOrders.windowEnd), desc(followUpOrders.id)],
+    caps.missed + 1,
+  )
+  const capped = liveRaw.length > caps.main
+  const missedCapped = missedRaw.length > caps.missed
+  const seen = new Set<number>()
+  const rows = [...liveRaw.slice(0, caps.main), ...missedRaw.slice(0, caps.missed)].filter((r) => {
+    if (seen.has(r.order.id)) return false
+    seen.add(r.order.id)
+    return true
+  })
+  if (rows.length === 0) return { rows: [], capped, missedCapped }
 
   const ids = rows.map((r) => r.order.id)
   const counts = await db
@@ -292,5 +338,5 @@ export async function listFollowUpWorklist(
       contactAttemptCount: countBy.get(v.id) ?? 0,
     })
   }
-  return out
+  return { rows: out, capped, missedCapped }
 }

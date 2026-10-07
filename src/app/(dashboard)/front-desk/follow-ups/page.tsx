@@ -6,7 +6,7 @@ import { todayIsoIn } from '@/lib/india-time'
 import { listFollowUpWorklist } from '@/lib/queries/follow-up-recall'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { listDepartments } from '@/lib/queries/departments'
-import { countWorklistBuckets, filterAndSortWorklist, parseWorklistParams, WORKLIST_ROW_CAP } from '@/lib/follow-ups/worklist'
+import { countWorklistBuckets, filterAndSortWorklist, parseWorklistParams } from '@/lib/follow-ups/worklist'
 import { FollowUpWorklist } from '@/components/follow-ups/FollowUpWorklist'
 
 export default async function FollowUpWorklistPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -15,12 +15,13 @@ export default async function FollowUpWorklistPage({ searchParams }: { searchPar
 
   const filters = parseWorklistParams(await searchParams)
   const todayIso = todayIsoIn()
-  const [all, providers, departments] = await Promise.all([
+  const [worklist, providers, departments] = await Promise.all([
     listFollowUpWorklist(todayIso, { departmentId: filters.departmentId, providerId: filters.providerId }),
     listActiveProviders(),
     listDepartments({ activeOnly: true }),
   ])
   await logAudit(session, 'viewed follow-up worklist', null)
+  const all = worklist.rows
 
   // Counts are for the department/doctor-filtered rows; the bucket filter only picks the visible tab.
   const scoped = filterAndSortWorklist(all, { ...filters, bucket: 'all_open' })
@@ -40,7 +41,8 @@ export default async function FollowUpWorklistPage({ searchParams }: { searchPar
         departments={departments.map((d) => ({ id: d.id, name: d.name }))}
         todayIso={todayIso}
         canAct={FOLLOW_UP_BOOKING_ROLES.includes(session.role)}
-        capped={all.length >= WORKLIST_ROW_CAP}
+        capped={worklist.capped}
+        missedCapped={worklist.missedCapped}
       />
     </div>
   )

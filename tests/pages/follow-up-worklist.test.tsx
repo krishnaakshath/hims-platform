@@ -10,11 +10,11 @@ const ROWS = [
   row({ id: 3, bucket: 'due', patientName: 'Due Patient' }),
 ]
 
-async function renderAs(role: string, searchParams: Record<string, string> = {}, rows = ROWS) {
+async function renderAs(role: string, searchParams: Record<string, string> = {}, rows = ROWS, flags = { capped: false, missedCapped: false }) {
   vi.resetModules()
   const logAudit = vi.fn(async () => undefined)
   const redirect = vi.fn(() => { throw new Error('NEXT_REDIRECT') })
-  const listFollowUpWorklist = vi.fn(async () => rows)
+  const listFollowUpWorklist = vi.fn(async () => ({ rows, ...flags }))
   vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Tester' })) }))
   vi.doMock('@/lib/audit', () => ({ logAudit }))
   vi.doMock('@/lib/queries/follow-up-recall', () => ({ listFollowUpWorklist }))
@@ -51,15 +51,21 @@ describe('/front-desk/follow-ups', () => {
     expect(container.innerHTML).not.toMatch(/secret@x\.in/)
   })
 
-  it('shows the cap notice at 500 rows', async () => {
-    const many = Array.from({ length: 500 }, (_, i) => row({ id: i + 1, bucket: 'due', patientName: `P${i}` }))
-    const { screen } = await renderAs('frontdesk', {}, many)
+  it('shows the cap notice when the query says it was capped (raw SQL count), not by counting rows', async () => {
+    const { screen } = await renderAs('frontdesk', {}, ROWS, { capped: true, missedCapped: false })
     expect(screen.getByText(/showing first 500/i)).toBeInTheDocument()
+    expect(screen.queryByText(/missed follow-ups \(most recent first\)/i)).toBeNull()
+  })
+
+  it('shows the separate missed cap notice on the missed tab', async () => {
+    const { screen } = await renderAs('frontdesk', { bucket: 'missed' }, ROWS, { capped: false, missedCapped: true })
+    expect(screen.getByText(/showing first 200 missed follow-ups/i)).toBeInTheDocument()
+    expect(screen.queryByText(/showing first 500/i)).toBeNull()
   })
 
   it.each(['pi', 'billing', 'labs'])('redirects %s before any query', async (role) => {
     vi.resetModules()
-    const listFollowUpWorklist = vi.fn(async () => [])
+    const listFollowUpWorklist = vi.fn(async () => ({ rows: [], capped: false, missedCapped: false }))
     const redirect = vi.fn(() => { throw new Error('NEXT_REDIRECT') })
     vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'T' })) }))
     vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn() }))

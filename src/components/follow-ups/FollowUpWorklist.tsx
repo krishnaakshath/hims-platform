@@ -10,7 +10,7 @@ import { ReasonDialog } from './ReasonDialog'
 import { unbookFollowUpSlot } from './api'
 import { CHANNEL_LABEL, FIELD, LABEL, OUTCOME_LABEL, formatIsoDate, formatIstDateTime } from './format'
 import type { WorklistBucket, WorklistFilters, WorklistRow } from '@/lib/follow-ups/worklist'
-import { WORKLIST_ROW_CAP } from '@/lib/follow-ups/worklist'
+import { MISSED_ROW_CAP, WORKLIST_ROW_CAP } from '@/lib/follow-ups/worklist'
 
 const BASE = '/front-desk/follow-ups'
 const TABS: { bucket: WorklistBucket; label: string }[] = [
@@ -40,9 +40,11 @@ export interface FollowUpWorklistProps {
   canAct: boolean
   /** True when the query hit its row cap, so the list may be incomplete. */
   capped: boolean
+  /** True when the separate missed list hit its own cap (only the most recent missed are shown). */
+  missedCapped?: boolean
 }
 
-export function FollowUpWorklist({ rows, counts, filters, providers, departments, todayIso, canAct, capped }: FollowUpWorklistProps) {
+export function FollowUpWorklist({ rows, counts, filters, providers, departments, todayIso, canAct, capped, missedCapped = false }: FollowUpWorklistProps) {
   const router = useRouter()
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const close = () => setDialog(null)
@@ -85,6 +87,11 @@ export function FollowUpWorklist({ rows, counts, filters, providers, departments
       {capped && (
         <p role="status" className="rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
           Showing first {WORKLIST_ROW_CAP} — refine filters to see the rest.
+        </p>
+      )}
+      {missedCapped && (filters.bucket === 'missed' || filters.bucket === 'all_open') && (
+        <p role="status" className="rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          Showing first {MISSED_ROW_CAP} missed follow-ups (most recent first) — refine filters to see the rest.
         </p>
       )}
 

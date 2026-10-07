@@ -5,6 +5,7 @@ import { appointments, auditLog, departments, followUpContactAttempts, followUpO
 import type { Session } from '@/lib/auth'
 import { bookFollowUp, listFollowUpWorklist, recordContactAttempt, unbookFollowUp } from '@/lib/queries/follow-up-recall'
 import { getFollowUpById } from '@/lib/queries/follow-ups'
+import { MISSED_ROW_CAP } from '@/lib/follow-ups/worklist'
 
 // Real logAudit by default; a test can make the audit insert itself fail.
 vi.mock('@/lib/audit', async () => {
@@ -245,10 +246,10 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up booking (DB)', () => {
     const o = await makeOrder()
     const b = await bookFollowUp(o.id, { providerId, ...SLOT }, S)
     if (!b.ok) throw new Error('booking failed')
-    const before = (await listFollowUpWorklist('2099-07-14', { providerId })).find((r) => r.id === o.id)
+    const before = (await listFollowUpWorklist('2099-07-14', { providerId })).rows.find((r) => r.id === o.id)
     expect(before).toMatchObject({ status: 'scheduled', bucket: 'scheduled', appointment: { id: b.appointmentId, status: 'scheduled' } })
     await getDb().update(appointments).set({ status: 'cancelled' }).where(eq(appointments.id, b.appointmentId))
-    const row = (await listFollowUpWorklist('2099-07-14', { providerId })).find((r) => r.id === o.id)
+    const row = (await listFollowUpWorklist('2099-07-14', { providerId })).rows.find((r) => r.id === o.id)
     expect(row).toMatchObject({ status: 'planned', bucket: 'due' })
   })
 
@@ -291,7 +292,7 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up booking (DB)', () => {
     await new Promise((r) => setTimeout(r, 5))
     await recordContactAttempt(due.id, { channel: 'whatsapp', outcome: 'reached_will_call_back', note: 'TEST_SP3 later' }, S)
 
-    const rows = await listFollowUpWorklist(today, { providerId })
+    const { rows } = await listFollowUpWorklist(today, { providerId })
     const byId = new Map(rows.map((r) => [r.id, r]))
     expect(byId.get(due.id)).toMatchObject({
       bucket: 'due', status: 'planned', patientId: PATIENT, patientName: 'TEST_SP3 Recall Patient', uhid: `TSP3-${RUN}-A`, phone: '+919800000001',
@@ -305,15 +306,50 @@ describe.skipIf(!process.env.DATABASE_URL)('follow-up booking (DB)', () => {
     expect(byId.has(cancelled.id)).toBe(false)
     expect(byId.has(derivedDone.id)).toBe(false)
     expect(byId.has(other.id)).toBe(false) // SQL provider filter
-    expect((await listFollowUpWorklist(today, { departmentId: deptId })).map((r) => r.id)).toEqual(expect.arrayContaining([due.id, other.id]))
+    expect((await listFollowUpWorklist(today, { departmentId: deptId })).rows.map((r) => r.id)).toEqual(expect.arrayContaining([due.id, other.id]))
     // Ordered by due date.
     const ours = rows.filter((r) => [due.id, overdue.id, upcoming.id, missed.id].includes(r.id)).map((r) => r.id)
     expect(ours).toEqual([missed.id, overdue.id, due.id, upcoming.id])
   })
 
+  it('stale missed rows cannot crowd live ones out of the worklist (I2)', async () => {
+    const today = '2099-07-14'
+    // 600 long-missed orders (window ended ~a year before today): far more than either cap.
+    await getDb().insert(followUpOrders).values(Array.from({ length: 600 }, (_, i) => ({
+      patientId: i % 2 ? PATIENT : PATIENT_B, source: 'manual' as const, status: 'planned' as const, prescribedByProviderId: providerId, departmentId: deptId,
+      baseDate: '2098-06-01', dueDate: '2098-07-01', windowStart: '2098-06-28', windowEnd: '2098-07-08',
+      reason: 'TEST_SP3 stale', createdByName: PROBE_USER,
+    })))
+    const live = await Promise.all(Array.from({ length: 5 }, () => makeOrder()))
+    const result = await listFollowUpWorklist(today, { providerId })
+    const ids = new Set(result.rows.map((r) => r.id))
+    for (const o of live) expect(ids.has(o.id)).toBe(true)
+    expect(result.capped).toBe(false)
+    // Missed rows come from their own query: capped at MISSED_ROW_CAP, flagged.
+    expect(result.rows.filter((r) => r.status === 'missed')).toHaveLength(MISSED_ROW_CAP)
+    expect(result.missedCapped).toBe(true)
+  })
+
+  it('the cap flags come from the raw SQL row count, not the rows left after dropping closed ones (I2)', async () => {
+    const today = '2099-07-14'
+    const open = await makeOrder()
+    const done = await getDb().insert(appointments).values([
+      { patientId: PATIENT, providerId, ...SLOT2, visitReason: 'x', status: 'completed' },
+      { patientId: PATIENT, providerId, ...SLOT, visitReason: 'x', status: 'completed' },
+    ]).returning()
+    for (const a of done) await makeOrder({ status: 'scheduled', appointmentId: a.id }) // derives completed: dropped
+    // SQL returns 3 candidate rows for a cap of 2 (open + one dropped), so the list is flagged as cut.
+    const r = await listFollowUpWorklist(today, { providerId }, { main: 2, missed: 1 })
+    expect(r.rows.map((x) => x.id)).toEqual([open.id])
+    expect(r.capped).toBe(true)
+    expect(r.missedCapped).toBe(false)
+    const under = await listFollowUpWorklist(today, { providerId }, { main: 3, missed: 1 })
+    expect(under.capped).toBe(false)
+  })
+
   it('worklist rows never carry planNotes or Aadhaar fields', async () => {
     await makeOrder()
-    const rows = (await listFollowUpWorklist('2099-07-14', { providerId }))
+    const rows = (await listFollowUpWorklist('2099-07-14', { providerId })).rows
     expect(rows.length).toBeGreaterThan(0)
     const json = JSON.stringify(rows)
     expect(json).not.toContain('PLANSECRET')
