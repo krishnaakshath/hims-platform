@@ -21,7 +21,8 @@ export default async function CodingWorklistPage({ searchParams }: { searchParam
     listCodingWorklist(filters, session),
     listDepartments({ activeOnly: true }),
   ])
-  const mayClaim = CODING_ACTION_ROLES.claim.includes(session.role)
+  // Claiming needs a staff user account (ruling 7): the env-only admin login cannot claim.
+  const mayClaim = CODING_ACTION_ROLES.claim.includes(session.role) && session.userId !== null
 
   const rows: CodingWorklistRowView[] = worklist.rows.map((r) => ({
     encounterId: r.encounterId,

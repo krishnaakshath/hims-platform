@@ -28,13 +28,15 @@ export function codingActionAvailable(status: EncounterCodingStatus, action: Cod
   return nextCodingStatus(status, action) !== null && CODING_ACTION_ROLES[action].includes(role)
 }
 
-export function CodingActions({ encounterId, status, role, assignedToUserId, holdsClaim, isCompleted, coders }: {
+export function CodingActions({ encounterId, status, role, assignedToUserId, holdsClaim, hasAccount, isCompleted, coders }: {
   encounterId: number
   status: EncounterCodingStatus
   role: Role
   assignedToUserId: number | null
   /** Admin, or the coder the encounter is assigned to. */
   holdsClaim: boolean
+  /** The login has a staff user account; claiming needs one (the env-only admin cannot claim). */
+  hasAccount: boolean
   /** Coding actions apply to completed visits only. */
   isCompleted: boolean
   /** Staff with the coder role (id and name only); loaded for an admin only. */
@@ -49,7 +51,7 @@ export function CodingActions({ encounterId, status, role, assignedToUserId, hol
 
   const available = (a: CodingAction) => {
     if (!isCompleted || !codingActionAvailable(status, a, role)) return false
-    if (a === 'claim') return assignedToUserId === null
+    if (a === 'claim') return assignedToUserId === null && hasAccount
     if (a === 'assign') return true
     if (!holdsClaim) return false
     if (a === 'release') return assignedToUserId !== null

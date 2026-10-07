@@ -29,7 +29,7 @@ const row = (o: Partial<CodingWorklistRow> = {}): CodingWorklistRow => ({
 const COUNTS = { uncoded: 1, in_progress: 1, queried: 0, coded: 0, finalised: 4 }
 const refresh = vi.fn()
 
-async function renderWorklist(opts: { role?: string; sp?: Record<string, string>; rows?: CodingWorklistRow[]; total?: number } = {}) {
+async function renderWorklist(opts: { role?: string; userId?: number | null; sp?: Record<string, string>; rows?: CodingWorklistRow[]; total?: number } = {}) {
   vi.resetModules()
   refresh.mockClear()
   const role = opts.role ?? 'coder'
@@ -37,7 +37,8 @@ async function renderWorklist(opts: { role?: string; sp?: Record<string, string>
   const logAudit = vi.fn(async () => undefined)
   const redirect = vi.fn(() => { throw new Error('NEXT_REDIRECT') })
   const listCodingWorklist = vi.fn(async () => ({ rows, total: opts.total ?? rows.length, counts: COUNTS }))
-  vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Tester', userId: 5 })) }))
+  const userId = opts.userId === undefined ? 5 : opts.userId
+  vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Tester', userId })) }))
   vi.doMock('@/lib/audit', () => ({ logAudit }))
   vi.doMock('@/lib/queries/coding-worklist', () => ({ listCodingWorklist }))
   vi.doMock('@/lib/queries/departments', () => ({ listDepartments: vi.fn(async () => [{ id: 2, name: 'Cardiology', code: 'SECRET-DEPT-CODE' }]) }))
@@ -62,6 +63,11 @@ describe('/coding worklist', () => {
     expect(screen.getAllByRole('button', { name: /^claim/i })).toHaveLength(1)
     expect(screen.getByText('Asha Coder')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /productivity report/i })).toHaveAttribute('href', '/coding/report')
+  })
+
+  it('offers no Claim to a login without a staff account (the env admin cannot claim)', async () => {
+    const { screen } = await renderWorklist({ role: 'admin', userId: null })
+    expect(screen.queryByRole('button', { name: /^claim/i })).toBeNull()
   })
 
   it('shows the empty state', async () => {

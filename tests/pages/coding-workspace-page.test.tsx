@@ -53,7 +53,7 @@ function workspace(status: EncounterCodingStatus, o: Partial<CodingWorkspace> = 
 
 const refresh = vi.fn()
 
-async function renderAs(opts: { role?: string; status?: EncounterCodingStatus; data?: CodingWorkspace | null; id?: string } = {}) {
+async function renderAs(opts: { role?: string; userId?: number | null; status?: EncounterCodingStatus; data?: CodingWorkspace | null; id?: string } = {}) {
   vi.resetModules()
   refresh.mockClear()
   const role = opts.role ?? 'coder'
@@ -70,7 +70,8 @@ async function renderAs(opts: { role?: string; status?: EncounterCodingStatus; d
   ])
   const notFound = vi.fn(() => { throw new Error('NEXT_NOT_FOUND') })
   const redirect = vi.fn(() => { throw new Error('NEXT_REDIRECT') })
-  vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Tester', userId: 5 })) }))
+  const userId = opts.userId === undefined ? 5 : opts.userId
+  vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Tester', userId })) }))
   vi.doMock('@/lib/audit', () => ({ logAudit }))
   vi.doMock('@/lib/queries/coding-workspace', () => ({ getCodingWorkspace }))
   vi.doMock('@/lib/queries/users', () => ({ listAllUsers }))
@@ -132,6 +133,12 @@ describe('/coding/encounters/[id]', () => {
     cleanup()
     const finalised = await renderPage({ data: other('finalised') })
     expect(buttonNames(finalised.container)).toEqual([])
+  })
+
+  it('a login without a staff account sees no Claim', async () => {
+    const w = workspace('uncoded')
+    const { screen } = await renderPage({ role: 'admin', userId: null, data: { ...w, coding: { ...w.coding, assignedToUserId: null, assignedToName: null } } })
+    expect(screen.queryByRole('button', { name: 'Claim' })).toBeNull()
   })
 
   it('a visit that is not completed offers no coding actions', async () => {

@@ -92,7 +92,7 @@ export function CodingWorkspaceView({ view, role, userId, coders, providers, tod
         </dl>
         <CodingActions
           encounterId={view.encounterId} status={coding.status} role={role} assignedToUserId={coding.assignedToUserId}
-          holdsClaim={holdsClaim} isCompleted={encounter.isCompleted} coders={coders}
+          holdsClaim={holdsClaim} hasAccount={userId !== null} isCompleted={encounter.isCompleted} coders={coders}
         />
       </header>
 
