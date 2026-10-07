@@ -405,6 +405,8 @@ import { POST as postFollowUpContact } from '@/app/api/follow-ups/[id]/contact-a
 import { POST as postDischarge } from '@/app/api/inpatient/admissions/[id]/discharge/route'
 // SP5
 import { LAB_SETUP_ROLES, NOTIFICATION_PREFERENCE_ROLES } from '@/lib/role-policy'
+import { LAB_ORDER_ROLES } from '@/lib/role-policy'
+import { POST as postLabRequisition } from '@/app/api/patients/[anonId]/lab-orders/route'
 import { POST as postLabServiceArea } from '@/app/api/settings/lab-service-area/route'
 import { PATCH as patchLabServiceArea } from '@/app/api/settings/lab-service-area/[id]/route'
 import { POST as postCollectionWindow } from '@/app/api/settings/home-collection-windows/route'
@@ -613,6 +615,8 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PATCH /api/lab-tests/[id]', call: () => settle(() => patchLabTestSetup(send('PATCH', `/api/lab-tests/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_SETUP_ROLES] },
   // SP5 notification opt-out (NOTIFICATION_PREFERENCE_ROLES): `{}` fails validation before any query.
   { name: 'PUT /api/patients/[anonId]/notification-preference', call: () => settle(() => putNotificationPreference(send('PUT', `/api/patients/${BOGUS_PATIENT}/notification-preference`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...NOTIFICATION_PREFERENCE_ROLES] },
+  // SP5 doctor's order (LAB_ORDER_ROLES): `{}` fails validation before any query.
+  { name: 'POST /api/patients/[anonId]/lab-orders', call: () => settle(() => postLabRequisition(send('POST', `/api/patients/${BOGUS_PATIENT}/lab-orders`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...LAB_ORDER_ROLES] },
   // end SP5
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
@@ -665,6 +669,7 @@ const SP5_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PATCH /api/settings/home-collection-windows/[id]', call: () => patchCollectionWindow(send('PATCH', `/api/settings/home-collection-windows/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SETUP_ROLES },
   { name: 'PATCH /api/lab-tests/[id]', call: () => patchLabTestSetup(send('PATCH', `/api/lab-tests/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SETUP_ROLES },
   { name: 'PUT /api/patients/[anonId]/notification-preference', call: () => putNotificationPreference(send('PUT', `/api/patients/${BOGUS_PATIENT}/notification-preference`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: NOTIFICATION_PREFERENCE_ROLES },
+  { name: 'POST /api/patients/[anonId]/lab-orders', call: () => postLabRequisition(send('POST', `/api/patients/${BOGUS_PATIENT}/lab-orders`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: LAB_ORDER_ROLES },
 ]
 // end SP5
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP5_WRITE_GATES])('$name (deny before parse)', (c) => {

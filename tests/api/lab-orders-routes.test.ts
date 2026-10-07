@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { patients, providers, labTests, labOrders, labResults } from '@/db/schema'
+import { patients, providers, labTests, labOrders, labResults, labRequisitions } from '@/db/schema'
 
 type Role = 'admin' | 'pi' | 'crc' | 'frontdesk'
 let sessionRole: Role = 'admin'
@@ -25,6 +25,8 @@ import { POST as resultOrder } from '@/app/api/lab-orders/[id]/result/route'
 import { POST as cancelOrderRoute } from '@/app/api/lab-orders/[id]/cancel/route'
 
 const createdOrderIds: number[] = []
+// SP5: order creation now writes a requisition plus its orders.
+const createdRequisitionIds: number[] = []
 
 beforeAll(async () => {
   const [providerRow] = await getDb().select().from(providers).limit(1)
@@ -38,6 +40,12 @@ afterEach(async () => {
     const id = createdOrderIds.pop()!
     await getDb().delete(labResults).where(eq(labResults.labOrderId, id))
     await getDb().delete(labOrders).where(eq(labOrders.id, id))
+  }
+  // SP5: requisitions created through the route (their orders first).
+  while (createdRequisitionIds.length > 0) {
+    const id = createdRequisitionIds.pop()!
+    await getDb().delete(labOrders).where(eq(labOrders.requisitionId, id))
+    await getDb().delete(labRequisitions).where(eq(labRequisitions.id, id))
   }
 })
 
@@ -75,7 +83,8 @@ describe('lab order lifecycle routes — role gating (asymmetric collect gate)',
       const res = await createOrder(req as never, { params: Promise.resolve({ anonId: patientRow.id }) })
       expect(res.status).toBe(201)
       const body = await res.json()
-      createdOrderIds.push(body.id)
+      createdRequisitionIds.push(body.requisitionId) // SP5 response shape
+      expect(body.lines).toEqual([expect.objectContaining({ labTestId: test.id })])
     })
 
     it('allows pi whose session name matches a provider (201, real match — not the admin-only fallback)', async () => {
@@ -87,8 +96,9 @@ describe('lab order lifecycle routes — role gating (asymmetric collect gate)',
       const res = await createOrder(req as never, { params: Promise.resolve({ anonId: patientRow.id }) })
       expect(res.status).toBe(201)
       const body = await res.json()
-      expect(body.orderedByProviderId).toBe(mockProviderId)
-      createdOrderIds.push(body.id)
+      createdRequisitionIds.push(body.requisitionId) // SP5 response shape
+      const [order] = await getDb().select().from(labOrders).where(eq(labOrders.id, body.lines[0].orderId))
+      expect(order.orderedByProviderId).toBe(mockProviderId)
     })
 
     it('rejects a pi session whose name matches no provider, rather than silently misattributing the order (fail closed — matches discharge route precedent)', async () => {
@@ -109,7 +119,7 @@ describe('lab order lifecycle routes — role gating (asymmetric collect gate)',
       const [test] = await getDb().select().from(labTests).limit(1)
       const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ labTestId: test.id }) })
       const res = await createOrder(req as never, { params: Promise.resolve({ anonId: patientRow.id }) })
-      if (res.status === 201) createdOrderIds.push((await res.json()).id)
+      if (res.status === 201) createdRequisitionIds.push((await res.json()).requisitionId)
       expect(res.status).toBe(403)
     })
   })

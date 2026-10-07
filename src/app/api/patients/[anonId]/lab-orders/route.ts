@@ -1,23 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
-import { logAudit } from '@/lib/audit'
-import { createLabOrder } from '@/lib/queries/lab-orders'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
+// SP5: the doctor's order is a requisition of one or more tests, priced from the tariff master.
+import { brand } from '@/lib/brand'
+import { LAB_ORDER_ROLES } from '@/lib/role-policy'
+import { createLabRequisitionSchema } from '@/lib/labs/validation'
+import { createLabRequisition } from '@/lib/queries/lab-requisitions'
+import { notifyPatientSafely, type NotifyOutcome } from '@/lib/queries/notifications'
+import { errorResponse, invalidBody, labServerError, readJsonBody } from '@/lib/labs/route-responses'
 
-const createLabOrderSchema = z.object({
-  labTestId: z.number().int().positive(),
-}).strict()
+const NOT_FOUND_MESSAGE = {
+  patient_not_found: 'Patient not found',
+  test_not_found: 'Lab test not found',
+  encounter_not_found: 'Visit not found',
+} as const
+// end SP5
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
-  if (!['admin', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!LAB_ORDER_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { anonId } = await params
-  const parsed = createLabOrderSchema.safeParse(await request.json())
-  if (!parsed.success) return NextResponse.json({ error: 'Invalid lab order payload', details: parsed.error.flatten() }, { status: 400 })
+  // SP5: JSON → schema (multi-test body, or the legacy { labTestId }); never a 500 on bad JSON.
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = createLabRequisitionSchema.safeParse(json.body)
+  if (!parsed.success) return invalidBody(parsed.error, 'Invalid lab order payload')
+  // end SP5
 
   // Resolves who ordered this test with the shared acting-provider resolver
   // (resolveDoctorQueueProvider: the users -> staff -> provider FK link
@@ -44,8 +55,29 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'Could not resolve your provider identity for this session' }, { status: 403 })
   }
 
-  const created = await createLabOrder({ patientId: anonId, labTestId: parsed.data.labTestId, orderedByProviderId })
+  // SP5: one transaction (requisition + orders + audits), then the notice after commit.
+  let result: Awaited<ReturnType<typeof createLabRequisition>>
+  try {
+    result = await createLabRequisition({ ...parsed.data, patientId: anonId, orderedByProviderId }, session)
+  } catch (err) {
+    return labServerError('lab requisition create', err, 'Could not order the tests')
+  }
+  if (!result.ok) {
+    if (result.error === 'encounter_mismatch') return errorResponse(409, 'That visit belongs to a different patient.')
+    return errorResponse(404, NOT_FOUND_MESSAGE[result.error])
+  }
 
-  await logAudit(session, 'created lab order', anonId)
-  return NextResponse.json(created, { status: 201 })
+  const requisitionId = result.requisition.id
+  let notification: NotifyOutcome | 'error' | null = null
+  if (result.patientIsLocal) {
+    notification = await notifyPatientSafely(session, {
+      patientId: anonId,
+      templateKey: 'lab_tests_ordered',
+      vars: { hospitalName: brand.name },
+      related: { type: 'lab_requisition', id: requisitionId },
+      dedupeKey: `lab_tests_ordered:requisition=${requisitionId}`,
+    })
+  }
+  return NextResponse.json({ requisitionId, lines: result.lines, patientIsLocal: result.patientIsLocal, notification }, { status: 201 })
+  // end SP5
 }

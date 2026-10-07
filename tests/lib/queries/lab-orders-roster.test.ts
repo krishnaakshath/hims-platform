@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, labOrders, labTests, providers } from '@/db/schema'
-import { createLabOrder, markCollected, listPatientsWithLabOrders } from '@/lib/queries/lab-orders'
+import { markCollected, listPatientsWithLabOrders } from '@/lib/queries/lab-orders'
 
 const TEST_PATIENT_ID = 'RD-LABROSTER-TEST-01'
 
@@ -23,7 +23,8 @@ afterAll(async () => {
 
 describe('listPatientsWithLabOrders', () => {
   it('counts an ordered-status order as pending, not resulted', async () => {
-    await createLabOrder({ patientId: TEST_PATIENT_ID, labTestId, orderedByProviderId: providerId })
+    // SP5: createLabOrder was replaced by createLabRequisition; a bare row is enough for the roster.
+    await getDb().insert(labOrders).values({ patientId: TEST_PATIENT_ID, labTestId, orderedByProviderId: providerId })
     const roster = await listPatientsWithLabOrders()
     const row = roster.find((r) => r.id === TEST_PATIENT_ID)
     expect(row).toBeDefined()

@@ -114,20 +114,18 @@ describe('LabResultsSection — imaging on the Medical Record page', () => {
     expect(screen.queryAllByRole('link')).toEqual([])
   })
 
-  it("groups the order modal's options into Labs and Imaging optgroups", () => {
+  // SP5: the order modal is a checklist (one requisition of several tests), grouped by category.
+  it("groups the order modal's checklist into Labs and Imaging", () => {
     const labTests: LabTestOption[] = [
       { id: 1, name: 'Complete Blood Count', code: 'CBC', defaultUnit: null, referenceRange: null, category: 'lab' },
       { id: 2, name: 'Chest X-Ray, 2 Views', code: 'XR-CHEST-2V', defaultUnit: null, referenceRange: null, category: 'imaging' },
     ]
     render(<OrderLabTestModal patientId="RD-0001" labTests={labTests} onClose={vi.fn()} />)
-    const select = screen.getByLabelText('Lab test')
-    const optgroups = select.querySelectorAll('optgroup')
-    expect(optgroups).toHaveLength(2)
-    const labels = Array.from(optgroups).map((g) => g.getAttribute('label'))
-    expect(labels).toEqual(expect.arrayContaining(['Labs', 'Imaging']))
-
-    const imagingGroup = Array.from(optgroups).find((g) => g.getAttribute('label') === 'Imaging')!
+    const labsGroup = screen.getByRole('group', { name: 'Labs' })
+    const imagingGroup = screen.getByRole('group', { name: 'Imaging' })
+    expect(labsGroup.textContent).toContain('CBC')
     expect(imagingGroup.textContent).toContain('XR-CHEST-2V')
+    expect(screen.getByRole('checkbox', { name: /XR-CHEST-2V/ })).toBeInTheDocument()
   })
 })
 

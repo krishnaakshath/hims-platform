@@ -1,8 +1,12 @@
 'use client'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+// SP5: multi-test order (one requisition) plus an optional follow-up request.
+import { INTERVAL_UNITS, type IntervalUnit } from '@/lib/follow-ups/rules'
+import { followUpIntervalSchema, followUpReasonSchema } from '@/lib/follow-ups/validation'
+// end SP5
 
 export interface LabTestOption {
   id: number
@@ -13,6 +17,11 @@ export interface LabTestOption {
   category: 'lab' | 'imaging'
 }
 
+// SP5 messages shown after the order is placed (Ruling 3: local = registered PIN in the service area).
+const LOCAL_MESSAGE = 'Home collection available for this patient'
+const NOT_LOCAL_MESSAGE = 'Patient is outside the home-collection area: walk-in only'
+const FIELD = 'w-full rounded-md border border-border px-3 py-2 text-sm'
+
 // Reusable from any patient-chart context -- the caller (LabResultsSection's
 // "Order Test" button) owns the trigger button and open/close state and
 // passes this patient's id plus the test catalog (fetched server-side via
@@ -20,55 +29,125 @@ export interface LabTestOption {
 // TransferAdmissionModal's `availableRooms`) as props.
 export function OrderLabTestModal({ patientId, labTests, onClose }: { patientId: string; labTests: LabTestOption[]; onClose: () => void }) {
   const router = useRouter()
-  const [labTestId, setLabTestId] = useState<number | ''>('')
+  const id = useId()
+  const [selected, setSelected] = useState<number[]>([])
+  const [askFollowUp, setAskFollowUp] = useState(false)
+  const [intervalValue, setIntervalValue] = useState('2')
+  const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>('weeks')
+  const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [placed, setPlaced] = useState<{ patientIsLocal: boolean } | null>(null)
+
+  function toggle(testId: number) {
+    setSelected((s) => (s.includes(testId) ? s.filter((x) => x !== testId) : [...s, testId]))
+  }
 
   async function submit() {
-    setSubmitting(true)
     setError(null)
+    let followUp: { interval: { value: number; unit: IntervalUnit }; reason: string } | null = null
+    if (askFollowUp) {
+      const interval = followUpIntervalSchema.safeParse({ value: Number(intervalValue), unit: intervalUnit })
+      if (!interval.success) { setError('Enter a follow-up interval between 1 and 365 (within 2 years).'); return }
+      const why = followUpReasonSchema.safeParse(reason)
+      if (!why.success) { setError(reason.trim() ? 'The follow-up reason is too long.' : 'Enter a short reason for the follow-up visit.'); return }
+      followUp = { interval: { value: interval.data.value, unit: interval.data.unit as IntervalUnit }, reason: why.data }
+    }
+    // Catalog order, so the request (and the requisition's lines) read like the checklist.
+    const labTestIds = labTests.filter((t) => selected.includes(t.id)).map((t) => t.id)
+    setSubmitting(true)
     const res = await fetch(`/api/patients/${patientId}/lab-orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ labTestId }),
+      body: JSON.stringify({ labTestIds, followUp }),
     })
     setSubmitting(false)
-    if (res.ok) { router.refresh(); onClose(); return }
+    if (res.ok) {
+      const body = await res.json().catch(() => null)
+      setPlaced({ patientIsLocal: body?.patientIsLocal === true })
+      router.refresh()
+      return
+    }
     const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not order this test.')
+    setError(body?.error ?? 'Could not order these tests.')
   }
 
-  const canSubmit = labTestId !== '' && !submitting
+  const count = selected.length
+  const canSubmit = count > 0 && !submitting
   const labOptions = labTests.filter((t) => t.category === 'lab')
   const imagingOptions = labTests.filter((t) => t.category === 'imaging')
+
+  const group = (legend: string, options: LabTestOption[]) =>
+    options.length > 0 && (
+      <fieldset className="space-y-1">
+        <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{legend}</legend>
+        {options.map((t) => (
+          <label key={t.id} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={selected.includes(t.id)} onChange={() => toggle(t.id)} />
+            <span>{t.name} ({t.code})</span>
+          </label>
+        ))}
+      </fieldset>
+    )
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Order Lab Test</DialogTitle>
+          <DialogTitle>Order Lab Tests</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
-          <select value={labTestId} onChange={(e) => setLabTestId(e.target.value === '' ? '' : Number(e.target.value))} aria-label="Lab test" className="w-full rounded-md border border-border px-3 py-2 text-sm">
-            <option value="">Select a test…</option>
-            {labOptions.length > 0 && (
-              <optgroup label="Labs">
-                {labOptions.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.code})</option>)}
-              </optgroup>
-            )}
-            {imagingOptions.length > 0 && (
-              <optgroup label="Imaging">
-                {imagingOptions.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.code})</option>)}
-              </optgroup>
-            )}
-          </select>
-          {labTests.length === 0 && <p className="text-sm text-warning">No lab tests are available in the catalog.</p>}
-          {error && <p className="text-sm text-destructive">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={!canSubmit}>Order test</Button>
-        </DialogFooter>
+        {placed ? (
+          <div className="space-y-3">
+            <p className="text-sm font-medium">Tests ordered.</p>
+            <p role="status" className="text-sm">{placed.patientIsLocal ? LOCAL_MESSAGE : NOT_LOCAL_MESSAGE}</p>
+            <DialogFooter>
+              <Button onClick={onClose}>Done</Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <>
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+              {group('Labs', labOptions)}
+              {group('Imaging', imagingOptions)}
+              {labTests.length === 0 && <p className="text-sm text-warning">No lab tests are available in the catalog.</p>}
+
+              <fieldset className="space-y-2 rounded-md border border-border p-3">
+                <legend className="px-1 text-sm">
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={askFollowUp} onChange={(e) => setAskFollowUp(e.target.checked)} />
+                    <span>Ask for a follow-up visit after the report</span>
+                  </label>
+                </legend>
+                {askFollowUp && (
+                  <>
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <label htmlFor={`${id}-value`} className="block text-xs text-muted-foreground">Follow-up after</label>
+                        <input id={`${id}-value`} type="number" min={1} max={365} value={intervalValue} onChange={(e) => setIntervalValue(e.target.value)} className={FIELD} />
+                      </div>
+                      <div>
+                        <label htmlFor={`${id}-unit`} className="block text-xs text-muted-foreground">Unit</label>
+                        <select id={`${id}-unit`} value={intervalUnit} onChange={(e) => setIntervalUnit(e.target.value as IntervalUnit)} className={`${FIELD} !w-28`}>
+                          {INTERVAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label htmlFor={`${id}-reason`} className="block text-xs text-muted-foreground">Reason (shown to front desk and in patient reminders)</label>
+                      <input id={`${id}-reason`} value={reason} onChange={(e) => setReason(e.target.value)} className={FIELD} />
+                    </div>
+                  </>
+                )}
+              </fieldset>
+
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button onClick={submit} disabled={!canSubmit}>{count === 0 ? 'Order tests' : `Order ${count} test${count === 1 ? '' : 's'}`}</Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   )

@@ -4,20 +4,8 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { listImagingForOrders, type ImagingAttachment } from '@/lib/queries/documents'
 import { PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status' // SP5
 
-export interface CreateLabOrderInput {
-  patientId: string
-  labTestId: number
-  orderedByProviderId: number
-}
-
-export async function createLabOrder(input: CreateLabOrderInput) {
-  const [created] = await getDb().insert(labOrders).values({
-    patientId: input.patientId,
-    labTestId: input.labTestId,
-    orderedByProviderId: input.orderedByProviderId,
-  }).returning()
-  return created
-}
+// SP5: orders are created only as part of a requisition (createLabRequisition in
+// src/lib/queries/lab-requisitions.ts); the single-order createLabOrder was removed.
 
 type LifecycleResult = { ok: true; patientId: string } | { ok: false; error: string }
 

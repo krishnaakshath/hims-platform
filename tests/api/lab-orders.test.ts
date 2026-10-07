@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, providers, labTests, labOrders, labResults, documents, auditLog } from '@/db/schema'
 import { logIntegrationEvent } from '@/lib/patient-portal-audit'
-import { createLabOrder, markCollected, enterResult, cancelOrder, listWorklist, listOrdersForPatient } from '@/lib/queries/lab-orders'
+import { markCollected, enterResult, cancelOrder, listWorklist, listOrdersForPatient } from '@/lib/queries/lab-orders'
 
 const createdOrderIds: number[] = []
 const createdDocumentIds: number[] = []
@@ -28,7 +28,8 @@ async function makeOrder() {
   const [test] = await db.select({ id: labTests.id }).from(labTests).limit(1)
   const [providerRow] = await db.select({ id: providers.id }).from(providers).limit(1)
   const [patientRow] = await db.select({ id: patients.id }).from(patients).limit(1)
-  const order = await createLabOrder({ patientId: patientRow.id, labTestId: test.id, orderedByProviderId: providerRow.id })
+  // SP5: createLabOrder was replaced by createLabRequisition; a bare row is enough for these lifecycle tests.
+  const [order] = await db.insert(labOrders).values({ patientId: patientRow.id, labTestId: test.id, orderedByProviderId: providerRow.id }).returning()
   createdOrderIds.push(order.id)
   return order
 }
@@ -52,7 +53,7 @@ async function attachDocument(orderId: number, patientId: string, name: string) 
 }
 
 describe('lab order lifecycle — query layer', () => {
-  it('createLabOrder sets initial status ordered', async () => {
+  it('a new order starts in status ordered', async () => {
     const order = await makeOrder()
     expect(order.status).toBe('ordered')
   })
