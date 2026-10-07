@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
-import { LeftNav } from '@/components/LeftNav'
+import { LeftNav, NAV_BILLING_ITEMS } from '@/components/LeftNav'
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/patients' }))
 
@@ -89,6 +89,20 @@ describe('LeftNav', () => {
     render(<LeftNav role="pi" badges={{ '/doctor': 0 }} />)
     expect(screen.getByRole('link', { name: /my patients/i }).textContent).toBe('My Patients')
   })
+  // Wave B P0-01: billing-only nav must reach its own home and Tariffs.
+  it('gives billing a Billing Home link and the Tariffs link, but no clinical entries', () => {
+    render(<LeftNav role="billing" />)
+    expect(screen.getByRole('link', { name: /billing home/i })).toHaveAttribute('href', '/billing')
+    expect(screen.getByRole('link', { name: /^tariffs$/i })).toHaveAttribute('href', '/tariffs')
+    for (const hidden of [/^patients$/i, /^calendar$/i, /^labs$/i, /^settings$/i, /^reports$/i]) {
+      expect(screen.queryByRole('link', { name: hidden })).not.toBeInTheDocument()
+    }
+  })
+
+  it('lists Billing Home first in the billing group', () => {
+    expect(NAV_BILLING_ITEMS[0]).toMatchObject({ href: '/billing', label: 'Billing Home' })
+  })
+
   it('shows the decline pill on Assignments for frontdesk', () => {
     render(<LeftNav role="frontdesk" badges={{ '/front-desk/assignments': 2 }} />)
     expect(within(screen.getByRole('link', { name: /assignments/i })).getByText('2')).toBeInTheDocument()

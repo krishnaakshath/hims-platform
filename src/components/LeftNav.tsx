@@ -87,6 +87,9 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
 ]
 
 export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon }[] = [
+  // Wave B P0-01: the billing role's own home (its '/' redirects here, but
+  // the billing-only nav hides the generic Home entry).
+  { href: '/billing', label: 'Billing Home', icon: LayoutDashboard },
   { href: '/billing/ar-dashboard', label: 'A/R Dashboard', icon: TrendingUp },
   { href: '/billing/charges', label: 'Charges', icon: Receipt },
   { href: '/billing/insurance-collections', label: 'Insurance Collections', icon: ShieldCheck },
@@ -210,7 +213,8 @@ export function LeftNav({ role, badges: initialBadges }: { role: Role; badges?: 
               <ul className={`mt-0.5 space-y-0.5 ${!isBillingOnly ? 'ps-3' : ''}`}>
                 {NAV_BILLING_ITEMS.map((item) => (
                   <li key={item.href}>
-                    <NavLink href={item.href} label={item.label} icon={item.icon} active={isActive(pathname, item.href)} badge={badges?.[item.href] ?? undefined} />
+                    {/* '/billing' is the parent of every other billing entry: exact match only. */}
+                    <NavLink href={item.href} label={item.label} icon={item.icon} active={item.href === '/billing' ? pathname === '/billing' : isActive(pathname, item.href)} badge={badges?.[item.href] ?? undefined} />
                   </li>
                 ))}
               </ul>
@@ -218,7 +222,9 @@ export function LeftNav({ role, badges: initialBadges }: { role: Role; badges?: 
           </>
         )}
 
-        {!isBillingOnly && trailingItems.length > 0 && (
+        {/* Wave B P0-01: billing-only roles still get the Operations entries
+            whose roles include them (Tariffs); trailingItems is role-filtered. */}
+        {trailingItems.length > 0 && (
           <>
             <GroupLabel>Operations</GroupLabel>
             <ul className="space-y-0.5">
