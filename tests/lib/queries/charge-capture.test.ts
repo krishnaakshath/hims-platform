@@ -291,4 +291,26 @@ describe.skipIf(!process.env.DATABASE_URL)('charge capture (DB)', () => {
     expect(await loadMappedProcedureCodes(executor as never, 1)).toEqual([])
     expect(calls).toBe(1)
   })
+
+  it('pharmacy lines with no visit or stay: listed per patient while unbilled, and viewable', async () => {
+    const { getDb, chargeLines, eq, cc } = await m()
+    const db = getDb()
+    const base = { patientId: PID_LAB, source: 'pharmacy' as const, priceSource: 'pharmacy' as const, itemCode: 'J3490', itemName: 'Test drug', serviceDate: DAY,
+      quantity: 2, unitPricePaise: 1500, taxablePaise: 3000, gstRateBp: 500, hsnSac: '3004', createdByName: 'TEST-SP4' }
+    const [a] = await db.insert(chargeLines).values(base).returning()
+    const [b] = await db.insert(chargeLines).values({ ...base, quantity: 1, taxablePaise: 1500 }).returning()
+    // a line with a context is not a pharmacy-view line
+    const r = await cc.captureChargeLine({ context: { encounterId: fx.labEncounterId }, serviceId: fx.consultId, quantity: 1, serviceDate: DAY, billTo: 'patient' }, crc, NOW)
+    expect(r.ok).toBe(true)
+    const rows = await cc.listUnbilledPharmacyPatients()
+    expect(rows.find((x) => x.patientId === PID_LAB)).toEqual({ patientId: PID_LAB, patientName: 'Test SP4 Lab', uhid: null, lineCount: 2, taxablePaise: 4500 })
+    const view = await cc.getPharmacyCaptureView(PID_LAB)
+    expect(view).toMatchObject({ patientId: PID_LAB, patientName: 'Test SP4 Lab', uhid: null })
+    expect(view!.lines.map((l) => l.id)).toEqual([a.id, b.id])
+    // once both are voided (or invoiced) the patient drops off the unbilled list but the view still opens
+    await db.update(chargeLines).set({ status: 'void', voidReason: 'test', voidedByName: 'TEST-SP4', voidedAt: NOW }).where(eq(chargeLines.patientId, PID_LAB))
+    expect((await cc.listUnbilledPharmacyPatients()).find((x) => x.patientId === PID_LAB)).toBeUndefined()
+    expect((await cc.getPharmacyCaptureView(PID_LAB))!.lines).toHaveLength(2)
+    expect(await cc.getPharmacyCaptureView('TEST-SP4-NOBODY')).toBeNull()
+  })
 })

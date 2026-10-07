@@ -15,12 +15,15 @@ vi.mock('@/lib/queries/charge-capture', () => ({
   listCaptureContexts: vi.fn(),
   getCaptureHeader: vi.fn(),
   listChargeLinesForContext: vi.fn(async () => []),
+  listUnbilledPharmacyPatients: vi.fn(async () => []),
+  getPharmacyCaptureView: vi.fn(),
 }))
 vi.mock('@/components/billing/ChargeCaptureForm', () => ({ ChargeCaptureForm: vi.fn(() => <div data-testid="capture-form" />) }))
 vi.mock('@/components/billing/ChargeLinesTable', () => ({ ChargeLinesTable: vi.fn(() => <div data-testid="lines-table" />) }))
 vi.mock('@/components/billing/RoomRentButton', () => ({ RoomRentButton: vi.fn(() => <button type="button">Post room rent to date</button>) }))
 
-import { getCaptureHeader, listCaptureContexts, listChargeLinesForContext } from '@/lib/queries/charge-capture'
+import { getCaptureHeader, getPharmacyCaptureView, listCaptureContexts, listChargeLinesForContext, listUnbilledPharmacyPatients } from '@/lib/queries/charge-capture'
+import { ChargeLinesTable } from '@/components/billing/ChargeLinesTable'
 import { ChargeCaptureForm } from '@/components/billing/ChargeCaptureForm'
 import { logAudit } from '@/lib/audit'
 import CapturePage from '@/app/(dashboard)/billing/capture/page'
@@ -83,5 +86,29 @@ describe('/billing/capture', () => {
     role = 'frontdesk'
     await expect(page({})).rejects.toThrow('REDIRECT /')
     expect(listCaptureContexts).not.toHaveBeenCalled()
+  })
+
+  // Pharmacy bills of a patient who is not admitted carry no visit or stay; without this view
+  // nothing could put them on an invoice.
+  it('lists patients with unbilled pharmacy charges and opens their lines without a capture form', async () => {
+    vi.mocked(listUnbilledPharmacyPatients).mockResolvedValue([{ patientId: 'RD-0005', patientName: 'Meena Das', uhid: 'HMS-000500', lineCount: 2, taxablePaise: 3000 }])
+    await page({})
+    expect(screen.getByRole('link', { name: /Meena Das/ })).toHaveAttribute('href', '/billing/capture?patientId=RD-0005')
+    vi.mocked(getPharmacyCaptureView).mockResolvedValue({
+      patientId: 'RD-0005', patientName: 'Meena Das', uhid: 'HMS-000500',
+      lines: [{ id: 9, serviceDate: '2099-06-01', itemCode: 'J3490', itemName: 'Drug', quantity: 2, unitPricePaise: 1500, taxablePaise: 3000, priceSource: 'pharmacy', status: 'captured', invoiceId: null, source: 'pharmacy', violations: [], voidReason: null }],
+    } as never)
+    await page({ patientId: 'RD-0005' })
+    expect(getPharmacyCaptureView).toHaveBeenCalledWith('RD-0005')
+    expect(vi.mocked(ChargeLinesTable).mock.calls.at(-1)![0].lines.map((l: { id: number }) => l.id)).toEqual([9])
+    expect(vi.mocked(ChargeCaptureForm)).not.toHaveBeenCalled()
+    expect(logAudit).toHaveBeenCalledWith(expect.anything(), 'billing: viewed charge capture', 'RD-0005')
+  })
+
+  it('a pharmacy view with a bad or unknown patient id is a 404', async () => {
+    await expect(page({ patientId: 'bad id!' })).rejects.toThrow('NOT_FOUND')
+    await expect(page({ patientId: 'RD-1', encounterId: '2' })).rejects.toThrow('NOT_FOUND')
+    vi.mocked(getPharmacyCaptureView).mockResolvedValue(null)
+    await expect(page({ patientId: 'RD-9' })).rejects.toThrow('NOT_FOUND')
   })
 })

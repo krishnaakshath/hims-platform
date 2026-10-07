@@ -1,7 +1,7 @@
 // SP4: charge capture. Context loading, preview, capture and void of charge lines.
 // Capture runs in one transaction that first takes the per-patient billing lock, so two clerks
 // (or a double click) adding the same charge serialise and the second sees the first.
-import { and, asc, eq, gte, inArray, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, isNull, lte, ne, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
   admissions, chargeLines, departments, encounters, patientPayments, patients, payers, providers, refunds, roomCategories, rooms, serviceCatalog,
@@ -10,7 +10,7 @@ import {
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { BILLING_AUTHORITY_ROLES } from '@/lib/role-policy'
-import { lineTaxablePaise } from '@/lib/billing/amounts'
+import { lineTaxablePaise, paiseFromDb } from '@/lib/billing/amounts'
 import {
   appliedOverrides, evaluateChargeRules, unresolvedBlocks,
   type ChargeRuleCode, type ChargeRuleInput, type ChargeViolation, type ProcedureCodeRef,
@@ -99,7 +99,7 @@ export async function loadChargeContext(executor: WriteExecutor, ref: ChargeCont
   const [adm] = await executor.select().from(admissions).where(eq(admissions.id, ref.admissionId)).limit(1)
   if (!adm) return null
   const [prov] = await executor.select({ departmentId: providers.departmentId }).from(providers).where(eq(providers.id, adm.attendingProviderId)).limit(1)
-  const [enc] = await executor.select({ id: encounters.id }).from(encounters).where(eq(encounters.admissionId, adm.id)).limit(1)
+  const [enc] = await executor.select({ id: encounters.id }).from(encounters).where(eq(encounters.admissionId, adm.id)).orderBy(asc(encounters.id)).limit(1)
   const room = await roomOf(executor, adm.currentRoomId)
   return {
     kind: 'admission',
@@ -438,3 +438,34 @@ export async function listChargeLinesForContext(ref: ChargeContextRef): Promise<
   const where = 'admissionId' in ref ? eq(chargeLines.admissionId, ref.admissionId) : eq(chargeLines.encounterId, ref.encounterId)
   return getDb().select().from(chargeLines).where(where).orderBy(asc(chargeLines.serviceDate), asc(chargeLines.id))
 }
+
+// ---------- pharmacy lines with no visit or stay ----------
+// A pharmacy bill for a patient who is not admitted becomes a line with neither an encounter nor an
+// admission. These two reads give such lines a screen, so they can be drafted onto an invoice
+// (createDraftInvoice groups them on their own) or voided.
+
+const noContext = and(isNull(chargeLines.encounterId), isNull(chargeLines.admissionId))
+
+export interface UnbilledPharmacyPatientRow { patientId: string; patientName: string; uhid: string | null; lineCount: number; taxablePaise: number }
+
+/** Patients with captured, not-yet-drafted pharmacy lines that carry no visit or stay. */
+export async function listUnbilledPharmacyPatients(): Promise<UnbilledPharmacyPatientRow[]> {
+  const rows = await getDb().select({
+    patientId: chargeLines.patientId, patientName: patients.name, uhid: patients.uhid,
+    lineCount: sql<number>`count(*)::int`, taxable: sql<string>`sum(${chargeLines.taxablePaise})`,
+  }).from(chargeLines).innerJoin(patients, eq(patients.id, chargeLines.patientId))
+    .where(and(noContext, eq(chargeLines.status, 'captured'), isNull(chargeLines.invoiceId)))
+    .groupBy(chargeLines.patientId, patients.name, patients.uhid).orderBy(asc(patients.name), asc(chargeLines.patientId))
+  return rows.map(({ taxable, ...r }) => ({ ...r, taxablePaise: paiseFromDb(taxable) }))
+}
+
+/** Every no-context line of a patient (void and invoiced included); null when the patient does not exist. */
+export async function getPharmacyCaptureView(patientId: string): Promise<{ patientId: string; patientName: string; uhid: string | null; lines: ChargeLineRow[] } | null> {
+  const db = getDb()
+  const [patient] = await db.select({ name: patients.name, uhid: patients.uhid }).from(patients).where(eq(patients.id, patientId)).limit(1)
+  if (!patient) return null
+  const lines = await db.select().from(chargeLines).where(and(eq(chargeLines.patientId, patientId), noContext))
+    .orderBy(asc(chargeLines.serviceDate), asc(chargeLines.id))
+  return { patientId, patientName: patient.name, uhid: patient.uhid, lines }
+}
+

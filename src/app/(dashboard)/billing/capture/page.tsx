@@ -6,18 +6,27 @@ import { logAudit } from '@/lib/audit'
 import { BILLING_AUTHORITY_ROLES, CHARGE_CAPTURE_ROLES } from '@/lib/role-policy'
 import { formatPaise } from '@/lib/format'
 import { formatIsoDate, todayIsoIn } from '@/lib/india-time'
-import { getCaptureHeader, listCaptureContexts, listChargeLinesForContext, type ChargeContextRef } from '@/lib/queries/charge-capture'
+import {
+  getCaptureHeader, getPharmacyCaptureView, listCaptureContexts, listChargeLinesForContext, listUnbilledPharmacyPatients, type ChargeContextRef,
+} from '@/lib/queries/charge-capture'
+import type { ChargeLineRow } from '@/db/schema'
 import { ChargeCaptureForm } from '@/components/billing/ChargeCaptureForm'
-import { ChargeLinesTable } from '@/components/billing/ChargeLinesTable'
+import { ChargeLinesTable, type ChargeLineView } from '@/components/billing/ChargeLinesTable'
 import { RoomRentButton } from '@/components/billing/RoomRentButton'
 import { BackLink } from '@/components/BackLink'
 
 const ID = /^[1-9]\d{0,9}$/
 
-function parseRef(sp: { encounterId?: string; admissionId?: string }): ChargeContextRef | null | 'none' {
-  const { encounterId, admissionId } = sp
-  if (encounterId === undefined && admissionId === undefined) return 'none'
-  if (encounterId !== undefined && admissionId !== undefined) return null
+const PATIENT_ID = /^[A-Za-z0-9_-]{1,40}$/
+
+type Ref = ChargeContextRef | { pharmacyPatientId: string }
+
+function parseRef(sp: { encounterId?: string; admissionId?: string; patientId?: string }): Ref | null | 'none' {
+  const { encounterId, admissionId, patientId } = sp
+  const given = [encounterId, admissionId, patientId].filter((v) => v !== undefined).length
+  if (given === 0) return 'none'
+  if (given > 1) return null
+  if (patientId !== undefined) return PATIENT_ID.test(patientId) ? { pharmacyPatientId: patientId } : null
   const raw = (encounterId ?? admissionId)!
   if (!ID.test(raw) || Number(raw) > 2_147_483_647) return null
   return encounterId !== undefined ? { encounterId: Number(raw) } : { admissionId: Number(raw) }
@@ -37,8 +46,14 @@ function PageTitle({ subtitle }: { subtitle: string }) {
   )
 }
 
+const toLineView = (l: ChargeLineRow): ChargeLineView => ({
+  id: l.id, serviceDate: l.serviceDate, itemCode: l.itemCode, itemName: l.itemName, quantity: l.quantity, unitPricePaise: l.unitPricePaise,
+  taxablePaise: l.taxablePaise, priceSource: l.priceSource, status: l.status, invoiceId: l.invoiceId, source: l.source,
+  violations: l.violations, voidReason: l.voidReason,
+})
+
 // SP4: capture charges against a visit or an admission (CHARGE_CAPTURE_ROLES = BILLING_ROLES).
-export default async function ChargeCapturePage({ searchParams }: { searchParams: Promise<{ encounterId?: string; admissionId?: string }> }) {
+export default async function ChargeCapturePage({ searchParams }: { searchParams: Promise<{ encounterId?: string; admissionId?: string; patientId?: string }> }) {
   const session = await requireSessionOrRedirect()
   if (!CHARGE_CAPTURE_ROLES.includes(session.role)) redirect('/')
 
@@ -47,7 +62,7 @@ export default async function ChargeCapturePage({ searchParams }: { searchParams
 
   if (ref === 'none') {
     const today = todayIsoIn()
-    const { encounters, admissions } = await listCaptureContexts(today)
+    const [{ encounters, admissions }, pharmacy] = await Promise.all([listCaptureContexts(today), listUnbilledPharmacyPatients()])
     return (
       <div>
         <PageTitle subtitle={`Choose a visit or an admitted patient to add charges. Today is ${formatIsoDate(today)}.`} />
@@ -89,6 +104,40 @@ export default async function ChargeCapturePage({ searchParams }: { searchParams
             )}
           </section>
         </div>
+        {pharmacy.length > 0 && (
+          <section className="mt-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Unbilled pharmacy charges (no visit or stay)</h2>
+            <ul className="divide-y divide-border rounded-md border border-border">
+              {pharmacy.map((p) => (
+                <li key={p.patientId}>
+                  <Link href={`/billing/capture?patientId=${encodeURIComponent(p.patientId)}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-muted">
+                    <span>
+                      <span className="font-medium">{p.patientName}</span>
+                      <span className="block text-xs text-muted-foreground">{p.uhid ?? p.patientId} · {p.lineCount} {p.lineCount === 1 ? 'charge' : 'charges'}</span>
+                    </span>
+                    <span className="tabular-nums">{formatPaise(p.taxablePaise)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+    )
+  }
+
+  if ('pharmacyPatientId' in ref) {
+    const view = await getPharmacyCaptureView(ref.pharmacyPatientId)
+    if (!view) notFound()
+    await logAudit(session, 'billing: viewed charge capture', view.patientId)
+    return (
+      <div>
+        <div className="mb-4"><BackLink href="/billing/capture" label="All visits and admissions" /></div>
+        <PageTitle subtitle={`Pharmacy charges with no visit or stay · ${view.patientName} · UHID ${view.uhid ?? '—'}`} />
+        <section>
+          <h2 className="mb-2 text-lg font-semibold">Charges</h2>
+          <ChargeLinesTable lines={view.lines.map(toLineView)} />
+        </section>
       </div>
     )
   }
@@ -117,11 +166,7 @@ export default async function ChargeCapturePage({ searchParams }: { searchParams
             <h2 className="text-lg font-semibold">Charges</h2>
             {'admissionId' in ref && <RoomRentButton admissionId={ref.admissionId} />}
           </div>
-          <ChargeLinesTable lines={lines.map((l) => ({
-            id: l.id, serviceDate: l.serviceDate, itemCode: l.itemCode, itemName: l.itemName, quantity: l.quantity, unitPricePaise: l.unitPricePaise,
-            taxablePaise: l.taxablePaise, priceSource: l.priceSource, status: l.status, invoiceId: l.invoiceId, source: l.source,
-            violations: l.violations, voidReason: l.voidReason,
-          }))} />
+          <ChargeLinesTable lines={lines.map(toLineView)} />
         </section>
         <section className="rounded-lg border border-border bg-card p-4">
           <h2 className="mb-3 text-lg font-semibold">Add a charge</h2>
