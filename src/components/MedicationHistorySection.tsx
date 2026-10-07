@@ -1,5 +1,6 @@
 'use client'
 import { sendJson } from '@/lib/client-fetch'
+import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pill } from 'lucide-react'
@@ -7,7 +8,6 @@ import { Button } from '@/components/ui/button'
 import { AddPrescriptionModal } from '@/components/AddPrescriptionModal'
 import type { medicationEpisodes } from '@/db/schema'
 import type { MedicationWithInventory } from '@/lib/queries/medications'
-import type { DatesToIso } from '@/lib/cache-shape'
 
 export interface PrescriberInfo { name: string; credentials: string | null; specialty: string }
 
@@ -24,11 +24,11 @@ const SECTION_HEADING = 'border-l-2 border-primary/40 pl-2.5 text-xs font-semibo
 // has no Date type). Review Focus #5 depends on this.
 function formatDate(value: string | Date | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return formatIstDate(value)
 }
 
-// ISO-string dates: episodes come from the cached patient detail (datesToIso).
-type Episode = DatesToIso<typeof medicationEpisodes.$inferSelect>
+// prescribedAt is a Date from the DB or its ISO string via the JSON cache.
+type Episode = Omit<typeof medicationEpisodes.$inferSelect, 'prescribedAt'> & { prescribedAt: Date | string | null }
 
 function MedicationRow({
   episode, prescriberById, canPrescribe, patientId,

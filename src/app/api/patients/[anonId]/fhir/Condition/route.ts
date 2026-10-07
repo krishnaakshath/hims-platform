@@ -1,3 +1,5 @@
+// Condition bundle (CLINICAL_ROLES). SP6: live diagnoses only, coded ones with a system URI only
+// when coded from a loaded non-sample code system (ruling 11, src/lib/fhir/condition.ts).
 import { NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'

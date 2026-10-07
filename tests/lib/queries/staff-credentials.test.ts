@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import { istDateOf } from '@/lib/india-time'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { staffMembers, staffCredentials } from '@/db/schema'
@@ -14,7 +15,7 @@ afterEach(async () => {
 })
 
 function daysFromNow(days: number): string {
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  return istDateOf(new Date(Date.now() + days * 24 * 60 * 60 * 1000)) // IST calendar date
 }
 
 async function makeStaff(name: string, employmentStatus?: 'active' | 'on_leave' | 'terminated') {

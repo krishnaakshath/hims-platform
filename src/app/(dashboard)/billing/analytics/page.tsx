@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getBillingAnalyticsData } from '@/lib/queries/billing-analytics'
-import { formatCents } from '@/lib/format'
+import { formatPaise } from '@/lib/format'
 import { BillingTrendChart } from '@/components/BillingTrendChart'
 
 function KpiCard({ label, value }: { label: string; value: string }) {
@@ -27,8 +27,8 @@ export default async function BillingAnalyticsPage() {
 
       <div className="grid grid-cols-3 gap-4">
         <KpiCard label="Patient Visits" value={String(data.patientVisits)} />
-        <KpiCard label="Gross Charges" value={formatCents(data.grossChargesCents)} />
-        <KpiCard label="Net Collections" value={formatCents(data.netCollectionsCents)} />
+        <KpiCard label="Gross Charges" value={formatPaise(data.grossChargesCents)} />
+        <KpiCard label="Net Collections" value={formatPaise(data.netCollectionsCents)} />
       </div>
 
       <section>

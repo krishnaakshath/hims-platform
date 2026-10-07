@@ -65,8 +65,9 @@ export function AddClientModal({ onClose }: { onClose: () => void }) {
       const res = await sendJson<{ id: string }>('/api/patients', 'POST', payload)
       if (res.ok) {
         onClose()
-        // Navigate straight to the new patient's page so the front desk sees it.
-        router.push(`/patients/${res.data.id}`)
+        // Navigate straight to the new patient's page so the front desk sees
+        // it; ?registered=1 shows the registration-slip / check-in banner (Wave C).
+        router.push(`/patients/${encodeURIComponent(res.data.id)}?registered=1`)
         return
       }
       if (res.status === 400) {

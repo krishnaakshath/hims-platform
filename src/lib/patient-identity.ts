@@ -78,11 +78,12 @@ export interface AadhaarSummary {
   status: AadhaarStatus
   last4: string | null
   declineReason: string | null
-  consentRecordedAt: Date | null
+  // A Date from the DB, or its ISO string when it came through the JSON cache.
+  consentRecordedAt: Date | string | null
   recordedByName: string | null
 }
 
-type AadhaarSummarySource = Pick<typeof patientAadhaar.$inferSelect, 'aadhaarLast4' | 'declineReason' | 'consentRecordedAt' | 'recordedByName'>
+type AadhaarSummarySource = Pick<typeof patientAadhaar.$inferSelect, 'aadhaarLast4' | 'declineReason' | 'recordedByName'> & { consentRecordedAt: Date | string | null }
 
 // The parameter type excludes aadhaarEncrypted; fields are copied explicitly
 // so even a whole row passed at runtime cannot carry the ciphertext through.

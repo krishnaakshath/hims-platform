@@ -1,5 +1,6 @@
 'use client'
 import { sendJson } from '@/lib/client-fetch'
+import { formatIstDateTime } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -108,7 +109,7 @@ export function BedBoard({ rooms, canManageFacilities, canBlock, canAdmit }: { r
                     Attending: {selected.attendingProviderName ?? 'Unassigned'}
                   </p>
                   {selected.admittedAt && (
-                    <p className="mt-0.5 text-xs text-muted-foreground">Admitted {new Date(selected.admittedAt).toLocaleString()}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Admitted {formatIstDateTime(selected.admittedAt)}</p>
                   )}
                   {selected.occupantPatientId && (
                     <a href={`/patients/${selected.occupantPatientId}`} className="mt-1.5 inline-block text-xs font-medium text-primary hover:underline">View patient →</a>

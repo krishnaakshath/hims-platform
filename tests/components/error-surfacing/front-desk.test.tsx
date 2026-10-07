@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { CLIENT_ERROR_MESSAGES, fillAll, mockFetch } from './helpers'
+import { CLIENT_ERROR_MESSAGES, fillAll, mockFetch, pickPatient } from './helpers'
 import type { DoctorAssignmentRow } from '@/lib/queries/doctor-assignments'
 import type { BookingRequestRow } from '@/lib/queries/booking-requests'
 
@@ -29,12 +29,12 @@ const LEAK = 'ECONNRESET at pg pool'
 const assignment = { id: 42, patientId: 'RD-0001', providerId: 1, visitType: 'outpatient', urgency: 'routine', reason: 'r', status: 'pending' } as unknown as DoctorAssignmentRow
 const request = { id: 5, requesterName: 'Morgan', reason: 'Checkup', preferredProviderId: null, preferredDateRangeStart: '2026-11-01', preferredDateRangeEnd: '2026-11-10' } as unknown as BookingRequestRow
 
-type Case = { name: string; ui: () => ReactElement; before?: () => void; submit: RegExp }
+type Case = { name: string; ui: () => ReactElement; before?: () => void | Promise<void>; submit: RegExp }
 const CASES: Case[] = [
   { name: 'AssignmentScheduleModal', ui: () => <AssignmentScheduleModalTrigger assignment={assignment} />, before: () => fireEvent.click(screen.getByText('Review')), submit: /^Schedule$/ },
-  { name: 'ConfirmBookingRequestModal', ui: () => <ConfirmBookingRequestModal request={request} providers={[{ id: 1, name: 'Dr' }]} onClose={vi.fn()} />, submit: /^Confirm$/ },
+  { name: 'ConfirmBookingRequestModal', ui: () => <ConfirmBookingRequestModal request={request} providers={[{ id: 1, name: 'Dr' }]} onClose={vi.fn()} />, before: pickPatient, submit: /^Confirm$/ },
   { name: 'DeclineBookingRequestModal', ui: () => <DeclineBookingRequestModal request={request} onClose={vi.fn()} />, submit: /^Decline$/ },
-  { name: 'NewEventModal', ui: () => <NewEventModal patients={[{ id: 'RD-0001', name: 'P' }]} providers={[{ id: 1, name: 'Dr' }]} defaultDate="2026-10-08" onClose={vi.fn()} />, submit: /^Save$/ },
+  { name: 'NewEventModal', ui: () => <NewEventModal providers={[{ id: 1, name: 'Dr' }]} defaultDate="2026-10-08" initialPatient={{ id: 'RD-0001', name: 'P', uhid: null }} onClose={vi.fn()} />, submit: /^Save$/ },
   { name: 'ConfirmEligibilityButton', ui: () => <ConfirmEligibilityButton anonId="RD-0001" />, submit: /confirm/i },
   { name: 'StartTelemedicineButton', ui: () => <StartTelemedicineButton appointmentId={3} />, submit: /start|telemedicine|video/i },
   { name: 'PatientPortalAccessPanel', ui: () => <PatientPortalAccessPanel anonId="RD-0001" initialConfigured={false} mfaEnabled={false} isAdmin />, submit: /Enable portal access/ },
@@ -46,7 +46,7 @@ describe.each(CASES)('$name', (c) => {
   it('shows a 500 in an alert with the fixed message (no server text) and stays usable', async () => {
     mockFetch(500, { error: LEAK })
     render(c.ui())
-    c.before?.()
+    await c.before?.()
     await fillAll()
     const button = screen.getAllByRole('button', { name: c.submit }).at(-1)!
     expect(button).toBeEnabled()
@@ -63,12 +63,14 @@ describe('EligibilityCheckModal', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) =>
       init?.method === 'POST'
         ? new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 })
+        : url.startsWith('/api/patients/lookup')
+          ? new Response(JSON.stringify({ results: [{ id: 'RD-0001', name: 'Asha Rao', uhid: 'UH1', gender: 'female', ageYears: 34 }], page: 1, pageSize: 10, hasMore: false }), { status: 200 })
         : url.startsWith('/api/payers')
           ? new Response(JSON.stringify([{ id: 1, name: 'Star Health' }]), { status: 200 })
           : new Response('null', { status: 200 })))
     render(<EligibilityCheckModal onClose={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('Patient ID'), { target: { value: 'RD-0001' } })
     await screen.findByRole('option', { name: 'Star Health' })
+    await pickPatient()
     fireEvent.change(screen.getByLabelText('Payer'), { target: { value: '1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Verify' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.forbidden)
@@ -113,24 +115,17 @@ describe('InsuranceCardUpload', () => {
 })
 
 describe('PharmacyPatientLookup', () => {
+  const roster = [{ id: 'RD-0001', name: 'Asha Rao', uhid: null, activeMedicationCount: 1 }] as never
   it('shows a failed lookup in an alert', async () => {
     mockFetch(500, { error: LEAK })
-    render(<PharmacyPatientLookup medications={[]} roster={[]} />)
-    const input = screen.getAllByRole('textbox')[0]
-    fireEvent.change(input, { target: { value: 'RD-0001' } })
-    fireEvent.submit(input.closest('form') ?? input)
-    const button = screen.queryByRole('button', { name: /look ?up|search|find/i })
-    if (button && !input.closest('form')) fireEvent.click(button)
+    render(<PharmacyPatientLookup medications={[]} roster={roster} />)
+    fireEvent.click(screen.getByRole('button', { name: /Asha Rao/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
   })
   it('says "No patient with that ID" for a plain 404', async () => {
     mockFetch(404, {})
-    render(<PharmacyPatientLookup medications={[]} roster={[]} />)
-    const input = screen.getAllByRole('textbox')[0]
-    fireEvent.change(input, { target: { value: 'RD-9999' } })
-    fireEvent.submit(input.closest('form') ?? input)
-    const button = screen.queryByRole('button', { name: /look ?up|search|find/i })
-    if (button && !input.closest('form')) fireEvent.click(button)
+    render(<PharmacyPatientLookup medications={[]} roster={roster} />)
+    fireEvent.click(screen.getByRole('button', { name: /Asha Rao/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('No patient with that ID')
   })
 })

@@ -78,7 +78,8 @@ describe('AddClientModal', () => {
       fireEvent.change(screen.getByLabelText('Aadhaar number'), { target: { value: VALID_AADHAAR } })
       fireEvent.click(screen.getByLabelText('Patient consents to recording their Aadhaar number'))
       fireEvent.click(screen.getByText('Save'))
-      await waitFor(() => expect(push).toHaveBeenCalledWith('/patients/7'))
+      // Wave C: lands on the patient page with the registration-slip banner.
+      await waitFor(() => expect(push).toHaveBeenCalledWith('/patients/7?registered=1'))
       const [url, init] = patientCalls()[0]
       expect(url).toBe('/api/patients')
       const body = JSON.parse(init.body)

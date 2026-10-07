@@ -1,0 +1,4 @@
+code,display,parent_code,selectable,active,effective_from,effective_to,sex,age_min_years,age_max_years,excludes
+ZZ00000,SAMPLE fictional procedure 0 - not a real code,,yes,yes,,,,,,
+ZZ00001,SAMPLE fictional procedure 1 - not a real code,,yes,yes,,,,,,
+ZZ00002,SAMPLE fictional procedure 2 - not a real code,,yes,yes,,,,,,

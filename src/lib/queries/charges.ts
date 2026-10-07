@@ -2,7 +2,6 @@ import { getDb } from '@/db/client'
 import { charges, patients } from '@/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, chargesListCacheKey, chargeDetailCacheKey } from '@/lib/cache'
-import { isoDates } from '@/lib/cache-shape'
 
 // Re-exported for existing importers -- the actual definitions live in the
 // DB-free src/lib/charge-status.ts so client components (ChargesTable) can
@@ -25,7 +24,7 @@ export interface CreateChargeInput {
 }
 
 export async function listCharges() {
-  return getOrSetCache(chargesListCacheKey(), 30, isoDates(async () => {
+  return getOrSetCache(chargesListCacheKey(), 30, async () => {
     const rows = await getDb()
       .select({ charge: charges, patient: publicPatientColumns })
       .from(charges)
@@ -37,11 +36,11 @@ export async function listCharges() {
       // changed the wrong row. desc(id) breaks ties deterministically.
       .orderBy(desc(charges.dateOfService), desc(charges.id))
     return rows.map((r) => ({ ...r.charge, patientName: r.patient.name }))
-  }))
+  })
 }
 
 export async function getCharge(id: number) {
-  return getOrSetCache(chargeDetailCacheKey(id), 30, isoDates(async () => {
+  return getOrSetCache(chargeDetailCacheKey(id), 30, async () => {
     const [row] = await getDb()
       .select({ charge: charges, patient: publicPatientColumns })
       .from(charges)
@@ -53,7 +52,7 @@ export async function getCharge(id: number) {
       patientName: row.patient.name,
       patientDob: row.patient.dob,
     }
-  }))
+  })
 }
 
 export async function createCharge(input: CreateChargeInput) {

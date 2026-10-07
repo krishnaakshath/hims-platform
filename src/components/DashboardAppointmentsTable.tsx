@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDate, formatIstTime } from '@/lib/india-time'
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { PatientAvatar } from '@/components/PatientAvatar'
@@ -101,8 +102,8 @@ export function DashboardAppointmentsTable({ appointments, canStartTelemedicine 
                     </td>
                     <td className="py-2.5 pr-3"><ReasonPill reason={a.visitReason} /></td>
                     <td className="py-2.5 pr-3"><AppointmentStatusChip status={a.status} /></td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{startsAt.toLocaleDateString([], { dateStyle: 'medium' })}</td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{startsAt.toLocaleTimeString([], { timeStyle: 'short' })}</td>
+                    <td className="py-2.5 pr-3 text-muted-foreground">{formatIstDate(startsAt)}</td>
+                    <td className="py-2.5 pr-3 text-muted-foreground">{formatIstTime(startsAt)}</td>
                     <td className="py-2.5 pr-3 text-muted-foreground">{a.providerName}</td>
                     {canStartTelemedicine && (
                       <td className="py-2.5 pr-3">

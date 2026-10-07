@@ -1,3 +1,4 @@
+import { formatIstDateTime } from '@/lib/india-time'
 import { redirect } from 'next/navigation'
 import { ShieldCheck } from 'lucide-react'
 import { requireSessionOrRedirect } from '@/lib/auth'
@@ -52,7 +53,7 @@ export default async function AuditLogPage() {
               <tbody>
                 {entries.map((e, i) => (
                   <tr key={e.id} className={`border-b border-border last:border-b-0 ${i % 2 === 1 ? 'bg-muted/40' : ''} transition-colors hover:bg-secondary`}>
-                    <td className="whitespace-nowrap p-3 text-muted-foreground">{new Date(e.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</td>
+                    <td className="whitespace-nowrap p-3 text-muted-foreground">{formatIstDateTime(e.timestamp)}</td>
                     <td className="p-3 font-medium text-foreground">{e.userName}</td>
                     <td className="p-3 text-foreground">{e.role ? (ROLE_LABEL[e.role] ?? e.role) : '—'}</td>
                     <td className="p-3 text-foreground">{e.action}</td>

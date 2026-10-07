@@ -7,10 +7,12 @@ import {
   adverseEvents, drugAccountabilityEntries, signatures,
   // SP3
   encounters, followUpOrders,
+  // SP6
+  codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures,
 } from '@/db/schema'
-import { desc, eq, inArray, or, sql } from 'drizzle-orm'
-import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey } from '@/lib/cache'
-import { isoDates, type DatesToIso } from '@/lib/cache-shape'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
+import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
@@ -33,8 +35,7 @@ export interface CriteriaSummary {
 // `mfaEnabled` (a non-sensitive flag the staff UI shows) stays, and
 // `portalConfigured` is computed in SQL.
 
-// Dates are ISO strings: this list is cached (getOrSetCache + datesToIso).
-export type PatientWithStatus = DatesToIso<PublicPatientRow> & { trialId?: string; overallStatus?: Verdict; criteriaSummary?: CriteriaSummary }
+export type PatientWithStatus = PublicPatientRow & { trialId?: string; overallStatus?: Verdict; criteriaSummary?: CriteriaSummary }
 
 /**
  * Shared by the /api/patients route handler and any Server Component that
@@ -74,8 +75,8 @@ export async function listPatientNameOptions(): Promise<PatientNameOption[]> {
     .orderBy(sql`patients.name`)
 }
 
-export async function listPatientsWithStatus(trialId: string | null): Promise<PatientWithStatus[]> {
-  return getOrSetCache(patientListCacheKey(trialId), 30, isoDates(async () => {
+export async function listPatientsWithStatus(trialId: string | null): Promise<Jsonified<PatientWithStatus>[]> {
+  return getOrSetCache(patientListCacheKey(trialId), 30, async () => {
     const rows = await getDb()
       .select({ patient: publicPatientColumns, screening: patientTrialScreenings })
       .from(patients)
@@ -117,7 +118,7 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Pa
       overallStatus: r.screening?.overallStatus,
       criteriaSummary: summaryByPatient.get(r.patient.id),
     }))
-  }))
+  })
 }
 
 /**
@@ -127,14 +128,14 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Pa
  * the app's own API route.
  */
 export async function getPatientDetail(anonId: string) {
-  return getOrSetCache(patientDetailCacheKey(anonId), 30, isoDates(async () => {
+  return getOrSetCache(patientDetailCacheKey(anonId), 30, async () => {
     const [row] = await getDb().select({ patient: publicPatientColumns, portalConfigured: patientPortalConfiguredSql }).from(patients).where(eq(patients.id, anonId))
     if (!row) return null
     const { patient, portalConfigured } = row
 
     const [screening] = await getDb().select().from(patientTrialScreenings).where(eq(patientTrialScreenings.patientId, anonId))
     const criteria = screening ? await getDb().select().from(screeningCriteriaResults).where(eq(screeningCriteriaResults.screeningId, screening.id)) : []
-    const dx = await getDb().select().from(diagnoses).where(eq(diagnoses.patientId, anonId))
+    const dx = await getDb().select().from(diagnoses).where(and(eq(diagnoses.patientId, anonId), liveDiagnosis)) // SP6: voided rows hidden
     const meds = await getDb().select().from(medicationEpisodes).where(eq(medicationEpisodes.patientId, anonId))
     const patientAllergies = await getDb().select().from(allergies).where(eq(allergies.patientId, anonId))
     // Project down to only what callers need. The full row includes
@@ -187,7 +188,7 @@ export async function getPatientDetail(anonId: string) {
       contacts,
       aadhaar,
     }
-  }))
+  })
 }
 
 export interface PharmacyEpisode {
@@ -203,6 +204,8 @@ export interface PharmacyEpisode {
 export interface PharmacyPatientView {
   id: string
   name: string
+  // Wave C: the counter identifies a patient by UHID, not the chart id.
+  uhid: string | null
   dob: string
   currentProvider: string | null
   diagnoses: { id: number; code: string; description: string }[]
@@ -279,17 +282,21 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
     .select({
       id: patients.id,
       name: sql<string>`patients.name`,
+      uhid: patients.uhid,
       dob: sql<string>`patients.dob::text`,
       currentProvider: patients.currentProvider,
     })
     .from(patients)
-    .where(sql`lower(trim(${patients.id})) = lower(trim(${trimmed}))`)
+    // Wave C: chart id or UHID, both case-insensitive; a chart-id match wins.
+    .where(sql`lower(trim(${patients.id})) = lower(trim(${trimmed})) or lower(${patients.uhid}) = lower(${trimmed})`)
+    .orderBy(sql`(lower(trim(${patients.id})) = lower(trim(${trimmed}))) desc`)
+    .limit(1)
   if (!patientRow) return null
 
   const dx = await db
     .select({ id: diagnoses.id, code: diagnoses.code, description: diagnoses.description })
     .from(diagnoses)
-    .where(eq(diagnoses.patientId, patientRow.id))
+    .where(and(eq(diagnoses.patientId, patientRow.id), liveDiagnosis, withCodeValue)) // SP6: live rows with a billable code value
 
   const episodeRows = await db
     .select({
@@ -343,6 +350,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
   return {
     id: patientRow.id,
     name: patientRow.name,
+    uhid: patientRow.uhid ?? null,
     dob: patientRow.dob,
     currentProvider: patientRow.currentProvider,
     diagnoses: dx,
@@ -524,6 +532,18 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // doctor assignment, encounter, lab order) is ON DELETE SET NULL, so these two only need
   // to go before the patient row; orders go first so their encounter links are not churned.
   await db.delete(followUpOrders).where(eq(followUpOrders.patientId, anonId))
+  // SP6: the coding tables reference encounters (and most of them patients) with no ON DELETE
+  // action, so they go before the encounters delete. Query responses cascade with their query;
+  // the events table has no patient_id, so it is cleared by this patient's encounter ids. The
+  // patient's diagnoses (including encounter-linked ones) were already deleted above.
+  const patientEncounterIds = (await db.select({ id: encounters.id }).from(encounters).where(eq(encounters.patientId, anonId))).map((e) => e.id)
+  await db.delete(codingQueries).where(eq(codingQueries.patientId, anonId))
+  if (patientEncounterIds.length > 0) {
+    await db.delete(encounterCodingEvents).where(inArray(encounterCodingEvents.encounterId, patientEncounterIds))
+  }
+  await db.delete(encounterCoding).where(eq(encounterCoding.patientId, anonId))
+  await db.delete(encounterProcedures).where(eq(encounterProcedures.patientId, anonId))
+  // end SP6
   await db.delete(encounters).where(eq(encounters.patientId, anonId))
   await db.delete(admissions).where(eq(admissions.patientId, anonId))
   await db.delete(doctorAssignments).where(eq(doctorAssignments.patientId, anonId))

@@ -1,15 +1,13 @@
-// Wave H P2-03: every getOrSetCache loader returns a value that survives the
-// Redis JSON round-trip unchanged, i.e. a cache HIT has exactly the shape of
-// a cache MISS (no Date that comes back as a string and crashes a later
-// `.getTime()` / `.toISOString()`). Runs each loader against the live DB with
-// the cache bypassed and compares the value with its JSON round-trip.
-import { describe, it, expect, vi } from 'vitest'
+// P2-03 regression: every getOrSetCache loader returns a value that survives
+// the Redis JSON round-trip unchanged, i.e. a cache HIT has exactly the shape
+// of a cache MISS (no Date that comes back as a string and crashes a later
+// `.getTime()`). getOrSetCache normalises centrally (src/lib/cache.ts); this
+// runs every loader against the live DB with Redis switched off.
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { desc } from 'drizzle-orm'
 
-vi.mock('@/lib/cache', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/cache')>()),
-  getOrSetCache: async (_k: string, _t: number, loader: () => Promise<unknown>) => loader(),
-}))
+beforeAll(() => { vi.stubEnv('KV_REST_API_URL', ''); vi.stubEnv('KV_REST_API_TOKEN', '') })
+afterAll(() => { vi.unstubAllEnvs() })
 
 import { getDb } from '@/db/client'
 import { charges, patients } from '@/db/schema'

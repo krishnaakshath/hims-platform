@@ -5,25 +5,26 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { VISIT_REASON_MAX_LENGTH } from '@/lib/notification-templates'
-
-interface PatientOption {
-  id: string
-  name: string
-}
+import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
+import { istSlotString } from '@/lib/india-time'
 
 interface ProviderOption {
   id: number
   name: string
 }
 
-export function NewEventModal({ patients, providers, defaultDate, onClose }: {
-  patients: PatientOption[]
+// Wave C P0-04: the patient comes from the PatientPicker (name, UHID,
+// mobile) or is preselected (calendar ?book=<chart id>) -- the page no longer
+// ships the whole patient list to the client.
+export function NewEventModal({ providers, defaultDate, onClose, initialPatient = null }: {
   providers: ProviderOption[]
   defaultDate: string
   onClose: () => void
+  initialPatient?: PickedPatient | null
 }) {
   const router = useRouter()
-  const [patientId, setPatientId] = useState('')
+  const [patient, setPatient] = useState<PickedPatient | null>(initialPatient)
+  const patientId = patient?.id ?? ''
   const [providerId, setProviderId] = useState<number | ''>('')
   const [date, setDate] = useState(defaultDate)
   const [startTime, setStartTime] = useState('09:00')
@@ -39,8 +40,9 @@ export function NewEventModal({ patients, providers, defaultDate, onClose }: {
       const res = await sendJson('/api/appointments', 'POST', {
         patientId,
         providerId,
-        startsAt: `${date}T${startTime}:00`,
-        endsAt: `${date}T${endTime}:00`,
+        // IST wall-clock time with an explicit offset; the server rejects naive times.
+        startsAt: istSlotString(date, startTime),
+        endsAt: istSlotString(date, endTime),
         visitReason,
       })
       if (res.ok) {
@@ -65,18 +67,15 @@ export function NewEventModal({ patients, providers, defaultDate, onClose }: {
           <DialogTitle>New Event</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <select value={patientId} onChange={(e) => setPatientId(e.target.value)} className="w-full rounded-md border border-border px-3 py-2 text-sm">
-            <option value="">Select a patient…</option>
-            {patients.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
-          </select>
-          <select value={providerId} onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))} className="w-full rounded-md border border-border px-3 py-2 text-sm">
-            <option value="">Select a provider…</option>
+          <PatientPicker value={patient} onChange={setPatient} />
+          <select value={providerId} onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))} aria-label="Doctor" className="w-full rounded-md border border-border px-3 py-2 text-sm">
+            <option value="">Select a doctor…</option>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <input value={date} onChange={(e) => setDate(e.target.value)} type="date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+          <input value={date} onChange={(e) => setDate(e.target.value)} type="date" aria-label="Appointment date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
           <div className="flex gap-2">
-            <input value={startTime} onChange={(e) => setStartTime(e.target.value)} type="time" className="w-1/2 rounded-md border border-border px-3 py-2 text-sm" />
-            <input value={endTime} onChange={(e) => setEndTime(e.target.value)} type="time" className="w-1/2 rounded-md border border-border px-3 py-2 text-sm" />
+            <input value={startTime} onChange={(e) => setStartTime(e.target.value)} type="time" aria-label="Start time (IST)" className="w-1/2 rounded-md border border-border px-3 py-2 text-sm" />
+            <input value={endTime} onChange={(e) => setEndTime(e.target.value)} type="time" aria-label="End time (IST)" className="w-1/2 rounded-md border border-border px-3 py-2 text-sm" />
           </div>
           <input value={visitReason} onChange={(e) => setVisitReason(e.target.value)} placeholder="Visit reason" maxLength={VISIT_REASON_MAX_LENGTH} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

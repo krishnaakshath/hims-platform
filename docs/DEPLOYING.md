@@ -87,6 +87,21 @@ Do not rely on `db:push` to manage the SP2 exclusion constraint
 in the migrations. Do not re-run `db:push` against a database that already has
 it, because `db:push` would offer to drop it.
 
+Clinical coding (SP6) adds two migrations,
+`2026-10-07-sp6-a-coder-role.sql` (the `coder` role value) and
+`2026-10-07-sp6-b-clinical-coding.sql` (code systems, coded diagnoses and
+procedures, the coding workflow tables). Apply them like the others, in name
+order. The `pg_trgm` extension and the `codes_display_trgm_idx` index (fast
+code-display search) are **migration-only**, like the tariff exclusion above:
+`db:push` cannot create them and would offer to drop the index, so never
+re-run `db:push` once the SP6 migrations are applied. Search still works
+without the index, only more slowly.
+
+No code sets ship with the app. After the migrations, the owner loads the
+licensed code sets (ICD-10, ICD-10-PCS, SNOMED CT, LOINC, PM-JAY HBP) with
+`npm run codes:import`; see [docs/CODE-SYSTEMS.md](CODE-SYSTEMS.md). Until a
+set is loaded, coders cannot assign codes of that kind.
+
 To avoid a local `.env.local`, you can pass the variable inline instead:
 `DATABASE_URL=... npx drizzle-kit push`.
 

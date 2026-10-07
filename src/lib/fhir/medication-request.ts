@@ -1,3 +1,4 @@
+import { istDateOf } from '@/lib/india-time'
 import type { medicationEpisodes } from '@/db/schema'
 import type { FhirReference } from './types'
 
@@ -43,7 +44,7 @@ export function medicationEpisodeToFhir(episode: typeof medicationEpisodes.$infe
     // `prescribedAt` and fall back to `startDate`, unchanged from before.
     // No `requester` reference: this export has no FHIR `Practitioner`
     // resource for a prescriber to point at.
-    authoredOn: episode.prescribedAt ? episode.prescribedAt.toISOString().slice(0, 10) : episode.startDate,
+    authoredOn: episode.prescribedAt ? istDateOf(episode.prescribedAt) : episode.startDate,
   }
 }
 

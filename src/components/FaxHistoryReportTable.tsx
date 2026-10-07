@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDateTime } from '@/lib/india-time'
 import { ReportTable, type ReportColumn } from '@/components/ReportTable'
 import type { DataGridFilterField } from '@/components/DataGridToolbar'
 
@@ -27,7 +28,7 @@ const FILTER_FIELDS: DataGridFilterField[] = [
 ]
 
 const COLUMNS: ReportColumn<FaxReportRow>[] = [
-  { key: 'faxDate', label: 'Date', render: (f) => new Date(f.faxDate).toLocaleString() },
+  { key: 'faxDate', label: 'Date', render: (f) => formatIstDateTime(f.faxDate) },
   { key: 'subject', label: 'Message Subject', render: (f) => f.subject },
   { key: 'documentsIncluded', label: 'Document(s) Included', render: (f) => f.documentsIncluded },
   {

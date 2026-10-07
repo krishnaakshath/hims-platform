@@ -3,6 +3,7 @@ import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { formatPaise, parseRupeesToPaise } from '@/lib/format'
 
 interface DiagnosisOption { id: number; code: string; description: string }
 // Only the fields this modal actually needs -- kept as its own narrow shape
@@ -35,8 +36,8 @@ export function LogDispenseBillModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const parsedUnitCharge = Number(unitCharge)
-  const unitChargeCents = unitCharge !== '' && Number.isFinite(parsedUnitCharge) ? Math.round(parsedUnitCharge * 100) : 0
+  // Rupees as typed -> integer paise (the API's unitChargeCents field holds paise).
+  const unitChargeCents = parseRupeesToPaise(unitCharge) ?? 0
   const totalCents = dispense.quantity * unitChargeCents
 
   async function submit() {
@@ -98,17 +99,15 @@ export function LogDispenseBillModal({
             className="w-full rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
           />
           <input
-            type="number"
-            min={0}
-            step="0.01"
+            inputMode="decimal"
             value={unitCharge}
             onChange={(e) => setUnitCharge(e.target.value)}
-            placeholder="Unit charge ($)"
-            aria-label="Unit charge in dollars"
+            placeholder="Unit charge (₹)"
+            aria-label="Unit charge in rupees"
             disabled={noDiagnoses}
             className="w-full rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
           />
-          <p className="text-sm text-muted-foreground">Total (server-computed): ${(totalCents / 100).toFixed(2)}</p>
+          <p className="text-sm text-muted-foreground">Total (server-computed): {formatPaise(totalCents)}</p>
 
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>

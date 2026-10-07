@@ -10,7 +10,8 @@
     "test": "dotenv -e .env.local -- vitest run",
     "db:generate": "dotenv -e .env.local -- drizzle-kit generate",
     "db:push": "dotenv -e .env.local -- drizzle-kit push",
-    "db:seed": "dotenv -e .env.local -- tsx src/db/seed.ts"
+    "db:seed": "dotenv -e .env.local -- tsx src/db/seed.ts",
+    "codes:import": "dotenv -e .env.local -- tsx scripts/import-code-system.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -30,6 +31,7 @@
     "nodemailer": "^10.0.10",
     "ogl": "^1.0.11",
     "otpauth": "^9.5.2",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.23.0",
     "qrcode": "^1.5.4",
     "react": "19.2.8",

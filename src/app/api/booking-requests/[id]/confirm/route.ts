@@ -8,12 +8,13 @@ import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getBookingRequestById, confirmBookingRequest } from '@/lib/queries/booking-requests'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
+import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
 
 const confirmBookingRequestSchema = z.object({
   patientId: z.string().min(1),
   providerId: z.number().int().positive(),
-  startsAt: z.string().min(1),
-  endsAt: z.string().min(1),
+  startsAt: appointmentInstantSchema,
+  endsAt: appointmentInstantSchema,
   visitReason: visitReasonSchema,
 }).strict()
 
@@ -31,6 +32,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const body: unknown = json.body
 
   const parsed = confirmBookingRequestSchema.safeParse(body)
+  if (!parsed.success && isTimeFieldError(parsed.error)) return invalidAppointmentTime()
   if (!parsed.success) return NextResponse.json({ error: 'Invalid confirm payload', details: parsed.error.flatten() }, { status: 400 })
 
   const startsAt = new Date(parsed.data.startsAt)

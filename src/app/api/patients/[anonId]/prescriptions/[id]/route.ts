@@ -1,3 +1,4 @@
+import { todayIsoIn } from '@/lib/india-time'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { parseId, readJsonBody } from '@/lib/http'
@@ -32,7 +33,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const episodeId = parseId(id)
   if (episodeId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const stopDate = parsed.data.stopDate ?? new Date().toISOString().slice(0, 10)
+  const stopDate = parsed.data.stopDate ?? todayIsoIn()
 
   const result = await stopPrescription(anonId, episodeId, stopDate)
   if (!result.ok) {

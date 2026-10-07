@@ -1,5 +1,4 @@
 import { Redis } from '@upstash/redis'
-import type { HasDate } from '@/lib/cache-shape'
 
 // Vercel's Upstash Redis integration provisions KV_REST_API_URL / KV_REST_API_TOKEN
 // (not UPSTASH_REDIS_REST_URL/TOKEN, which is what Redis.fromEnv() looks for) —
@@ -39,6 +38,19 @@ function errKind(e: unknown): string {
   return e instanceof Error ? e.name : 'UnknownError'
 }
 
+/** The shape a value has after a JSON round-trip: Dates become ISO strings. */
+export type Jsonified<T> = T extends Date
+  ? string
+  : T extends (infer U)[]
+    ? Jsonified<U>[]
+    : T extends object
+      ? { [K in keyof T]: Jsonified<T[K]> }
+      : T
+
+function toJson<T>(value: T): Jsonified<T> {
+  return (value === undefined ? value : JSON.parse(JSON.stringify(value))) as Jsonified<T>
+}
+
 /**
  * Read-through cache: returns the cached value if present, otherwise
  * calls `loader`, caches its result for `ttlSeconds`, and returns it.
@@ -49,26 +61,19 @@ function errKind(e: unknown): string {
  * hits the database), and a failed write-back is logged and ignored. Loader
  * errors still propagate.
  */
-export async function getOrSetCache<T>(
-  key: string,
-  ttlSeconds: number,
-  loader: () => Promise<T>,
-  // Compile-time guard (Wave H P2-03): a cached value round-trips through
-  // JSON, so a Date in it comes back from a cache HIT as a string while a
-  // MISS returns a real Date -- a latent `.getTime()` crash. Loaders must
-  // normalise with datesToIso(); a value type containing Date makes this
-  // call fail to type-check.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- type-level guard only
-  ..._noDates: true extends HasDate<T> ? [cachedValueMustNotContainDate: never] : []
-): Promise<T> {
-  if (!isCacheConfigured()) return loader()
+export async function getOrSetCache<T>(key: string, ttlSeconds: number, loader: () => Promise<T>): Promise<Jsonified<T>> {
+  // A cache hit is the JSON round-trip of the loader's value (Dates come back
+  // as ISO strings). Every path -- no cache, miss, hit -- returns that same
+  // JSON shape, so a consumer can never call a Date method on a value that is
+  // a Date only on a cold cache (Wave A, P2-03). The return type says so.
+  if (!isCacheConfigured()) return toJson(await loader())
   try {
-    const cached = await getRedis().get<T>(key)
+    const cached = await getRedis().get<Jsonified<T>>(key)
     if (cached !== null && cached !== undefined) return cached
   } catch (e) {
     console.warn(`[cache] read failed for "${key}" (${errKind(e)}); falling back to the database`)
   }
-  const fresh = await loader()
+  const fresh = toJson(await loader())
   try {
     await getRedis().set(key, fresh, { ex: ttlSeconds })
   } catch (e) {

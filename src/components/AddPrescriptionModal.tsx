@@ -1,5 +1,6 @@
 'use client'
 import { sendJson } from '@/lib/client-fetch'
+import { todayIsoIn } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sparkles } from 'lucide-react'
@@ -9,7 +10,7 @@ import type { MedicationWithInventory } from '@/lib/queries/medications'
 import { suggestMedicationsForDiagnoses } from '@/lib/medication-suggestions'
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10)
+  return todayIsoIn()
 }
 
 // `catalog` comes from listMedicationsWithInventory(), which inner-joins

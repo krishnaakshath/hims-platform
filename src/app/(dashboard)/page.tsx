@@ -27,6 +27,10 @@ export default async function DashboardHomePage() {
   if (session.role === 'billing') redirect('/billing')
   // Labs has its own dedicated route (the worklist doubles as its home dashboard).
   if (session.role === 'labs') redirect('/labs')
+  // SP6: the coder's home is the coding worklist; never the coordinator dashboard
+  // (patient names and appointments are outside the coder's minimum PHI).
+  if (session.role === 'coder') redirect('/coding')
+  // end SP6
   // Called and awaited directly (not `<FrontDeskDashboard session={session} />`) so this
   // page resolves to a plain, already-rendered element tree instead of an unresolved async
   // component nested inside another one's return value -- React's client renderer (used by
@@ -50,7 +54,7 @@ export default async function DashboardHomePage() {
   ])
   await logAudit(session, 'viewed home dashboard', null)
 
-  const staffByRole = ['admin', 'pi', 'crc', 'frontdesk', 'pharmacy', 'billing', 'labs'].map((role) => ({
+  const staffByRole = ['admin', 'pi', 'crc', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder' /* SP6 */].map((role) => ({
     role,
     count: allStaff.filter((u) => u.role === role).length,
   }))

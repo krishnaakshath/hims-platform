@@ -77,7 +77,7 @@ export function VirtualCardPaymentForm({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Payment Amount</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Payment Amount (₹)</label>
             <input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-md border border-border px-2 py-1.5 text-sm" />
           </div>
 

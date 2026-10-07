@@ -1,4 +1,5 @@
 'use client'
+import { formatIstTime } from '@/lib/india-time'
 import { useState, useEffect } from 'react'
 import { Bell } from 'lucide-react'
 import type { Role } from '@/lib/auth'
@@ -44,7 +45,7 @@ export function NotificationPanel({ role, triggerClassName = 'text-muted-foregro
               {events.map((e) => (
                 <li key={e.id} className="text-sm">
                   <span className="text-foreground">{e.action}</span>
-                  <span className="ml-1 text-xs text-muted-foreground">{new Date(e.timestamp).toLocaleTimeString()}</span>
+                  <span className="ml-1 text-xs text-muted-foreground">{formatIstTime(e.timestamp)}</span>
                 </li>
               ))}
             </ul>

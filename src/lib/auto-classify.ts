@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
 import { patients, patientTrialScreenings, diagnoses, medicationEpisodes } from '@/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
+import { liveDiagnosis } from '@/lib/queries/diagnoses' // SP6
 import { regenerateScreeningCriteria } from '@/lib/queries/eligibility'
 import { getAppSettings } from '@/lib/queries/settings'
 import { invalidateCache, patientDetailCacheKey, patientListCacheKey } from '@/lib/cache'
@@ -25,7 +26,7 @@ export async function maybeAutoClassify(patientId: string, session: Session): Pr
   const settings = await getAppSettings()
   if (!settings.autoClassifyOnComplete) return
 
-  const dx = await getDb().select().from(diagnoses).where(eq(diagnoses.patientId, patientId))
+  const dx = await getDb().select().from(diagnoses).where(and(eq(diagnoses.patientId, patientId), liveDiagnosis)) // SP6: voided rows hidden
   const meds = await getDb().select().from(medicationEpisodes).where(eq(medicationEpisodes.patientId, patientId))
   if (dx.length === 0 && meds.length === 0) return  // no chart data yet — nothing to classify against
 

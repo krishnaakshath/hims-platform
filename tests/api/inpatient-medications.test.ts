@@ -5,7 +5,7 @@ import { POST as administerRoute } from '@/app/api/inpatient/admissions/[id]/med
 import { getDb } from '@/db/client'
 import { patients, providers, rooms, admissions, medicationAdministrations, medicationEpisodes } from '@/db/schema'
 
-let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' = 'admin'
+let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' = 'admin'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Test Admin' })) }))
 
 const createdMarIds: number[] = []
@@ -45,7 +45,7 @@ describe('GET /api/inpatient/admissions/[id]/medications', () => {
 
   it('403s frontdesk, pharmacy, billing and labs', async () => {
     const admission = await makeAdmission()
-    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs'] as const) {
+    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] as const) {
       sessionRole = role
       const res = await listRoute(new Request('http://localhost') as never, { params: Promise.resolve({ id: String(admission.id) }) })
       expect(res.status, `role ${role}`).toBe(403)
@@ -63,6 +63,16 @@ describe('POST /api/inpatient/admissions/[id]/medications', () => {
     const body = await res.json()
     createdMarIds.push(body.id)
     expect(body.status).toBe('scheduled')
+  })
+
+  it('rejects a naive scheduledFor (no UTC offset) with 400 and orders nothing', async () => {
+    const admission = await makeAdmission()
+    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ medicationName: 'Sertraline', dose: '100mg', scheduledFor: '2026-11-03T09:00' }) })
+    const res = await orderRoute(req as never, { params: Promise.resolve({ id: String(admission.id) }) })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/UTC offset/)
+    const rows = await getDb().select().from(medicationAdministrations).where(eq(medicationAdministrations.admissionId, admission.id))
+    expect(rows).toHaveLength(0)
   })
 
   it('rejects a frontdesk session', async () => {

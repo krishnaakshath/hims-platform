@@ -121,6 +121,5 @@ export function followUpVisitReason(reason: string): string {
   return normalizeVisitReason(`Follow-up: ${reason}`)
 }
 
-export function istSlotString(dateIso: string, hhmm: string): string {
-  return `${dateIso}T${hhmm}:00+05:30`
-}
+// The one IST slot builder lives in the shared time module.
+export { istSlotString } from '@/lib/india-time'

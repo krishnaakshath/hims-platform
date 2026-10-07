@@ -1,7 +1,9 @@
+import { istDateOf } from '@/lib/india-time'
 import { NextRequest, NextResponse } from 'next/server'
 import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
+import { liveDiagnosis, withCodeValue } from '@/lib/queries/diagnoses' // SP6
 import { getDb } from '@/db/client'
 import { diagnoses, patients } from '@/db/schema'
 import { requireSession } from '@/lib/auth'
@@ -46,7 +48,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const patientDiagnoses = await getDb()
     .select({ id: diagnoses.id, code: diagnoses.code, description: diagnoses.description })
     .from(diagnoses)
-    .where(eq(diagnoses.patientId, dispense.patientId))
+    // SP6: live rows only, and never an uncoded SP6 row (code = '') as a charge's diagnosis code.
+    .where(and(eq(diagnoses.patientId, dispense.patientId), liveDiagnosis, withCodeValue))
   const diagnosis = patientDiagnoses.find((d) => d.id === parsed.data.diagnosisId)
   if (!diagnosis) return NextResponse.json({ error: 'diagnosisId does not belong to this patient' }, { status: 400 })
 
@@ -59,7 +62,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     dispenseId: dispense.id,
     patientId: dispense.patientId,
     providerName,
-    dateOfService: dispense.dispensedAt.toISOString().slice(0, 10),
+    dateOfService: istDateOf(dispense.dispensedAt),
     diagnosisCode: { code: diagnosis.code, description: diagnosis.description },
     procedureCode: {
       code: parsed.data.procedureCode,

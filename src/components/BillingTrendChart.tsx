@@ -1,4 +1,5 @@
 'use client'
+import { formatRupeesWhole } from '@/lib/format'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 export function BillingTrendChart({ trend }: { trend: { month: string; grossChargesCents: number; netCollectionsCents: number }[] }) {
@@ -14,9 +15,9 @@ export function BillingTrendChart({ trend }: { trend: { month: string; grossChar
         <LineChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="month" tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} />
-          <YAxis tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
+          <YAxis tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} tickFormatter={(v: number) => formatRupeesWhole(v)} />
           <Tooltip
-            formatter={(value: number) => `$${value.toLocaleString()}`}
+            formatter={(value: number) => formatRupeesWhole(value)}
             contentStyle={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)', fontSize: 12 }}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />

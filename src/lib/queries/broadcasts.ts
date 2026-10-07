@@ -2,7 +2,6 @@ import { getDb } from '@/db/client'
 import { broadcasts, patients, patientTrialScreenings, formSubmissions, trials } from '@/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { getOrSetCache, invalidateCache, broadcastsListCacheKey } from '@/lib/cache'
-import { isoDates } from '@/lib/cache-shape'
 import type { Verdict } from '@/lib/rule-engine'
 import { publicPatientColumns, type PublicPatientRow } from '@/lib/queries/patient-columns'
 
@@ -89,7 +88,7 @@ export function simulateBroadcastDelivery(channel: 'sms' | 'email' | 'both', pho
 }
 
 export async function listBroadcasts() {
-  return getOrSetCache(broadcastsListCacheKey(), 30, isoDates(async () => {
+  return getOrSetCache(broadcastsListCacheKey(), 30, async () => {
     const rows = await getDb()
       .select({ broadcast: broadcasts, trial: trials })
       .from(broadcasts)
@@ -97,7 +96,7 @@ export async function listBroadcasts() {
       .orderBy(desc(broadcasts.sentAt))
 
     return rows.map((r) => ({ ...r.broadcast, trialCondition: r.trial?.condition ?? null }))
-  }))
+  })
 }
 
 export async function getBroadcast(id: number) {

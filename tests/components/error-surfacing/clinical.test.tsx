@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { CLIENT_ERROR_MESSAGES, fillAll, mockFetch } from './helpers'
+import { CLIENT_ERROR_MESSAGES, fillAll, mockFetch, pickPatient } from './helpers'
 
 const router = { refresh: vi.fn(), push: vi.fn() }
 vi.mock('next/navigation', () => ({ useRouter: () => router }))
@@ -38,10 +38,10 @@ const CASES: Case[] = [
     before: () => { fireEvent.change(screen.getByLabelText('Imaging file'), { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } }) }, submit: /^Attach image$/ },
   { name: 'OrderLabTestModal', ui: () => <OrderLabTestModal patientId="RD-1" labTests={[{ id: 3, name: 'CBC', code: 'CBC', category: 'lab' } as never]} onClose={vi.fn()} />, submit: /^Order test$/ },
   { name: 'TransferAdmissionModal', ui: () => <TransferAdmissionModal admissionId={1} availableRooms={[{ id: 2, ward: 'A', roomNumber: '1', bedNumber: 'B' }]} onClose={vi.fn()} />, submit: /^Transfer$/ },
-  { name: 'DispenseMedicationModal', ui: () => <DispenseMedicationModal medication={med} onClose={vi.fn()} />, submit: /^Dispense$/ },
+  { name: 'DispenseMedicationModal', ui: () => <DispenseMedicationModal medication={med} onClose={vi.fn()} />, before: pickPatient, submit: /^Dispense$/ },
   { name: 'EnterLabResultModal', ui: () => <EnterLabResultModal orderId={1} testName="CBC" defaultUnit="g/dL" defaultReferenceRange="12-16" category="lab" attachments={[]} onClose={vi.fn()} />, submit: /^Save result$/ },
   { name: 'DeletePatientDialog', ui: () => <DeletePatientDialog target={{ id: 'RD-1', name: 'P' }} onClose={vi.fn()} onDeleted={vi.fn()} />, submit: /delete/i },
-  { name: 'CheckInModal', ui: () => <CheckInModal providers={[{ id: 1, name: 'Dr A' }]} rooms={[]} onClose={vi.fn()} />, submit: /^Check In$/ },
+  { name: 'CheckInModal', ui: () => <CheckInModal providers={[{ id: 1, name: 'Dr A' }]} rooms={[]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} />, submit: /^Check In$/ },
   { name: 'NoteForm', ui: () => <NoteForm patientId="RD-1" canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: /new note/i })) }, submit: /^(Save|Create)/ },
   { name: 'CarePlanSection', ui: () => <CarePlanSection patientId="RD-1" plans={[]} canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: 'New Care Plan' })) }, submit: /^Save$/ },
   { name: 'BedBoard block', ui: () => <BedBoard rooms={[{ id: 5, ward: 'A', roomNumber: '1', bedNumber: 'B', status: 'available', blockedReason: null, occupantName: null, occupantPatientId: null, attendingProviderName: null, admittedAt: null }]} canManageFacilities canBlock canAdmit={false} />,
@@ -98,7 +98,7 @@ describe('LogDispenseBillModal', () => {
     mockFetch(409, { error: 'This dispense has already been billed' })
     render(<LogDispenseBillModal dispense={{ id: 1, patientId: 'RD-1', medicationName: 'X', quantity: 2 } as never} diagnoses={[{ id: 1, code: 'J00', description: 'Cold' }] as never} onClose={vi.fn()} />)
     await fillAll()
-    const button = screen.getAllByRole('button').find((b) => /log|bill/i.test(b.textContent ?? '') && !/cancel/i.test(b.textContent ?? ''))!
+    const button = screen.getByRole('button', { name: 'Log bill' })
     fireEvent.click(button)
     expect(await screen.findByRole('alert')).toHaveTextContent('already been billed')
   })

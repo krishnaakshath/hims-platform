@@ -3,8 +3,16 @@
 import { vi } from 'vitest'
 export { CLIENT_ERROR_MESSAGES } from '@/lib/client-fetch'
 
+export const PICKER_PATIENT = { id: 'RD-0001', name: 'Asha Rao', uhid: 'UH00000042' }
+
+/**
+ * Every request answers `status`/`body`, except the PatientPicker's lookup
+ * (GET /api/patients/lookup), which returns PICKER_PATIENT.
+ */
 export function mockFetch(status: number, body: unknown = {}) {
-  const fn = vi.fn(async () => new Response(body === null ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
+  const fn = vi.fn(async (url?: string) => (typeof url === 'string' && url.startsWith('/api/patients/lookup'))
+    ? new Response(JSON.stringify({ results: [{ ...PICKER_PATIENT, gender: 'female', ageYears: 34 }], page: 1, pageSize: 10, hasMore: false }), { status: 200 })
+    : new Response(body === null ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
   vi.stubGlobal('fetch', fn)
   return fn
 }
@@ -32,8 +40,11 @@ export async function fillAll(root: ParentNode = document.body) {
   root.querySelectorAll('input').forEach((el) => {
     if (el.disabled || el.readOnly || el.value !== '') return
     const t = el.type
+    const hint = `${el.getAttribute('aria-label') ?? ''} ${el.name} ${el.placeholder}`
+    if (el.getAttribute('role') === 'combobox') return
     const value =
-      t === 'number' ? '5'
+      /rupee|amount|charge|fee|price/i.test(hint) ? '50'
+      : t === 'number' ? '5'
       : t === 'date' ? '2026-10-08'
       : t === 'time' ? '10:00'
       : t === 'datetime-local' ? '2026-10-08T10:00'
@@ -44,4 +55,11 @@ export async function fillAll(root: ParentNode = document.body) {
       : 'Test value'
     if (value !== null) fireEvent.change(el, { target: { value } })
   })
+}
+
+/** Picks PICKER_PATIENT in the (first) PatientPicker combobox. Needs mockFetch. */
+export async function pickPatient() {
+  const { fireEvent, screen } = await import('@testing-library/react')
+  fireEvent.change(screen.getAllByRole('combobox', { name: /patient/i })[0], { target: { value: 'Asha' } })
+  fireEvent.click(await screen.findByRole('option', { name: /asha rao/i }))
 }

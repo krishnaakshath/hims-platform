@@ -2,8 +2,8 @@
 //
 // - Gate first: requireSession, then TARIFF_MANAGE_ROLES, before the body is touched.
 // - The body is JSON `{ kind, csv, commit }`. It is read as a stream with a hard byte cap
-//   (declared content-length checked first, bytes counted while reading), held in memory only,
-//   and never written to disk.
+//   (readCappedBody: declared content-length checked first, bytes counted while reading), held
+//   in memory only, and never written to disk.
 // - Validation always runs first. Issue messages come from src/lib/tariff/import.ts, which never
 //   echoes more than 40 characters of a cell.
 // - A commit is ONE transaction in the query layer, with the audit row written inside it.
@@ -17,6 +17,7 @@ import { TariffPackageIntegrityError, commitRateImport, commitServiceImport, get
 import { MAX_IMPORT_BYTES, validateRateImport, validateServiceImport } from '@/lib/tariff/import'
 import { isExclusionViolation, isUniqueViolation, pgErrorCode } from '@/lib/db-errors'
 import { badRequest, conflict, forbidden, serverError } from '@/lib/tariff/route-responses'
+import { readCappedBody } from '@/lib/http/read-capped-body'
 
 const TOO_LARGE = 'CSV is larger than 1 MB'
 const INVALID = 'Invalid import'
@@ -33,33 +34,6 @@ const importBodySchema = z.object({
 
 const tooLarge = () => NextResponse.json({ error: TOO_LARGE }, { status: 413 })
 
-/** The body as bytes, or a response when it is over the cap. Reading stops at the cap. */
-async function readCapped(request: NextRequest): Promise<Uint8Array | NextResponse> {
-  const declared = request.headers.get('content-length')
-  if (declared !== null) {
-    if (!/^\d{1,15}$/.test(declared.trim())) return badRequest(INVALID)
-    if (Number(declared) > MAX_BODY_BYTES) return tooLarge()
-  }
-  if (!request.body) return new Uint8Array(0)
-  const reader = request.body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > MAX_BODY_BYTES) {
-      await reader.cancel().catch(() => undefined)
-      return tooLarge()
-    }
-    chunks.push(value)
-  }
-  const bytes = new Uint8Array(total)
-  let at = 0
-  for (const c of chunks) { bytes.set(c, at); at += c.byteLength }
-  return bytes
-}
-
 export async function POST(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
@@ -69,8 +43,9 @@ export async function POST(request: NextRequest) {
   if (mediaType !== 'application/json') {
     return NextResponse.json({ error: 'Send the import as application/json' }, { status: 415 })
   }
-  const bytes = await readCapped(request)
-  if (bytes instanceof NextResponse) return bytes
+  const read = await readCappedBody(request, MAX_BODY_BYTES)
+  if (!read.ok) return read.reason === 'too_large' ? tooLarge() : badRequest(INVALID)
+  const bytes = read.bytes
 
   let body: unknown
   try {

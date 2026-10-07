@@ -1,6 +1,7 @@
 'use client'
 import { sendJson } from '@/lib/client-fetch'
-import { useEffect, useState, type ComponentProps } from 'react'
+import { formatIstTime } from '@/lib/india-time'
+import { useState, type ComponentProps } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowUp, ArrowDown, Trash2, Plus, ShieldAlert } from 'lucide-react'
@@ -54,9 +55,9 @@ export function FormBuilderEditor({
   const [showSend, setShowSend] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify({ name: initialName, category: initialCategory, diagnosisTag: initialDiagnosisTag, folderId: initialFolderId, questions: initialQuestions }))
+  // Null until the first save in this session: the status reads plain "Saved"
+  // (identical on server and client), then "Saved · <IST time>" after a save.
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
-  // Set after mount (not in the initial state) so server and client renders agree.
-  useEffect(() => { setLastSavedAt(new Date()) }, [])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -172,7 +173,7 @@ export function FormBuilderEditor({
         <button onClick={() => setShowPreview(true)} className={btn}>Preview</button>
         <button onClick={() => setTab(tab === 'consents' ? 'questions' : 'consents')} aria-pressed={tab === 'consents'} className={`${btn} ${tab === 'consents' ? 'bg-secondary' : ''}`}>Consent Forms</button>
         <span className="ml-auto text-xs text-muted-foreground" role="status">
-          {isDirty ? 'Unsaved changes' : lastSavedAt ? `Saved · ${lastSavedAt.toLocaleTimeString()}` : 'Saved'}
+          {isDirty ? 'Unsaved changes' : lastSavedAt ? `Saved · ${formatIstTime(lastSavedAt)}` : 'Saved'}
         </span>
         <button onClick={save} disabled={saving} className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
           {saving ? 'Saving…' : 'Save Form'}

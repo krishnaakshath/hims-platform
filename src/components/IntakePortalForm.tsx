@@ -1,5 +1,6 @@
 'use client'
 import { sendJson } from '@/lib/client-fetch'
+import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import { IntakeQuestionField, type IntakeQuestion as Question } from '@/components/IntakeQuestionField'
 import { SignatureCapture } from '@/components/SignatureCapture'
@@ -175,7 +176,7 @@ function ConsentPage({ consent, signing, error, onSign }: {
       <div tabIndex={0} role="region" aria-label={consent.name} className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-4 text-sm text-foreground">{consent.renderedText}</div>
       {consent.signedAt ? (
         <p className="text-sm font-medium text-foreground" suppressHydrationWarning>
-          Signed by {consent.signerTypedName} on {new Date(consent.signedAt).toLocaleDateString()}
+          Signed by {consent.signerTypedName} on {formatIstDate(consent.signedAt)}
         </p>
       ) : (
         <SignatureCapture
