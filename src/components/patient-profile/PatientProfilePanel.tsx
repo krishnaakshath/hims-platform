@@ -4,6 +4,7 @@ import { Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AadhaarPanel } from './AadhaarPanel'
 import { EditPatientProfileModal } from './EditPatientProfileModal'
+import { NotificationPreferenceToggle } from './NotificationPreferenceToggle' // SP5
 import { formatAbhaNumber } from '@/lib/india/abha'
 import {
   stateName, GENDERS, MARITAL_STATUSES, BLOOD_GROUPS, LANGUAGES, ABHA_UNAVAILABLE_REASONS,
@@ -45,6 +46,7 @@ export interface ProfileView {
   isMlc: boolean
   mlcNumber: string | null
   contacts: ProfileContact[]
+  notificationOptOut?: boolean // SP5
 }
 
 const KIND_LABELS: Record<ProfileContact['kind'], string> = { next_of_kin: 'Next of kin', guardian: 'Guardian', emergency: 'Emergency contact' }
@@ -70,11 +72,12 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar }: {
+export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar, canEditNotifications = false }: {
   patient: ProfileView
   aadhaar: AadhaarView
   canEdit: boolean
   canWriteAadhaar: boolean
+  canEditNotifications?: boolean // SP5: NOTIFICATION_PREFERENCE_ROLES
 }) {
   const [editing, setEditing] = useState(false)
   const abhaNumber = patient.abhaNumber && /^\d{14}$/.test(patient.abhaNumber) ? formatAbhaNumber(patient.abhaNumber) : patient.abhaNumber
@@ -145,6 +148,13 @@ export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar
           </ul>
         )}
       </Group>
+
+      {/* SP5 */}
+      {canEditNotifications && (
+        <Group title="Notifications">
+          <NotificationPreferenceToggle anonId={patient.id} initialOptOut={patient.notificationOptOut ?? false} />
+        </Group>
+      )}
 
       {canEdit && editing && <EditPatientProfileModal patient={patient} onClose={() => setEditing(false)} />}
     </div>
