@@ -65,6 +65,16 @@ describe('POST /api/inpatient/admissions/[id]/medications', () => {
     expect(body.status).toBe('scheduled')
   })
 
+  it('rejects a naive scheduledFor (no UTC offset) with 400 and orders nothing', async () => {
+    const admission = await makeAdmission()
+    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ medicationName: 'Sertraline', dose: '100mg', scheduledFor: '2026-11-03T09:00' }) })
+    const res = await orderRoute(req as never, { params: Promise.resolve({ id: String(admission.id) }) })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/UTC offset/)
+    const rows = await getDb().select().from(medicationAdministrations).where(eq(medicationAdministrations.admissionId, admission.id))
+    expect(rows).toHaveLength(0)
+  })
+
   it('rejects a frontdesk session', async () => {
     sessionRole = 'frontdesk'
     const admission = await makeAdmission()

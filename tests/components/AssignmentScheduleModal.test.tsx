@@ -32,6 +32,6 @@ describe('AssignmentScheduleModal', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/front-desk/assignments/42/schedule')
-    expect(JSON.parse(init!.body as string)).toEqual({ startsAt: '2026-11-03T10:00:00', endsAt: '2026-11-03T10:30:00' })
+    expect(JSON.parse(init!.body as string)).toEqual({ startsAt: '2026-11-03T10:00:00+05:30', endsAt: '2026-11-03T10:30:00+05:30' })
   })
 })

@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getArDashboardData } from '@/lib/queries/ar-dashboard'
-import { formatCents } from '@/lib/format'
+import { formatPaise } from '@/lib/format'
 import { ArAgingChart } from '@/components/ArAgingChart'
 
 function KpiCard({ label, value }: { label: string; value: string }) {
@@ -26,7 +26,7 @@ export default async function ArDashboardPage() {
       <h1 className="text-2xl font-bold text-foreground">A/R Dashboard</h1>
 
       <div className="grid grid-cols-3 gap-4">
-        <KpiCard label="Outstanding A/R" value={formatCents(data.outstandingArCents)} />
+        <KpiCard label="Outstanding A/R" value={formatPaise(data.outstandingArCents)} />
         <KpiCard label="Gross Collection Rate" value={`${data.grossCollectionRate.toFixed(1)}%`} />
         <KpiCard label="Avg Days in A/R" value={data.avgDaysInAr.toFixed(0)} />
       </div>

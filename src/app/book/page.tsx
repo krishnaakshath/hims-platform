@@ -1,3 +1,4 @@
+import { startOfIstDay, todayIsoIn } from '@/lib/india-time'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { listAppointmentsInRange } from '@/lib/queries/appointments'
 import { PublicBookingForm } from '@/components/PublicBookingForm'
@@ -15,10 +16,9 @@ import { BrandLogo } from '@/components/BrandLogo'
 export const dynamic = 'force-dynamic'
 
 export default async function PublicBookingPage() {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const windowEnd = new Date(today)
-  windowEnd.setDate(windowEnd.getDate() + 90)
+  // Today's IST day start and 90 IST days ahead.
+  const today = startOfIstDay(todayIsoIn())
+  const windowEnd = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000)
 
   const [providerRows, appointmentRows] = await Promise.all([
     listActiveProviders(),

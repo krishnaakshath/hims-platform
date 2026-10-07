@@ -1,23 +1,30 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { normalizeVisitReason, buildVisitConfirmationBody, formatVisitDate, formatVisitTime, WHAT_TO_BRING, INPATIENT_OVERNIGHT_BAG } from '@/lib/notification-templates'
 
-const base = { providerName: 'Dr. Rajiv Kunam', startsAt: new Date(2026, 10, 3, 9, 0), visitReason: 'Follow-up', visitType: 'outpatient' as const }
+// Prove independence from the process zone: run as if the server were in Los Angeles.
+const ORIGINAL_TZ = process.env.TZ
+beforeAll(() => { process.env.TZ = 'America/Los_Angeles' })
+afterAll(() => { if (ORIGINAL_TZ === undefined) delete process.env.TZ; else process.env.TZ = ORIGINAL_TZ })
+
+// 09:00 IST on Tue 3 Nov 2026 (= 03:30Z). Built from an explicit instant so the
+// result never depends on the test machine's (or the server's) time zone.
+const base = { providerName: 'Dr. Rajiv Kunam', startsAt: new Date('2026-11-03T09:00:00+05:30'), visitReason: 'Follow-up', visitType: 'outpatient' as const }
 
 describe('buildVisitConfirmationBody', () => {
-  it('names provider, local day, local time and reason', () => {
+  it('names provider, IST day, IST time (labelled) and reason', () => {
     const body = buildVisitConfirmationBody(base)
     expect(body.startsWith('Your visit is confirmed.')).toBe(true)
-    expect(body).toContain('Dr. Rajiv Kunam will see you on Tuesday, November 3, 2026 at 9:00 AM.')
+    expect(body).toContain('Dr. Rajiv Kunam will see you on Tuesday, 3 November 2026 at 9:00 am IST.')
     expect(body).toContain('Reason for visit: Follow-up')
     expect(body).toContain("If this time doesn't work, reply to this message and our front desk will help you change it.")
   })
   it('lists all five base bullets in order', () => {
     expect(WHAT_TO_BRING).toEqual([
-      'A photo ID',
-      'Your insurance card',
+      'A photo ID (for example Aadhaar, PAN card, voter ID or passport)',
+      'Your health insurance, TPA or government scheme card, if you have one',
       'A current list of everything you take — prescriptions, over-the-counter medicines, vitamins and supplements — with the dose for each',
       "Any forms we sent you that you haven't finished yet",
-      'A payment method, in case there is a copay due at the visit',
+      'A way to pay (cash, UPI or card) for any amount due at the visit',
     ])
     const body = buildVisitConfirmationBody(base)
     for (const item of WHAT_TO_BRING) expect(body).toContain(`• ${item}`)
@@ -27,15 +34,18 @@ describe('buildVisitConfirmationBody', () => {
     expect(buildVisitConfirmationBody({ ...base, visitType: 'inpatient' })).toContain(`• ${INPATIENT_OVERNIGHT_BAG}`)
     expect(buildVisitConfirmationBody(base)).not.toContain('overnight bag')
   })
-  it('renders 23:30 and 00:15 local on the local calendar day (reports.ts midnight trap)', () => {
-    const late = new Date(2026, 10, 3, 23, 30)
-    expect(formatVisitDate(late)).toBe('Tuesday, November 3, 2026')
-    expect(formatVisitTime(late)).toBe('11:30 PM')
-    const early = new Date(2026, 10, 4, 0, 15)
-    expect(formatVisitDate(early)).toBe('Wednesday, November 4, 2026')
-    expect(formatVisitTime(early)).toBe('12:15 AM')
-    // Same day the patient portal's own formatter shows (local getters).
-    expect(formatVisitDate(late)).toContain(String(late.getDate()))
+  it('renders 23:30 and 00:15 IST on the IST calendar day (midnight trap)', () => {
+    const late = new Date('2026-11-03T18:00:00Z') // 23:30 IST, 3 Nov
+    expect(formatVisitDate(late)).toBe('Tuesday, 3 November 2026')
+    expect(formatVisitTime(late)).toBe('11:30 pm IST')
+    const early = new Date('2026-11-03T18:45:00Z') // 00:15 IST, 4 Nov (still 3 Nov in UTC)
+    expect(formatVisitDate(early)).toBe('Wednesday, 4 November 2026')
+    expect(formatVisitTime(early)).toBe('12:15 am IST')
+  })
+  it('a 09:00 IST visit is never told to the patient as 2:30 pm (server running in UTC)', () => {
+    const body = buildVisitConfirmationBody({ ...base, startsAt: new Date('2026-11-03T03:30:00Z') })
+    expect(body).toContain('at 9:00 am IST.')
+    expect(body).not.toMatch(/2:30|AM|PM/)
   })
 })
 

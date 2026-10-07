@@ -1,3 +1,4 @@
+import { formatIstDate } from '@/lib/india-time'
 import Link from 'next/link'
 import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { notFound, redirect } from 'next/navigation'
@@ -138,8 +139,8 @@ export default async function ExperienceSurveysPage({ searchParams }: { searchPa
                     </span>
                   </td>
                   <td className="p-3 text-foreground">{r.ratingOverall !== null ? `${r.ratingOverall}/5` : '—'}</td>
-                  <td className="p-3 text-muted-foreground">{new Date(r.sentAt).toLocaleDateString()}</td>
-                  <td className="p-3 text-muted-foreground">{r.respondedAt ? new Date(r.respondedAt).toLocaleDateString() : '—'}</td>
+                  <td className="p-3 text-muted-foreground">{formatIstDate(r.sentAt)}</td>
+                  <td className="p-3 text-muted-foreground">{r.respondedAt ? formatIstDate(r.respondedAt) : '—'}</td>
                 </tr>
               ))}
             </tbody>

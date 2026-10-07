@@ -52,7 +52,7 @@ describe('MedicationHistorySection', () => {
         canPrescribe={false}
       />
     )
-    expect(screen.getByText('10mg · started Mar 12, 2026')).toBeInTheDocument()
+    expect(screen.getByText('10mg · started 12 Mar 2026')).toBeInTheDocument()
     expect(screen.queryByText(/Prescribed by/)).not.toBeInTheDocument()
     expect(screen.queryByText('Print')).not.toBeInTheDocument()
   })
@@ -66,7 +66,7 @@ describe('MedicationHistorySection', () => {
         canPrescribe={false}
       />
     )
-    expect(screen.getByText('Dose not recorded · started Mar 12, 2026')).toBeInTheDocument()
+    expect(screen.getByText('Dose not recorded · started 12 Mar 2026')).toBeInTheDocument()
   })
 
   it('renders the composed sig for a prescribed row', () => {
@@ -81,7 +81,7 @@ describe('MedicationHistorySection', () => {
         canPrescribe={false}
       />
     )
-    expect(screen.getByText('50mg · 2 times daily · 30 days · started Mar 12, 2026')).toBeInTheDocument()
+    expect(screen.getByText('50mg · 2 times daily · 30 days · started 12 Mar 2026')).toBeInTheDocument()
   })
 
   it('renders instructions on their own line', () => {
@@ -111,7 +111,7 @@ describe('MedicationHistorySection', () => {
         canPrescribe={false}
       />
     )
-    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · Sep 29, 2026')).toBeInTheDocument()
+    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · 29 Sep 2026')).toBeInTheDocument()
   })
 
   it('appends "Entered by" only when it differs from the prescriber\'s name', () => {
@@ -125,7 +125,7 @@ describe('MedicationHistorySection', () => {
         canPrescribe={false}
       />
     )
-    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · Sep 29, 2026 · Entered by Front Desk Staffer')).toBeInTheDocument()
+    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · 29 Sep 2026 · Entered by Front Desk Staffer')).toBeInTheDocument()
 
     rerender(
       <MedicationHistorySection
@@ -137,7 +137,7 @@ describe('MedicationHistorySection', () => {
         canPrescribe={false}
       />
     )
-    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · Sep 29, 2026')).toBeInTheDocument()
+    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · 29 Sep 2026')).toBeInTheDocument()
     expect(screen.queryByText(/Entered by/)).not.toBeInTheDocument()
   })
 
@@ -164,7 +164,7 @@ describe('MedicationHistorySection', () => {
         canPrescribe={false}
       />
     )
-    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · Sep 29, 2026')).toBeInTheDocument()
+    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · 29 Sep 2026')).toBeInTheDocument()
     unmount()
 
     // A Redis cache-hit shape: `prescribedAt` comes back as an ISO string,
@@ -185,7 +185,7 @@ describe('MedicationHistorySection', () => {
         />
       )
     ).not.toThrow()
-    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · Sep 29, 2026')).toBeInTheDocument()
+    expect(screen.getByText('Prescribed by Dr. Rajiv Kunam, MD · Psychiatry · 29 Sep 2026')).toBeInTheDocument()
   })
 
   it('renders no "Add prescription" button and no Stop action when canPrescribe is false', () => {

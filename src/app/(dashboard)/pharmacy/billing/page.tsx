@@ -1,10 +1,10 @@
 import { redirect } from 'next/navigation'
-import { DollarSign, Clock, Receipt } from 'lucide-react'
+import { IndianRupee, Clock, Receipt } from 'lucide-react'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { listAllDispensesWithBilling } from '@/lib/queries/medication-dispenses'
 import { PharmacyBillingTable } from '@/components/PharmacyBillingTable'
-import { formatCents } from '@/lib/format'
+import { formatPaise } from '@/lib/format'
 
 function StatTile({ value, label, icon: Icon, tone }: { value: string; label: string; icon: React.ComponentType<{ className?: string }>; tone: string }) {
   return (
@@ -42,7 +42,7 @@ export default async function PharmacyBillingPage() {
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <StatTile value={formatCents(billedCents)} label="Total Billed" icon={DollarSign} tone="bg-success/10 text-success" />
+        <StatTile value={formatPaise(billedCents)} label="Total Billed" icon={IndianRupee} tone="bg-success/10 text-success" />
         <StatTile value={String(unbilled.length)} label="Awaiting Billing" icon={Clock} tone="bg-warning/10 text-warning" />
         <StatTile value={String(dispenses.length)} label="Total Dispenses" icon={Receipt} tone="bg-primary/10 text-primary" />
       </div>

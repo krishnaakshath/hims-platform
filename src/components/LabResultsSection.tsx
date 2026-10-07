@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDate, formatIstDateTime } from '@/lib/india-time'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { OrderLabTestModal, type LabTestOption } from '@/components/OrderLabTestModal'
@@ -103,7 +104,7 @@ export function LabResultsSection({ patientId, orders, labTests, canOrder }: { p
                       {r.referenceRange && ` · Reference: ${r.referenceRange}`}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Resulted {r.resultedAt.toLocaleString()} by {r.resultedByName}
+                      Resulted {formatIstDateTime(r.resultedAt)} by {r.resultedByName}
                     </p>
                     {r.notes && <p className="mt-1 text-xs text-muted-foreground">{r.notes}</p>}
                   </div>
@@ -126,7 +127,7 @@ export function LabResultsSection({ patientId, orders, labTests, canOrder }: { p
                   <span>
                     {o.testName} <span className="text-xs">({o.testCode})</span>
                   </span>
-                  <span className="text-xs">{PENDING_STATUS_LABEL[o.status as 'ordered' | 'collected']} · {o.orderedAt.toLocaleDateString()}</span>
+                  <span className="text-xs">{PENDING_STATUS_LABEL[o.status as 'ordered' | 'collected']} · {formatIstDate(o.orderedAt)}</span>
                 </div>
                 <ImagingAttachmentStrip attachments={o.attachments} />
               </li>

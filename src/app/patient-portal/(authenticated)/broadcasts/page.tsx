@@ -1,3 +1,4 @@
+import { formatIstDateTime } from '@/lib/india-time'
 import { notFound } from 'next/navigation'
 import { Megaphone, Mail, MessageCircle } from 'lucide-react'
 import { requirePatientSessionOrRedirect } from '@/lib/patient-session'
@@ -43,7 +44,7 @@ export default async function PatientPortalBroadcastsPage() {
                   <div className="min-w-0">
                     {b.subject && <p className="text-sm font-semibold text-foreground">{b.subject}</p>}
                     <p className="text-sm text-foreground">{b.message}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{new Date(b.sentAt).toLocaleString()}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{formatIstDateTime(b.sentAt)}</p>
                   </div>
                 </li>
               )

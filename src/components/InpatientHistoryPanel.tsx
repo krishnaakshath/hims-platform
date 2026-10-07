@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDate, formatIstDateTime } from '@/lib/india-time'
 import { useState } from 'react'
 import { TransferAdmissionModal } from '@/components/TransferAdmissionModal'
 import { DischargeAdmissionModal } from '@/components/DischargeAdmissionModal'
@@ -33,8 +34,8 @@ export function InpatientHistoryPanel({ admissions, availableRooms, canTransfer,
         <section key={a.id} className="rounded-xl border border-primary/10 bg-card/80 p-5 shadow-sm">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-sm font-semibold text-foreground">
-              {a.status === 'admitted' ? 'Currently admitted' : 'Discharged'} — admitted {new Date(a.admittedAt).toLocaleDateString()}
-              {a.dischargedAt && ` · discharged ${new Date(a.dischargedAt).toLocaleDateString()}`}
+              {a.status === 'admitted' ? 'Currently admitted' : 'Discharged'} — admitted {formatIstDate(a.admittedAt)}
+              {a.dischargedAt && ` · discharged ${formatIstDate(a.dischargedAt)}`}
             </p>
             <span className="rounded-full bg-secondary px-2 py-0.5 text-xs capitalize text-muted-foreground">{a.admissionType.replace('_', ' ')}</span>
           </div>
@@ -50,7 +51,7 @@ export function InpatientHistoryPanel({ admissions, availableRooms, canTransfer,
           {a.status === 'discharged' && (
             <p className="mb-2 text-xs">
               {a.dischargeSignature
-                ? <span className="text-success">Signed by {a.dischargeSignature.signerTypedName} on {new Date(a.dischargeSignature.signedAt).toLocaleDateString()}</span>
+                ? <span className="text-success">Signed by {a.dischargeSignature.signerTypedName} on {formatIstDate(a.dischargeSignature.signedAt)}</span>
                 : <span className="font-medium text-destructive">Not yet signed</span>}
             </p>
           )}
@@ -73,7 +74,7 @@ export function InpatientHistoryPanel({ admissions, availableRooms, canTransfer,
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Room history</p>
               <ul className="space-y-1 text-xs text-muted-foreground">
                 {a.transfers.map((t) => (
-                  <li key={t.id}>{new Date(t.transferredAt).toLocaleString()} — {t.fromRoomId ? `Room #${t.fromRoomId}` : 'Boarding'} → Room #{t.toRoomId} ({t.reason}, by {t.transferredByName})</li>
+                  <li key={t.id}>{formatIstDateTime(t.transferredAt)} — {t.fromRoomId ? `Room #${t.fromRoomId}` : 'Boarding'} → Room #{t.toRoomId} ({t.reason}, by {t.transferredByName})</li>
                 ))}
               </ul>
             </div>

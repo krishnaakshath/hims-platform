@@ -1,3 +1,4 @@
+import { todayIsoIn } from '@/lib/india-time'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { put } from '@vercel/blob'
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const created = await createDocument({
     name,
-    documentDate: new Date().toISOString().slice(0, 10),
+    documentDate: todayIsoIn(),
     receivedFrom: session.name,
     documentType: 'imaging_result',
     patientId: order.patientId,

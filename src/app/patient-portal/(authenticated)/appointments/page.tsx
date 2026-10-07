@@ -1,3 +1,4 @@
+import { formatIstDate, formatIstDateTime } from '@/lib/india-time'
 import { notFound } from 'next/navigation'
 import { CalendarClock } from 'lucide-react'
 import { requirePatientSessionOrRedirect } from '@/lib/patient-session'
@@ -51,7 +52,7 @@ export default async function PatientPortalAppointmentsPage() {
                 visitReason={a.visitReason}
                 providerName={a.providerName}
                 status={a.status}
-                dateLabel={new Date(a.startsAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                dateLabel={formatIstDateTime(a.startsAt)}
               />
             ))}
           </ul>
@@ -70,7 +71,7 @@ export default async function PatientPortalAppointmentsPage() {
                 visitReason={a.visitReason}
                 providerName={a.providerName}
                 status={a.status}
-                dateLabel={new Date(a.startsAt).toLocaleDateString()}
+                dateLabel={formatIstDate(a.startsAt)}
               />
             ))}
           </ul>

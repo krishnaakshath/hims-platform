@@ -1,3 +1,4 @@
+import { formatIstDate } from '@/lib/india-time'
 import { notFound, redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
@@ -33,7 +34,7 @@ function parseIds(raw: string | undefined): number[] | null {
 }
 
 function formatLongDate(value: Date | string): string {
-  return new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  return formatIstDate(value)
 }
 
 export default async function PrescriptionPrintPage({ searchParams }: { searchParams: Promise<{ ids?: string }> }) {

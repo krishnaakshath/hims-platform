@@ -1,3 +1,4 @@
+import { istDateOf } from '@/lib/india-time'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { eq } from 'drizzle-orm'
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     dispenseId: dispense.id,
     patientId: dispense.patientId,
     providerName,
-    dateOfService: dispense.dispensedAt.toISOString().slice(0, 10),
+    dateOfService: istDateOf(dispense.dispensedAt),
     diagnosisCode: { code: diagnosis.code, description: diagnosis.description },
     procedureCode: {
       code: parsed.data.procedureCode,
