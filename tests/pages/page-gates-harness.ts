@@ -327,4 +327,11 @@ export const PAGE_GATES: PageGateCase[] = [
     props: { params: Promise.resolve({ encounterId: '1' }) },
     allowed: ['frontdesk', 'admin', 'crc'],
   },
+  // Wave C: registration slip / UHID card -- REGISTRATION_ROLES.
+  {
+    route: '/print/registration/[anonId]',
+    load: () => import('@/app/print/registration/[anonId]/page'),
+    props: { params: Promise.resolve({ anonId: 'RD-0001' }) },
+    allowed: ['admin', 'frontdesk'],
+  },
 ]
