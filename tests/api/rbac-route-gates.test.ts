@@ -12,6 +12,7 @@ import {
   INSURANCE_CARD_READ_ROLES,
   MASTER_DATA_ADMIN_ROLES,
   PAYER_LOOKUP_ROLES,
+  REGISTRATION_ROLES,
   SCHEDULING_ROLES,
   TRIAL_CRITERIA_EDIT_ROLES,
   hasSearchScope,
@@ -341,7 +342,7 @@ describe('PUT /api/reviews/[id]', () => {
 // `it.fails`; RBAC_SHOW_GAPS=1 runs them as normal tests (the red list).
 // ---------------------------------------------------------------------------
 
-import { GET as listPatients } from '@/app/api/patients/route'
+import { GET as listPatients, POST as postPatient } from '@/app/api/patients/route'
 import { GET as getPatient } from '@/app/api/patients/[anonId]/route'
 import { GET as getCcda } from '@/app/api/patients/[anonId]/ccda/route'
 import { GET as getFhirAllergyIntolerance } from '@/app/api/patients/[anonId]/fhir/AllergyIntolerance/route'
@@ -397,6 +398,8 @@ const fhir = (resource: string, handler: typeof getFhirPatient): ApiGateCase => 
 export const API_GATES: ApiGateCase[] = [
   // POLICY.md: patient JSON APIs -- CLINICAL_ROLES (ruling 1: frontdesk denied)
   { name: 'GET /api/patients', call: () => listPatients(get('/api/patients')), allowed: [...CLINICAL_ROLES] },
+  // REGISTRATION_ROLES -- admin/frontdesk only (route.ts comment: crc removed by product direction)
+  { name: 'POST /api/patients', call: () => settle(() => postPatient(send('POST', '/api/patients'))), allowed: [...REGISTRATION_ROLES] },
   {
     name: 'GET /api/patients/[anonId]',
     call: () => getPatient(get(`/api/patients/${BOGUS_PATIENT}`), ctx({ anonId: BOGUS_PATIENT })),

@@ -1,33 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
-import { getDb } from '@/db/client'
-import { patients } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import { requireSession } from '@/lib/auth'
-import { CLINICAL_ROLES } from '@/lib/role-policy'
+import { CLINICAL_ROLES, REGISTRATION_ROLES } from '@/lib/role-policy'
 import { invalidateCache, patientListCacheKey } from '@/lib/cache'
 import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { getPayerById } from '@/lib/queries/payers'
-
-// Collects the same demographic shape a chart would carry (no
-// referralType/availability/consent -- those belong to an intake, which this
-// patient doesn't have yet) and writes it straight into the app's own
-// `patients` row.
-const addClientSchema = z.object({
-  name: z.string().min(1),
-  dob: z.string().min(1),
-  email: z.string().email().optional(),
-  phone: z.string().optional(),
-  city: z.string().optional(),
-  zip: z.string().optional(),
-  currentProvider: z.string().optional(),
-  primaryPayerId: z.number().int().optional(),
-  primaryMemberId: z.string().optional(),
-  primaryGroupNumber: z.string().optional(),
-  primaryPlanType: z.enum(['ppo', 'hmo', 'epo', 'pos', 'medicare', 'medicaid']).optional(),
-  primarySubscriberName: z.string().optional(),
-  primarySubscriberRelationship: z.enum(['self', 'spouse', 'child', 'other']).optional(),
-}).strict()
+import { registerPatient } from '@/lib/queries/patient-registration'
+import { patientRegistrationSchema } from '@/lib/validation/patient-registration'
+import { isUniqueViolation, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 
 export async function GET(request: NextRequest) {
   const session = await requireSession()
@@ -44,55 +24,52 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ patients: patientsWithStatus })
 }
 
+// Patient registration (Indian patient master, SP1). Gate first, then the
+// strict zod schema, then ONE transaction in registerPatient (patient row,
+// contacts, Aadhaar value-or-decline, optional KYC, UHID). Responses never
+// echo the submitted body: validation details carry fixed messages only, the
+// 201 is just { id, uhid }, and any unmapped failure is a generic 500.
 export async function POST(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   // Patient registration (inpatient and outpatient) is front desk's job
   // exclusively, admin kept as the practice-wide override -- crc previously
   // had this too, removed per explicit product direction.
-  if (!['admin', 'frontdesk'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!REGISTRATION_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const parsed = addClientSchema.safeParse(await request.json())
-  if (!parsed.success) return NextResponse.json({ error: 'Invalid new-client payload', details: parsed.error.flatten() }, { status: 400 })
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid registration' }, { status: 400 })
+  }
+  const parsed = patientRegistrationSchema.safeParse(body)
+  if (!parsed.success) return NextResponse.json({ error: 'Invalid registration', details: parsed.error.flatten() }, { status: 400 })
 
   if (parsed.data.primaryPayerId !== undefined) {
     const payer = await getPayerById(parsed.data.primaryPayerId)
     if (!payer) return NextResponse.json({ error: 'primaryPayerId does not reference a real payer' }, { status: 400 })
   }
 
-  // Anon IDs are RD-#### sequential; find the current max and increment.
-  // Only consider ids that actually match the RD-#### shape -- Math.max
-  // propagates NaN from a single bad operand to its entire result, so any
-  // non-conforming id (e.g. a dedicated TEST-*-<timestamp> fixture id left
-  // behind by a test that didn't clean itself up) would otherwise
-  // permanently poison every future call to "RD-0NaN", which then collides
-  // on the unique constraint forever after the first one.
-  const existing = await getDb().select({ id: patients.id }).from(patients)
-  const existingNumbers = existing
-    .map((p) => /^RD-(\d+)$/.exec(p.id))
-    .filter((m): m is RegExpExecArray => m !== null)
-    .map((m) => parseInt(m[1], 10))
-  const nextNum = existingNumbers.length === 0 ? 1 : Math.max(...existingNumbers) + 1
-  const newId = `RD-${String(nextNum).padStart(4, '0')}`
+  let registered: Awaited<ReturnType<typeof registerPatient>>
+  try {
+    registered = await registerPatient(parsed.data, session.name)
+  } catch (err) {
+    if (isUniqueViolation(err, 'patients_abha_number_unique')) {
+      return NextResponse.json({ error: 'This ABHA number is already registered to another patient' }, { status: 409 })
+    }
+    if (isUniqueViolation(err, 'patients_abha_address_unique')) {
+      return NextResponse.json({ error: 'This ABHA address is already registered to another patient' }, { status: 409 })
+    }
+    // Never log the error itself: a drizzle error message carries the query
+    // params (patient demographics, ABHA). Code and constraint only.
+    console.error(`[patients] registration failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
+    return NextResponse.json({ error: 'Registration failed' }, { status: 500 })
+  }
 
-  const [created] = await getDb().insert(patients).values({
-    id: newId,
-    name: parsed.data.name.trim(),
-    dob: parsed.data.dob,
-    city: parsed.data.city ?? null,
-    zip: parsed.data.zip ?? null,
-    phone: parsed.data.phone ?? null,
-    email: parsed.data.email ?? null,
-    currentProvider: parsed.data.currentProvider ?? null,
-    primaryPayerId: parsed.data.primaryPayerId ?? null,
-    primaryMemberId: parsed.data.primaryMemberId ?? null,
-    primaryGroupNumber: parsed.data.primaryGroupNumber ?? null,
-    primaryPlanType: parsed.data.primaryPlanType ?? null,
-    primarySubscriberName: parsed.data.primarySubscriberName ?? null,
-    primarySubscriberRelationship: parsed.data.primarySubscriberRelationship ?? null,
-  }).returning()
-
+  const { id, uhid, auditEntries } = registered
+  await logAudit(session, 'registered patient', id)
+  for (const e of auditEntries) await logAudit(session, e.action, id, e.details)
   await invalidateCache(patientListCacheKey(null))
-  await logAudit(session, 'added new client', newId)
-  return NextResponse.json(created, { status: 201 })
+  return NextResponse.json({ id, uhid }, { status: 201 })
 }
