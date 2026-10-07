@@ -57,8 +57,10 @@ describe('buildDischargeSummary', () => {
       expect(d.clinical).toBeNull()
       expect(d.patient.abhaNumber).toBeNull()
       expect(d.patient.abhaAddress).toBeNull()
+      // The MLC number is a medico-legal identifier: clinical roles only. The flag stays.
+      expect(d.patient).toMatchObject({ isMlc: true, mlcNumber: null })
       const json = JSON.stringify(d)
-      for (const text of ['pneumonia', 'Amoxicillin', 'Recovered well', '9123', 'asha.rao@abdm']) expect(json).not.toContain(text)
+      for (const text of ['pneumonia', 'Amoxicillin', 'Recovered well', '9123', 'asha.rao@abdm', 'MLC-7']) expect(json).not.toContain(text)
       // Admin-visible facts the front desk still needs.
       expect(d.followUp?.reason).toBe('Chest X-ray review')
       expect(d.admission.dischargedOn).toBe('2026-10-05')

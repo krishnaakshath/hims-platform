@@ -91,7 +91,8 @@ export function buildDischargeSummary(src: DischargeSummarySource, now: Date, vi
       abhaAddress: clinicalViewer ? p.abhaAddress : null,
       address: address(p),
       isMlc: p.isMlc,
-      mlcNumber: p.mlcNumber,
+      // The MLC number is a medico-legal identifier: clinical roles only (the isMlc flag stays).
+      mlcNumber: clinicalViewer ? p.mlcNumber : null,
     },
     admission: {
       id: a.id,

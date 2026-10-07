@@ -14,7 +14,10 @@ import { getLatestSignatureForSignable } from './signatures'
  * patients at all). `viewerRole` gates the clinical sections and ABHA
  * (see buildDischargeSummary); without it the result has none.
  */
-export async function getDischargeSummaryData(admissionId: number, now: Date = new Date(), viewerRole: Role | null = null): Promise<DischargeSummaryData | null> {
+export async function getDischargeSummaryData(
+  admissionId: number,
+  { now = new Date(), viewerRole = null }: { now?: Date; viewerRole?: Role | null } = {},
+): Promise<DischargeSummaryData | null> {
   const db = getDb()
   const [row] = await db
     .select({

@@ -57,7 +57,7 @@ describe.skipIf(!process.env.DATABASE_URL)('getDischargeSummaryData (DB)', () =>
   })
 
   it('returns null for an unknown admission', async () => {
-    expect(await getDischargeSummaryData(2147483000, new Date(), 'admin')).toBeNull()
+    expect(await getDischargeSummaryData(2147483000, { now: new Date(), viewerRole: 'admin' })).toBeNull()
   })
 
   it('returns null for an admission still admitted and the shape after discharge', async () => {
@@ -65,7 +65,7 @@ describe.skipIf(!process.env.DATABASE_URL)('getDischargeSummaryData (DB)', () =>
     const adm = await createAdmission({ patientId: PATIENT, roomId: null, attendingProviderId: providerId, admissionType: 'elective', createdFromAssignmentId: null })
     admissionId = adm.id
     await db.insert(admissionTransfers).values({ admissionId: adm.id, fromRoomId: null, toRoomId: roomId, reason: 'TEST_SP3 bed', transferredByName: PROBE_USER })
-    expect(await getDischargeSummaryData(adm.id, new Date(), 'admin')).toBeNull()
+    expect(await getDischargeSummaryData(adm.id, { now: new Date(), viewerRole: 'admin' })).toBeNull()
 
     const start = new Date(Math.floor((Date.now() + 15 * DAY) / 60000) * 60000)
     const r = await dischargeAdmission(adm.id, {
@@ -77,7 +77,7 @@ describe.skipIf(!process.env.DATABASE_URL)('getDischargeSummaryData (DB)', () =>
     await createSignature({ signableType: 'admission_discharge', signableId: adm.id, signerTypedName: PROBE_USER, signerRole: 'admin', attestationText: 'TEST_SP3' })
 
     const now = new Date()
-    const d = await getDischargeSummaryData(adm.id, now, 'pi')
+    const d = await getDischargeSummaryData(adm.id, { now, viewerRole: 'pi' })
     expect(d).not.toBeNull()
     const today = istDateOf(now)
     expect(d!.patient).toEqual({
@@ -100,19 +100,25 @@ describe.skipIf(!process.env.DATABASE_URL)('getDischargeSummaryData (DB)', () =>
   })
 
   it('front desk gets the document without clinical sections or ABHA', async () => {
-    const d = await getDischargeSummaryData(admissionId, new Date(), 'frontdesk')
+    const d = await getDischargeSummaryData(admissionId, { now: new Date(), viewerRole: 'frontdesk' })
     expect(d).not.toBeNull()
     expect(d!.clinical).toBeNull()
     expect(d!.patient.abhaNumber).toBeNull()
+    expect(d!.patient.mlcNumber).toBeNull()
     expect(JSON.stringify(d)).not.toContain('appendicitis')
     expect(d!.followUp?.reason).toBe('Suture removal')
+  })
+
+  it('options default to now and no viewer role (no clinical sections)', async () => {
+    const d = await getDischargeSummaryData(admissionId)
+    expect(d?.clinical).toBeNull()
   })
 
   it('a discharge without a follow-up has followUp and signature null', async () => {
     const adm = await createAdmission({ patientId: PATIENT, roomId: null, attendingProviderId: providerId, admissionType: 'transfer_in', createdFromAssignmentId: null })
     otherAdmissionId = adm.id
     await dischargeAdmission(adm.id, { dischargeDiagnosis: 'A', dischargeDrugs: 'B', dischargeDevices: 'C', dischargeDiet: 'D', dischargeSummaryNotes: 'E', followUp: null, followUpPlan: null }, SESSION)
-    const d = await getDischargeSummaryData(adm.id, new Date(), 'admin')
+    const d = await getDischargeSummaryData(adm.id, { now: new Date(), viewerRole: 'admin' })
     expect(d!.followUp).toBeNull()
     expect(d!.signature).toBeNull()
     expect(d!.admission.lastWard).toBeNull()
