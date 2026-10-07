@@ -80,7 +80,7 @@ export default async function SettingsPage() {
   const providersTab = (
     <section className={SECTION}>
       <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Provider roster</h2>
-      <ProviderProfilesPanel providers={providers} isAdmin={isAdmin} />
+      <ProviderProfilesPanel providers={providers} departments={departments} isAdmin={isAdmin} />
     </section>
   )
 

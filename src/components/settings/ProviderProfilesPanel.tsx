@@ -2,6 +2,11 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pencil } from 'lucide-react'
+import type { Department } from '@/db/schema'
+import { INDIAN_STATES } from '@/lib/india/reference'
+import { formatPaise, parseRupeesToPaise } from '@/lib/money'
+
+const INPUT = 'w-full rounded-md border border-border px-2 py-1 text-sm'
 
 // colorTag stores a design-system chart token name (e.g. "chart-1"), not a
 // raw color value -- map it to the matching Tailwind background class.
@@ -20,24 +25,47 @@ export interface ProviderRow {
   specialty: string
   colorTag: string
   isActive: boolean
+  departmentId: number | null
+  registrationCouncil: 'nmc' | 'smc' | null
+  registrationStateCode: string | null
+  registrationNumber: string | null
+  consultationFeePaise: number | null
 }
 
-function ProviderRowItem({ provider, isAdmin }: { provider: ProviderRow; isAdmin: boolean }) {
+function ProviderRowItem({ provider, departments, isAdmin }: { provider: ProviderRow; departments: Department[]; isAdmin: boolean }) {
   const router = useRouter()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(provider.name)
+  const [departmentId, setDepartmentId] = useState(provider.departmentId != null ? String(provider.departmentId) : '')
+  const [council, setCouncil] = useState<string>(provider.registrationCouncil ?? '')
+  const [stateCode, setStateCode] = useState(provider.registrationStateCode ?? '')
+  const [regNumber, setRegNumber] = useState(provider.registrationNumber ?? '')
+  const [fee, setFee] = useState(provider.consultationFeePaise != null ? (provider.consultationFeePaise / 100).toFixed(2) : '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function save() {
-    setSaving(true)
     setError(null)
+    let consultationFeePaise: number | null = null
+    if (fee.trim() !== '') {
+      consultationFeePaise = parseRupeesToPaise(fee)
+      if (consultationFeePaise === null) { setError('Enter a valid fee in rupees.'); return }
+    }
+    setSaving(true)
     const res = await fetch(`/api/providers/${provider.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({
+        name,
+        departmentId: departmentId === '' ? null : Number(departmentId),
+        registrationCouncil: council === '' ? null : council,
+        registrationStateCode: council === 'smc' ? stateCode || null : null,
+        registrationNumber: regNumber.trim() === '' ? null : regNumber.trim(),
+        consultationFeePaise,
+      }),
     })
     setSaving(false)
+    if (res.status === 409) { setError('Conflicts with an existing provider.'); return }
     if (!res.ok) { setError('Could not save.'); return }
     setEditing(false)
     // provider.name is a prop from the server-rendered roster -- without
@@ -63,7 +91,42 @@ function ProviderRowItem({ provider, isAdmin }: { provider: ProviderRow; isAdmin
           ) : (
             <p className="truncate text-sm font-medium text-foreground">{provider.name}{provider.credentials ? `, ${provider.credentials}` : ''}</p>
           )}
-          <p className="truncate text-xs text-muted-foreground">{provider.specialty}{!provider.isActive ? ' · Inactive' : ''}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {provider.specialty}
+            {provider.consultationFeePaise != null ? ` · ${formatPaise(provider.consultationFeePaise)}` : ''}
+            {!provider.isActive ? ' · Inactive' : ''}
+          </p>
+          {editing && (
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <label className="text-xs text-muted-foreground">Department
+                <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className={INPUT}>
+                  <option value="">None</option>
+                  {departments.filter((d) => d.isActive || String(d.id) === departmentId).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </label>
+              <label className="text-xs text-muted-foreground">Registration council
+                <select value={council} onChange={(e) => setCouncil(e.target.value)} className={INPUT}>
+                  <option value="">None</option>
+                  <option value="nmc">National Medical Commission</option>
+                  <option value="smc">State Medical Council</option>
+                </select>
+              </label>
+              {council === 'smc' && (
+                <label className="text-xs text-muted-foreground">Registration state
+                  <select value={stateCode} onChange={(e) => setStateCode(e.target.value)} className={INPUT}>
+                    <option value="">Select state</option>
+                    {INDIAN_STATES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
+                  </select>
+                </label>
+              )}
+              <label className="text-xs text-muted-foreground">Registration number
+                <input value={regNumber} onChange={(e) => setRegNumber(e.target.value)} maxLength={20} autoComplete="off" className={INPUT} />
+              </label>
+              <label className="text-xs text-muted-foreground">Consultation fee (₹)
+                <input value={fee} onChange={(e) => setFee(e.target.value)} inputMode="decimal" className={INPUT} />
+              </label>
+            </div>
+          )}
         </div>
       </div>
       {isAdmin && (
@@ -74,7 +137,7 @@ function ProviderRowItem({ provider, isAdmin }: { provider: ProviderRow; isAdmin
               <button onClick={save} disabled={saving} className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
                 {saving ? 'Saving…' : 'Save'}
               </button>
-              <button onClick={() => { setEditing(false); setName(provider.name) }} className="text-xs font-medium text-muted-foreground hover:text-foreground">
+              <button onClick={() => { setEditing(false); setName(provider.name); setError(null) }} className="text-xs font-medium text-muted-foreground hover:text-foreground">
                 Cancel
               </button>
             </>
@@ -90,11 +153,11 @@ function ProviderRowItem({ provider, isAdmin }: { provider: ProviderRow; isAdmin
   )
 }
 
-export function ProviderProfilesPanel({ providers, isAdmin }: { providers: ProviderRow[]; isAdmin: boolean }) {
+export function ProviderProfilesPanel({ providers, departments, isAdmin }: { providers: ProviderRow[]; departments: Department[]; isAdmin: boolean }) {
   if (providers.length === 0) return <p className="text-sm text-muted-foreground">No providers on file.</p>
   return (
     <div>
-      {providers.map((p) => <ProviderRowItem key={p.id} provider={p} isAdmin={isAdmin} />)}
+      {providers.map((p) => <ProviderRowItem key={p.id} provider={p} departments={departments} isAdmin={isAdmin} />)}
     </div>
   )
 }
