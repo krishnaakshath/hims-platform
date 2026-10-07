@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
+import { appointmentInstantSchema, isTimeFieldError } from '@/lib/appointment-time'
 import { getAdmissionById } from '@/lib/queries/admissions'
 import { orderMedication, listMedicationsForAdmission, getMedicationEpisodeById } from '@/lib/queries/medication-administrations'
 
@@ -10,7 +11,8 @@ const orderSchema = z.object({
   medicationEpisodeId: z.number().int().optional(),
   medicationName: z.string().min(1),
   dose: z.string().min(1),
-  scheduledFor: z.string().min(1),
+  // Explicit UTC offset required (the panel sends +05:30), like every appointment time.
+  scheduledFor: appointmentInstantSchema,
 }).strict()
 
 // Read access is wider than the POST below (admin/crc/pi vs. admin/pi only)
@@ -46,6 +48,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!admission) return NextResponse.json({ error: 'Admission not found' }, { status: 404 })
 
   const parsed = orderSchema.safeParse(await request.json())
+  if (!parsed.success && isTimeFieldError(parsed.error, ['scheduledFor'])) {
+    return NextResponse.json({ error: 'Invalid scheduled time. Send it with a UTC offset (e.g. +05:30).' }, { status: 400 })
+  }
   if (!parsed.success) return NextResponse.json({ error: 'Invalid medication order', details: parsed.error.flatten() }, { status: 400 })
 
   if (parsed.data.medicationEpisodeId !== undefined) {

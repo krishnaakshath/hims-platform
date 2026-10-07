@@ -5,12 +5,13 @@ import { SCHEDULING_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { insertAppointmentIfFree, listAppointmentsInRange } from '@/lib/queries/appointments'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
+import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
 
 const createAppointmentSchema = z.object({
   patientId: z.string().min(1),
   providerId: z.number().int().positive(),
-  startsAt: z.string().min(1),
-  endsAt: z.string().min(1),
+  startsAt: appointmentInstantSchema,
+  endsAt: appointmentInstantSchema,
   visitReason: visitReasonSchema,
   status: z.enum(['scheduled', 'completed', 'cancelled', 'no_show']).optional(),
 }).strict()
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
   if (!SCHEDULING_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const parsed = createAppointmentSchema.safeParse(await request.json())
+  if (!parsed.success && isTimeFieldError(parsed.error)) return invalidAppointmentTime()
   if (!parsed.success) return NextResponse.json({ error: 'Invalid appointment payload', details: parsed.error.flatten() }, { status: 400 })
 
   const startsAt = new Date(parsed.data.startsAt)

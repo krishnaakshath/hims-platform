@@ -49,7 +49,7 @@ describe('POST /api/appointments', () => {
     const providers = await listActiveProviders()
     const req = new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-10-01T10:00:00', endsAt: '2026-10-01T09:00:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-10-01T10:00:00+05:30', endsAt: '2026-10-01T09:00:00+05:30', visitReason: 'Test visit' }),
     })
     const res = await POST(req as never)
     expect(res.status).toBe(400)
@@ -59,7 +59,7 @@ describe('POST /api/appointments', () => {
     const providers = await listActiveProviders()
     const req = new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-10-01T09:00:00', endsAt: '2026-10-01T09:30:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-10-01T09:00:00+05:30', endsAt: '2026-10-01T09:30:00+05:30', visitReason: 'Test visit' }),
     })
     const res = await POST(req as never)
     expect(res.status).toBe(201)
@@ -74,7 +74,7 @@ describe('PUT /api/appointments/[id]', () => {
     const providers = await listActiveProviders()
     const createReq = new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0002', providerId: providers[0].id, startsAt: '2026-10-02T09:00:00', endsAt: '2026-10-02T09:30:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0002', providerId: providers[0].id, startsAt: '2026-10-02T09:00:00+05:30', endsAt: '2026-10-02T09:30:00+05:30', visitReason: 'Test visit' }),
     })
     const created = await (await POST(createReq as never)).json()
     createdIds.push(created.id)
@@ -88,7 +88,7 @@ describe('PUT /api/appointments/[id]', () => {
     const providers = await listActiveProviders()
     const createReq = new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0003', providerId: providers[0].id, startsAt: '2026-10-03T09:00:00', endsAt: '2026-10-03T09:30:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0003', providerId: providers[0].id, startsAt: '2026-10-03T09:00:00+05:30', endsAt: '2026-10-03T09:30:00+05:30', visitReason: 'Test visit' }),
     })
     const created = await (await POST(createReq as never)).json()
     createdIds.push(created.id)
@@ -108,13 +108,13 @@ describe('PUT /api/appointments/[id]', () => {
     const providers = await listActiveProviders()
     const createReq = new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0004', providerId: providers[0].id, startsAt: '2026-10-04T09:00:00', endsAt: '2026-10-04T09:30:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0004', providerId: providers[0].id, startsAt: '2026-10-04T09:00:00+05:30', endsAt: '2026-10-04T09:30:00+05:30', visitReason: 'Test visit' }),
     })
     const created = await (await POST(createReq as never)).json()
     createdIds.push(created.id)
 
     // Only startsAt is sent -- the existing endsAt (09:30) is now before it.
-    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ startsAt: '2026-10-04T10:00:00' }) })
+    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ startsAt: '2026-10-04T10:00:00+05:30' }) })
     const res = await PUT(req as never, { params: Promise.resolve({ id: String(created.id) }) })
     expect(res.status).toBe(400)
   })
@@ -125,14 +125,14 @@ describe('scheduling conflict detection', () => {
     const providers = await listActiveProviders()
     const first = await POST(new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-11-01T09:00:00', endsAt: '2026-11-01T09:30:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-11-01T09:00:00+05:30', endsAt: '2026-11-01T09:30:00+05:30', visitReason: 'Test visit' }),
     }) as never)
     const firstBody = await first.json()
     createdIds.push(firstBody.id)
 
     const overlapping = await POST(new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0002', providerId: providers[0].id, startsAt: '2026-11-01T09:15:00', endsAt: '2026-11-01T09:45:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0002', providerId: providers[0].id, startsAt: '2026-11-01T09:15:00+05:30', endsAt: '2026-11-01T09:45:00+05:30', visitReason: 'Test visit' }),
     }) as never)
     expect(overlapping.status).toBe(409)
   })
@@ -141,20 +141,20 @@ describe('scheduling conflict detection', () => {
     const providers = await listActiveProviders()
     const first = await POST(new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-11-05T09:00:00', endsAt: '2026-11-05T09:30:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-11-05T09:00:00+05:30', endsAt: '2026-11-05T09:30:00+05:30', visitReason: 'Test visit' }),
     }) as never)
     const firstBody = await first.json()
     createdIds.push(firstBody.id)
 
     const second = await POST(new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0002', providerId: providers[0].id, startsAt: '2026-11-05T11:00:00', endsAt: '2026-11-05T11:30:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0002', providerId: providers[0].id, startsAt: '2026-11-05T11:00:00+05:30', endsAt: '2026-11-05T11:30:00+05:30', visitReason: 'Test visit' }),
     }) as never)
     const secondBody = await second.json()
     createdIds.push(secondBody.id)
 
     // Reschedule the second appointment into the first one's slot.
-    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ startsAt: '2026-11-05T09:15:00', endsAt: '2026-11-05T09:45:00' }) })
+    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ startsAt: '2026-11-05T09:15:00+05:30', endsAt: '2026-11-05T09:45:00+05:30' }) })
     const res = await PUT(req as never, { params: Promise.resolve({ id: String(secondBody.id) }) })
     expect(res.status).toBe(409)
   })
@@ -163,21 +163,21 @@ describe('scheduling conflict detection', () => {
     const providers = await listActiveProviders()
     const created = await POST(new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-11-06T09:00:00', endsAt: '2026-11-06T09:30:00', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-11-06T09:00:00+05:30', endsAt: '2026-11-06T09:30:00+05:30', visitReason: 'Test visit' }),
     }) as never)
     const createdBody = await created.json()
     createdIds.push(createdBody.id)
 
     // Re-sends the appointment's own current startsAt -- must not conflict
     // with itself.
-    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ startsAt: '2026-11-06T09:00:00', endsAt: '2026-11-06T09:30:00' }) })
+    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ startsAt: '2026-11-06T09:00:00+05:30', endsAt: '2026-11-06T09:30:00+05:30' }) })
     const res = await PUT(req as never, { params: Promise.resolve({ id: String(createdBody.id) }) })
     expect(res.status).toBe(200)
   })
 })
 
 describe('appointments visitReason length (patient-facing)', () => {
-  const slot = { startsAt: '2026-11-13T09:00:00', endsAt: '2026-11-13T09:30:00' }
+  const slot = { startsAt: '2026-11-13T09:00:00+05:30', endsAt: '2026-11-13T09:30:00+05:30' }
 
   async function apptsAtSlot(providerId: number) {
     const rows = await getDb().select().from(appointments).where(eq(appointments.startsAt, new Date(slot.startsAt)))
@@ -252,7 +252,7 @@ describe('appointments role gate', () => {
     const providers = await listActiveProviders()
     const [row] = await getDb().insert(appointments).values({
       patientId: 'RD-0001', providerId: providers[0].id,
-      startsAt: new Date('2026-12-07T09:00:00'), endsAt: new Date('2026-12-07T09:30:00'),
+      startsAt: new Date('2026-12-07T09:00:00+05:30'), endsAt: new Date('2026-12-07T09:30:00+05:30'),
       visitReason: 'T7 gate fixture', status: 'scheduled',
     }).returning()
     probeIds.push(row.id)
@@ -270,7 +270,7 @@ describe('appointments role gate', () => {
 
       const postRes = await POST(new Request('http://localhost/api/appointments', {
         method: 'POST',
-        body: JSON.stringify({ patientId: 'RD-0002', providerId: providers[0].id, startsAt: '2026-12-08T09:00:00', endsAt: '2026-12-08T09:30:00', visitReason: 'T7 denied POST' }),
+        body: JSON.stringify({ patientId: 'RD-0002', providerId: providers[0].id, startsAt: '2026-12-08T09:00:00+05:30', endsAt: '2026-12-08T09:30:00+05:30', visitReason: 'T7 denied POST' }),
       }) as never)
       const postBody = await postRes.json()
       if (typeof postBody?.id === 'number') probeIds.push(postBody.id) // regression safety: never leak a row
@@ -302,7 +302,7 @@ describe('appointments role gate', () => {
       const day = { frontdesk: '12-10', pi: '12-11', admin: '12-12' }[role]
       const post = await POST(new Request('http://localhost/api/appointments', {
         method: 'POST',
-        body: JSON.stringify({ patientId: 'RD-0003', providerId: providers[0].id, startsAt: `2026-${day}T09:00:00`, endsAt: `2026-${day}T09:30:00`, visitReason: 'T7 allowed role' }),
+        body: JSON.stringify({ patientId: 'RD-0003', providerId: providers[0].id, startsAt: `2026-${day}T09:00:00+05:30`, endsAt: `2026-${day}T09:30:00+05:30`, visitReason: 'T7 allowed role' }),
       }) as never)
       const created = await post.json()
       if (typeof created?.id === 'number') probeIds.push(created.id)

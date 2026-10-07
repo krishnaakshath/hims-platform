@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { istSlotString } from '@/lib/india-time'
 
 interface MedicationRecord {
   id: number
@@ -71,7 +72,8 @@ export function MedicationAdministrationPanel({ admissionId, onClose }: { admiss
   async function addMedication() {
     setAdding(true)
     setAddError(null)
-    const scheduledFor = scheduledDate && scheduledTime ? new Date(`${scheduledDate}T${scheduledTime}`).toISOString() : ''
+    // IST wall-clock time with an explicit offset (not the browser's own zone).
+    const scheduledFor = scheduledDate && scheduledTime ? istSlotString(scheduledDate, scheduledTime) : ''
     const res = await fetch(`/api/inpatient/admissions/${admissionId}/medications`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

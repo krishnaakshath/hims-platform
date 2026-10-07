@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import type { DoctorAssignmentRow } from '@/lib/queries/doctor-assignments'
+import { istSlotString, todayIsoIn } from '@/lib/india-time'
 
 export function AssignmentScheduleModalTrigger({ assignment }: { assignment: DoctorAssignmentRow }) {
   const [open, setOpen] = useState(false)
@@ -17,7 +18,7 @@ export function AssignmentScheduleModalTrigger({ assignment }: { assignment: Doc
 
 function AssignmentScheduleModal({ assignment, onClose }: { assignment: DoctorAssignmentRow; onClose: () => void }) {
   const router = useRouter()
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(() => todayIsoIn())
   const [startTime, setStartTime] = useState('09:00')
   const [endTime, setEndTime] = useState('09:30')
   const [declineReason, setDeclineReason] = useState('')
@@ -31,7 +32,8 @@ function AssignmentScheduleModal({ assignment, onClose }: { assignment: DoctorAs
     const res = await fetch(`/api/front-desk/assignments/${assignment.id}/schedule`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ startsAt: `${date}T${startTime}:00`, endsAt: `${date}T${endTime}:00` }),
+      // IST wall-clock time with an explicit offset; the server rejects naive times.
+      body: JSON.stringify({ startsAt: istSlotString(date, startTime), endsAt: istSlotString(date, endTime) }),
     })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
