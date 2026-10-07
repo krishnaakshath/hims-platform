@@ -1,4 +1,5 @@
-import { eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
+import { liveDiagnosis } from '@/lib/queries/diagnoses' // SP6
 import { getDb } from '@/db/client'
 import { patients, allergies, diagnoses, medicationEpisodes, medications } from '@/db/schema'
 import { listDispensesForPatient } from '@/lib/queries/medication-dispenses'
@@ -26,7 +27,7 @@ export async function gatherPatientFhirData(anonId: string): Promise<PatientFhir
 
   const [allergyRows, diagnosisRows, medicationEpisodeRows, dispenses, labOrderRows] = await Promise.all([
     db.select().from(allergies).where(eq(allergies.patientId, anonId)),
-    db.select().from(diagnoses).where(eq(diagnoses.patientId, anonId)),
+    db.select().from(diagnoses).where(and(eq(diagnoses.patientId, anonId), liveDiagnosis)), // SP6: voided rows hidden
     db.select().from(medicationEpisodes).where(eq(medicationEpisodes.patientId, anonId)),
     listDispensesForPatient(anonId),
     listOrdersForPatient(anonId),

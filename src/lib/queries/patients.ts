@@ -10,7 +10,8 @@ import {
   // SP6
   codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures,
 } from '@/db/schema'
-import { desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
@@ -132,7 +133,7 @@ export async function getPatientDetail(anonId: string) {
 
     const [screening] = await getDb().select().from(patientTrialScreenings).where(eq(patientTrialScreenings.patientId, anonId))
     const criteria = screening ? await getDb().select().from(screeningCriteriaResults).where(eq(screeningCriteriaResults.screeningId, screening.id)) : []
-    const dx = await getDb().select().from(diagnoses).where(eq(diagnoses.patientId, anonId))
+    const dx = await getDb().select().from(diagnoses).where(and(eq(diagnoses.patientId, anonId), liveDiagnosis)) // SP6: voided rows hidden
     const meds = await getDb().select().from(medicationEpisodes).where(eq(medicationEpisodes.patientId, anonId))
     const patientAllergies = await getDb().select().from(allergies).where(eq(allergies.patientId, anonId))
     // Project down to only what callers need. The full row includes
@@ -287,7 +288,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
   const dx = await db
     .select({ id: diagnoses.id, code: diagnoses.code, description: diagnoses.description })
     .from(diagnoses)
-    .where(eq(diagnoses.patientId, patientRow.id))
+    .where(and(eq(diagnoses.patientId, patientRow.id), liveDiagnosis, withCodeValue)) // SP6: live rows with a billable code value
 
   const episodeRows = await db
     .select({
