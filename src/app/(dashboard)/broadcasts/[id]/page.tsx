@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { notFound, redirect } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getBroadcast } from '@/lib/queries/broadcasts'
@@ -13,7 +14,9 @@ export default async function BroadcastDetailPage({ params }: { params: Promise<
   // Wave B P1-21: demo-only page -- 404 unless DEMO_FEATURES is on (after the role gate, before any read).
   if (!demoFeaturesEnabled()) notFound()
   const { id } = await params
-  const broadcast = await getBroadcast(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) notFound()
+  const broadcast = await getBroadcast(numericId)
   if (!broadcast) notFound()
   await logAudit(session, `viewed broadcast ${id}`, null)
 

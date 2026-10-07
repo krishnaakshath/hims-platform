@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
@@ -10,7 +11,9 @@ export default async function ClientFormDetailPage({ params }: { params: Promise
   const session = await requireSessionOrRedirect()
   if (!CLINICAL_ROLES.includes(session.role)) redirect('/')
   const { id } = await params
-  const submission = await getFormSubmission(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) notFound()
+  const submission = await getFormSubmission(numericId)
   if (!submission) notFound()
   await logAudit(session, `viewed client form ${id}`, submission.patientId)
 

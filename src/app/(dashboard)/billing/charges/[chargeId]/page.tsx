@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import Link from 'next/link'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -23,7 +24,9 @@ export default async function ChargeCaptureDetailPage({ params }: { params: Prom
   if (!['admin', 'crc', 'billing'].includes(session.role)) redirect('/')
 
   const { chargeId } = await params
-  const charge = await getCharge(Number(chargeId))
+  const numericId = parseId(chargeId)
+  if (numericId === null) notFound()
+  const charge = await getCharge(numericId)
   if (!charge) notFound()
   await logAudit(session, `viewed charge capture ${chargeId}`, charge.patientId)
 

@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
@@ -16,7 +17,8 @@ import { brand } from '@/lib/brand'
 // below).
 
 // Splits on ',', requires every token to be a bare non-negative integer
-// (rejects '', 'abc', a trailing empty token from '1,', and a leading '-'),
+// (rejects '', 'abc', a trailing empty token from '1,', a leading '-', and
+// anything past int4 -- see parseId),
 // de-duplicates, and bounds the result to 1-20 entries -- a cap on a
 // URL-supplied fan-out, not a product limit.
 function parseIds(raw: string | undefined): number[] | null {
@@ -24,8 +26,9 @@ function parseIds(raw: string | undefined): number[] | null {
   const tokens = raw.split(',')
   const ids: number[] = []
   for (const token of tokens) {
-    if (!/^\d+$/.test(token)) return null
-    ids.push(Number(token))
+    const id = parseId(token)
+    if (id === null) return null
+    ids.push(id)
   }
   const unique = Array.from(new Set(ids))
   if (unique.length < 1 || unique.length > 20) return null
