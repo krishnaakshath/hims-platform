@@ -425,6 +425,9 @@ import { POST as postCodingQuery } from '@/app/api/coding/encounters/[id]/querie
 import { PATCH as patchCodingQuery } from '@/app/api/coding/queries/[queryId]/route'
 import { POST as postCodingQueryResponse } from '@/app/api/coding/queries/[queryId]/responses/route'
 // end SP6
+// SP6: service <-> procedure-code map
+import { GET as getServiceCodes, PUT as putServiceCodes } from '@/app/api/coding/services/[serviceId]/procedure-codes/route'
+// end SP6
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -644,6 +647,11 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PATCH /api/coding/queries/[queryId]', call: () => settle(() => patchCodingQuery(send('PATCH', `/api/coding/queries/${BOGUS_ID}`), ctx({ queryId: BOGUS_ID }))), allowed: [...CODING_ROLES] },
   { name: 'POST /api/coding/queries/[queryId]/responses', call: () => settle(() => postCodingQueryResponse(send('POST', `/api/coding/queries/${BOGUS_ID}/responses`), ctx({ queryId: BOGUS_ID }))), allowed: [...CODING_QUERY_RESPOND_ROLES] },
   // end SP6
+  // SP6 service <-> procedure-code map: lookup (no PHI) for CODE_LOOKUP_ROLES, replace for CODING_ROLES.
+  // An allowed PUT's `{}` body fails validation before any write.
+  { name: 'GET /api/coding/services/[serviceId]/procedure-codes', call: () => settle(() => getServiceCodes(get(`/api/coding/services/${BOGUS_ID}/procedure-codes`), ctx({ serviceId: BOGUS_ID }))), allowed: [...CODE_LOOKUP_ROLES] },
+  { name: 'PUT /api/coding/services/[serviceId]/procedure-codes', call: () => settle(() => putServiceCodes(send('PUT', `/api/coding/services/${BOGUS_ID}/procedure-codes`), ctx({ serviceId: BOGUS_ID }))), allowed: [...CODING_ROLES] },
+  // end SP6
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
 ]
@@ -700,6 +708,7 @@ const SP6_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/coding/encounters/[id]/queries', call: () => postCodingQuery(send('POST', `/api/coding/encounters/${BOGUS_ID}/queries`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CODING_ROLES },
   { name: 'PATCH /api/coding/queries/[queryId]', call: () => patchCodingQuery(send('PATCH', `/api/coding/queries/${BOGUS_ID}`, NOT_JSON), ctx({ queryId: BOGUS_ID })), allowed: CODING_ROLES },
   { name: 'POST /api/coding/queries/[queryId]/responses', call: () => postCodingQueryResponse(send('POST', `/api/coding/queries/${BOGUS_ID}/responses`, NOT_JSON), ctx({ queryId: BOGUS_ID })), allowed: CODING_QUERY_RESPOND_ROLES },
+  { name: 'PUT /api/coding/services/[serviceId]/procedure-codes', call: () => putServiceCodes(send('PUT', `/api/coding/services/${BOGUS_ID}/procedure-codes`, NOT_JSON), ctx({ serviceId: BOGUS_ID })), allowed: CODING_ROLES }, // SP6 Task 14
 ]
 // end SP6
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP6_WRITE_GATES])('$name (deny before parse)', (c) => {

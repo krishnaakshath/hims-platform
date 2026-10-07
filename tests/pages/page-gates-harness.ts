@@ -314,6 +314,8 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/coding', load: () => import('@/app/(dashboard)/coding/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
   { route: '/coding/report', load: () => import('@/app/(dashboard)/coding/report/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
   { route: '/coding/encounters/[id]', load: () => import('@/app/(dashboard)/coding/encounters/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'coder'] },
+  // SP6: /coding/service-codes -- CODING_ROLES (linked from the worklist; not a nav entry)
+  { route: '/coding/service-codes', load: () => import('@/app/(dashboard)/coding/service-codes/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
   // end SP6
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).
