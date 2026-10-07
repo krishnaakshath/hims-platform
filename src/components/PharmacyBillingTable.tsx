@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDateTime } from '@/lib/india-time'
 import { formatPaise } from '@/lib/format'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -51,7 +52,7 @@ export function PharmacyBillingTable({ rows }: { rows: PharmacyBillingRowView[] 
               <td className="p-3 text-foreground">{r.medicationName}</td>
               <td className="p-3 text-foreground">{r.quantity}</td>
               <td className="p-3 text-foreground">{r.dispensedByName}</td>
-              <td className="p-3 text-foreground">{new Date(r.dispensedAt).toLocaleString()}</td>
+              <td className="p-3 text-foreground">{formatIstDateTime(r.dispensedAt)}</td>
               <td className="p-3">
                 {r.charge === null ? (
                   <Button size="sm" variant="outline" disabled={loadingId === r.dispenseId} onClick={() => openBilling(r)}>

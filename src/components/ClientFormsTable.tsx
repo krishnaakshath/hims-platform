@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDate } from '@/lib/india-time'
 import { useRouter } from 'next/navigation'
 import { ChevronRight } from 'lucide-react'
 
@@ -49,8 +50,8 @@ export function ClientFormsTable({ submissions }: { submissions: ClientFormRow[]
                 {s.status}
                 {s.bandLabel !== null && <span className="normal-case"> · Score: {s.totalScore} ({s.bandLabel})</span>}
               </td>
-              <td className="p-3 text-muted-foreground">{new Date(s.sentDate).toLocaleDateString()}</td>
-              <td className="p-3 text-muted-foreground">{s.completedDate ? new Date(s.completedDate).toLocaleDateString() : '—'}</td>
+              <td className="p-3 text-muted-foreground">{formatIstDate(s.sentDate)}</td>
+              <td className="p-3 text-muted-foreground">{s.completedDate ? formatIstDate(s.completedDate) : '—'}</td>
               <td className="p-3 text-muted-foreground"><ChevronRight className="h-4 w-4" aria-hidden="true" /></td>
             </tr>
           ))}

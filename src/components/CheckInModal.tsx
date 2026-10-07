@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDateTime } from '@/lib/india-time'
 import { useId, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -47,7 +48,7 @@ export function CheckInModal({ providers, rooms, onClose }: { providers: Provide
         queueTicketNumber: body.queueTicketNumber,
         patientId: body.patientId ?? patientId,
         roomId: body.roomId ?? null,
-        checkedInAt: new Date().toLocaleString(),
+        checkedInAt: formatIstDateTime(new Date(), { label: true }),
       })
       router.refresh()
       return

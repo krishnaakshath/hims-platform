@@ -1,9 +1,14 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import {
   formatIstDate, formatIstDateTime, formatIstTime, formatIstLongDate, formatIstMonthYear, formatIstWeekdayDay,
   istSlotString, istLocalToOffsetString, parseIstLocalDateTime, hasExplicitUtcOffset, istDateOf, IST_OFFSET,
 } from '@/lib/india-time'
+
+// Prove independence from the process zone: run as if the server were in Los Angeles.
+const ORIGINAL_TZ = process.env.TZ
+beforeAll(() => { process.env.TZ = 'America/Los_Angeles' })
+afterAll(() => { if (ORIGINAL_TZ === undefined) delete process.env.TZ; else process.env.TZ = ORIGINAL_TZ })
 
 // 2026-10-08T03:30:00Z = 09:00 IST on Thu 8 Oct 2026.
 const NINE_IST = new Date('2026-10-08T03:30:00Z')

@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDate } from '@/lib/india-time'
 import { ReportTable, type ReportColumn } from '@/components/ReportTable'
 import type { DataGridFilterField } from '@/components/DataGridToolbar'
 
@@ -21,7 +22,7 @@ const FILTER_FIELDS: DataGridFilterField[] = [
 const COLUMNS: ReportColumn<UnsignedNoteRow>[] = [
   { key: 'assignedUser', label: 'Assigned User', render: (r) => r.assignedUser },
   { key: 'patientName', label: 'Patient', render: (r) => r.patientName },
-  { key: 'visitDate', label: 'Visit Date', render: (r) => (r.visitDate ? new Date(r.visitDate).toLocaleDateString() : '—') },
+  { key: 'visitDate', label: 'Visit Date', render: (r) => (r.visitDate ? formatIstDate(r.visitDate) : '—') },
   { key: 'status', label: 'Status', render: (r) => r.status },
   { key: 'noteType', label: 'Note Type', render: (r) => r.noteType },
   { key: 'noteId', label: 'Note ID', render: (r) => r.noteId },

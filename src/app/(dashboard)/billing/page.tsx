@@ -1,3 +1,4 @@
+import { formatIstDate } from '@/lib/india-time'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { IndianRupee, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3 } from 'lucide-react'
@@ -184,7 +185,7 @@ export default async function BillingHomePage() {
                     <Link href={`/billing/charges/${charge.id}`} className="hover:underline">{charge.patientName}</Link>
                   </td>
                   <td className="p-3 text-muted-foreground">{charge.providerName}</td>
-                  <td className="p-3 text-muted-foreground">{new Date(charge.dateOfService).toLocaleDateString()}</td>
+                  <td className="p-3 text-muted-foreground">{formatIstDate(charge.dateOfService)}</td>
                   <td className="p-3 text-right font-medium tabular-nums text-foreground">{formatPaise(charge.amountCents)}</td>
                   <td className="p-3">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${CHARGE_STATUS_BADGE[charge.status] ?? 'bg-muted text-muted-foreground'}`}>

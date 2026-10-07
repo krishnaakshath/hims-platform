@@ -5,6 +5,7 @@ import { SCHEDULING_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { insertAppointmentIfFree, listAppointmentsInRange } from '@/lib/queries/appointments'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
+import { startOfIstDay } from '@/lib/india-time'
 import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
 
 const createAppointmentSchema = z.object({
@@ -31,7 +32,12 @@ export async function GET(request: NextRequest) {
     ? (providerIdsParam === '' ? [] : providerIdsParam.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))
     : undefined
 
-  const results = await listAppointmentsInRange(new Date(from), new Date(to), providerIds)
+  // A bare YYYY-MM-DD is an IST calendar day: `from` starts it, `to` includes all of it.
+  const DAY = /^\d{4}-\d{2}-\d{2}$/
+  const fromInstant = DAY.test(from) ? startOfIstDay(from) : new Date(from)
+  const toInstant = DAY.test(to) ? new Date(startOfIstDay(to).getTime() + 24 * 60 * 60 * 1000 - 1) : new Date(to)
+  if (isNaN(fromInstant.getTime()) || isNaN(toInstant.getTime())) return NextResponse.json({ error: 'from and to must be dates' }, { status: 400 })
+  const results = await listAppointmentsInRange(fromInstant, toInstant, providerIds)
   await logAudit(session, 'viewed appointments', null)
   return NextResponse.json(results)
 }

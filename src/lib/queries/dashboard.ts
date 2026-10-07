@@ -1,3 +1,4 @@
+import { istHourOf, istYearMonthOf } from '@/lib/india-time'
 import { getDb } from '@/db/client'
 import { formSubmissions, formTemplates, patients, patientTrialScreenings, auditLog, appointments, reviews } from '@/db/schema'
 import { eq, desc, or, inArray, sql } from 'drizzle-orm'
@@ -27,17 +28,19 @@ function formatHourRange(startHour: number, spanHours: number): string {
 export function computePeakHourRange(startTimes: Date[]): string | null {
   if (startTimes.length === 0) return null
   const buckets = new Array(12).fill(0) // 12 two-hour windows across a day
-  for (const d of startTimes) buckets[Math.floor(d.getHours() / 2)] += 1
+  for (const d of startTimes) buckets[Math.floor(istHourOf(d) / 2)] += 1
   let maxIdx = 0
   for (let i = 1; i < buckets.length; i++) if (buckets[i] > buckets[maxIdx]) maxIdx = i
   return formatHourRange(maxIdx * 2, 2)
 }
 
 export function computePatientsByMonth(dateAddedList: Date[]): { month: string; count: number }[] {
-  const year = new Date().getFullYear()
+  // IST year/months, independent of the server's zone.
+  const year = istYearMonthOf(new Date()).year
   const counts = new Array(12).fill(0)
   for (const d of dateAddedList) {
-    if (d.getFullYear() === year) counts[d.getMonth()] += 1
+    const ym = istYearMonthOf(new Date(d))
+    if (ym.year === year) counts[ym.month] += 1
   }
   return MONTH_LABELS.map((month, i) => ({ month, count: counts[i] }))
 }

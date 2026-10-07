@@ -1,3 +1,4 @@
+import { istDateOf } from '@/lib/india-time'
 import { getDb } from '@/db/client'
 import { patients, patientTrialScreenings, formSubmissions } from '@/db/schema'
 import { eq, and, gte, lte } from 'drizzle-orm'
@@ -66,10 +67,9 @@ export async function getPipelinePerformance(range: PipelineDateRange): Promise<
 // (referral received / form completed / classification run), but bucketed by
 // calendar day instead of summed into one KPI, so the dashboard can chart
 // activity across the selected range rather than only showing a single
-// aggregate number per KPI. Uses `.toISOString().slice(0, 10)` for the day
-// key -- the same UTC-day convention this page's own date-range form already
-// uses for its `defaultValue`s -- so a day bucket boundary here always lines
-// up with what the date pickers above the chart show.
+// aggregate number per KPI. Day keys are IST calendar dates -- the same
+// convention this page's date-range form uses for its `defaultValue`s -- so a
+// day bucket boundary here always lines up with what the date pickers show.
 export async function getPipelineTrend(range: PipelineDateRange): Promise<PipelineTrendPoint[]> {
   return getOrSetCache(pipelineDashboardTrendCacheKey(range.from.toISOString(), range.to.toISOString()), 30, async () => {
     const db = getDb()
@@ -91,7 +91,7 @@ export async function getPipelineTrend(range: PipelineDateRange): Promise<Pipeli
       .where(and(gte(patients.chartDataAsOf, range.from), lte(patients.chartDataAsOf, range.to)))
     const classifiedInWindow = candidatesInWindow.filter((p) => screenedPatientIds.has(p.id))
 
-    const dayKey = (d: Date) => d.toISOString().slice(0, 10)
+    const dayKey = (d: Date) => istDateOf(new Date(d))
     const buckets = new Map<string, PipelineTrendPoint>()
     const bucketFor = (key: string) => {
       let entry = buckets.get(key)

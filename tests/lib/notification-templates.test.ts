@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { normalizeVisitReason, buildVisitConfirmationBody, formatVisitDate, formatVisitTime, WHAT_TO_BRING, INPATIENT_OVERNIGHT_BAG } from '@/lib/notification-templates'
+
+// Prove independence from the process zone: run as if the server were in Los Angeles.
+const ORIGINAL_TZ = process.env.TZ
+beforeAll(() => { process.env.TZ = 'America/Los_Angeles' })
+afterAll(() => { if (ORIGINAL_TZ === undefined) delete process.env.TZ; else process.env.TZ = ORIGINAL_TZ })
 
 // 09:00 IST on Tue 3 Nov 2026 (= 03:30Z). Built from an explicit instant so the
 // result never depends on the test machine's (or the server's) time zone.

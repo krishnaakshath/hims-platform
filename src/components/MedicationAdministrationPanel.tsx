@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { istSlotString } from '@/lib/india-time'
+import { formatIstDateTime, istSlotString } from '@/lib/india-time'
 
 interface MedicationRecord {
   id: number
@@ -144,10 +144,10 @@ export function MedicationAdministrationPanel({ admissionId, onClose }: { admiss
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="font-medium text-foreground">{m.medicationName} <span className="font-normal text-muted-foreground">({m.dose})</span></p>
-                    <p className="text-xs text-muted-foreground">Scheduled {new Date(m.scheduledFor).toLocaleString()}</p>
+                    <p className="text-xs text-muted-foreground">Scheduled {formatIstDateTime(m.scheduledFor)}</p>
                     {m.status !== 'scheduled' && (
                       <p className="text-xs text-muted-foreground">
-                        {m.status === 'given' ? 'Given' : m.status === 'held' ? 'Held' : 'Refused'} by {m.administeredByName} at {m.administeredAt ? new Date(m.administeredAt).toLocaleString() : '—'}
+                        {m.status === 'given' ? 'Given' : m.status === 'held' ? 'Held' : 'Refused'} by {m.administeredByName} at {m.administeredAt ? formatIstDateTime(m.administeredAt) : '—'}
                         {m.notes && ` — ${m.notes}`}
                       </p>
                     )}

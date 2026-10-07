@@ -36,6 +36,23 @@ describe('GET /api/appointments', () => {
     const body = await res.json()
     expect(body.length).toBeGreaterThan(0)
   })
+
+  it('treats bare from/to dates as whole IST days (00:15 IST belongs to that IST day)', async () => {
+    const providers = await listActiveProviders()
+    const post = new Request('http://localhost/api/appointments', {
+      method: 'POST',
+      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, startsAt: '2026-12-20T00:15:00+05:30', endsAt: '2026-12-20T00:45:00+05:30', visitReason: 'IST day range' }),
+    })
+    const created = await POST(post as never)
+    expect(created.status).toBe(201)
+    const { id } = await created.json()
+    createdIds.push(id)
+    const res = await GET(new Request('http://localhost/api/appointments?from=2026-12-20&to=2026-12-20') as never)
+    const ids = (await res.json()).map((a: { id: number }) => a.id)
+    expect(ids).toContain(id)
+    const prev = await GET(new Request('http://localhost/api/appointments?from=2026-12-19&to=2026-12-19') as never)
+    expect((await prev.json()).map((a: { id: number }) => a.id)).not.toContain(id)
+  })
 })
 
 describe('POST /api/appointments', () => {

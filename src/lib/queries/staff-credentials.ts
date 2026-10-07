@@ -1,3 +1,4 @@
+import { istDateOf, todayIsoIn } from '@/lib/india-time'
 import { getDb } from '@/db/client'
 import { staffCredentials, staffMembers } from '@/db/schema'
 import { and, asc, eq, isNotNull, ne, sql } from 'drizzle-orm'
@@ -78,8 +79,8 @@ export interface ExpiringCredential {
 // expiring exactly `cutoff` days out is included, `cutoff + 1` is not.
 export async function listExpiringOrExpiredCredentials(): Promise<ExpiringCredential[]> {
   const db = getDb()
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const cutoffStr = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const todayStr = todayIsoIn()
+  const cutoffStr = istDateOf(new Date(Date.now() + 60 * 24 * 60 * 60 * 1000))
 
   const rows = await db
     .select({

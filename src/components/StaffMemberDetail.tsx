@@ -1,4 +1,5 @@
 'use client'
+import { istDateOf, todayIsoIn } from '@/lib/india-time'
 import { useState } from 'react'
 import { CheckCircle2, AlertTriangle, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -22,8 +23,8 @@ type CredentialStatus = 'no_expiry' | 'current' | 'expiring_soon' | 'expired'
 
 function classifyCredential(expiresOn: string | null): CredentialStatus {
   if (!expiresOn) return 'no_expiry'
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const cutoffStr = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const todayStr = todayIsoIn()
+  const cutoffStr = istDateOf(new Date(Date.now() + 60 * 24 * 60 * 60 * 1000))
   if (expiresOn < todayStr) return 'expired'
   if (expiresOn <= cutoffStr) return 'expiring_soon'
   return 'current'

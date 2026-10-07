@@ -1,4 +1,5 @@
 'use client'
+import { formatIstDateTime } from '@/lib/india-time'
 import { formatPaise } from '@/lib/format'
 import { useState } from 'react'
 import { Send } from 'lucide-react'
@@ -259,7 +260,7 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
                         <td className="p-3 font-medium text-foreground">{d.medicationName}</td>
                         <td className="p-3 text-foreground">{d.quantity}</td>
                         <td className="p-3 text-foreground">{d.dispensedByName}</td>
-                        <td className="p-3 text-foreground">{new Date(d.dispensedAt).toLocaleString()}</td>
+                        <td className="p-3 text-foreground">{formatIstDateTime(d.dispensedAt)}</td>
                         <td className="p-3">
                           {d.charge === null ? (
                             <Button size="sm" variant="outline" onClick={() => setBillingDispense(d)}>Log bill</Button>

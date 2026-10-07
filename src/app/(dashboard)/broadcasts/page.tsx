@@ -1,3 +1,4 @@
+import { formatIstDate } from '@/lib/india-time'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
@@ -53,7 +54,7 @@ export default async function BroadcastsPage({ searchParams }: { searchParams: P
                 const failed = b.recipients.length - delivered
                 return (
                   <tr key={b.id} className={`border-b border-border last:border-b-0 ${i % 2 === 1 ? 'bg-muted/40' : ''} transition-colors hover:bg-secondary`}>
-                    <td className="p-3 text-muted-foreground">{new Date(b.sentAt).toLocaleDateString()}</td>
+                    <td className="p-3 text-muted-foreground">{formatIstDate(b.sentAt)}</td>
                     <td className="p-3 text-foreground">{b.channel === 'both' ? 'SMS + Email' : b.channel === 'sms' ? 'SMS' : 'Email'}</td>
                     <td className="p-3"><Link href={`/broadcasts/${b.id}`} className="font-medium text-primary hover:underline">{b.message.length > 60 ? `${b.message.slice(0, 60)}…` : b.message}</Link></td>
                     <td className="p-3 text-foreground">{b.trialCondition ?? 'All trials'}</td>

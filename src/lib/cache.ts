@@ -38,6 +38,19 @@ function errKind(e: unknown): string {
   return e instanceof Error ? e.name : 'UnknownError'
 }
 
+/** The shape a value has after a JSON round-trip: Dates become ISO strings. */
+export type Jsonified<T> = T extends Date
+  ? string
+  : T extends (infer U)[]
+    ? Jsonified<U>[]
+    : T extends object
+      ? { [K in keyof T]: Jsonified<T[K]> }
+      : T
+
+function toJson<T>(value: T): Jsonified<T> {
+  return (value === undefined ? value : JSON.parse(JSON.stringify(value))) as Jsonified<T>
+}
+
 /**
  * Read-through cache: returns the cached value if present, otherwise
  * calls `loader`, caches its result for `ttlSeconds`, and returns it.
@@ -48,15 +61,19 @@ function errKind(e: unknown): string {
  * hits the database), and a failed write-back is logged and ignored. Loader
  * errors still propagate.
  */
-export async function getOrSetCache<T>(key: string, ttlSeconds: number, loader: () => Promise<T>): Promise<T> {
-  if (!isCacheConfigured()) return loader()
+export async function getOrSetCache<T>(key: string, ttlSeconds: number, loader: () => Promise<T>): Promise<Jsonified<T>> {
+  // A cache hit is the JSON round-trip of the loader's value (Dates come back
+  // as ISO strings). Every path -- no cache, miss, hit -- returns that same
+  // JSON shape, so a consumer can never call a Date method on a value that is
+  // a Date only on a cold cache (Wave A, P2-03). The return type says so.
+  if (!isCacheConfigured()) return toJson(await loader())
   try {
-    const cached = await getRedis().get<T>(key)
+    const cached = await getRedis().get<Jsonified<T>>(key)
     if (cached !== null && cached !== undefined) return cached
   } catch (e) {
     console.warn(`[cache] read failed for "${key}" (${errKind(e)}); falling back to the database`)
   }
-  const fresh = await loader()
+  const fresh = toJson(await loader())
   try {
     await getRedis().set(key, fresh, { ex: ttlSeconds })
   } catch (e) {

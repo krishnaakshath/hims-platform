@@ -32,13 +32,14 @@ export function istDayBounds(now: Date = new Date()): { start: Date; end: Date }
   return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) }
 }
 
-/** "21 Oct 2026" for a YYYY-MM-DD calendar date (no zone shift). */
+/** "21 Oct 2026" for a YYYY-MM-DD calendar date (no zone shift). Pure; see formatCalendarDate. */
 export function formatIsoDate(dateIso: string): string {
-  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${dateIso}T00:00:00Z`))
+  return formatCalendarDate(dateIso)
 }
 
-/** "22 Oct 2026, 12:30 am" in the given zone (default IST). */
+/** "22 Oct 2026, 12:30 am" in IST (pure). Other zones fall back to Intl, server-side only. */
 export function formatDateTimeIn(instant: Date, tz: string = DEFAULT_TIMEZONE): string {
+  if (tz === DEFAULT_TIMEZONE) return formatIstDateTime(instant)
   return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz }).format(instant)
 }
 
@@ -176,4 +177,15 @@ export function parseIstLocalDateTime(local: string): Date | null {
 /** True when an ISO date-time string carries an explicit UTC offset (Z or ±HH:MM). */
 export function hasExplicitUtcOffset(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(value)
+}
+
+/** IST hour of day (0-23) of an instant. */
+export function istHourOf(instant: Date): number {
+  return new Date(instant.getTime() + IST_OFFSET_MS).getUTCHours()
+}
+
+/** IST calendar year and month (0-11) of an instant. */
+export function istYearMonthOf(instant: Date): { year: number; month: number } {
+  const s = new Date(instant.getTime() + IST_OFFSET_MS)
+  return { year: s.getUTCFullYear(), month: s.getUTCMonth() }
 }
