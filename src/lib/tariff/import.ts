@@ -100,12 +100,32 @@ export function validateServiceImport(text: string, lookups: ImportLookups): { r
   return { rows, issues }
 }
 
+/**
+ * Rates can only overlap when every dimension matches (sameDims), so overlap checks run within
+ * one dimension group instead of against every rate: a 5,000-row file against tens of thousands
+ * of live rates stays linear rather than pairwise.
+ */
+function dimsKey(r: DatedRate): string {
+  return JSON.stringify([r.serviceId, r.scope, r.departmentId, r.payerId, r.roomCategoryId, r.ward === null ? null : normalizeWard(r.ward)])
+}
+function groupByDims<T extends DatedRate>(rates: T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>()
+  for (const r of rates) {
+    const k = dimsKey(r)
+    const g = groups.get(k)
+    if (g) g.push(r)
+    else groups.set(k, [r])
+  }
+  return groups
+}
+
 export function validateRateImport(text: string, lookups: ImportLookups): { rows: RateCreateInput[]; issues: ImportIssue[] } {
   const table = readTable(text, RATE_CSV_HEADERS)
   if ('issues' in table) return { rows: [], issues: table.issues }
   const rows: RateCreateInput[] = []
   const issues: ImportIssue[] = []
-  const accepted: (DatedRate & { line: number })[] = []
+  const existingByDims = groupByDims(lookups.existingRates)
+  const acceptedByDims = new Map<string, (DatedRate & { line: number })[]>()
   const columnOf = {
     serviceId: 'service_code', scope: 'scope', departmentId: 'department_code', payerId: 'payer_code',
     roomCategoryId: 'room_category_code', ward: 'ward', amountPaise: 'amount_inr', validFrom: 'valid_from', validTo: 'valid_to',
@@ -149,16 +169,19 @@ export function validateRateImport(text: string, lookups: ImportLookups): { rows
       roomCategoryId: v.roomCategoryId ?? null, ward: v.ward === undefined ? null : normalizeWard(v.ward),
       validFrom: v.validFrom, validTo: v.validTo ?? null,
     }
-    if (findOverlap(dated, lookups.existingRates)) {
+    const key = dimsKey(dated)
+    if (findOverlap(dated, existingByDims.get(key) ?? [])) {
       issues.push({ line, column: 'valid_from', message: 'Overlaps an existing rate for the same service and scope' })
       continue
     }
-    const earlier = findOverlap(dated, accepted)
+    const sameGroup = acceptedByDims.get(key) ?? []
+    const earlier = findOverlap(dated, sameGroup)
     if (earlier) {
       issues.push({ line, column: 'valid_from', message: `Overlaps the rate on line ${(earlier as DatedRate & { line: number }).line} of this file` })
       continue
     }
-    accepted.push({ ...dated, line })
+    sameGroup.push({ ...dated, line })
+    acceptedByDims.set(key, sameGroup)
     rows.push(v)
   }
   return { rows, issues }

@@ -93,3 +93,40 @@ describe('validateRateImport', () => {
     expect(r.issues).toHaveLength(1); expect(r.issues[0].line).toBe(1)
   })
 })
+
+describe('validateRateImport performance', () => {
+  // Overlap checks are grouped by rate dimensions, so a full 5,000-row file against 25,000 live
+  // rates stays well under a request budget instead of 125M pairwise comparisons.
+  const big = (existing: ImportLookups['existingRates'], services: Map<string, { id: number; category: 'procedure' }>, lines: string[]) => {
+    const csv = `${RH}\n${lines.join('\n')}\n`
+    const t0 = performance.now()
+    const r = validateRateImport(csv, { ...lookups(), servicesByCode: services, existingRates: existing })
+    return { r, ms: performance.now() - t0 }
+  }
+
+  it('5,000 rows x 25,000 existing rates spread over many services finishes quickly', () => {
+    const services = new Map(Array.from({ length: 5000 }, (_, i) => [`S${i}`, { id: 1000 + i, category: 'procedure' as const }]))
+    const existing = Array.from({ length: 25_000 }, (_, i) => ({
+      serviceId: 1000 + (i % 5000), scope: 'base' as const, departmentId: null, payerId: null, roomCategoryId: null, ward: null,
+      validFrom: `${2000 + Math.floor(i / 5000)}-01-01`, validTo: `${2000 + Math.floor(i / 5000)}-12-31`,
+    }))
+    const { r, ms } = big(existing, services, Array.from({ length: 5000 }, (_, i) => `S${i},base,,,,,500,2026-01-01,`))
+    expect(r.issues).toEqual([])
+    expect(r.rows).toHaveLength(5000)
+    expect(ms).toBeLessThan(2000)
+  })
+
+  it('5,000 rows x 25,000 existing rates on ONE service (distinct wards) finishes quickly and still finds overlaps', () => {
+    const services = new Map([['ONE', { id: 77, category: 'procedure' as const }]])
+    const existing = Array.from({ length: 25_000 }, (_, i) => ({
+      serviceId: 77, scope: 'base' as const, departmentId: null, payerId: null, roomCategoryId: null, ward: `ward ${i}`,
+      validFrom: '2026-01-01', validTo: null,
+    }))
+    // Rows use wards 20,000..24,999 typed in a different case: every one overlaps an existing rate.
+    const lines = Array.from({ length: 5000 }, (_, i) => `ONE,base,,,,WARD  ${20_000 + i},500,2026-06-01,`)
+    const { r, ms } = big(existing, services, lines)
+    expect(r.issues).toHaveLength(5000)
+    expect(r.issues[0]).toEqual({ line: 2, column: 'valid_from', message: 'Overlaps an existing rate for the same service and scope' })
+    expect(ms).toBeLessThan(2000)
+  })
+})
