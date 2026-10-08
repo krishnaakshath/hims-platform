@@ -35,6 +35,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP7
       'Pick an approved pre-authorisation when capturing a charge billed to an insurer',
       // end SP7
+      // Wave I
+      'View the hospital reports (OPD and IPD statistics, bed occupancy, discharges, revenue, collections, tariff, lab turnaround, pharmacy) and export them as CSV',
     ],
   },
   pi: {
@@ -121,6 +123,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Approve or reject claim write-offs',
       'Set the hospital ROHINI and HFR identifiers',
       // end SP7
+      // Wave I
+      'View the hospital reports (OPD and IPD statistics, bed occupancy, discharges, revenue, collections, tariff, lab turnaround, pharmacy) and export them as CSV',
     ],
   },
   frontdesk: {
@@ -163,6 +167,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Log a bill for a dispense as a draft charge for the billing team to review',
       'View the medication catalog, stock levels, and what the practice is currently prescribing',
       'Add a medication to the practice catalog',
+      // Wave I
+      'View the pharmacy stock and dispensing report and export it as CSV',
     ],
   },
   billing: {
@@ -182,6 +188,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP7
       'Pick an approved pre-authorisation when capturing a charge billed to an insurer',
       // end SP7
+      // Wave I
+      'View the department revenue, collections by payment mode and tariff price list reports and export them as CSV',
     ],
   },
   labs: {
@@ -196,6 +204,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP5
       'Book and dispatch home sample collection visits and assign collectors',
       'Receive samples by sample ID, enter results and release lab reports',
+      // Wave I
+      'View the lab turnaround time report and export it as CSV',
     ],
   },
   // SP5

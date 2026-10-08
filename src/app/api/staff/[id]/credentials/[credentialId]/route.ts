@@ -20,7 +20,7 @@ const updateCredentialSchema = z.object({
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; credentialId: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
-  if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
+  if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { credentialId } = await params
   const parsedCredentialId = parseId(credentialId)

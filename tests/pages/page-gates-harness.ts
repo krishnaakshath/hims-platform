@@ -152,11 +152,8 @@ export const PAGE_GATES: PageGateCase[] = [
     props: { searchParams: Promise.resolve({}) },
     allowed: ['admin', 'crc', 'billing'],
   },
-  // LeftNav.tsx:60 — { href: '/reports', roles: ['admin', 'crc'] }. No row
-  // for (dashboard)/reports/page.tsx itself: it is a bare
-  // redirect('/reports/patients') with no session read, and once this leaf
-  // is gated it grants nothing (spec §3.2) -- Task 5's coverage rule
-  // matches the /reports nav href via this leaf instead.
+  // ReportsSidebar legacy leaves (src/lib/reports/catalog.ts) -- admin, crc. Wave I: the /reports
+  // landing page has its own row (REPORTS_ROLES) below.
   { route: '/reports/patients', load: () => import('@/app/(dashboard)/reports/patients/page'), allowed: ['admin', 'crc'] },
   // LeftNav.tsx:60 — { href: '/reports', roles: ['admin', 'crc'] }
   { route: '/reports/appointments/all', load: () => import('@/app/(dashboard)/reports/appointments/all/page'), allowed: ['admin', 'crc'] },
@@ -386,4 +383,17 @@ export const PAGE_GATES: PageGateCase[] = [
   // LeftNav.tsx /encounters (OPD Register) -- ENCOUNTER_REGISTER_ROLES.
   { route: '/encounters', load: () => import('@/app/(dashboard)/encounters/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'pi', 'frontdesk'] },
   // end Wave F
+  // Wave I (P1-23): hospital reports (src/lib/reports/catalog.ts). The /reports landing page is
+  // REPORTS_ROLES (LeftNav /reports); each report is its own list, shown in ReportsSidebar to exactly those roles.
+  { route: '/reports', load: () => import('@/app/(dashboard)/reports/page'), allowed: ['admin', 'crc', 'billing', 'labs', 'pharmacy'] },
+  { route: '/reports/hospital/opd', load: () => import('@/app/(dashboard)/reports/hospital/opd/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc'] },
+  { route: '/reports/hospital/ipd', load: () => import('@/app/(dashboard)/reports/hospital/ipd/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc'] },
+  { route: '/reports/hospital/bed-occupancy', load: () => import('@/app/(dashboard)/reports/hospital/bed-occupancy/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc'] },
+  { route: '/reports/hospital/discharges', load: () => import('@/app/(dashboard)/reports/hospital/discharges/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc'] },
+  { route: '/reports/hospital/department-revenue', load: () => import('@/app/(dashboard)/reports/hospital/department-revenue/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
+  { route: '/reports/hospital/collections', load: () => import('@/app/(dashboard)/reports/hospital/collections/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
+  { route: '/reports/hospital/tariff', load: () => import('@/app/(dashboard)/reports/hospital/tariff/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
+  { route: '/reports/hospital/lab-tat', load: () => import('@/app/(dashboard)/reports/hospital/lab-tat/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'labs'] },
+  { route: '/reports/hospital/pharmacy', load: () => import('@/app/(dashboard)/reports/hospital/pharmacy/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'pharmacy'] },
+  // end Wave I
 ]

@@ -94,9 +94,11 @@ describe('LeftNav', () => {
     render(<LeftNav role="billing" />)
     expect(screen.getByRole('link', { name: /billing home/i })).toHaveAttribute('href', '/billing')
     expect(screen.getByRole('link', { name: /^tariffs$/i })).toHaveAttribute('href', '/tariffs')
-    for (const hidden of [/^patients$/i, /^calendar$/i, /^labs$/i, /^settings$/i, /^reports$/i]) {
+    for (const hidden of [/^patients$/i, /^calendar$/i, /^labs$/i, /^settings$/i]) {
       expect(screen.queryByRole('link', { name: hidden })).not.toBeInTheDocument()
     }
+    // Wave I (P1-23): billing opens the finance reports (department revenue, collections, tariff).
+    expect(screen.getByRole('link', { name: /^reports$/i })).toHaveAttribute('href', '/reports')
   })
 
   it('lists Billing Home first in the billing group', () => {

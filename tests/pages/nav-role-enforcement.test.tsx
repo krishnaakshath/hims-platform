@@ -107,9 +107,57 @@ function findPageFiles(dir: string): string[] {
 }
 
 it('every (dashboard) page file has a PAGE_GATES row or an explicit exemption', () => {
-  const EXEMPT = ['/', '/reports'] // '/' = per-role landing (dashboard-routing.test.tsx); '/reports' = bare redirect
+  const EXEMPT = ['/'] // '/' = per-role landing (dashboard-routing.test.tsx). Wave I: '/reports' is now a gated landing page with its own row.
   const root = join(process.cwd(), 'src', 'app', '(dashboard)')
   const routes = findPageFiles(root).map((f) => toRoute(f, root))
   expect(routes.length).toBeGreaterThan(40)
   expect(routes.filter((r) => !EXEMPT.includes(r) && !PAGE_GATES.some((g) => g.route === r))).toEqual([])
 })
+
+// Wave I (P2-14): the same check across every page file in src/app, not only
+// (dashboard). Pages outside the staff dashboard have no staff role gate to
+// pin; each exemption says why and where it is tested.
+const NON_STAFF_PAGES: Record<string, string> = {
+  '/book': 'public booking form (tests/pages/book.test.tsx, POST /api/public/booking-requests)',
+  '/display/queue': 'lobby display, PIN-gated by GET /api/queue-display',
+  '/intake/[token]': 'patient intake, token possession (GET /api/intake/[token])',
+  '/telemedicine/join/[token]': 'patient video join, token possession',
+  '/login': 'sign-in chooser, pre-session',
+  '/login/admin': 'sign-in, pre-session', '/login/billing': 'sign-in, pre-session', '/login/coder': 'sign-in, pre-session',
+  '/login/collector': 'sign-in, pre-session', '/login/crc': 'sign-in, pre-session', '/login/frontdesk': 'sign-in, pre-session',
+  '/login/labs': 'sign-in, pre-session', '/login/pharmacy': 'sign-in, pre-session', '/login/pi': 'sign-in, pre-session',
+  '/login/rcm': 'sign-in, pre-session',
+  '/patient-portal/login': 'patient portal sign-in, pre-session',
+  '/patient-portal/consent': 'patient session only (requirePatientSession)',
+  '/patient-portal': 'patient session only, (authenticated) layout',
+  '/patient-portal/appointments': 'patient session only, (authenticated) layout',
+  '/patient-portal/broadcasts': 'patient session only, (authenticated) layout',
+  '/patient-portal/forms': 'patient session only, (authenticated) layout',
+  '/patient-portal/lab-reports': 'patient session only, (authenticated) layout',
+  '/patient-portal/medications': 'patient session only, (authenticated) layout',
+  '/patient-portal/messages': 'patient session only, (authenticated) layout',
+  '/patient-portal/security': 'patient session only, (authenticated) layout',
+}
+
+describe('every page file in src/app has a PAGE_GATES row or a documented exemption (Wave I P2-14)', () => {
+  const root = join(process.cwd(), 'src', 'app')
+  const routes = findPageFiles(root).map((f) => toRoute(f, root))
+  const dashboardRoot = join(root, '(dashboard)')
+  const dashboardRoutes = new Set(findPageFiles(dashboardRoot).map((f) => toRoute(f, dashboardRoot)))
+
+  it('finds the page files', () => {
+    expect(routes.length).toBeGreaterThan(100)
+  })
+
+  it('pins every page outside (dashboard) too', () => {
+    const missing = routes.filter((r) => !dashboardRoutes.has(r) && !(r in NON_STAFF_PAGES) && !PAGE_GATES.some((g) => g.route === r))
+    expect(missing).toEqual([])
+  })
+
+  it('has no stale or doubled exemptions, and no PAGE_GATES row for a page that does not exist', () => {
+    expect(Object.keys(NON_STAFF_PAGES).filter((r) => !routes.includes(r))).toEqual([])
+    expect(Object.keys(NON_STAFF_PAGES).filter((r) => PAGE_GATES.some((g) => g.route === r))).toEqual([])
+    expect(PAGE_GATES.map((g) => g.route).filter((r) => !routes.includes(r))).toEqual([])
+  })
+})
+// end Wave I
