@@ -11,7 +11,6 @@ import {
 } from '@/lib/role-policy'
 import { formatPaise } from '@/lib/format'
 import type { KpiTileProps } from '@/components/dashboards/KpiTile'
-import { formatMinutes, formatPct } from '@/components/dashboards/KpiTile'
 import type {
   BillingQueueKpi, ClaimAgeingKpi, CollectionsTodayKpi, FollowUpBucketsKpi, IpdCensusKpi, LabKpi, OpdTodayKpi,
 } from '@/lib/queries/hospital-kpis'
@@ -106,4 +105,18 @@ export function hospitalTiles(role: Role, s: HospitalSnapshot): HospitalTile[] {
     tiles.push({ id: 'claims', label: 'Insurer outstanding', value: formatPaise(s.claims.outstandingPaise), sub: `${formatPaise(over90Paise(s.claims.aging))} over 90 days`, href: '/rcm', icon: Landmark, tone: 'warning' })
   }
   return tiles
+}
+
+/** "45 min" / "2 h 5 min"; em dash when there is no figure. */
+export function formatMinutes(min: number | null): string {
+  if (min === null) return '—'
+  if (min < 60) return `${min} min`
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return m === 0 ? `${h} h` : `${h} h ${m} min`
+}
+
+/** "72%" or an em dash. */
+export function formatPct(pct: number | null): string {
+  return pct === null ? '—' : `${pct}%`
 }

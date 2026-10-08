@@ -17,6 +17,9 @@ import { startOfIstDay, todayIsoIn } from '@/lib/india-time'
 import { listFollowUpWorklist } from '@/lib/queries/follow-up-recall'
 import { countWorklistBuckets, type WorklistBucket } from '@/lib/follow-ups/worklist'
 import { getRcmDashboard } from '@/lib/queries/rcm-worklist'
+import { countPendingBookingRequests } from '@/lib/queries/booking-requests'
+import { snapshotScope, type HospitalSnapshot } from '@/lib/dashboard-tiles'
+import type { Role } from '@/lib/auth'
 
 const KPI_TTL_SECONDS = 20
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -274,3 +277,19 @@ export const getFollowUpBuckets = (providerId: number | null = null, today = tod
 export const getClaimAgeing = () => getOrSetCache(hospitalKpiCacheKey('claims'), 60, () => loadClaimAgeing())
 export const getDoctorWorkload = (providerId: number, authorName: string, today = todayIsoIn()) =>
   getOrSetCache(hospitalKpiCacheKey('doctor', today, providerId, encodeURIComponent(authorName)), KPI_TTL_SECONDS, () => loadDoctorWorkload({ providerId, authorName, today }))
+
+/** The hospital overview for one role: only the sections that role may open (dashboard-tiles.ts). */
+export async function getHospitalSnapshot(role: Role): Promise<HospitalSnapshot> {
+  const scope = snapshotScope(role)
+  const [opd, ipd, followUps, labs, collections, billing, claims, bookingRequestsPending] = await Promise.all([
+    getOpdToday(),
+    getIpdCensus(),
+    scope.followUps ? getFollowUpBuckets() : null,
+    scope.labs ? getLabKpis() : null,
+    scope.collections ? getCollectionsToday() : null,
+    scope.billing ? getBillingQueue() : null,
+    scope.claims ? getClaimAgeing() : null,
+    scope.bookingRequests ? countPendingBookingRequests() : null,
+  ])
+  return { opd, ipd, followUps, labs, collections, billing, claims, bookingRequestsPending }
+}

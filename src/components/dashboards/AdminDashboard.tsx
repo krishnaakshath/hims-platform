@@ -1,6 +1,6 @@
 import { formatIstDayMonth, istYearMonthOf } from '@/lib/india-time'
 import Link from 'next/link'
-import { FileClock, ClipboardCheck, LayoutTemplate, Clock, Users, Star, Send, CheckCircle2, Fingerprint, Sparkles, ArrowRight, ShieldCheck, AlertTriangle, XCircle } from 'lucide-react'
+import { FileClock, ClipboardCheck, LayoutTemplate, Clock, Users, Star, Send, CheckCircle2, Fingerprint, Sparkles, ArrowRight, AlertTriangle, XCircle } from 'lucide-react'
 import type { Session } from '@/lib/auth'
 import { PortalTileLink } from '@/components/PortalTileLink'
 import { CountUp } from '@/components/CountUp'
@@ -10,6 +10,10 @@ import { PatientsByMonthChart } from '@/components/PatientsByMonthChart'
 import { ScreeningBreakdownChart } from '@/components/ScreeningBreakdownChart'
 import { PatientAvatar } from '@/components/PatientAvatar'
 import type { ExpiringCredential } from '@/lib/queries/staff-credentials'
+import type { HospitalSnapshot } from '@/lib/dashboard-tiles' // Wave E
+import { HospitalOverview } from '@/components/dashboards/HospitalOverview' // Wave E
+import { Tabs } from '@/components/Tabs' // Wave E
+import { Tags, Building2, IdCard, History, BedDouble, CalendarSync, SlidersHorizontal, Settings2 } from 'lucide-react' // Wave E
 
 export interface DashboardData {
   latestForms: { id: number; status: string; sentDate: Date | string | null; completedDate: Date | string | null; templateName: string; patientName: string }[]
@@ -42,6 +46,8 @@ export interface DashboardPageProps {
   // AdminDashboard, per this task's brief (Task 4 §Step 2/3).
   expiringCredentials?: ExpiringCredential[]
   canStartTelemedicine: boolean
+  // Wave E: live hospital KPIs, scoped to the viewing role (getHospitalSnapshot).
+  hospital: HospitalSnapshot
 }
 
 const FORM_STATUS_STYLE: Record<string, string> = {
@@ -103,7 +109,48 @@ export function resolveTotalPatients(data: { totalPatients?: number }, patients:
   return data.totalPatients ?? new Set(patients.map((p) => p.id)).size
 }
 
-export function AdminDashboard({ session, data, templates, patients, appointmentsInRange, staffByRole, expiringCredentials = [], canStartTelemedicine }: DashboardPageProps) {
+// Wave E P1-07: hospital configuration shortcuts (every page here is admin-only or admits admin).
+const CONFIG_LINKS: { href: string; label: string; sub: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { href: '/tariffs', label: 'Tariffs', sub: 'Service catalogue and price lists', icon: Tags },
+  { href: '/settings', label: 'Departments & UHID', sub: 'Departments, UHID prefix, practice settings', icon: Building2 },
+  { href: '/inpatient/beds', label: 'Beds & wards', sub: 'Block, unblock and clean beds', icon: BedDouble },
+  { href: '/front-desk/check-in', label: 'Check-in', sub: 'OPD tokens and inpatient admits', icon: ClipboardCheck },
+  { href: '/front-desk/follow-ups', label: 'Follow-up recall', sub: 'Due and overdue return visits', icon: CalendarSync },
+  { href: '/billing/rules', label: 'Billing rules', sub: 'GST, rule configuration', icon: SlidersHorizontal },
+  { href: '/rcm/settings', label: 'RCM settings', sub: 'ROHINI and HFR identifiers', icon: Settings2 },
+  { href: '/audit-log', label: 'Audit log', sub: 'Who did what, when', icon: History },
+]
+
+function ConfigurationCard({ staffByRole }: { staffByRole: { role: string; count: number }[] }) {
+  const staffTotal = staffByRole.reduce((sum, r) => sum + r.count, 0)
+  return (
+    <section className={`${CARD_SURFACE} p-5`}>
+      <SectionHeading>Configuration</SectionHeading>
+      <Link href="/staff" className="mb-2 flex items-center gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/40">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true"><IdCard className="h-4 w-4" /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-foreground">Staff roster ({staffTotal})</span>
+          <span className="block truncate text-xs text-muted-foreground">{staffByRole.filter((r) => r.count > 0).map((r) => `${r.count} ${r.role}`).join(' · ')}</span>
+        </span>
+      </Link>
+      <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-1">
+        {CONFIG_LINKS.map(({ href, label, sub, icon: Icon }) => (
+          <li key={href}>
+            <Link href={href} className="flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/40">
+              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block text-sm text-foreground">{label}</span>
+                <span className="block truncate text-[11px] text-muted-foreground">{sub}</span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+export function AdminDashboard({ session, data, templates, patients, appointmentsInRange, staffByRole, expiringCredentials = [], canStartTelemedicine, hospital }: DashboardPageProps) {
   const totalPatients = resolveTotalPatients(data, patients)
   const screenedCount = data.screeningBreakdown.green + data.screeningBreakdown.yellow + data.screeningBreakdown.red
   const unscreenedCount = Math.max(totalPatients - screenedCount, 0)
@@ -111,17 +158,9 @@ export function AdminDashboard({ session, data, templates, patients, appointment
   const now = new Date()
   const currentMonthLabel = data.patientsByMonth[istYearMonthOf(now).month]?.month
 
-  return (
+  const research = (
     <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Hello, {session.name}!</h1>
-          <p className="text-sm text-muted-foreground">Here&apos;s what&apos;s happening across the practice today.</p>
-        </div>
-        <DashboardHomeClient templates={templates} patients={patients} />
-      </div>
-
-      <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className={`${CARD_SURFACE} p-5`}>
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Peak Scheduling Hours</span>
@@ -151,15 +190,6 @@ export function AdminDashboard({ session, data, templates, patients, appointment
           <p className="text-3xl font-bold tabular-nums text-foreground">{data.avgExperienceRating !== null ? data.avgExperienceRating.toFixed(1) : '—'}</p>
           <p className="mt-1 text-xs text-muted-foreground">{data.completedReviewCount} completed experience survey{data.completedReviewCount === 1 ? '' : 's'}</p>
         </div>
-
-        <Link href="/settings" className={`${CARD_SURFACE} p-5 transition-colors hover:bg-secondary/40`}>
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Staff</span>
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true"><ShieldCheck className="h-4 w-4" /></span>
-          </div>
-          <p className="text-3xl font-bold tabular-nums text-foreground">{staffByRole.reduce((sum, r) => sum + r.count, 0)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{staffByRole.map((r) => `${r.count} ${r.role}`).join(' · ')}</p>
-        </Link>
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-5">
@@ -172,16 +202,6 @@ export function AdminDashboard({ session, data, templates, patients, appointment
           <ScreeningBreakdownChart breakdown={data.screeningBreakdown} />
         </section>
       </div>
-
-      <section className={`${CARD_SURFACE} mb-6 p-5`}>
-        {/* DashboardPageProps (Task 6) widens `status` to `string` so this
-            component doesn't need to import the appointments query's
-            AppointmentStatus union; DashboardAppointmentsTable requires that
-            narrower type. The page.tsx caller always sources this array from
-            listAppointmentsInRange(), whose rows are already real
-            AppointmentStatus values, so this narrowing is safe. */}
-        <DashboardAppointmentsTable appointments={appointmentsInRange as DashboardAppointmentRow[]} canStartTelemedicine={canStartTelemedicine} />
-      </section>
 
       <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
         <MiniStatTile value={data.pendingFormsTotal} label="Pending Forms" href="/client-forms" icon={FileClock} />
@@ -235,71 +255,100 @@ export function AdminDashboard({ session, data, templates, patients, appointment
           <SectionHeading>Pending Classifications</SectionHeading>
           {data.pendingClassification.length === 0 ? <EmptyRow text="Everything's been classified." /> : (
             <ul className="divide-y divide-border">
-              {data.pendingClassification.map((p) => {
-                const name = p.name
-                return (
-                  <li key={p.id}>
-                    <Link href={`/patients/${p.id}`} className="flex items-center gap-3 py-2.5 transition-colors hover:bg-secondary/40 -mx-2 px-2 rounded-lg">
-                      <PatientAvatar name={name} size="sm" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-foreground">{name}</p>
-                        <p className="truncate text-xs text-muted-foreground">Intake complete, awaiting classification</p>
-                      </div>
-                      <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </section>
-
-        <section className={`${CARD_SURFACE} p-5`}>
-          <SectionHeading>Latest Account Events</SectionHeading>
-          {data.recentEvents.length === 0 ? <EmptyRow text="No recent activity." /> : (
-            <ul className="divide-y divide-border">
-              {data.recentEvents.map((e) => {
-                const { icon: Icon, color } = EVENT_ICON[e.action] ?? EVENT_ICON_FALLBACK
-                return (
-                  <li key={e.id} className="flex items-center gap-3 py-2.5">
-                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${color}`} aria-hidden="true"><Icon className="h-4 w-4" /></span>
+              {data.pendingClassification.map((p) => (
+                <li key={p.id}>
+                  <Link href={`/patients/${p.id}`} className="flex items-center gap-3 py-2.5 transition-colors hover:bg-secondary/40 -mx-2 px-2 rounded-lg">
+                    <PatientAvatar name={p.name} size="sm" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-foreground">{e.action}</p>
-                      <p className="text-xs text-muted-foreground">{e.userName}</p>
+                      <p className="truncate text-sm font-medium text-foreground">{p.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">Intake complete, awaiting classification</p>
                     </div>
-                    <span className="shrink-0 text-xs text-muted-foreground">{formatIstDayMonth(e.timestamp)}</span>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </section>
-
-        <section className={`${CARD_SURFACE} p-5`}>
-          <SectionHeading>Credential Expiry</SectionHeading>
-          {expiringCredentials.length === 0 ? <EmptyRow text="No credentials expiring soon." /> : (
-            <ul className="divide-y divide-border">
-              {expiringCredentials.map((c) => {
-                const expired = c.status === 'expired'
-                const Icon = expired ? XCircle : AlertTriangle
-                const iconColor = expired ? 'bg-destructive/10 text-destructive' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                return (
-                  <li key={c.id} className="flex items-center gap-3 py-2.5">
-                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${iconColor}`} aria-hidden="true"><Icon className="h-4 w-4" /></span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-foreground">{c.staffMemberName}</p>
-                      <p className="truncate text-xs text-muted-foreground">{c.credentialType}</p>
-                    </div>
-                    <span className={`shrink-0 text-xs font-medium ${expired ? 'text-destructive' : 'text-amber-600 dark:text-amber-400'}`}>
-                      {expired ? 'Expired · ' : 'Expiring · '}{formatExpiryPhrase(c.daysUntilExpiry)}
-                    </span>
-                  </li>
-                )
-              })}
+                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  </Link>
+                </li>
+              ))}
             </ul>
           )}
         </section>
       </div>
+    </div>
+  )
+
+  const operations = (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <section className={`${CARD_SURFACE} p-5`}>
+        <SectionHeading>Latest Account Events</SectionHeading>
+        {data.recentEvents.length === 0 ? <EmptyRow text="No recent activity." /> : (
+          <ul className="divide-y divide-border">
+            {data.recentEvents.map((e) => {
+              const { icon: Icon, color } = EVENT_ICON[e.action] ?? EVENT_ICON_FALLBACK
+              return (
+                <li key={e.id} className="flex items-center gap-3 py-2.5">
+                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${color}`} aria-hidden="true"><Icon className="h-4 w-4" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-foreground">{e.action}</p>
+                    <p className="text-xs text-muted-foreground">{e.userName}</p>
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground">{formatIstDayMonth(e.timestamp)}</span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className={`${CARD_SURFACE} p-5`}>
+        <SectionHeading>Credential Expiry</SectionHeading>
+        {expiringCredentials.length === 0 ? <EmptyRow text="No credentials expiring soon." /> : (
+          <ul className="divide-y divide-border">
+            {expiringCredentials.map((c) => {
+              const expired = c.status === 'expired'
+              const Icon = expired ? XCircle : AlertTriangle
+              const iconColor = expired ? 'bg-destructive/10 text-destructive' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+              return (
+                <li key={c.id} className="flex items-center gap-3 py-2.5">
+                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${iconColor}`} aria-hidden="true"><Icon className="h-4 w-4" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{c.staffMemberName}</p>
+                    <p className="truncate text-xs text-muted-foreground">{c.credentialType}</p>
+                  </div>
+                  <span className={`shrink-0 text-xs font-medium ${expired ? 'text-destructive' : 'text-amber-600 dark:text-amber-400'}`}>
+                    {expired ? 'Expired · ' : 'Expiring · '}{formatExpiryPhrase(c.daysUntilExpiry)}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Hello, {session.name}!</h1>
+          <p className="text-sm text-muted-foreground">Here&apos;s what&apos;s happening across the hospital today.</p>
+        </div>
+        <DashboardHomeClient templates={templates} patients={patients} />
+      </div>
+
+      {/* Wave E P1-07: live hospital KPIs first; the trial widgets move to the Research tab. */}
+      <HospitalOverview role={session.role} hospital={hospital} />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <section className={`${CARD_SURFACE} p-5 lg:col-span-2`}>
+          {/* DashboardPageProps widens `status` to `string`; listAppointmentsInRange() rows are real AppointmentStatus values. */}
+          <DashboardAppointmentsTable appointments={appointmentsInRange as DashboardAppointmentRow[]} canStartTelemedicine={canStartTelemedicine} />
+        </section>
+        <ConfigurationCard staffByRole={staffByRole} />
+      </div>
+
+      <Tabs tabs={[
+        { id: 'operations', label: 'Operations', content: operations },
+        { id: 'research', label: 'Research', content: research },
+      ]} />
     </div>
   )
 }

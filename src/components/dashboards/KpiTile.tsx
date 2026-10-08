@@ -6,6 +6,7 @@
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { PortalTileLink } from '@/components/PortalTileLink'
+export { formatMinutes, formatPct } from '@/lib/dashboard-tiles'
 
 export type KpiTone = 'primary' | 'success' | 'warning' | 'danger' | 'muted'
 
@@ -81,18 +82,4 @@ export function WardOccupancy({ wards }: { wards: { ward: string; beds: number; 
       ))}
     </ul>
   )
-}
-
-/** "45 min" / "2 h 5 min"; em dash when there is no figure. */
-export function formatMinutes(min: number | null): string {
-  if (min === null) return '—'
-  if (min < 60) return `${min} min`
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return m === 0 ? `${h} h` : `${h} h ${m} min`
-}
-
-/** "72%" or an em dash. */
-export function formatPct(pct: number | null): string {
-  return pct === null ? '—' : `${pct}%`
 }
