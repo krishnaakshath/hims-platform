@@ -26,3 +26,14 @@ describe('PatientPortalSideNav', () => {
     expect(labels.indexOf('Lab reports')).toBe(labels.indexOf('Medications') + 1)
   })
 })
+
+// Wave J (P1-20)
+describe('PatientPortalSideNav Wave J entries', () => {
+  it('links prescriptions, discharge summaries, bills and insurance', () => {
+    render(<PatientPortalSideNav />)
+    expect(screen.getByRole('link', { name: 'Prescriptions' })).toHaveAttribute('href', '/patient-portal/prescriptions')
+    expect(screen.getByRole('link', { name: 'Discharge summaries' })).toHaveAttribute('href', '/patient-portal/discharge-summaries')
+    expect(screen.getByRole('link', { name: 'Bills & receipts' })).toHaveAttribute('href', '/patient-portal/bills')
+    expect(screen.getByRole('link', { name: 'Insurance & ABHA' })).toHaveAttribute('href', '/patient-portal/insurance')
+  })
+})
