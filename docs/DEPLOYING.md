@@ -139,6 +139,17 @@ SEED_DEMO_PASSWORD='<12+ chars>' npm run db:seed
 - `SEED_DEMO_PASSWORD` is required; there is no default.
 - The seed throws if `NODE_ENV` or `VERCEL_ENV` is `production` unless
   `ALLOW_PRODUCTION_SEED=1`. A client's live database must never be seeded.
+- The demo is an Indian multispeciality hospital: departments, doctors with
+  NMC/SMC numbers, Indian insurers/TPAs/schemes, wards with room-category
+  tariffs, a service master, and a working day relative to today (IST): OPD
+  queue, inpatients, lab orders in every status with home collection, coding
+  on the fictional SAMPLE code sets, charges, invoices, receipts and advances.
+  Every identifier is synthetic (Aadhaar test values start `9999 0000` and are
+  stored only encrypted; ABHA numbers start `99-9999-0000`; mobiles `+91 90000`).
+- On a database that already has patients the seed only tops up reference
+  data and issues missing UHIDs. `SEED_RESET=1` clears the demo data and
+  rebuilds it (it still needs `SEED_DEMO_PASSWORD` and still refuses
+  production): `SEED_RESET=1 SEED_DEMO_PASSWORD='<12+ chars>' npm run db:seed`.
 
 ## 8. Smoke test
 

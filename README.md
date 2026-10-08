@@ -350,8 +350,10 @@ account per staff role at `<role>@<SEED_EMAIL_DOMAIN>` (default
 `example.test`). `SEED_DEMO_PASSWORD` (12+ characters) is required and has no
 default; there is no password in the source. The seed refuses to run when
 `NODE_ENV` or `VERCEL_ENV` is `production` unless `ALLOW_PRODUCTION_SEED=1`.
-It is safe to re-run: on an already-populated database it tops up its own
-empty tables instead of wiping anything.
+It is safe to re-run: on an already-populated database it tops up reference
+data (and issues any missing UHIDs) instead of wiping anything. The demo is an
+Indian multispeciality hospital with a working day relative to today (IST);
+`SEED_RESET=1` clears and rebuilds it. All identifiers are synthetic.
 
 **Admin password hash.** `ADMIN_PASSWORD_HASH` is a `salt:hash` pair (scrypt)
 matching `hashPassword()` in `src/lib/password.ts`:
