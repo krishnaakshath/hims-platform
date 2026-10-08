@@ -17,6 +17,18 @@ export const defaultSessionDeps = (): SessionDeps => ({ fetch: globalThis.fetch.
 
 export const ABDM_TIMEOUT_MS = 15_000
 
+/**
+ * An AbortSignal that fires after `ms`. A plain timer (not AbortSignal.timeout)
+ * so tests can drive it with fake timers; unref'd so it never holds the
+ * process open.
+ */
+export function timeoutSignal(ms: number): AbortSignal {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new DOMException('The operation timed out', 'TimeoutError')), ms)
+  ;(timer as { unref?: () => void }).unref?.()
+  return controller.signal
+}
+
 export class AbdmHttpError extends Error {
   readonly status: number | null
   constructor(status: number | null) {
@@ -72,14 +84,14 @@ async function readJson(res: Response): Promise<unknown> {
   }
 }
 
-async function fetchToken(cfg: AbdmConfig, deps: SessionDeps): Promise<string> {
+async function fetchToken(cfg: AbdmConfig, deps: SessionDeps): Promise<{ token: string; expiresIn: number }> {
   let res: Response
   try {
     res = await deps.fetch(`${cfg.gatewayBaseUrl}${ABDM_PATHS.session}`, {
       method: 'POST',
       headers: abdmHeaders({ 'X-CM-ID': cfg.cmId }, deps.now()),
       body: JSON.stringify({ clientId: cfg.clientId, clientSecret: cfg.clientSecret, grantType: 'client_credentials' }),
-      signal: AbortSignal.timeout(ABDM_TIMEOUT_MS),
+      signal: timeoutSignal(ABDM_TIMEOUT_MS),
     })
   } catch {
     throw new AbdmHttpError(null)
@@ -91,7 +103,7 @@ async function fetchToken(cfg: AbdmConfig, deps: SessionDeps): Promise<string> {
   if (typeof token !== 'string' || token.length === 0 || !Number.isFinite(expiresIn) || expiresIn <= 0) throw new AbdmHttpError(502)
   const refreshInS = Math.max(expiresIn - TOKEN_REFRESH_MARGIN_S, 0)
   tokenCache.set(tokenKey(cfg), { token, refreshAt: deps.now().getTime() + refreshInS * 1000 })
-  return token
+  return { token, expiresIn }
 }
 
 /** The gateway access token, cached until 60 s before expiry; concurrent callers share one fetch. */
@@ -101,9 +113,16 @@ export async function getGatewayToken(cfg: AbdmConfig, deps: SessionDeps = defau
   if (cached && deps.now().getTime() < cached.refreshAt) return cached.token
   const pending = tokenInFlight.get(key)
   if (pending) return pending
-  const p = fetchToken(cfg, deps).finally(() => tokenInFlight.delete(key))
+  const p = fetchToken(cfg, deps).then((t) => t.token).finally(() => tokenInFlight.delete(key))
   tokenInFlight.set(key, p)
   return p
+}
+
+/** Test connection: drops the cached token, fetches a new one and reports its life in seconds. */
+export async function refreshGatewayToken(cfg: AbdmConfig, deps: SessionDeps = defaultSessionDeps()): Promise<{ expiresIn: number }> {
+  invalidateGatewayToken(cfg)
+  const { expiresIn } = await fetchToken(cfg, deps)
+  return { expiresIn }
 }
 
 /** The ABHA public key (base64 SPKI) used to encrypt Aadhaar numbers, OTPs and login ids. Cached 6 h. */
@@ -116,7 +135,7 @@ export async function getAbhaPublicKey(cfg: AbdmConfig, deps: SessionDeps = defa
     res = await deps.fetch(`${cfg.abhaBaseUrl}${ABDM_PATHS.publicCert}`, {
       method: 'GET',
       headers: abdmHeaders({ Authorization: `Bearer ${token}` }, deps.now()),
-      signal: AbortSignal.timeout(ABDM_TIMEOUT_MS),
+      signal: timeoutSignal(ABDM_TIMEOUT_MS),
     })
   } catch {
     throw new AbdmHttpError(null)

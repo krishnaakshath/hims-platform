@@ -19,6 +19,7 @@ export function safeLogFields(fields: Record<string, unknown>): Record<string, s
   for (const key of SAFE_LOG_KEYS) {
     if (!Object.prototype.hasOwnProperty.call(fields, key)) continue
     const v = fields[key]
+    if (v === undefined) continue
     if (typeof v === 'boolean') out[key] = v
     else if (typeof v === 'number') out[key] = Number.isFinite(v) ? v : DROPPED
     else if (typeof v === 'string' && SAFE_STRING.test(v)) out[key] = redactAadhaarLike(v)
