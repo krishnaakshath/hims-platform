@@ -1,0 +1,54 @@
+# Local development stack: Postgres + Redis (with an Upstash-compatible REST
+# endpoint, because the app talks to Redis over HTTP like Upstash does).
+#
+#   docker compose up -d
+#   DATABASE_URL=postgres://postgres:hims_local_dev@127.0.0.1:55432/hims
+#   KV_REST_API_URL=http://127.0.0.1:8079   KV_REST_API_TOKEN=hims_local_redis_token
+#   npm run db:migrate && SEED_DEMO_PASSWORD=... npm run db:seed
+#
+# Note: Upstash's rate-limit library uses a script flag (allow-key-locking) that
+# only Upstash's own Redis accepts, so tests/lib/rate-limit.test.ts needs a real
+# Upstash database; mfa, otp and cache work against this local stack.
+# Local only: the credentials below are throwaway development values.
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: hims_local_dev
+      POSTGRES_DB: hims
+    ports:
+      - "55432:5432"
+    volumes:
+      - hims_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hims"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - hims_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis-rest:
+    image: hiett/serverless-redis-http:latest
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: hims_local_redis_token
+      SRH_CONNECTION_STRING: redis://redis:6379
+    ports:
+      - "8079:80"
+volumes:
+  hims_pg:
+  hims_redis:
