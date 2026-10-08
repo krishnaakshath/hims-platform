@@ -225,13 +225,15 @@ Blob files in the same operation.
 (200 only when all pass, else 503) are public and answer only:
 
 ```json
-{"status":"ok|degraded|down","checks":{"database":"ok|fail","redis":"ok|fail|not_configured","migrations":"up_to_date|pending|unknown","secrets":"ok|missing"}}
+{"status":"ok|degraded|down","checks":{"database":"ok|fail","redis":"ok|fail|not_configured","migrations":"up_to_date|pending|unknown","secrets":"ok|missing","blob":"ok|not_configured"}}
 ```
 
 No variable names, values or error text. `down` = database unreachable or
-secrets missing; `degraded` = Redis or migrations not right. Results are
+secrets missing; `degraded` = Redis or migrations not right, or no blob
+store (`blob` reports configuration only; there is no round trip to the store). Results are
 reused for 5 seconds. For detail, read the function logs: routes that need
-Redis or the database log one line per refused request, for example
-`[config] REDIS not configured: login is unavailable` or
-`[config] database unreachable (28P01): login is unavailable`, while the
-client receives a generic 503 "Service temporarily unavailable".
+Redis, the database or the blob store log one line per refused request, for
+example `[config] REDIS not configured: login is unavailable`,
+`[config] database unreachable (28P01): login is unavailable` or
+`[config] BLOB_READ_WRITE_TOKEN not configured: lab report download is unavailable`,
+while the client receives a generic 503 "Service temporarily unavailable".

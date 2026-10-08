@@ -2,17 +2,21 @@
 // (serverless-redis-http). @upstash/ratelimit's Lua scripts start with
 // `#!lua flags=allow-key-locking`, a flag only Upstash's own Redis accepts;
 // stock Redis 7 rejects the script, so every rate-limited route (staff and
-// patient sign-in, OTP, booking) answers 500 against the local stack. This
-// shim rewrites that shebang to a plain `#!lua` and forwards everything else
-// unchanged, so the app can be signed into locally.
+// patient sign-in, OTP, booking) answers 500 against plain Redis. This shim
+// rewrites that shebang to a plain `#!lua` and forwards everything else
+// unchanged.
 //
-//   node scripts/audit/redis-rest-shim.mjs   (listens on 8078, forwards to 8079)
-//   KV_REST_API_URL=http://127.0.0.1:8078
+// docker-compose.yml runs it as the `redis-rest` service on port 8079 (in front
+// of `redis-http`), so KV_REST_API_URL=http://127.0.0.1:8079 just works. To run
+// it by hand in front of another REST endpoint:
+//
+//   SHIM_PORT=8078 SHIM_TARGET=http://127.0.0.1:8079 node scripts/dev/redis-rest-shim.mjs
 //
 // Never point a deployment at this; it is for local runs only.
 import http from 'node:http'
 
 const LISTEN = Number(process.env.SHIM_PORT ?? 8078)
+const HOST = process.env.SHIM_HOST ?? '127.0.0.1'
 const TARGET = new URL(process.env.SHIM_TARGET ?? 'http://127.0.0.1:8079')
 const FLAG = /^#!lua flags=allow-key-locking/
 
@@ -38,4 +42,4 @@ http.createServer((req, res) => {
     up.on('error', () => { res.writeHead(502); res.end() })
     up.end(body)
   })
-}).listen(LISTEN, '127.0.0.1', () => console.log(`redis-rest-shim on ${LISTEN} -> ${TARGET.href}`))
+}).listen(LISTEN, HOST, () => console.log(`redis-rest-shim on ${LISTEN} -> ${TARGET.href}`))

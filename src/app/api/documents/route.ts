@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { put } from '@vercel/blob'
+import { requireBlobStore, withServiceGuard } from '@/lib/service-config'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getDb } from '@/db/client'
@@ -32,7 +33,7 @@ const receiveDocumentSchema = z
   })
   .strict()
 
-export async function POST(request: NextRequest) {
+export const POST = withServiceGuard('document upload', async function POST(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   if (!['admin', 'crc', 'frontdesk'].includes(session.role)) {
@@ -92,6 +93,7 @@ export async function POST(request: NextRequest) {
 
   // UUID prefix, not a timestamp -- two coordinators scanning the same
   // standard form name in the same second must not collide.
+  requireBlobStore()
   const blob = await put(`documents/${crypto.randomUUID()}-${file.name}`, file, { access: 'private', contentType: file.type })
 
   const created = await createDocument({
@@ -117,4 +119,4 @@ export async function POST(request: NextRequest) {
   await logAudit(session, `received document "${name}" (${documentType})`, patientId ?? null)
 
   return NextResponse.json({ id: created.id, fileUrl: created.fileUrl }, { status: 201 })
-}
+})

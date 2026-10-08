@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { del } from '@vercel/blob'
+import { isBlobConfigured } from '@/lib/service-config'
 import { getDb } from '@/db/client'
 import { patients, documentTypeEnum } from '@/db/schema'
 import { eq } from 'drizzle-orm'
@@ -135,7 +136,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const deleted = await deleteDocument(numericId)
   if (!deleted) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (deleted.fileUrl) {
+  if (deleted.fileUrl && isBlobConfigured()) {
     // Best-effort: a failed Blob delete must never block or reverse the DB
     // delete. The record that this document existed and was removed lives in
     // auditLog and outlives storage cleanup either way; an orphaned blob is a

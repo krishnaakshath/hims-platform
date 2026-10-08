@@ -12,6 +12,7 @@
 //   - GSTINs use the PAN-like block ZZZ?D9999Z with a valid check character.
 import { verhoeffCheckDigit } from '../lib/india/verhoeff'
 import { isValidGstin } from '../lib/billing/gst'
+import type { PayerProfileInput } from '../lib/rcm/validation'
 
 // ---------------------------------------------------------------------------
 // Synthetic identifiers
@@ -133,6 +134,42 @@ export const PAYERS_SEED: PayerSeed[] = [
   { name: 'Ayushman Bharat PM-JAY', payerId: 'PMJAY', payerType: 'other', requiresPreauth: true, stateCode: null, gstin: null },
   { name: 'CGHS (Central Government Health Scheme)', payerId: 'CGHS', payerType: 'other', requiresPreauth: false, stateCode: null, gstin: null },
   { name: 'ECHS (Ex-Servicemen Contributory Health Scheme)', payerId: 'ECHS', payerType: 'other', requiresPreauth: false, stateCode: null, gstin: null },
+]
+
+/**
+ * SP7 RCM profile of each seeded payer (kind, channel, SLAs, empanelment). Written once per
+ * payer that has no profile yet; a profile edited in the app is never overwritten. The payer's
+ * GSTIN and state come from PAYERS_SEED. No portal links, e-mails or IRDAI numbers: those are
+ * the hospital's own to enter.
+ */
+type PayerProfileSeed = Omit<PayerProfileInput, 'gstin' | 'stateCode'>
+const insurerProfile = (shortName: string): PayerProfileSeed => ({
+  kind: 'insurer', shortName, defaultChannel: 'portal', empanelmentStatus: 'empanelled', empanelledFrom: '2025-04-01',
+  agreementReference: `DEMO/AGR/${shortName.toUpperCase().replace(/[^A-Z]/g, '')}`, preauthSlaHours: 3, claimSettlementSlaDays: 30,
+  queryResponseDays: 7, submissionWindowDays: 30, requiresAbha: false, requiresPreauthForIpd: true, active: true,
+})
+const tpaProfile = (shortName: string): PayerProfileSeed => ({ ...insurerProfile(shortName), kind: 'tpa' })
+const schemeProfile = (shortName: string, over: Partial<PayerProfileSeed> = {}): PayerProfileSeed => ({
+  ...insurerProfile(shortName), kind: 'government_scheme', claimSettlementSlaDays: 45, submissionWindowDays: 15, ...over,
+})
+export const PAYER_PROFILE_SEED: Record<string, PayerProfileSeed> = {
+  'Star Health and Allied Insurance': insurerProfile('Star Health'),
+  'ICICI Lombard General Insurance': insurerProfile('ICICI Lombard'),
+  'HDFC ERGO General Insurance': insurerProfile('HDFC ERGO'),
+  'Niva Bupa Health Insurance': { ...insurerProfile('Niva Bupa'), empanelmentStatus: 'pending', empanelledFrom: undefined },
+  'Medi Assist TPA': tpaProfile('Medi Assist'),
+  'Paramount Health Services TPA': tpaProfile('Paramount'),
+  'MD India Health Insurance TPA': tpaProfile('MD India'),
+  'Ayushman Bharat PM-JAY': schemeProfile('PM-JAY', { requiresAbha: true, preauthSlaHours: 6 }),
+  'CGHS (Central Government Health Scheme)': schemeProfile('CGHS', { requiresPreauthForIpd: false }),
+  'ECHS (Ex-Servicemen Contributory Health Scheme)': schemeProfile('ECHS', { requiresPreauthForIpd: false }),
+}
+
+/** Which TPAs service which insurers (set only for an insurer with no network yet). */
+export const PAYER_NETWORK_SEED: { insurer: string; tpas: string[] }[] = [
+  { insurer: 'ICICI Lombard General Insurance', tpas: ['Medi Assist TPA', 'MD India Health Insurance TPA'] },
+  { insurer: 'HDFC ERGO General Insurance', tpas: ['Medi Assist TPA', 'Paramount Health Services TPA'] },
+  { insurer: 'Niva Bupa Health Insurance', tpas: ['Paramount Health Services TPA'] },
 ]
 
 /** The US payer directory earlier seeds created; a reset removes any that nothing references. */

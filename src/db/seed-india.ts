@@ -1,12 +1,14 @@
 // Wave D: Indian-hospital demo data written by src/db/seed.ts.
 //
 // Two layers:
-//   - seedIndiaReference(): idempotent masters (departments, payers, room categories and
-//     beds, service master and tariffs, lab-test mapping, billing settings, doctors' Indian
-//     profiles, SAMPLE code sets, UHIDs for any patient missing one). Safe on every run.
+//   - seedIndiaReference(): idempotent masters (departments, payers and their RCM profiles and
+//     TPA networks, room categories and beds, service master and tariffs, lab-test mapping,
+//     billing settings, doctors' Indian profiles, SAMPLE code sets, UHIDs for any patient
+//     missing one). Safe on every run.
 //   - seedIndiaOperations(): the day-to-day demo (appointments, OPD/IPD encounters, lab orders
 //     in every status, home collection, coding, charges, invoices, receipts, advances,
-//     follow-ups, pharmacy, messages). Only on a fresh or reset database (seed.ts decides).
+//     follow-ups, pharmacy, messages, insurance policies, pre-auths and claims). Only on a fresh
+//     or reset database (seed.ts decides).
 //
 // Operational rows are written through the same query functions the app uses (check-in,
 // charge capture, invoicing, lab lifecycle, home collection, coding), so every invariant,
@@ -21,10 +23,11 @@ import {
   encounters, followUpContactAttempts, followUpOrders, homeCollectionWindows, labServiceAreaPins, labTests,
   medicationAdministrations, medicationEpisodes, medications, messages, patientContacts, patients, payers,
   providers, roomCategories, rooms, serviceCatalog, servicePackageItems, signatures, tariffRates,
+  payerProfiles, payerNetworks, preauths, claims, claimDispatches, encounterCoding,
 } from './schema'
 import {
   DEMO_HOSPITAL, DEPARTMENT_SEED, DOCTOR_ROSTER, EXISTING_LAB_TEST_SERVICE_MAP, INDIA_LAB_TESTS, PACKAGE_ITEMS_SEED,
-  PAYERS_SEED, PAYER_TARIFFS, DEPARTMENT_TARIFFS, PREVIOUS_TARIFF, ROOM_CATEGORY_SEED, ROOM_SEED, SERVICE_AREA_PINS,
+  PAYERS_SEED, PAYER_PROFILE_SEED, PAYER_NETWORK_SEED, PAYER_TARIFFS, DEPARTMENT_TARIFFS, PREVIOUS_TARIFF, ROOM_CATEGORY_SEED, ROOM_SEED, SERVICE_AREA_PINS,
   SERVICE_SEED, SYNTHETIC_AADHAAR_RECORDED_BY, TARIFF_VALID_FROM, addressFor, syntheticAadhaar, syntheticMobile,
 } from './seed-india-data'
 import type { Session } from '../lib/auth'
@@ -50,6 +53,14 @@ import { bookHomeCollection, assignCollector, collectHomeVisit, cancelHomeCollec
 import { releaseLabReport } from '../lib/queries/lab-reports'
 import { dispenseMedication, createChargeForDispense } from '../lib/queries/medication-dispenses'
 import { createTelemedicineSession } from '../lib/queries/telemedicine-sessions'
+import { setPayerNetworks, upsertPayerProfile } from '../lib/queries/rcm-payers'
+import { createPolicy } from '../lib/queries/rcm-policies'
+import { applyPreauthAction, createPreauth } from '../lib/queries/preauths'
+import { createClaimDraft, getClaimReadiness } from '../lib/queries/claims'
+import { waiveClaimDocument } from '../lib/queries/claim-documents'
+import { acknowledgeDispatch, defaultSubmissionDeps, submitClaimVersion } from '../lib/queries/claim-submissions'
+import { applyClaimUpdate, recordSettlement } from '../lib/queries/claim-updates'
+import type { PolicyInput } from '../lib/rcm/validation'
 
 type Db = ReturnType<typeof getDb>
 
@@ -98,6 +109,26 @@ async function upsertPayers(db: Db): Promise<Map<string, number>> {
   if (toInsert.length > 0) await db.insert(payers).values(toInsert)
   const rows = await db.select({ id: payers.id, name: payers.name }).from(payers)
   return new Map(rows.map((r) => [r.name, r.id]))
+}
+
+/**
+ * SP7: an RCM profile for every seeded payer that has none (an edited profile is never touched),
+ * and the TPA network of each insurer that has none yet, through the payer-master functions.
+ */
+async function seedPayerProfiles(db: Db, payerIds: Map<string, number>, actor: Session): Promise<void> {
+  const profiled = new Set((await db.select({ id: payerProfiles.payerId }).from(payerProfiles)).map((r) => r.id))
+  for (const p of PAYERS_SEED) {
+    const payerId = payerIds.get(p.name)
+    if (payerId === undefined || profiled.has(payerId)) continue
+    must(await upsertPayerProfile(payerId, { ...PAYER_PROFILE_SEED[p.name], gstin: p.gstin, stateCode: p.stateCode }, actor), `payer profile ${p.payerId}`)
+  }
+  const networked = new Set((await db.select({ id: payerNetworks.insurerPayerId }).from(payerNetworks)).map((r) => r.id))
+  for (const n of PAYER_NETWORK_SEED) {
+    const insurerId = payerIds.get(n.insurer)
+    const tpaIds = n.tpas.map((t) => payerIds.get(t))
+    if (insurerId === undefined || networked.has(insurerId) || tpaIds.some((id) => id === undefined)) continue
+    must(await setPayerNetworks(insurerId, tpaIds as number[], actor), 'payer network')
+  }
 }
 
 async function upsertRoomCategories(db: Db): Promise<Map<string, number>> {
@@ -246,6 +277,7 @@ export async function seedIndiaReference(actor: Session): Promise<IndiaRefs> {
   const db = getDb()
   const deptIds = await upsertDepartments(db)
   const payerIds = await upsertPayers(db)
+  await seedPayerProfiles(db, payerIds, actor)
   const roomCategoryIds = await upsertRoomCategories(db)
   await ensureCategorisedRooms(db, roomCategoryIds)
   const serviceIds = await upsertServices(db, deptIds)
@@ -299,7 +331,7 @@ export interface OperationsInput {
   patientIds: string[]
   heroIds: string[]
   /** Demo staff sessions, by DEMO_USERS local part. */
-  sessions: Record<'admin' | 'frontdesk' | 'billing' | 'labs' | 'pathologist' | 'collector' | 'coder' | 'pharmacy' | 'crc' | 'pi', Session>
+  sessions: Record<'admin' | 'frontdesk' | 'billing' | 'labs' | 'pathologist' | 'collector' | 'coder' | 'pharmacy' | 'crc' | 'pi' | 'rcm', Session>
   now?: Date
 }
 
@@ -347,7 +379,25 @@ export interface OperationsSummary {
   admissions: number
   labOrders: number
   invoices: number
+  policies: number
+  preauths: number
+  claims: number
 }
+
+// SP7: the insurance policy behind each payer patient (payerFor below). Plan names are generic.
+type PolicySeed = { insurer: string; tpa?: string; type: PolicyInput['policyType']; plan: string; corporate?: string; employeeId?: string; sumInsuredPaise: number; copayBp?: number }
+const POLICY_SEED: Record<number, PolicySeed> = {
+  15: { insurer: 'Star Health and Allied Insurance', type: 'family_floater', plan: 'Family floater (demo plan)', sumInsuredPaise: 10_00_000_00 },
+  10: { insurer: 'ICICI Lombard General Insurance', type: 'individual', plan: 'Individual health (demo plan)', sumInsuredPaise: 5_00_000_00, copayBp: 1000 },
+  18: { insurer: 'ICICI Lombard General Insurance', tpa: 'Medi Assist TPA', type: 'group_corporate', plan: 'Group mediclaim (demo plan)', corporate: 'Demo Technologies Pvt Ltd', employeeId: 'EMP-1018', sumInsuredPaise: 3_00_000_00 },
+  22: { insurer: 'CGHS (Central Government Health Scheme)', type: 'government_scheme', plan: 'CGHS card (demo)', sumInsuredPaise: 0 },
+  48: { insurer: 'Ayushman Bharat PM-JAY', type: 'government_scheme', plan: 'PM-JAY family cover (demo)', sumInsuredPaise: 5_00_000_00 },
+  28: { insurer: 'HDFC ERGO General Insurance', type: 'individual', plan: 'Individual health (demo plan)', sumInsuredPaise: 5_00_000_00 },
+}
+/** The two OPD visits whose payer bills are invoiced for a claim (one submitted and settled, one draft). */
+const SETTLED_CLAIM_PATIENT = 10
+const DRAFT_CLAIM_PATIENT = 15
+
 
 export async function seedIndiaOperations(input: OperationsInput): Promise<OperationsSummary> {
   const db = getDb()
@@ -375,6 +425,24 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     if (payerId === undefined) continue
     await db.update(patients).set({ primaryPayerId: payerId, primaryMemberId: `DEMO-${payerId}-${patientId.slice(3)}`, primarySubscriberRelationship: 'self' }).where(eq(patients.id, patientId))
   }
+  // SP7: each of them holds an active primary policy, written through the policy desk's function
+  // (it mirrors the billing payer, the TPA when there is one, back onto the patient).
+  const policyIds = new Map<string, number>()
+  const holderNames = new Map((await db.select({ id: patients.id, name: patients.name }).from(patients)
+    .where(inArray(patients.id, Object.keys(POLICY_SEED).map((n) => pid(Number(n)))))).map((r) => [r.id, r.name]))
+  for (const [n, pol] of Object.entries(POLICY_SEED)) {
+    const patientId = pid(Number(n))
+    const insurerPayerId = refs.payerIds.get(pol.insurer)
+    const tpaPayerId = pol.tpa ? refs.payerIds.get(pol.tpa) : null
+    if (insurerPayerId === undefined || tpaPayerId === undefined || !holderNames.has(patientId)) continue
+    const r = must(await createPolicy({
+      patientId, insurerPayerId, tpaPayerId, policyNumber: `DEMO/POL/${patientId.slice(3)}`, memberId: `DEMO-${tpaPayerId ?? insurerPayerId}-${patientId.slice(3)}`,
+      planName: pol.plan, policyType: pol.type, corporateName: pol.corporate, employeeId: pol.employeeId, holderName: holderNames.get(patientId)!,
+      relationship: 'self', validFrom: day(-200), validTo: day(165), sumInsuredPaise: pol.sumInsuredPaise || null, copayBp: pol.copayBp ?? null,
+      priority: 'primary', status: 'active',
+    }, sessions.frontdesk), `policy ${patientId}`)
+    policyIds.set(patientId, r.value.policyId)
+  }
 
   const roomRows = await db.select({ id: rooms.id, ward: rooms.ward, roomNumber: rooms.roomNumber, bedNumber: rooms.bedNumber }).from(rooms)
   const room = (ward: string, roomNumber: string, bed: string) => roomRows.find((r) => r.ward === ward && r.roomNumber === roomNumber && r.bedNumber === bed)!.id
@@ -389,6 +457,8 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   }
   let encounterCount = 0
   let invoiceCount = 0
+  /** SP7: the finalised payer invoice of each claim visit (filled in section 1). */
+  const claimVisits = new Map<string, { encounterId: number; invoiceId: number; date: string }>()
 
   // ---- helpers -----------------------------------------------------------------------------
 
@@ -464,6 +534,12 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
 
     // Billing state by visit: unbilled, draft, finalised & paid, finalised & unpaid, cancelled.
     const state = v.i % 5
+    if (hasPayer && (v.patientId === pid(SETTLED_CLAIM_PATIENT) || v.patientId === pid(DRAFT_CLAIM_PATIENT)) && !claimVisits.has(v.patientId)) {
+      // SP7: the payer bill of a claim visit is finalised; the claim itself is made in section 10.
+      const inv = await invoice(lines, plusMinutes(start, 50))
+      claimVisits.set(v.patientId, { encounterId, invoiceId: inv.invoiceId, date })
+      continue
+    }
     if (state === 0 || hasPayer) continue // captured, not yet invoiced (payer lines wait for the claim)
     const sameBillTo = lines
     if (state === 1) { await invoice(sameBillTo, null); continue }
@@ -847,6 +923,125 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     ]),
   ])
 
+  // ---- 10. Insurance: pre-auths for two payer inpatients, a settled and a draft claim ------------
+
+  const insurance = await seedInsuranceDesk({ db, day, sessions, policyIds, claimVisits, stays: stays.map((s, i) => ({ ...s, admissionId: admissionIds[i] })), doctorId, svc, pid })
+
   // Policies and portal: a portal password is set separately by seed.ts (it owns the demo password).
-  return { encounters: encounterCount, admissions: admissionIds.length, labOrders: labOrderCount, invoices: invoiceCount }
+  return {
+    encounters: encounterCount, admissions: admissionIds.length, labOrders: labOrderCount, invoices: invoiceCount,
+    policies: policyIds.size, preauths: insurance.preauths, claims: insurance.claims,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SP7 insurance desk (fresh seed only)
+// ---------------------------------------------------------------------------
+
+interface InsuranceInput {
+  db: Db
+  day: (offset: number) => string
+  sessions: OperationsInput['sessions']
+  policyIds: Map<string, number>
+  claimVisits: Map<string, { encounterId: number; invoiceId: number; date: string }>
+  stays: { patientId: string; doctor: string; offset: number; reason: string; admissionId: number }[]
+  doctorId: (name: string) => number
+  svc: (code: string) => number
+  pid: (n: number) => string
+}
+
+/** A demo claim copy is never uploaded: the stored "URL" names the copy (no random suffix). */
+const seedCopyBlob = async (path: string) => ({ url: `seed-demo://${path.replace(/-[0-9a-f-]{36}\.pdf$/, '.pdf')}` })
+
+/**
+ * Pre-auths (one approved, one with an open insurer query) for two payer inpatients, and two OPD
+ * claims: one submitted with both copies recorded, acknowledged, part-approved and settled (left
+ * for the bank reconciliation), and one still a draft. Everything goes through the RCM desk's own
+ * functions, with past times, so the worklists, dashboard and reports have real rows.
+ */
+async function seedInsuranceDesk(input: InsuranceInput): Promise<{ preauths: number; claims: number }> {
+  const { db, day, sessions, policyIds, claimVisits, stays, doctorId, svc, pid } = input
+  const rcm = sessions.rcm
+  let preauthCount = 0
+  let claimCount = 0
+
+  // Pre-auth 1, approved: the cardiac evaluation stay (Star Health).
+  const cardiac = stays.find((s) => s.patientId === pid(15))
+  const cardiacPolicy = policyIds.get(pid(15))
+  if (cardiac && cardiacPolicy !== undefined) {
+    const at = istAt(day(cardiac.offset), '11:00')
+    const p = must(await createPreauth({
+      policyId: cardiacPolicy, claimType: 'ipd', admissionId: cardiac.admissionId, plannedAdmissionDate: day(cardiac.offset), expectedLengthOfStayDays: 4,
+      treatingProviderId: doctorId(cardiac.doctor), diagnosisCodeIds: [], procedureCodeIds: [], provisionalDiagnosisText: cardiac.reason,
+      estimate: [{ serviceId: svc('CONS_CARDIO'), quantity: 3 }, { serviceId: svc('IMG_ECHO'), quantity: 1 }, { serviceId: svc('LAB_CBC'), quantity: 2 }],
+    }, rcm, at), 'pre-auth (cardiac)')
+    must(await applyPreauthAction(p.value.preauthId, { action: 'request' }, rcm, plusMinutes(at, 10)), 'pre-auth request')
+    const [row] = await db.select({ requested: preauths.requestedPaise }).from(preauths).where(eq(preauths.id, p.value.preauthId))
+    must(await applyPreauthAction(p.value.preauthId, {
+      action: 'approve', approvedPaise: row.requested, approvalReference: `DEMO/STAR/PA/${String(p.value.preauthId).padStart(4, '0')}`,
+      validUntil: day(cardiac.offset + 15), decidedOn: day(cardiac.offset),
+    }, rcm, plusMinutes(at, 150)), 'pre-auth approve')
+    preauthCount++
+  }
+
+  // Pre-auth 2, queried: the delivery package (PM-JAY) is waiting on the hospital's reply.
+  const delivery = stays.find((s) => s.patientId === pid(48))
+  const deliveryPolicy = policyIds.get(pid(48))
+  if (delivery && deliveryPolicy !== undefined) {
+    const at = istAt(day(delivery.offset), '12:00')
+    const p = must(await createPreauth({
+      policyId: deliveryPolicy, claimType: 'ipd', admissionId: delivery.admissionId, plannedAdmissionDate: day(delivery.offset), expectedLengthOfStayDays: 2,
+      treatingProviderId: doctorId(delivery.doctor), diagnosisCodeIds: [], procedureCodeIds: [], provisionalDiagnosisText: delivery.reason,
+      estimate: [{ serviceId: svc('PKG_NORMAL_DEL'), quantity: 1 }],
+    }, rcm, at), 'pre-auth (delivery)')
+    must(await applyPreauthAction(p.value.preauthId, { action: 'request' }, rcm, plusMinutes(at, 10)), 'pre-auth request')
+    must(await applyPreauthAction(p.value.preauthId, {
+      action: 'record_query', question: 'Please send the latest obstetric ultrasound report and the antenatal card.', raisedOn: day(delivery.offset + 1), dueOn: day(delivery.offset + 3),
+    }, rcm, istAt(day(delivery.offset + 1), '09:30')), 'pre-auth query')
+    preauthCount++
+  }
+
+  // Claim 1: submitted with both copies, acknowledged, part-approved and settled.
+  const settledVisit = claimVisits.get(pid(SETTLED_CLAIM_PATIENT))
+  const settledPolicy = policyIds.get(pid(SETTLED_CLAIM_PATIENT))
+  if (settledVisit && settledPolicy !== undefined) {
+    const { encounterId, invoiceId, date } = settledVisit
+    const [coding] = await db.select({ status: encounterCoding.status }).from(encounterCoding).where(eq(encounterCoding.encounterId, encounterId))
+    if (coding?.status === 'coded') must(await applyCodingAction(encounterId, { action: 'finalise' }, sessions.coder, istAt(date, '17:45')), 'finalise coding (claim)')
+    const created = istAt(addDaysIso(date, 1), '10:00')
+    const c = must(await createClaimDraft({ policyId: settledPolicy, claimType: 'opd', encounterId, invoices: [{ invoiceId }] }, rcm, created), 'claim draft')
+    claimCount++
+    const readiness = await getClaimReadiness(c.value.claimId)
+    for (const item of readiness?.items ?? []) {
+      if (item.code === 'document_missing' && item.documentKind) {
+        must(await waiveClaimDocument(c.value.claimId, item.documentKind, 'Original sent by courier with the signed claim form', rcm), 'waive claim document')
+      }
+    }
+    if ((await getClaimReadiness(c.value.claimId))?.ready) {
+      const s = must(await submitClaimVersion(c.value.claimId, { action: 'submit', channel: 'portal', trackingReference: `DEMO-PORTAL-${c.value.claimNumber}` }, rcm,
+        { ...defaultSubmissionDeps, putBlob: seedCopyBlob }, plusMinutes(created, 60)), 'submit claim')
+      const [dispatch] = await db.select({ id: claimDispatches.id }).from(claimDispatches).where(eq(claimDispatches.submissionId, s.value.submissionId))
+      must(await acknowledgeDispatch(dispatch.id, { insurerReference: `DEMO/ICICI/CLM/${String(c.value.claimId).padStart(4, '0')}`, acknowledgedOn: addDaysIso(date, 2) }, rcm), 'acknowledge claim')
+      const [{ claimedPaise }] = await db.select({ claimedPaise: claims.claimedPaise }).from(claims).where(eq(claims.id, c.value.claimId))
+      const deductionPaise = Math.max(100_00, Math.round(claimedPaise / 10 / 100) * 100)
+      const approvedPaise = claimedPaise - deductionPaise
+      must(await applyClaimUpdate(c.value.claimId, {
+        action: 'record_decision', approvedPaise, decidedOn: day(-4),
+        disallowances: [{ reasonCode: 'NME', amountPaise: deductionPaise, patientRecoverable: true, note: 'Registration and file charges are not payable' }],
+      }, rcm, istAt(day(-4), '15:00')), 'claim decision')
+      const tdsPaise = Math.round(approvedPaise / 10)
+      must(await recordSettlement(c.value.claimId, {
+        utr: `DEMO-NEFT-${c.value.claimNumber}`, paymentDate: day(-2), receivedPaise: approvedPaise - tdsPaise, tdsPaise, bankChargesPaise: 0,
+      }, rcm, istAt(day(-2), '16:00')), 'claim settlement')
+    }
+  }
+
+  // Claim 2: a draft the desk still has to complete (coding and documents outstanding).
+  const draftVisit = claimVisits.get(pid(DRAFT_CLAIM_PATIENT))
+  const draftPolicy = policyIds.get(pid(DRAFT_CLAIM_PATIENT))
+  if (draftVisit && draftPolicy !== undefined) {
+    must(await createClaimDraft({ policyId: draftPolicy, claimType: 'opd', encounterId: draftVisit.encounterId, invoices: [{ invoiceId: draftVisit.invoiceId }] }, rcm, istAt(day(-1), '12:00')), 'claim draft')
+    claimCount++
+  }
+  return { preauths: preauthCount, claims: claimCount }
 }

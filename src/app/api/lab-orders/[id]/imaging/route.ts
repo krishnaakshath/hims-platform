@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { parseId } from '@/lib/http'
 import { z } from 'zod'
 import { put } from '@vercel/blob'
+import { requireBlobStore, withServiceGuard } from '@/lib/service-config'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getDb } from '@/db/client'
@@ -30,7 +31,7 @@ const MAX_BYTES = 16 * 1024 * 1024
 
 const attachImagingSchema = z.object({ name: z.string().trim().min(1) }).strict()
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const POST = withServiceGuard('imaging upload', async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   // Deliberately the same admin/pi/labs tier as POST /api/lab-orders/[id]/result,
@@ -87,6 +88,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // Blob before DB, matching POST /api/documents -- an orphaned blob is
   // invisible and cheap; a row pointing at bytes that were never stored is
   // a broken link in a chart.
+  requireBlobStore()
   const blob = await put(`imaging/${orderId}-${crypto.randomUUID()}-${file.name}`, file, { access: 'private', contentType: file.type })
 
   const created = await createDocument({
@@ -123,4 +125,4 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   await logAudit(session, `attached imaging to lab order ${orderId}`, order.patientId)
 
   return NextResponse.json({ id: created.id, fileUrl: created.fileUrl }, { status: 201 })
-}
+})

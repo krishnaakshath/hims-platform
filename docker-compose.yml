@@ -6,9 +6,13 @@
 #   KV_REST_API_URL=http://127.0.0.1:8079   KV_REST_API_TOKEN=hims_local_redis_token
 #   npm run db:migrate && SEED_DEMO_PASSWORD=... npm run db:seed
 #
-# Note: Upstash's rate-limit library uses a script flag (allow-key-locking) that
-# only Upstash's own Redis accepts, so tests/lib/rate-limit.test.ts needs a real
-# Upstash database; mfa, otp and cache work against this local stack.
+# Redis REST is two services: `redis-http` (serverless-redis-http, internal
+# only) and `redis-rest`, a tiny Node proxy (scripts/dev/redis-rest-shim.mjs)
+# published on 8079. Upstash's rate-limit library sends Lua scripts with a
+# flag (allow-key-locking) that only Upstash's own Redis accepts; the proxy
+# strips it, so login, OTP and booking rate limits and
+# tests/lib/rate-limit.test.ts work against this stack. Set REDIS_REST_PORT to
+# publish it on another host port.
 # Local only: the credentials below are throwaway development values.
 services:
   postgres:
@@ -37,7 +41,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-  redis-rest:
+  redis-http:
     image: hiett/serverless-redis-http:latest
     restart: unless-stopped
     depends_on:
@@ -47,8 +51,25 @@ services:
       SRH_MODE: env
       SRH_TOKEN: hims_local_redis_token
       SRH_CONNECTION_STRING: redis://redis:6379
+  redis-rest:
+    image: node:22-alpine
+    restart: unless-stopped
+    depends_on:
+      - redis-http
+    command: ["node", "/shim/redis-rest-shim.mjs"]
+    environment:
+      SHIM_HOST: 0.0.0.0
+      SHIM_PORT: "8079"
+      SHIM_TARGET: http://redis-http:80
+    volumes:
+      - ./scripts/dev/redis-rest-shim.mjs:/shim/redis-rest-shim.mjs:ro
     ports:
-      - "8079:80"
+      - "${REDIS_REST_PORT:-8079}:8079"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8079/',{method:'POST',headers:{authorization:'Bearer hims_local_redis_token','content-type':'application/json'},body:'[\"PING\"]'}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 volumes:
   hims_pg:
   hims_redis:

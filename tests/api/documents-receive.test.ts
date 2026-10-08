@@ -8,7 +8,7 @@
 // strict webidl brand check on each value, which a jsdom File fails even
 // though it's a genuine File -- see tests/api/patients-insurance-card.test.ts
 // for the same class of jsdom/Node realm mismatch.
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { POST as receiveDocument } from '@/app/api/documents/route'
 import { getDb } from '@/db/client'
@@ -22,6 +22,9 @@ vi.mock('@vercel/blob', () => ({
 }))
 
 import { put as mockedPut } from '@vercel/blob'
+
+// The routes refuse to reach the (mocked) blob SDK without a configured store.
+beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
 
 const createdDocumentIds: number[] = []
 const createdAdmissionIds: number[] = []

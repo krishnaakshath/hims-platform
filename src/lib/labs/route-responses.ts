@@ -3,6 +3,7 @@
 import { NextResponse } from 'next/server'
 import type { ZodError } from 'zod'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { serviceErrorResponse } from '@/lib/service-config'
 
 export { parseId, readJsonBody } from '@/lib/http'
 
@@ -39,10 +40,13 @@ export function labTransitionError(error: LabTransitionError) {
 }
 
 /**
- * A thrown error: a deadlock / serialization failure (nothing was written) is a 409 asking to
+ * A thrown error: a missing blob store or unreachable database is a 503 (one [config] log
+ * line); a deadlock / serialization failure (nothing was written) is a 409 asking to
  * try again; anything else a generic 500. Logs only the pg code and constraint.
  */
 export function labServerError(tag: string, err: unknown, message: string) {
+  const unavailable = serviceErrorResponse(err, tag)
+  if (unavailable) return unavailable
   if (isRetryableConflict(err)) return errorResponse(409, RETRY_MESSAGE)
   console.error(`[labs] ${tag} failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
   return errorResponse(500, message)

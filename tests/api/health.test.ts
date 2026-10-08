@@ -20,6 +20,7 @@ const KEY32 = Buffer.alloc(32, 7).toString('base64')
 const okDeps = (over: Partial<HealthDeps> = {}): HealthDeps => ({
   pingDatabase: async () => {},
   redisConfigured: () => true,
+  blobConfigured: () => true,
   pingRedis: async () => {},
   appliedMigrations: async () => [BASELINE_NAME, 'a.sql'],
   migrationFiles: () => ['a.sql'],
@@ -42,7 +43,7 @@ describe('runHealthChecks', () => {
   it('reports ok when everything is in place', async () => {
     expect(await runHealthChecks(okDeps())).toEqual({
       status: 'ok',
-      checks: { database: 'ok', redis: 'ok', migrations: 'up_to_date', secrets: 'ok' },
+      checks: { database: 'ok', redis: 'ok', migrations: 'up_to_date', secrets: 'ok', blob: 'ok' },
     })
   })
 
@@ -50,21 +51,27 @@ describe('runHealthChecks', () => {
     const report = await runHealthChecks(okDeps({
       pingDatabase: async () => { throw new Error('password authentication failed for user "neondb_owner" postgres://u:p@h/db') },
       redisConfigured: () => false,
+      blobConfigured: () => false,
       appliedMigrations: async () => { throw new Error('boom') },
       env: {},
     }))
     expect(report).toEqual({
       status: 'down',
-      checks: { database: 'fail', redis: 'not_configured', migrations: 'unknown', secrets: 'missing' },
+      checks: { database: 'fail', redis: 'not_configured', migrations: 'unknown', secrets: 'missing', blob: 'not_configured' },
     })
   })
 
   it('is degraded (not down) when only Redis or migrations are wrong', async () => {
     const r1 = await runHealthChecks(okDeps({ pingRedis: async () => { throw new Error('x') } }))
-    expect(r1).toEqual({ status: 'degraded', checks: { database: 'ok', redis: 'fail', migrations: 'up_to_date', secrets: 'ok' } })
+    expect(r1).toEqual({ status: 'degraded', checks: { database: 'ok', redis: 'fail', migrations: 'up_to_date', secrets: 'ok', blob: 'ok' } })
     const r2 = await runHealthChecks(okDeps({ appliedMigrations: async () => [BASELINE_NAME] , migrationFiles: () => ['a.sql', 'b.sql'] }))
     expect(r2.checks.migrations).toBe('pending')
     expect(r2.status).toBe('degraded')
+  })
+
+  it('is degraded when the blob store is not configured (file storage is unavailable)', async () => {
+    const r = await runHealthChecks(okDeps({ blobConfigured: () => false }))
+    expect(r).toEqual({ status: 'degraded', checks: { database: 'ok', redis: 'ok', migrations: 'up_to_date', secrets: 'ok', blob: 'not_configured' } })
   })
 
   it('reports migrations unknown when the database is down', async () => {
@@ -79,19 +86,22 @@ describe('runHealthChecks', () => {
 })
 
 describe('GET /api/health and /api/health/ready', () => {
-  const ENV_LEAK = /KV_REST|DATABASE_URL|SESSION_SECRET|IDENTITY_ENCRYPTION|postgres:|neon|password|Error/i
+  const ENV_LEAK = /KV_REST|DATABASE_URL|SESSION_SECRET|IDENTITY_ENCRYPTION|BLOB_|TOKEN|postgres:|neon|password|Error/i
 
   it('answers with exactly {status, checks} and no session, no env names, no error text', async () => {
     vi.stubEnv('KV_REST_API_URL', '')
     vi.stubEnv('KV_REST_API_TOKEN', '')
+    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
+    vi.stubEnv('BLOB_STORE_ID', '')
     const { GET } = await import('@/app/api/health/route')
     const res = await GET()
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toContain('no-store')
     const body = await res.json()
     expect(Object.keys(body).sort()).toEqual(['checks', 'status'])
-    expect(Object.keys(body.checks).sort()).toEqual(['database', 'migrations', 'redis', 'secrets'])
+    expect(Object.keys(body.checks).sort()).toEqual(['blob', 'database', 'migrations', 'redis', 'secrets'])
     expect(body.checks.redis).toBe('not_configured')
+    expect(body.checks.blob).toBe('not_configured')
     expect(JSON.stringify(body)).not.toMatch(ENV_LEAK)
   })
 

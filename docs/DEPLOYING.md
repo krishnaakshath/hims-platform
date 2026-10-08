@@ -107,7 +107,7 @@ Step by step, for a new client:
    `codes_display_trgm_idx` index, the billing immutability triggers).
    Run `db:migrate:status` again: every line must read `applied`.
 6. **Deploy** (section 5) and check `https://<client-domain>/api/health/ready`
-   answers 200 with `{"status":"ok","checks":{"database":"ok","redis":"ok","migrations":"up_to_date","secrets":"ok"}}`.
+   answers 200 with `{"status":"ok","checks":{"database":"ok","redis":"ok","migrations":"up_to_date","secrets":"ok","blob":"ok"}}`.
    Any other word names the missing piece; it never shows values.
 7. **Create the first admin** (section 6).
 8. **Code sets.** No code sets ship with the app. The owner loads the licensed
@@ -174,10 +174,14 @@ SEED_DEMO_PASSWORD='<12+ chars>' npm run db:seed
 - The seed throws if `NODE_ENV` or `VERCEL_ENV` is `production` unless
   `ALLOW_PRODUCTION_SEED=1`. A client's live database must never be seeded.
 - The demo is an Indian multispeciality hospital: departments, doctors with
-  NMC/SMC numbers, Indian insurers/TPAs/schemes, wards with room-category
+  NMC/SMC numbers, Indian insurers/TPAs/schemes with RCM payer profiles and
+  TPA networks, wards with room-category
   tariffs, a service master, and a working day relative to today (IST): OPD
   queue, inpatients, lab orders in every status with home collection, coding
-  on the fictional SAMPLE code sets, charges, invoices, receipts and advances.
+  on the fictional SAMPLE code sets, charges, invoices, receipts and advances,
+  and an insurance desk: patient policies, an approved and a queried
+  pre-authorisation, a settled claim (both copies recorded; the demo copies are
+  not uploaded to the blob store) and a draft claim.
   Every identifier is synthetic (Aadhaar test values start `9999 0000` and are
   stored only encrypted; ABHA numbers start `99-9999-0000`; mobiles `+91 90000`).
 - On a database that already has patients the seed only tops up reference
@@ -253,7 +257,7 @@ Devanagari to the repository and embed it in `src/lib/labs/report-pdf.ts`.
 
 ## Local development with Docker
 
-`docker-compose.yml` starts Postgres 15 (port 55432) and Redis with an Upstash-compatible REST endpoint (port 8079):
+`docker-compose.yml` starts Postgres 15 (port 55432) and Redis with an Upstash-compatible REST endpoint (port 8079; set `REDIS_REST_PORT` to use another host port):
 
 ```
 docker compose up -d
@@ -263,4 +267,6 @@ npm run db:migrate
 SEED_DEMO_PASSWORD='choose-a-password' npm run db:seed
 ```
 
-Production uses Neon (Postgres) and Upstash (Redis) from the Vercel Marketplace; the Docker stack is for local development and tests only. `tests/lib/rate-limit.test.ts` needs a real Upstash database (its rate-limit script uses a flag only Upstash's Redis accepts).
+Production uses Neon (Postgres) and Upstash (Redis) from the Vercel Marketplace; the Docker stack is for local development and tests only.
+
+The REST endpoint on 8079 is `redis-rest`, a small Node proxy (`scripts/dev/redis-rest-shim.mjs`) in front of `redis-http` (serverless-redis-http, not published). Upstash's rate-limit library sends Lua scripts marked `#!lua flags=allow-key-locking`, a flag only Upstash's own Redis accepts; plain Redis 7 rejects them, which made every rate-limited route (staff and patient sign-in, OTP, booking) answer 500 locally. The proxy rewrites that line to `#!lua` and forwards everything else unchanged, so sign-in and `tests/lib/rate-limit.test.ts` work against the local stack. A stack created before this change picks it up with `docker compose up -d` (it replaces the old `redis-rest` container). Never point a deployment at the proxy.

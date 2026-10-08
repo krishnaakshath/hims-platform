@@ -7,10 +7,13 @@ import {
   trials, patients, charges, insuranceClaims, patientStatements, mockPayments, providers, appointments, rooms, documents, faxes,
   broadcasts, reviews, departments, payers, serviceCatalog, tariffRates, roomCategories, billingSettings, patientAadhaar,
   encounters, admissions, labOrders, homeCollectionVisits, diagnoses, chargeLines, invoices, patientPayments, followUpOrders,
-  encounterCoding, codeSystems, users,
+  encounterCoding, codeSystems, users, payerProfiles, payerNetworks, patientPolicies, preauths, rcmQueries, claims, claimSubmissions,
+  claimDispatches, claimSettlements,
 } from '@/db/schema'
 import { seed, seedResetRequested } from '@/db/seed'
-import { SYNTHETIC_AADHAAR_PREFIX, SYNTHETIC_AADHAAR_RECORDED_BY } from '@/db/seed-india-data'
+import { PAYERS_SEED, SYNTHETIC_AADHAAR_PREFIX, SYNTHETIC_AADHAAR_RECORDED_BY } from '@/db/seed-india-data'
+import { listClaims, getRcmDashboard } from '@/lib/queries/rcm-worklist'
+import { payerPerformance } from '@/lib/queries/rcm-reports'
 import { parseUhid } from '@/lib/uhid'
 import { isIndianStateCode, isValidPinCode } from '@/lib/india/reference'
 import { normalizePhone } from '@/lib/india/phone'
@@ -127,6 +130,14 @@ describe('India masters (topped up on every run)', () => {
     expect(s.roomRentServiceId).not.toBeNull()
   })
 
+  it('every Indian payer has an RCM profile and the TPAs service some insurers', async () => {
+    const db = getDb()
+    const named = await db.select({ id: payers.id, name: payers.name }).from(payers)
+    const profiled = new Set((await db.select({ id: payerProfiles.payerId }).from(payerProfiles)).map((r) => r.id))
+    for (const p of PAYERS_SEED) expect(profiled.has(named.find((n) => n.name === p.name)!.id), p.name).toBe(true)
+    expect((await db.select().from(payerNetworks)).length).toBeGreaterThan(0)
+  })
+
   it('the fictional SAMPLE code sets are loaded for coding', async () => {
     const rows = await getDb().select().from(codeSystems)
     expect(rows.some((r) => r.kind === 'icd10')).toBe(true)
@@ -210,6 +221,46 @@ describe('India hospital demo (after a fresh seed or SEED_RESET=1)', () => {
     const rows = await getDb().select().from(followUpOrders)
     const buckets = new Set(rows.map((r) => recallBucket(r.status, r.windowStart, r.windowEnd, today())))
     for (const b of ['due', 'overdue', 'upcoming', 'scheduled', 'missed']) expect(buckets.has(b as never), b).toBe(true)
+  })
+
+  it('insurance: policies, approved and queried pre-auths, a draft claim and a settled claim with both copies', async (ctx) => {
+    if (!rebuilt) ctx.skip()
+    const db = getDb()
+    const policies = await db.select().from(patientPolicies)
+    expect(policies.filter((p) => p.status === 'active' && p.priority === 'primary').length).toBeGreaterThanOrEqual(5)
+    expect(policies.some((p) => p.tpaPayerId !== null)).toBe(true)
+    // A patient's billing payer mirrors the active primary policy (insurer, or its TPA).
+    const mirror = await db.select({ id: patients.id, payer: patients.primaryPayerId }).from(patients)
+    for (const p of policies) expect(mirror.find((m) => m.id === p.patientId)?.payer, p.patientId).toBe(p.tpaPayerId ?? p.insurerPayerId)
+
+    const pa = await db.select().from(preauths)
+    const approved = pa.find((p) => p.status === 'approved')
+    expect(approved?.approvedPaise).toBeGreaterThan(0)
+    expect(approved?.approvalReference).toBeTruthy()
+    const queried = pa.find((p) => p.status === 'queried')
+    expect(queried).toBeDefined()
+    expect((await db.select().from(rcmQueries)).some((q) => q.preauthId === queried!.id && q.status === 'open')).toBe(true)
+
+    const cl = await db.select().from(claims)
+    expect(cl.some((c) => c.status === 'draft')).toBe(true)
+    const settled = cl.find((c) => c.status === 'settled')!
+    expect(settled).toBeDefined()
+    expect(settled.settledPaise).toBeGreaterThan(0)
+    const subs = await db.select().from(claimSubmissions)
+    const sub = subs.find((s) => s.claimId === settled.id)!
+    expect(sub.rcmCopySha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(sub.insurerCopySha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(sub.rcmCopyBlobUrl).not.toBe(sub.insurerCopyBlobUrl)
+    expect((await db.select().from(claimDispatches)).some((d) => d.submissionId === sub.id)).toBe(true)
+    expect((await db.select().from(claimSettlements)).some((s) => s.claimId === settled.id)).toBe(true)
+
+    // The RCM desk, its dashboard and the payer report all have something to show.
+    expect((await listClaims()).total).toBeGreaterThanOrEqual(2)
+    const dash = await getRcmDashboard()
+    expect(dash.counts.to_submit).toBeGreaterThanOrEqual(1)
+    expect(dash.counts.to_reconcile + dash.counts.denied).toBeGreaterThanOrEqual(1)
+    const from = istDateOf(new Date(Date.now() - 60 * 86_400_000))
+    expect((await payerPerformance({ from, to: today() })).some((r) => r.settledPaise > 0)).toBe(true)
   })
 
   it('every staff role has a demo login', async (ctx) => {

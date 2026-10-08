@@ -7,10 +7,11 @@ import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { streamPrivateBlob } from '@/lib/blob-store'
 import { getLabReportForDownload } from '@/lib/queries/lab-reports'
 import { parseId } from '@/lib/http'
+import { withServiceGuard } from '@/lib/service-config'
 
 const notFound = () => NextResponse.json({ error: 'Report not found' }, { status: 404 })
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withServiceGuard('patient lab report download', async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requirePatientSession()
   if (session instanceof NextResponse) return session
 
@@ -23,4 +24,4 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!res) return notFound()
   await logPatientPortalAction('downloaded lab report via patient portal', session.patientId, `report=${report.id}`)
   return res
-}
+})

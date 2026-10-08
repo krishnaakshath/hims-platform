@@ -5,6 +5,7 @@ import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { DOCUMENT_READ_ROLES } from '@/lib/role-policy'
 import { getDocument } from '@/lib/queries/documents'
+import { requireBlobStore, withServiceGuard } from '@/lib/service-config'
 
 // Read access for DOCUMENT_READ_ROLES (admin, crc, pi, frontdesk). Labs is
 // admitted ONLY for documents attached to a lab order (imaging thumbnails in
@@ -16,7 +17,7 @@ import { getDocument } from '@/lib/queries/documents'
 // an <img src> for inline thumbnails too (ImagingAttachmentStrip), so this
 // streams the bytes rather than redirecting to a blob URL the browser could
 // never authenticate to on its own.
-export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withServiceGuard('document download', async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   if (!DOCUMENT_READ_ROLES.includes(session.role) && session.role !== 'labs') {
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // get() throws (rather than returning null) for a fileUrl that isn't a
   // Vercel Blob URL, e.g. seeded rows -- treat that as a missing file. Only
   // the error class name is logged: the message embeds the stored URL.
+  requireBlobStore()
   let blob: Awaited<ReturnType<typeof get>>
   try {
     blob = await get(existing.fileUrl, { access: 'private' })
@@ -56,4 +58,4 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       'Cache-Control': 'private, max-age=0, must-revalidate',
     },
   })
-}
+})
