@@ -72,3 +72,9 @@ export const CODING_STATUS_LABEL: Record<S, string> = {
   coded: 'Coded, awaiting finalise',
   finalised: 'Finalised',
 }
+
+/** Whether `role` may take `action` from `status` (the status machine and the per-action roles).
+ *  Pure, so the server-rendered workspace and the client action bar share it. */
+export function codingActionAvailable(status: EncounterCodingStatus, action: CodingAction, role: Role): boolean {
+  return nextCodingStatus(status, action) !== null && CODING_ACTION_ROLES[action].includes(role)
+}

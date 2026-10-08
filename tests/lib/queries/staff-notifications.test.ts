@@ -1,11 +1,11 @@
 // Wave G P2-01: the staff notification feed against real Postgres. Fixtures are
 // created per run and deleted by id; read-state rows by this run's user keys.
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { inArray, like } from 'drizzle-orm'
+import { eq, inArray, like } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
   bookingRequests, doctorAssignments, labOrders, labResults, medicationInventory, medications,
-  notificationDeliveries, staffNotificationReads,
+  notificationDeliveries, patients, staffNotificationReads,
 } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 
@@ -67,7 +67,9 @@ describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () =>
     const item = (await loadStaffNotifications(s('crc'))).find((n) => n.key === `lab_critical:${ids.result}`)!
     expect(item.severity).toBe('critical')
     expect(item.href).toBe(`/patients/${PATIENT}`)
-    expect(item.detail).toMatch(/Maria Alvarez/)
+    // The seeded patient's own name (the India demo renamed RD-0001), never a hardcoded one.
+    const [p] = await getDb().select({ name: patients.name }).from(patients).where(eq(patients.id, PATIENT))
+    expect(item.detail).toContain(p.name)
     expect(item.detail).not.toMatch(/9\.9/) // never the value
   })
 

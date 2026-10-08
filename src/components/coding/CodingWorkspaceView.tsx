@@ -4,9 +4,9 @@
 // pre-formatted on the server (IST). Finalised coding is read-only apart from Reopen.
 import type { Role } from '@/lib/auth'
 import type { CodingIssue } from '@/lib/coding/rules'
-import { CODING_STATUS_LABEL, type CodingEventAction, type EncounterCodingStatus } from '@/lib/coding/status'
+import { CODING_STATUS_LABEL, codingActionAvailable, type CodingEventAction, type EncounterCodingStatus } from '@/lib/coding/status'
 import { CodingStatusBadge } from './CodingStatusBadge'
-import { CodingActions, codingActionAvailable } from './CodingActions'
+import { CodingActions } from './CodingActions'
 import { CodingIssuesPanel } from './CodingIssuesPanel'
 import { CodingQueriesPanel, type QueryView } from './CodingQueriesPanel'
 import { EntryEditor, type EntryView } from './EntryEditor'

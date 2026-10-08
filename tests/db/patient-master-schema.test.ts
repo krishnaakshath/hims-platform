@@ -40,7 +40,10 @@ describe('patient master schema', () => {
 
   // SP5: columns added after SP1 by their own migration file (not by 2026-10-07-sp1-patient-master.sql).
   const LATER_MIGRATION_COLUMNS: Record<string, { file: string; columns: string[] }[]> = {
-    patients: [{ file: '2026-10-08-sp5-lab-home-collection.sql', columns: ['notification_opt_out', 'notification_opt_out_at'] }],
+    patients: [
+      { file: '2026-10-08-sp5-lab-home-collection.sql', columns: ['notification_opt_out', 'notification_opt_out_at'] },
+      { file: '2026-10-10-sp8-abdm-nhcx.sql', columns: ['abha_verified_at', 'abha_verification_source', 'abha_verified_via'] }, // SP8
+    ],
   }
 
   it.each([
