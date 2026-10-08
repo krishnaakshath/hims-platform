@@ -174,3 +174,23 @@ describe('migrationStatus', () => {
     expect(migrationStatus([BASELINE_NAME], null)).toBe('unknown')
   })
 })
+
+describe('scripts/db/baseline.sql', () => {
+  // Every migrated database records this checksum; changing the file makes
+  // db:migrate refuse to run everywhere. Schema changes go in a new file in
+  // scripts/migrations/, never in the baseline.
+  it('is frozen', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const sql = fs.readFileSync(path.resolve(__dirname, '../../scripts/db/baseline.sql'), 'utf8')
+    expect(checksumOf(sql)).toBe('a9bb604bc7a3ee4c92cfd098151b9fcfc8e3fcde808d2761261136d606cb7af3')
+  })
+
+  it('every file in scripts/migrations has a dated name the runner accepts', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const names = fs.readdirSync(path.resolve(__dirname, '../../scripts/migrations'))
+    expect(() => orderMigrationNames(names)).not.toThrow()
+    expect(orderMigrationNames(names).length).toBe(names.filter((n) => n.endsWith('.sql')).length)
+  })
+})
