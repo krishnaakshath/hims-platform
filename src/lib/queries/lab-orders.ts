@@ -115,7 +115,7 @@ export interface WorklistRow {
   receivedAt: Date | null
   verifiedAt: Date | null
   patientUhid: string | null
-  result: { value: string; unit: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
+  result: { value: string; unit: string | null; referenceRange: string | null; notes: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
   // end SP5
 }
 
@@ -150,7 +150,7 @@ function mapWorklistRow(r: {
     verifiedAt: r.order.verifiedAt,
     patientUhid: r.patientUhid,
     result: r.result
-      ? { value: r.result.value, unit: r.result.unit, flag: r.result.flag, resultedByName: r.result.resultedByName, amendedAt: r.result.amendedAt }
+      ? { value: r.result.value, unit: r.result.unit, referenceRange: r.result.referenceRange, notes: r.result.notes, flag: r.result.flag, resultedByName: r.result.resultedByName, amendedAt: r.result.amendedAt }
       : null,
     // end SP5
   }

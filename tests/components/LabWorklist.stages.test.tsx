@@ -45,7 +45,7 @@ function order(overrides: Partial<WorklistOrder> = {}): WorklistOrder {
 
 const RESULTED = () => order({
   status: 'resulted', sampleId: 'L26100800429', collectedAt: new Date('2099-05-01T05:00:00Z'), receivedAt: new Date('2099-05-01T06:00:00Z'),
-  result: { value: '182', unit: 'mg/dL', flag: 'abnormal', resultedByName: 'Lab Tech', amendedAt: null },
+  result: { value: '182', unit: 'mg/dL', referenceRange: '70-99', notes: 'Fasting 10 h', flag: 'abnormal', resultedByName: 'Lab Tech', amendedAt: null },
 })
 const ALL = () => [
   order({ status: 'ordered' }),
@@ -64,6 +64,25 @@ describe('LabWorklist stages', () => {
     expect(headings).toEqual(['To collect', 'In transit', 'At the bench', 'To verify', 'To report', 'Reported'])
     expect(screen.getByText(/Verified test/)).toBeInTheDocument()
     expect(screen.getByText(/Reported test/)).toBeInTheDocument()
+  })
+
+  // Fix wave: Amend opens prefilled with the current result, so a correction never blanks fields.
+  it('Amend opens the result form prefilled with the current result', () => {
+    renderAs('labs', [RESULTED()])
+    fireEvent.click(screen.getByRole('button', { name: 'Amend' }))
+    expect(screen.getByLabelText('Result value')).toHaveValue('182')
+    expect(screen.getByLabelText('Unit')).toHaveValue('mg/dL')
+    expect(screen.getByLabelText('Reference range')).toHaveValue('70-99')
+    expect(screen.getByLabelText('Flag')).toHaveValue('abnormal')
+    expect(screen.getByLabelText('Notes')).toHaveValue('Fasting 10 h')
+    expect(screen.getByRole('heading', { name: /Amend result/ })).toBeInTheDocument()
+  })
+
+  it('Enter result on a received sample opens an empty value with the test defaults', () => {
+    renderAs('labs', [order({ status: 'received', sampleId: 'L26100800440' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Enter result' }))
+    expect(screen.getByLabelText('Result value')).toHaveValue('')
+    expect(screen.getByLabelText('Flag')).toHaveValue('normal')
   })
 
   it('labs sees Receive and Enter result but not Verify', () => {

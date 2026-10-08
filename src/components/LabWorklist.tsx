@@ -43,7 +43,7 @@ export interface WorklistOrder {
   receivedAt: Date | null
   verifiedAt: Date | null
   patientUhid: string | null
-  result: { value: string; unit: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
+  result: { value: string; unit: string | null; referenceRange?: string | null; notes?: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
   // end SP5
 }
 
@@ -382,6 +382,8 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
           defaultReferenceRange={testDefaults(resultFor.testId)?.referenceRange ?? null}
           category={resultFor.category}
           attachments={resultFor.attachments}
+          // Amend: prefill the current result so a correction never blanks a field.
+          initial={resultFor.status === 'resulted' && resultFor.result ? resultFor.result : null}
           onClose={() => setResultFor(null)}
         />
       )}
