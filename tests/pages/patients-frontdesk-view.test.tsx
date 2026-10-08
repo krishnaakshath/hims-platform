@@ -105,6 +105,9 @@ function mockCommon(role: Role) {
   vi.doMock('@/lib/queries/encounters', () => ({ listEncountersForPatient: async () => [] }))
   vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: async () => [] }))
   vi.doMock('@/lib/queries/departments', () => ({ listDepartments: async () => [] }))
+  // SP7: the Insurance tab's loaders
+  vi.doMock('@/lib/queries/rcm-policies', () => ({ listPatientPolicies: async () => [], legacyPolicyPrefill: async () => null }))
+  vi.doMock('@/lib/queries/rcm-payers', () => ({ listRcmPayers: async () => [] }))
   return spies
 }
 

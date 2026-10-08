@@ -12,6 +12,7 @@ import { ViolationList } from './ViolationList'
 import { PRICE_SOURCE_LABELS, bpToPercent } from './labels'
 import { CHARGE_PROCEDURE_CODE_KINDS } from '@/lib/billing/validation'
 import { CODE_SYSTEM_LABEL } from '@/lib/coding/code-systems'
+import { PreauthPicker } from './PreauthPicker' // SP7
 
 type Context = { encounterId: number } | { admissionId: number }
 interface ServiceOption { id: number; code: string; name: string; gstRateBp: number; departmentName?: string }
@@ -49,8 +50,10 @@ function Field({ id, label, hint, children }: { id: string; label: string; hint?
  * SP4: capture one charge against a visit or stay. Every change is previewed (debounced) so the
  * clerk sees the tariff price, its source, the estimated GST and every rule result before saving.
  */
-export function ChargeCaptureForm({ context, canOverride, hasPayer, today }: {
+export function ChargeCaptureForm({ context, canOverride, hasPayer, today, patientId }: {
   context: Context
+  /** SP7: enables the approved pre-auth picker. */
+  patientId?: string
   canOverride: boolean
   hasPayer: boolean
   /** IST business date; defaults to today. */
@@ -194,7 +197,10 @@ export function ChargeCaptureForm({ context, canOverride, hasPayer, today }: {
       </div>
 
       <Field id={id('preauth')} label="Pre-authorisation reference">
-        <input id={id('preauth')} value={preAuth} maxLength={40} onChange={(e) => setPreAuth(e.target.value)} className={FIELD_CLASS} />
+        {/* SP7: approved pre-auths of the patient for a payer line; free text still allowed. */}
+        {patientId && billTo === 'payer'
+          ? <PreauthPicker patientId={patientId} serviceDate={serviceDate} value={preAuth} onChange={setPreAuth} inputId={id('preauth')} className={FIELD_CLASS} />
+          : <input id={id('preauth')} value={preAuth} maxLength={40} onChange={(e) => setPreAuth(e.target.value)} className={FIELD_CLASS} />}
       </Field>
 
       <fieldset className="space-y-2">

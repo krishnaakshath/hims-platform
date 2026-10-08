@@ -97,6 +97,7 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   { href: '/rcm/claims', label: 'Claims', icon: FileStack, roles: ['admin', 'rcm'] as Role[] },
   { href: '/rcm/preauths', label: 'Pre-authorisations', icon: FileCheck2, roles: ['admin', 'rcm'] as Role[] },
   { href: '/rcm/payers', label: 'Insurers & TPAs', icon: Building2, roles: ['admin', 'rcm'] as Role[] },
+  { href: '/rcm/policies', label: 'Policies', icon: IdCard, roles: ['admin', 'rcm'] as Role[] },
   // end SP7
 
   // Staff directory — admin/crc/pi (pi view-only; NOT frontdesk, NOT billing, NOT pharmacy, NOT labs)

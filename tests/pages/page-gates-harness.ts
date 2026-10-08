@@ -326,6 +326,7 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/rcm/preauths/[id]', load: () => import('@/app/(dashboard)/rcm/preauths/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'rcm'] },
   { route: '/rcm/payers', load: () => import('@/app/(dashboard)/rcm/payers/page'), allowed: ['admin', 'rcm'] },
   { route: '/rcm/payers/[id]', load: () => import('@/app/(dashboard)/rcm/payers/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/policies', load: () => import('@/app/(dashboard)/rcm/policies/page'), props: { searchParams: Promise.resolve({ patientId: 'RD-ZZZZ' }) }, allowed: ['admin', 'rcm'] },
   // SP7: LeftNav NAV_TRAILING_ITEMS /rcm/settings -- RCM_SETTINGS_ROLES
   { route: '/rcm/settings', load: () => import('@/app/(dashboard)/rcm/settings/page'), allowed: ['admin'] },
   // end SP7
