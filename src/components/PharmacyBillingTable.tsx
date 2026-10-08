@@ -1,7 +1,10 @@
 'use client'
+import { formatIstDateTime } from '@/lib/india-time'
+import { formatPaise } from '@/lib/format'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { fetchJson } from '@/lib/client-fetch'
 import { LogDispenseBillModal } from '@/components/LogDispenseBillModal'
 import { CHARGE_STATUS_LABELS, type ChargeStatus } from '@/lib/charge-status'
 
@@ -20,17 +23,21 @@ export function PharmacyBillingTable({ rows }: { rows: PharmacyBillingRowView[] 
   const router = useRouter()
   const [billing, setBilling] = useState<{ dispenseId: number; medicationName: string; quantity: number; diagnoses: { id: number; code: string; description: string }[] } | null>(null)
   const [loadingId, setLoadingId] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   async function openBilling(row: PharmacyBillingRowView) {
     setLoadingId(row.dispenseId)
-    const res = await fetch(`/api/pharmacy/patients/${encodeURIComponent(row.patientId)}`)
+    setError(null)
+    const res = await fetchJson<{ diagnoses?: { id: number; code: string; description: string }[] }>(`/api/pharmacy/patients/${encodeURIComponent(row.patientId)}`)
     setLoadingId(null)
-    if (!res.ok) return
-    const view = await res.json()
+    if (!res.ok) { setError(res.error); return }
+    const view = res.data ?? {}
     setBilling({ dispenseId: row.dispenseId, medicationName: row.medicationName, quantity: row.quantity, diagnoses: view.diagnoses ?? [] })
   }
 
   return (
+    <>
+    {error && <p role="alert" className="mb-2 text-sm text-destructive">{error}</p>}
     <div className="overflow-hidden rounded-lg border border-border">
       <table className="w-full border-collapse text-sm">
         <thead>
@@ -50,14 +57,14 @@ export function PharmacyBillingTable({ rows }: { rows: PharmacyBillingRowView[] 
               <td className="p-3 text-foreground">{r.medicationName}</td>
               <td className="p-3 text-foreground">{r.quantity}</td>
               <td className="p-3 text-foreground">{r.dispensedByName}</td>
-              <td className="p-3 text-foreground">{new Date(r.dispensedAt).toLocaleString()}</td>
+              <td className="p-3 text-foreground">{formatIstDateTime(r.dispensedAt)}</td>
               <td className="p-3">
                 {r.charge === null ? (
                   <Button size="sm" variant="outline" disabled={loadingId === r.dispenseId} onClick={() => openBilling(r)}>
                     {loadingId === r.dispenseId ? 'Loading…' : 'Log bill'}
                   </Button>
                 ) : (
-                  <span className="text-foreground">{CHARGE_STATUS_LABELS[r.charge.status]} · ${(r.charge.amountCents / 100).toFixed(2)}</span>
+                  <span className="text-foreground">{CHARGE_STATUS_LABELS[r.charge.status]} · {formatPaise(r.charge.amountCents)}</span>
                 )}
               </td>
             </tr>
@@ -73,5 +80,6 @@ export function PharmacyBillingTable({ rows }: { rows: PharmacyBillingRowView[] 
         />
       )}
     </div>
+    </>
   )
 }

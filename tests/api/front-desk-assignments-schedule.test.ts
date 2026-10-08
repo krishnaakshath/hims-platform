@@ -91,7 +91,7 @@ describe('POST /api/front-desk/assignments/[id]/schedule', () => {
     const assignment = await createDoctorAssignment({ patientId: 'RD-0001', providerId, visitType: 'outpatient', urgency: 'routine', reason: 'Test', roomId: null, assignedByName: 'Taylor Nguyen' })
     createdAssignmentIds.push(assignment.id)
 
-    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ startsAt: '2026-11-03T09:00:00', endsAt: '2026-11-03T09:30:00' }) })
+    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ startsAt: '2026-11-03T09:00:00+05:30', endsAt: '2026-11-03T09:30:00+05:30' }) })
     const res = await schedule(req as never, { params: Promise.resolve({ id: String(assignment.id) }) })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -107,7 +107,7 @@ describe('POST /api/front-desk/assignments/[id]/schedule', () => {
     const assignment = await createDoctorAssignment({ patientId: 'RD-0001', providerId, visitType: 'outpatient', urgency: 'routine', reason: 'Test', roomId: null, assignedByName: 'Taylor Nguyen' })
     createdAssignmentIds.push(assignment.id)
 
-    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ startsAt: '2026-11-03T10:00:00', endsAt: '2026-11-03T10:30:00' }) })
+    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ startsAt: '2026-11-03T10:00:00+05:30', endsAt: '2026-11-03T10:30:00+05:30' }) })
     const res = await schedule(req as never, { params: Promise.resolve({ id: String(assignment.id) }) })
     expect(res.status).toBe(403)
   })
@@ -119,7 +119,7 @@ describe('POST /api/front-desk/assignments/[id]/schedule', () => {
     const assignment = await createDoctorAssignment({ patientId: 'RD-0001', providerId, visitType: 'outpatient', urgency: 'routine', reason: 'Test', roomId: null, assignedByName: 'Taylor Nguyen' })
     createdAssignmentIds.push(assignment.id)
 
-    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ startsAt: '2026-11-03T11:00:00', endsAt: '2026-11-03T11:30:00' }) })
+    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ startsAt: '2026-11-03T11:00:00+05:30', endsAt: '2026-11-03T11:30:00+05:30' }) })
     const res = await schedule(req as never, { params: Promise.resolve({ id: String(assignment.id) }) })
     expect(res.status).toBe(403)
   })
@@ -129,7 +129,7 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- notification and sta
   it('success inserts exactly one system message for that patient and sets patientNotifiedAt', async () => {
     const before = await maxMessageId()
     const a = await newAssignment()
-    const res = await post(a.id, '2026-11-04T09:00:00', '2026-11-04T09:30:00')
+    const res = await post(a.id, '2026-11-04T09:00:00+05:30', '2026-11-04T09:30:00+05:30')
     expect(res.status).toBe(200)
     const body = await res.json()
     createdAppointmentIds.push(body.appointmentId)
@@ -145,17 +145,17 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- notification and sta
   it('second POST on a scheduled assignment -> 409, no second appointment, still one message', async () => {
     const before = await maxMessageId()
     const a = await newAssignment()
-    const first = await post(a.id, '2026-11-05T09:00:00', '2026-11-05T09:30:00')
+    const first = await post(a.id, '2026-11-05T09:00:00+05:30', '2026-11-05T09:30:00+05:30')
     expect(first.status).toBe(200)
     const apptId = (await first.json()).appointmentId
     createdAppointmentIds.push(apptId)
 
-    const second = await post(a.id, '2026-11-05T10:00:00', '2026-11-05T10:30:00')
+    const second = await post(a.id, '2026-11-05T10:00:00+05:30', '2026-11-05T10:30:00+05:30')
     expect(second.status).toBe(409)
     expect(await second.json()).toEqual({ error: 'This assignment has already been scheduled or declined.' })
     const providerId = await kunamProviderId()
     const stray = await getDb().select().from(appointments)
-      .where(and(eq(appointments.providerId, providerId), eq(appointments.startsAt, new Date('2026-11-05T10:00:00'))))
+      .where(and(eq(appointments.providerId, providerId), eq(appointments.startsAt, new Date('2026-11-05T10:00:00+05:30'))))
     for (const r of stray) createdAppointmentIds.push(r.id)
     expect(stray).toHaveLength(0)
     expect(await systemMsgs('RD-0001', before)).toHaveLength(1)
@@ -166,7 +166,7 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- notification and sta
     const before = await maxMessageId()
     const a = await newAssignment()
     const providerId = await kunamProviderId()
-    const slots = ['2026-11-09T09:00:00', '2026-11-09T10:00:00']
+    const slots = ['2026-11-09T09:00:00+05:30', '2026-11-09T10:00:00+05:30']
     // Barrier: neither request takes the schedule lock until both have read
     // the assignment as pending.
     const actual = (await vi.importActual<typeof import('@/lib/queries/appointments')>('@/lib/queries/appointments')).lockProviderSchedule
@@ -179,8 +179,8 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- notification and sta
       return actual(...args)
     })
     const results = await Promise.all([
-      post(a.id, slots[0], '2026-11-09T09:30:00'),
-      post(a.id, slots[1], '2026-11-09T10:30:00'),
+      post(a.id, slots[0], '2026-11-09T09:30:00+05:30'),
+      post(a.id, slots[1], '2026-11-09T10:30:00+05:30'),
     ])
     // Track every appointment in either slot for cleanup before asserting.
     const appts = await getDb().select().from(appointments)
@@ -204,7 +204,7 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- notification and sta
     const before = await maxMessageId()
     const a = await newAssignment()
     await declineAssignment(a.id, 'Fully booked')
-    const res = await post(a.id, '2026-11-06T09:00:00', '2026-11-06T09:30:00')
+    const res = await post(a.id, '2026-11-06T09:00:00+05:30', '2026-11-06T09:30:00+05:30')
     expect(res.status).toBe(409)
     expect((await getRow(a.id)).status).toBe('declined')
     expect(await systemMsgs('RD-0001', before)).toHaveLength(0)
@@ -216,7 +216,7 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- notification and sta
     const a = await newAssignment()
     vi.mocked(sendMessage).mockRejectedValueOnce(new Error('boom'))
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await post(a.id, '2026-11-07T09:00:00', '2026-11-07T09:30:00')
+    const res = await post(a.id, '2026-11-07T09:00:00+05:30', '2026-11-07T09:30:00+05:30')
     errSpy.mockRestore()
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'The appointment was scheduled, but the confirmation message to the patient could not be sent. Please message the patient manually.' })
@@ -243,10 +243,10 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- visit reason is serv
     const a = await createDoctorAssignment({ patientId: 'RD-0001', providerId, visitType: 'outpatient', urgency: 'routine', reason: storedReason, roomId: null, assignedByName: 'Taylor Nguyen' })
     createdAssignmentIds.push(a.id)
 
-    const res = await post(a.id, '2026-11-11T09:00:00', '2026-11-11T09:30:00')
+    const res = await post(a.id, '2026-11-11T09:00:00+05:30', '2026-11-11T09:30:00+05:30')
     // Record everything created for cleanup before asserting.
     const appts = await getDb().select().from(appointments)
-      .where(and(eq(appointments.providerId, providerId), eq(appointments.startsAt, new Date('2026-11-11T09:00:00'))))
+      .where(and(eq(appointments.providerId, providerId), eq(appointments.startsAt, new Date('2026-11-11T09:00:00+05:30'))))
     for (const r of appts) createdAppointmentIds.push(r.id)
     const msgs = await systemMsgs('RD-0001', before)
 
@@ -267,7 +267,7 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- visit reason is serv
       const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify(body) })
       return schedule(req as never, { params: Promise.resolve({ id: String(a.id) }) })
     }
-    const times = { startsAt: '2026-11-12T09:00:00', endsAt: '2026-11-12T09:30:00' }
+    const times = { startsAt: '2026-11-12T09:00:00+05:30', endsAt: '2026-11-12T09:30:00+05:30' }
     const withReason = await postBody({ ...times, visitReason: 'Crafted text for the patient' })
     const withUnknown = await postBody({ ...times, somethingElse: 'x' })
     const appts = await getDb().select().from(appointments)
@@ -292,8 +292,8 @@ describe('POST /api/front-desk/assignments/[id]/schedule -- empty session name',
   // An empty last name used to match the first active provider via
   // includes(''), letting the session act on that provider's assignments.
   it.each([
-    ['', '2026-11-10T09:00:00', '2026-11-10T09:30:00'],
-    ['   ', '2026-11-10T10:00:00', '2026-11-10T10:30:00'],
+    ['', '2026-11-10T09:00:00+05:30', '2026-11-10T09:30:00+05:30'],
+    ['   ', '2026-11-10T10:00:00+05:30', '2026-11-10T10:30:00+05:30'],
   ])('pi named %j -> 403, assignment stays pending, no appointment or message', async (name, startsAt, endsAt) => {
     const auth = await import('@/lib/auth')
     vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'pi', name, userId: null })

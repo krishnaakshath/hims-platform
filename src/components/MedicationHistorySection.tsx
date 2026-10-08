@@ -1,4 +1,6 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
+import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pill } from 'lucide-react'
@@ -22,10 +24,11 @@ const SECTION_HEADING = 'border-l-2 border-primary/40 pl-2.5 text-xs font-semibo
 // has no Date type). Review Focus #5 depends on this.
 function formatDate(value: string | Date | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return formatIstDate(value)
 }
 
-type Episode = typeof medicationEpisodes.$inferSelect
+// prescribedAt is a Date from the DB or its ISO string via the JSON cache.
+type Episode = Omit<typeof medicationEpisodes.$inferSelect, 'prescribedAt'> & { prescribedAt: Date | string | null }
 
 function MedicationRow({
   episode, prescriberById, canPrescribe, patientId,
@@ -69,11 +72,10 @@ function MedicationRow({
   async function stop() {
     setStopping(true)
     setError(null)
-    const res = await fetch(`/api/patients/${patientId}/prescriptions/${m.id}`, { method: 'PATCH' })
+    const res = await sendJson(`/api/patients/${patientId}/prescriptions/${m.id}`, 'PATCH')
     setStopping(false)
     if (res.ok) { router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not stop this prescription.')
+    setError(res.error)
   }
 
   return (
@@ -107,7 +109,7 @@ function MedicationRow({
             )}
           </div>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
     </li>
   )

@@ -78,11 +78,12 @@ export interface AadhaarSummary {
   status: AadhaarStatus
   last4: string | null
   declineReason: string | null
-  consentRecordedAt: Date | null
+  // A Date from the DB, or its ISO string when it came through the JSON cache.
+  consentRecordedAt: Date | string | null
   recordedByName: string | null
 }
 
-type AadhaarSummarySource = Pick<typeof patientAadhaar.$inferSelect, 'aadhaarLast4' | 'declineReason' | 'consentRecordedAt' | 'recordedByName'>
+type AadhaarSummarySource = Pick<typeof patientAadhaar.$inferSelect, 'aadhaarLast4' | 'declineReason' | 'recordedByName'> & { consentRecordedAt: Date | string | null }
 
 // The parameter type excludes aadhaarEncrypted; fields are copied explicitly
 // so even a whole row passed at runtime cannot carry the ciphertext through.
@@ -110,7 +111,8 @@ export interface AadhaarView {
 // What a viewer may see. Only AADHAAR_MASKED_READ_ROLES get detail: masked
 // (`XXXX XXXX 1234`) when on file, the decline reason code when declined.
 // Every other role (and any unknown role, allowlist) gets the status alone.
-export function toAadhaarView(summary: AadhaarSummary, role: Role): AadhaarView {
+// Takes only the fields it reads, so a cached summary (ISO-string consentRecordedAt) fits too.
+export function toAadhaarView(summary: Pick<AadhaarSummary, 'status' | 'last4' | 'declineReason'>, role: Role): AadhaarView {
   if (!AADHAAR_MASKED_READ_ROLES.includes(role)) return { status: summary.status, masked: null, declineReason: null }
   const masked = summary.status === 'on_file' && summary.last4 !== null && /^\d{4}$/.test(summary.last4)
     ? maskAadhaarLast4(summary.last4)

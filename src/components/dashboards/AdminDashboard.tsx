@@ -1,3 +1,4 @@
+import { formatIstDayMonth, istYearMonthOf } from '@/lib/india-time'
 import Link from 'next/link'
 import { FileClock, ClipboardCheck, LayoutTemplate, Clock, Users, Star, Send, CheckCircle2, Fingerprint, Sparkles, ArrowRight, ShieldCheck, AlertTriangle, XCircle } from 'lucide-react'
 import type { Session } from '@/lib/auth'
@@ -11,11 +12,11 @@ import { PatientAvatar } from '@/components/PatientAvatar'
 import type { ExpiringCredential } from '@/lib/queries/staff-credentials'
 
 export interface DashboardData {
-  latestForms: { id: number; status: string; sentDate: Date | null; completedDate: Date | null; templateName: string; patientName: string }[]
-  pendingForms: { id: number; status: string; sentDate: Date | null; completedDate: Date | null; templateName: string; patientName: string }[]
+  latestForms: { id: number; status: string; sentDate: Date | string | null; completedDate: Date | string | null; templateName: string; patientName: string }[]
+  pendingForms: { id: number; status: string; sentDate: Date | string | null; completedDate: Date | string | null; templateName: string; patientName: string }[]
   pendingFormsTotal: number
   pendingClassification: { id: string; name: string }[]
-  recentEvents: { id: number; action: string; userName: string; timestamp: Date }[]
+  recentEvents: { id: number; action: string; userName: string; timestamp: Date | string }[]
   patientsByMonth: { month: string; count: number }[]
   screeningBreakdown: { green: number; yellow: number; red: number }
   peakHourRange: string | null
@@ -108,7 +109,7 @@ export function AdminDashboard({ session, data, templates, patients, appointment
   const unscreenedCount = Math.max(totalPatients - screenedCount, 0)
   const screenedPct = totalPatients > 0 ? Math.round((screenedCount / totalPatients) * 100) : 0
   const now = new Date()
-  const currentMonthLabel = data.patientsByMonth[now.getMonth()]?.month
+  const currentMonthLabel = data.patientsByMonth[istYearMonthOf(now).month]?.month
 
   return (
     <div>
@@ -163,7 +164,7 @@ export function AdminDashboard({ session, data, templates, patients, appointment
 
       <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-5">
         <section className={`${CARD_SURFACE} p-5 lg:col-span-3`}>
-          <SectionHeading>Patients Added ({now.getFullYear()})</SectionHeading>
+          <SectionHeading>Patients Added ({istYearMonthOf(now).year})</SectionHeading>
           <PatientsByMonthChart data={data.patientsByMonth} highlightMonth={currentMonthLabel} />
         </section>
         <section className={`${CARD_SURFACE} p-5 lg:col-span-2`}>
@@ -266,7 +267,7 @@ export function AdminDashboard({ session, data, templates, patients, appointment
                       <p className="truncate text-sm text-foreground">{e.action}</p>
                       <p className="text-xs text-muted-foreground">{e.userName}</p>
                     </div>
-                    <span className="shrink-0 text-xs text-muted-foreground">{new Date(e.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{formatIstDayMonth(e.timestamp)}</span>
                   </li>
                 )
               })}

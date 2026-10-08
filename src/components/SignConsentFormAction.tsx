@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { SignatureCapture } from '@/components/SignatureCapture'
@@ -18,14 +19,9 @@ export function SignConsentFormAction({ patientId, formSubmissionId }: { patient
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`/api/patients/${patientId}/form-submissions/${formSubmissionId}/sign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ typedName }),
-      })
+      const res = await sendJson(`/api/patients/${patientId}/form-submissions/${formSubmissionId}/sign`, 'POST', { typedName })
       if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        setError(body?.error ?? 'Could not sign this form.')
+        setError(res.error)
         return
       }
       router.refresh()

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -28,10 +29,10 @@ export function DeletePatientDialog({ target, onClose, onDeleted }: { target: De
     if (!target) return
     setDeleting(true)
     setError(null)
-    const res = await fetch(`/api/patients/${target.id}`, { method: 'DELETE' })
+    const res = await sendJson(`/api/patients/${target.id}`, 'DELETE')
     setDeleting(false)
     if (!res.ok) {
-      setError('Could not delete this patient. Please try again.')
+      setError(res.error)
       return
     }
     onClose()
@@ -54,7 +55,7 @@ export function DeletePatientDialog({ target, onClose, onDeleted }: { target: De
           them -- diagnoses, medications, forms, appointments, messages, billing -- from {brandName}. It disappears from the Patients tab, the
           Workbook, and everywhere else in the app immediately. This does not affect their chart in your practice&apos;s EHR or intake system, and cannot be undone.
         </p>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={deleting}>Cancel</Button>
           <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>

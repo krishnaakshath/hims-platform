@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -28,19 +29,14 @@ export function EditCredentialModal({ credential, onClose }: { credential: Edita
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/staff/${credential.staffMemberId}/credentials/${credential.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        credentialType,
-        credentialNumber: credentialNumber.trim() ? credentialNumber : null,
-        expiresOn: expiresOn ? expiresOn : null,
-      }),
+    const res = await sendJson(`/api/staff/${credential.staffMemberId}/credentials/${credential.id}`, 'PATCH', {
+      credentialType,
+      credentialNumber: credentialNumber.trim() ? credentialNumber : null,
+      expiresOn: expiresOn ? expiresOn : null,
     })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not update this credential.')
+    setError(res.error)
   }
 
   const canSubmit = Boolean(credentialType.trim()) && !submitting
@@ -58,7 +54,7 @@ export function EditCredentialModal({ credential, onClose }: { credential: Edita
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Expiry date (optional)</label>
             <input value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} type="date" aria-label="Expiry date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

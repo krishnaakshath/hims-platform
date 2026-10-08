@@ -1,4 +1,6 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
+import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import { IntakeQuestionField, type IntakeQuestion as Question } from '@/components/IntakeQuestionField'
 import { SignatureCapture } from '@/components/SignatureCapture'
@@ -37,15 +39,10 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
   async function submit(complete: boolean) {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/intake/${token}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answers, complete }),
-    })
+    const res = await sendJson(`/api/intake/${token}`, 'PUT', { answers, complete })
     setSubmitting(false)
     if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(typeof body?.error === 'string' ? body.error : 'Something went wrong saving your answers. Please try again.')
+      setError(res.error)
       return
     }
     if (complete) setSubmitted(true)
@@ -55,14 +52,9 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
     setSigningId(formSubmissionConsentId)
     setSignErrors((prev) => { const next = { ...prev }; delete next[formSubmissionConsentId]; return next })
     try {
-      const res = await fetch(`/api/intake/${token}/consents/${formSubmissionConsentId}/sign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ typedName }),
-      })
+      const res = await sendJson(`/api/intake/${token}/consents/${formSubmissionConsentId}/sign`, 'POST', { typedName })
       if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        setSignErrors((prev) => ({ ...prev, [formSubmissionConsentId]: typeof body?.error === 'string' ? body.error : 'Something went wrong recording your signature. Please try again.' }))
+        setSignErrors((prev) => ({ ...prev, [formSubmissionConsentId]: res.error }))
         return
       }
       setConsents((prev) => prev.map((c) => c.formSubmissionConsentId === formSubmissionConsentId ? { ...c, signedAt: new Date(), signerTypedName: typedName } : c))
@@ -184,7 +176,7 @@ function ConsentPage({ consent, signing, error, onSign }: {
       <div tabIndex={0} role="region" aria-label={consent.name} className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-4 text-sm text-foreground">{consent.renderedText}</div>
       {consent.signedAt ? (
         <p className="text-sm font-medium text-foreground" suppressHydrationWarning>
-          Signed by {consent.signerTypedName} on {new Date(consent.signedAt).toLocaleDateString()}
+          Signed by {consent.signerTypedName} on {formatIstDate(consent.signedAt)}
         </p>
       ) : (
         <SignatureCapture

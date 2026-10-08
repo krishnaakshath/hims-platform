@@ -1,10 +1,11 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { DataGridToolbar, type DataGridFilterField, type DataGridColumn } from '@/components/DataGridToolbar'
 import { NewChargeModal } from '@/components/NewChargeModal'
-import { formatCents } from '@/lib/format'
+import { formatPaise } from '@/lib/format'
 import { CHARGE_STATUS_LABELS, nextStatusActions, type ChargeStatus } from '@/lib/charge-status'
 
 type Charge = {
@@ -65,17 +66,12 @@ export function ChargesTable({ charges, patients }: { charges: Charge[]; patient
   async function advance(chargeId: number, nextStatus: Charge['status']) {
     setPending(chargeId)
     setError(null)
-    const res = await fetch(`/api/charges/${chargeId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: nextStatus }),
-    })
+    const res = await sendJson(`/api/charges/${chargeId}`, 'PATCH', { status: nextStatus })
     setPending(null)
     if (res.ok) {
       router.refresh()
     } else {
-      const body = await res.json()
-      setError(body.error ?? 'Could not update this charge.')
+      setError(res.error)
     }
   }
 
@@ -100,7 +96,7 @@ export function ChargesTable({ charges, patients }: { charges: Charge[]; patient
         <NewChargeModal patients={patients} />
       </div>
 
-      {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
 
       {filtered.length === 0 ? (
         <p className="mt-6 rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No records found.</p>
@@ -131,7 +127,7 @@ export function ChargesTable({ charges, patients }: { charges: Charge[]; patient
                       </span>
                     </td>
                   )}
-                  {show('amount') && <td className="p-3 text-foreground">{formatCents(c.amountCents)}</td>}
+                  {show('amount') && <td className="p-3 text-foreground">{formatPaise(c.amountCents)}</td>}
                   {show('actions') && (
                     <td className="p-3">
                       <div className="flex gap-2">

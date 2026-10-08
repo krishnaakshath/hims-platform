@@ -1,4 +1,6 @@
+import { todayIsoIn } from '@/lib/india-time'
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId } from '@/lib/http'
 import { z } from 'zod'
 import { put } from '@vercel/blob'
 import { requireSession } from '@/lib/auth'
@@ -40,8 +42,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const orderId = Number((await params).id)
-  if (!Number.isInteger(orderId)) return NextResponse.json({ error: 'Invalid order id' }, { status: 400 })
+  const orderId = parseId((await params).id)
+  if (orderId === null) return NextResponse.json({ error: 'Invalid order id' }, { status: 400 })
 
   const formData = await request.formData()
   const file = formData.get('file')
@@ -89,7 +91,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const created = await createDocument({
     name,
-    documentDate: new Date().toISOString().slice(0, 10),
+    documentDate: todayIsoIn(),
     receivedFrom: session.name,
     documentType: 'imaging_result',
     patientId: order.patientId,

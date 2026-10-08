@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -30,7 +31,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!ALLOWED_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { trialId } = await params
-  const parsed = createSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = createSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid regulatory document payload', details: parsed.error.flatten() }, { status: 400 })
 
   const created = await createRegulatoryDocument({ trialId, uploadedByName: session.name, ...parsed.data })

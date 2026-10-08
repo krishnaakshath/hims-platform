@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { and, eq, ne } from 'drizzle-orm'
 import { getDb } from '@/db/client'
@@ -24,10 +25,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // this id exists for a *different* patient.
   if (session.patientId !== anonId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const parsed = signSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = signSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid signature payload', details: parsed.error.flatten() }, { status: 400 })
 
-  const submissionId = Number(id)
+  const submissionId = parseId(id)
+  if (submissionId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   const submission = await getFormSubmission(submissionId)
   if (!submission || submission.patientId !== anonId) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (submission.category !== 'Consent Forms') return NextResponse.json({ error: 'This form does not require a signature' }, { status: 400 })

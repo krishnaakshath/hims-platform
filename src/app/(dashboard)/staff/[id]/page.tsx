@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getStaffMemberDetail } from '@/lib/queries/staff-members'
@@ -15,8 +16,8 @@ export default async function StaffMemberDetailPage({ params }: { params: Promis
   if (!CLINICAL_ROLES.includes(session.role)) redirect('/')
 
   const { id } = await params
-  const staffId = Number(id)
-  if (!Number.isInteger(staffId)) notFound()
+  const staffId = parseId(id)
+  if (staffId === null) notFound()
 
   const staffMember = await getStaffMemberDetail(staffId)
   if (!staffMember) notFound()

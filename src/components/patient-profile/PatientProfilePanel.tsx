@@ -43,6 +43,8 @@ export interface ProfileView {
   abhaNumber: string | null
   abhaAddress: string | null
   abhaUnavailableReason: string | null
+  // Wave C P2-11: prefilled in the edit form (optional for older callers).
+  abhaUnavailableNote?: string | null
   isMlc: boolean
   mlcNumber: string | null
   contacts: ProfileContact[]
@@ -72,12 +74,14 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar, canEditNotifications = false }: {
+export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar, canUnflagMlc = false, canEditNotifications = false }: {
   patient: ProfileView
   aadhaar: AadhaarView
   canEdit: boolean
   canWriteAadhaar: boolean
   canEditNotifications?: boolean // SP5: NOTIFICATION_PREFERENCE_ROLES
+  // Wave C P2-11: MLC_UNFLAG_ROLES -- may clear an MLC flag already on file.
+  canUnflagMlc?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const abhaNumber = patient.abhaNumber && /^\d{14}$/.test(patient.abhaNumber) ? formatAbhaNumber(patient.abhaNumber) : patient.abhaNumber
@@ -156,7 +160,7 @@ export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar
         </Group>
       )}
 
-      {canEdit && editing && <EditPatientProfileModal patient={patient} onClose={() => setEditing(false)} />}
+      {canEdit && editing && <EditPatientProfileModal patient={patient} canUnflagMlc={canUnflagMlc} onClose={() => setEditing(false)} />}
     </div>
   )
 }

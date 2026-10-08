@@ -1,15 +1,23 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useId, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
 
 interface ProviderOption { id: number; name: string }
 interface RoomOption { id: number; ward: string; roomNumber: string; bedNumber: string }
 
-export function CheckInModal({ providers, rooms, onClose }: { providers: ProviderOption[]; rooms: RoomOption[]; onClose: () => void }) {
+// Wave C P0-04 / P1-14: the patient is chosen in the PatientPicker (name,
+// UHID, mobile or chart id) -- or preselected from the patient page -- and
+// the route still receives the chart id. After check-in the ticket shows the
+// token, name and UHID and links to the printable 80 mm slip
+// (/print/token/[encounterId]) instead of printing the whole page.
+export function CheckInModal({ providers, rooms, onClose, initialPatient = null }: { providers: ProviderOption[]; rooms: RoomOption[]; onClose: () => void; initialPatient?: PickedPatient | null }) {
   const router = useRouter()
-  const [patientId, setPatientId] = useState('')
+  const [patient, setPatient] = useState<PickedPatient | null>(initialPatient)
+  const patientId = patient?.id ?? ''
   const [providerId, setProviderId] = useState<number | ''>('')
   const [visitType, setVisitType] = useState<'inpatient' | 'outpatient'>('outpatient')
   const [urgency, setUrgency] = useState<'routine' | 'urgent' | 'emergency'>('routine')
@@ -19,41 +27,37 @@ export function CheckInModal({ providers, rooms, onClose }: { providers: Provide
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [checkinResult, setCheckinResult] = useState<{
-    queueTicketNumber: number
-    patientId: string
+    token: number | null
+    patient: PickedPatient
     roomId: number | null
-    checkedInAt: string
+    encounterId: number | null
   } | null>(null)
 
   async function submit() {
+    if (!patient) return
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/front-desk/check-in', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        patientId,
-        providerId,
-        visitType,
-        urgency,
-        reason,
-        ...(visitType === 'inpatient' && roomId !== '' ? { roomId } : {}),
-      }),
+    const res = await sendJson<{ queueTicketNumber?: number | null; opdToken?: number | null; encounterId?: number | null; patientId?: string; roomId?: number | null }>('/api/front-desk/check-in', 'POST', {
+      patientId,
+      providerId,
+      visitType,
+      urgency,
+      reason,
+      ...(visitType === 'inpatient' && roomId !== '' ? { roomId } : {}),
     })
     setSubmitting(false)
     if (res.ok) {
-      const body = await res.json()
+      const body = res.data
       setCheckinResult({
-        queueTicketNumber: body.queueTicketNumber,
-        patientId: body.patientId ?? patientId,
-        roomId: body.roomId ?? null,
-        checkedInAt: new Date().toLocaleString(),
+        token: typeof body?.opdToken === 'number' ? body.opdToken : typeof body?.queueTicketNumber === 'number' ? body.queueTicketNumber : null,
+        patient,
+        roomId: body?.roomId ?? null,
+        encounterId: typeof body?.encounterId === 'number' ? body.encounterId : null,
       })
       router.refresh()
       return
     }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not check in this patient.')
+    setError(res.error)
   }
 
   const canSubmit = Boolean(patientId) && providerId !== '' && Boolean(reason) && (visitType === 'outpatient' || roomId !== '' || rooms.length === 0) && !submitting
@@ -66,12 +70,13 @@ export function CheckInModal({ providers, rooms, onClose }: { providers: Provide
           <DialogHeader>
             <DialogTitle>Check-in Ticket</DialogTitle>
           </DialogHeader>
-          <div id="print-ticket" className="space-y-3 rounded-md border p-4 text-center">
-            <p className="text-sm text-muted-foreground">Queue Number</p>
-            <p className="text-5xl font-bold text-foreground">{checkinResult.queueTicketNumber}</p>
+          <div className="space-y-3 rounded-md border p-4 text-center" role="status">
+            <p className="text-sm text-muted-foreground">Token</p>
+            <p className="text-5xl font-bold text-foreground">{checkinResult.token ?? '—'}</p>
             <hr className="border-border" />
             <p className="text-sm text-muted-foreground">Patient</p>
-            <p className="text-lg font-semibold text-foreground">{checkinResult.patientId}</p>
+            <p className="text-lg font-semibold text-foreground">{checkinResult.patient.name}</p>
+            <p className="font-mono text-xs text-muted-foreground">{checkinResult.patient.uhid ? `UHID ${checkinResult.patient.uhid}` : `Chart ID ${checkinResult.patient.id}`}</p>
             {room && (
               <>
                 <p className="text-sm text-muted-foreground">Room</p>
@@ -80,11 +85,18 @@ export function CheckInModal({ providers, rooms, onClose }: { providers: Provide
                 </p>
               </>
             )}
-            <p className="text-sm text-muted-foreground">Date / Time</p>
-            <p className="text-sm text-foreground">{checkinResult.checkedInAt}</p>
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => window.print()}>Print</Button>
+            {checkinResult.encounterId !== null && (
+              <a
+                href={`/print/token/${checkinResult.encounterId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary"
+              >
+                Print token slip
+              </a>
+            )}
             <Button onClick={onClose}>Done</Button>
           </DialogFooter>
         </DialogContent>
@@ -99,7 +111,7 @@ export function CheckInModal({ providers, rooms, onClose }: { providers: Provide
           <DialogTitle>Check In Patient</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <input value={patientId} onChange={(e) => setPatientId(e.target.value)} placeholder="Anonymous #, e.g. RD-0001" aria-label="Patient ID" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+          <PatientPicker value={patient} onChange={setPatient} autoFocus={!initialPatient} />
 
           <div className="flex gap-4 text-sm">
             <label className="flex items-center gap-1.5"><input type="radio" name="visitType" checked={visitType === 'outpatient'} onChange={() => setVisitType('outpatient')} aria-label="Outpatient" /> Outpatient</label>
@@ -131,7 +143,7 @@ export function CheckInModal({ providers, rooms, onClose }: { providers: Provide
             <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for visit" aria-label="Reason" aria-describedby={reasonHintId} maxLength={140} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
             <p id={reasonHintId} className="text-xs text-muted-foreground">Shown to the patient in their visit confirmation — keep it brief and non-clinical.</p>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

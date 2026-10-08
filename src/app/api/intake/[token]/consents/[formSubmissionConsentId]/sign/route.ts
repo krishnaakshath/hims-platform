@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { createSignature } from '@/lib/queries/signatures'
 import { getSubmissionConsentForToken } from '@/lib/queries/form-submission-consents'
@@ -24,15 +25,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   // One check, three failure modes: bad token, expired/completed submission,
   // consent row owned by another submission.
-  const consent = await getSubmissionConsentForToken(token, Number(formSubmissionConsentId))
+  const consentId = parseId(formSubmissionConsentId)
+  if (consentId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const consent = await getSubmissionConsentForToken(token, consentId)
   if (!consent) return NextResponse.json({ error: 'This link is no longer valid.' }, { status: 404 })
 
-  let raw: unknown
-  try {
-    raw = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid signature payload' }, { status: 400 })
-  }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const raw: unknown = json.body
   const parsed = signSchema.safeParse(raw)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid signature payload', details: parsed.error.flatten() }, { status: 400 })
 
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   await createSignature({
     signableType: 'form_submission_consent',
-    signableId: Number(formSubmissionConsentId),
+    signableId: consentId,
     signerTypedName: parsed.data.typedName,
     signerRole: 'patient',
     attestationText: consent.renderedText,

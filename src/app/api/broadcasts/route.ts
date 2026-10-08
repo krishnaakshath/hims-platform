@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { demoFeaturesEnabled, DEMO_NOT_CONFIGURED_BODY, DEMO_NOT_CONFIGURED_STATUS } from '@/lib/demo-features'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
@@ -44,7 +45,9 @@ export async function POST(request: NextRequest) {
   // Wave B P1-21: simulated delivery -- 503 unless DEMO_FEATURES is on (after the role gate, before parsing).
   if (!demoFeaturesEnabled()) return NextResponse.json(DEMO_NOT_CONFIGURED_BODY, { status: DEMO_NOT_CONFIGURED_STATUS })
 
-  const parsed = createBroadcastSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = createBroadcastSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid broadcast payload', details: parsed.error.flatten() }, { status: 400 })
 
   const candidates = await listBroadcastRecipientCandidates({

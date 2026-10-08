@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -72,21 +73,16 @@ export function NoteForm({ patientId, canWrite }: { patientId: string; canWrite:
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/patients/${patientId}/notes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        noteType,
-        ...(subjective ? { subjective } : {}),
-        ...(objective ? { objective } : {}),
-        ...(assessment ? { assessment } : {}),
-        ...(plan ? { plan } : {}),
-      }),
+    const res = await sendJson(`/api/patients/${patientId}/notes`, 'POST', {
+      noteType,
+      ...(subjective ? { subjective } : {}),
+      ...(objective ? { objective } : {}),
+      ...(assessment ? { assessment } : {}),
+      ...(plan ? { plan } : {}),
     })
     setSubmitting(false)
     if (res.ok) { router.refresh(); setOpen(false); reset(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not create this note.')
+    setError(res.error)
   }
 
   return (
@@ -108,7 +104,7 @@ export function NoteForm({ patientId, canWrite }: { patientId: string; canWrite:
               <textarea value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Objective" aria-label="Objective" className="w-full rounded-md border border-border px-3 py-2 text-sm" rows={2} />
               <textarea value={assessment} onChange={(e) => setAssessment(e.target.value)} placeholder="Assessment" aria-label="Assessment" className="w-full rounded-md border border-border px-3 py-2 text-sm" rows={2} />
               <textarea value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="Plan" aria-label="Plan" className="w-full rounded-md border border-border px-3 py-2 text-sm" rows={2} />
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => { setOpen(false); reset() }}>Cancel</Button>
@@ -129,11 +125,10 @@ export function NoteCard({ note, patientId, canSign }: { note: NoteRecord; patie
   async function sign() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/patients/${patientId}/notes/${note.id}/sign`, { method: 'PUT' })
+    const res = await sendJson(`/api/patients/${patientId}/notes/${note.id}/sign`, 'PUT')
     setSubmitting(false)
     if (res.ok) { router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not sign this note.')
+    setError(res.error)
   }
 
   return (
@@ -150,7 +145,7 @@ export function NoteCard({ note, patientId, canSign }: { note: NoteRecord; patie
         </div>
       </div>
       <p className="mb-1.5 text-xs text-muted-foreground"><LocalDateTime iso={safeIso(note.createdAt)} /></p>
-      {error && <p className="mb-1.5 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="mb-1.5 text-xs text-destructive">{error}</p>}
       <dl className="space-y-1 text-xs text-foreground">
         {note.subjective && <div><dt className="inline font-semibold text-muted-foreground">Subjective: </dt><dd className="inline">{note.subjective}</dd></div>}
         {note.objective && <div><dt className="inline font-semibold text-muted-foreground">Objective: </dt><dd className="inline">{note.objective}</dd></div>}

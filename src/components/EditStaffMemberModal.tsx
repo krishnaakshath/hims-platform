@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -35,20 +36,15 @@ export function EditStaffMemberModal({ staffMember, onClose }: { staffMember: Ed
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/staff/${staffMember.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        department,
-        title,
-        employmentStatus,
-        terminationDate: terminationDate ? terminationDate : null,
-      }),
+    const res = await sendJson(`/api/staff/${staffMember.id}`, 'PATCH', {
+      department,
+      title,
+      employmentStatus,
+      terminationDate: terminationDate ? terminationDate : null,
     })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not update this staff member.')
+    setError(res.error)
   }
 
   const canSubmit = Boolean(department.trim()) && Boolean(title.trim()) && !submitting
@@ -69,7 +65,7 @@ export function EditStaffMemberModal({ staffMember, onClose }: { staffMember: Ed
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Termination date (optional)</label>
             <input value={terminationDate} onChange={(e) => setTerminationDate(e.target.value)} type="date" aria-label="Termination date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

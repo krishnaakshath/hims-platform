@@ -48,7 +48,7 @@ describe('GET /api/patients and /api/patients/[anonId] -- RBAC ruling 1', () => 
   // The billing eligibility modal reads the payer from
   // /api/patients/[anonId]/primary-payer instead (controller ruling, option b).
   it('403s frontdesk, pharmacy, billing and labs on GET detail', async () => {
-    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'collector'] as const) {
+    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const) {
       sessionRole = role
       const detail = await getPatient(new NextRequest('http://localhost/api/patients/RD-0001'), { params: Promise.resolve({ anonId: 'RD-0001' }) })
       expect(detail.status, `role ${role}`).toBe(403)

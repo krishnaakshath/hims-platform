@@ -180,7 +180,7 @@ describe('GET /prescriptions/print', () => {
   // Printing shows the prescription as the chart does, so it follows the
   // chart's gate (CLINICAL_ROLES): every other role is redirected home
   // before any query, like every other page gate.
-  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'collector'])('a %s session is redirected to / with no audit row', async (role) => {
+  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'])('a %s session is redirected to / with no audit row', async (role) => {
     state.sessionRole = role
     mockRedirect.mockClear()
     logAudit.mockClear()

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
+import { eq, or, sql } from 'drizzle-orm'
 import { requireSession } from '@/lib/auth'
 import { getDb } from '@/db/client'
 import { patients, providers } from '@/db/schema'
@@ -38,16 +39,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body: unknown = json.body
   const parsed = checkInSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid check-in payload', details: parsed.error.flatten() }, { status: 400 })
 
-  const { patientId, providerId, visitType, urgency, reason, roomId, appointmentId } = parsed.data
+  const { patientId: patientRef, providerId, visitType, urgency, reason, roomId, appointmentId } = parsed.data
 
   if (visitType === 'outpatient' && roomId) {
     return NextResponse.json({ error: 'roomId is only valid for an inpatient check-in' }, { status: 400 })
@@ -59,8 +57,13 @@ export async function POST(request: NextRequest) {
   // Verify the patient and provider actually exist BEFORE touching a room --
   // a bad providerId must never be able to strand a room as occupied with no
   // valid assignment behind it.
-  const [patientRow] = await getDb().select({ id: patients.id }).from(patients).where(eq(patients.id, patientId))
+  // Wave C: the chart id (what the PatientPicker sends) or a UHID typed
+  // directly (case-insensitive); an exact chart-id match wins.
+  const patientRows = await getDb().select({ id: patients.id }).from(patients)
+    .where(or(eq(patients.id, patientRef), sql`upper(${patients.uhid}) = upper(${patientRef})`))
+  const patientRow = patientRows.find((r) => r.id === patientRef) ?? patientRows[0]
   if (!patientRow) return NextResponse.json({ error: 'Patient not found' }, { status: 404 })
+  const patientId = patientRow.id
 
   const [providerRow] = await getDb().select({ id: providers.id }).from(providers).where(eq(providers.id, providerId))
   if (!providerRow) return NextResponse.json({ error: 'Provider not found' }, { status: 404 })

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LogOut, UserCircle2 } from 'lucide-react'
@@ -19,8 +20,10 @@ function searchPlaceholder(s: SearchScopes): string {
 export function TopBanner({ userName, role }: { userName: string; role: Role }) {
   const router = useRouter()
 
+  // Sign-out always lands on /login: the session cookie is cleared server-side,
+  // and if that request failed the next request is still re-checked there.
   async function signOut() {
-    await fetch('/api/logout', { method: 'POST' })
+    await sendJson('/api/logout', 'POST')
     router.push('/login')
     router.refresh()
   }

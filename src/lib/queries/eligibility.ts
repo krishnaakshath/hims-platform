@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
 import { trials, patients, diagnoses, medicationEpisodes, screeningCriteriaResults, patientTrialScreenings } from '@/db/schema'
 import { eq, and, isNull, or, lt } from 'drizzle-orm'
+import { liveDiagnosis } from './diagnoses' // SP6
 import { evaluateEligibility } from '@/lib/eligibility'
 import { evaluateCriteria, type Verdict } from '@/lib/rule-engine'
 import { sendMessage } from '@/lib/queries/messages'
@@ -23,7 +24,7 @@ export async function regenerateScreeningCriteria(patientId: string, screeningId
   const [patient] = await db.select(publicPatientColumns).from(patients).where(eq(patients.id, patientId))
   if (!trial || !patient) return null
 
-  const dx = await db.select({ code: diagnoses.code, description: diagnoses.description }).from(diagnoses).where(eq(diagnoses.patientId, patientId))
+  const dx = await db.select({ code: diagnoses.code, description: diagnoses.description }).from(diagnoses).where(and(eq(diagnoses.patientId, patientId), liveDiagnosis)) // SP6: voided rows hidden
   const meds = await db
     .select({ name: medicationEpisodes.name, medicationClass: medicationEpisodes.medicationClass, startDate: medicationEpisodes.startDate, status: medicationEpisodes.status })
     .from(medicationEpisodes)

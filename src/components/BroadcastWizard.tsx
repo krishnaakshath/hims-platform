@@ -1,4 +1,5 @@
 'use client'
+import { fetchJson, sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, MessageSquareText, Users, Send } from 'lucide-react'
@@ -85,38 +86,33 @@ export function BroadcastWizard({ trials }: { trials: Trial[] }) {
     if (trialId) params.set('trialId', trialId)
     if (overallStatus) params.set('overallStatus', overallStatus)
     if (formStatus) params.set('formStatus', formStatus)
-    const res = await fetch(`/api/broadcasts/recipients?${params.toString()}`)
+    const res = await fetchJson<typeof candidates>(`/api/broadcasts/recipients?${params.toString()}`)
     setLoadingCandidates(false)
     if (res.ok) {
-      setCandidates(await res.json())
+      setCandidates(res.data)
     } else {
-      setError('Could not load recipients for this filter.')
+      setError(`Could not load recipients for this filter. ${res.error}`)
     }
   }
 
   async function send() {
     setSending(true)
     setError(null)
-    const res = await fetch('/api/broadcasts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        subject: subject || undefined,
-        message,
-        channel,
-        filterTrialId: trialId || undefined,
-        filterOverallStatus: overallStatus || undefined,
-        filterFormStatus: formStatus || undefined,
-      }),
+    const res = await sendJson<{ recipientCount: number }>('/api/broadcasts', 'POST', {
+      subject: subject || undefined,
+      message,
+      channel,
+      filterTrialId: trialId || undefined,
+      filterOverallStatus: overallStatus || undefined,
+      filterFormStatus: formStatus || undefined,
     })
     setSending(false)
     if (res.ok) {
-      const created = await res.json()
+      const created = res.data
       setSent({ recipientCount: created.recipientCount })
       router.refresh()
     } else {
-      const body = await res.json()
-      setError(body.error ?? 'Could not send broadcast.')
+      setError(res.error)
     }
   }
 
@@ -142,7 +138,7 @@ export function BroadcastWizard({ trials }: { trials: Trial[] }) {
     <div className={`max-w-xl ${SECTION}`}>
       <Stepper step={step} />
 
-      {error && <p className="mb-4 rounded-md border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="mb-4 rounded-md border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
 
       {step === 1 && (
         <div className="space-y-4">

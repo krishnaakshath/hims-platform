@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { MASTER_DATA_ADMIN_ROLES } from '@/lib/role-policy'
@@ -16,10 +17,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!MASTER_DATA_ADMIN_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const providerId = Number(id)
-  if (!Number.isInteger(providerId)) return NextResponse.json({ error: 'Invalid provider id' }, { status: 400 })
+  const providerId = parseId(id)
+  if (providerId === null) return NextResponse.json({ error: 'Invalid provider id' }, { status: 400 })
 
-  const body = await request.json().catch(() => null)
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const body = json.body
   const parsed = providerProfileSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
 

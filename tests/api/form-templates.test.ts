@@ -270,7 +270,7 @@ describe('form-templates role gate', () => {
     return Number(row.n)
   }
 
-  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'collector'] as const)('403s %s on all four handlers without creating or changing a row', async (role) => {
+  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const)('403s %s on all four handlers without creating or changing a row', async (role) => {
     const [existing] = await getDb().select().from(formTemplates).limit(1)
     const beforeCount = await templateCount()
     const validPost = { name: `Gate Probe ${role}`, category: 'Consent Forms', diagnosisTag: 'General', questions: [] }

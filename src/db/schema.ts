@@ -2,8 +2,9 @@ import { pgTable, text, timestamp, date, boolean, jsonb, integer, pgEnum, serial
 import { sql } from 'drizzle-orm'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
+// SP6: + coder (scripts/migrations/2026-10-07-sp6-a-coder-role.sql)
 // SP5: + 'collector' (last; added by scripts/migrations/2026-10-08-sp5-lab-enum-values.sql)
-export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'collector'])
+export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'])
 export const mfaMethodEnum = pgEnum('mfa_method', ['totp', 'sms', 'email'])
 export const payerTypeEnum = pgEnum('payer_type', ['commercial', 'medicare', 'medicaid', 'tricare', 'other'])
 export const insuranceRelationshipEnum = pgEnum('insurance_relationship', ['self', 'spouse', 'child', 'other'])
@@ -134,13 +135,49 @@ export const patients = pgTable('patients', {
   notificationOptOutAt: timestamp('notification_opt_out_at'),
 })
 
+// SP6 clinical coding enums (scripts/migrations/2026-10-07-sp6-b-clinical-coding.sql). Declared
+// here, ahead of the SP6 table block below, because `diagnoses` uses them eagerly.
+export const codeSystemKindEnum = pgEnum('code_system_kind', ['icd10', 'icd10pcs', 'snomed', 'loinc', 'hbp'])
+export const codeEntryStatusEnum = pgEnum('code_entry_status', ['uncoded', 'proposed', 'coded'])
+export const diagnosisTypeEnum = pgEnum('diagnosis_type', ['primary', 'secondary', 'provisional'])
+export const encounterCodingStatusEnum = pgEnum('encounter_coding_status', ['uncoded', 'in_progress', 'queried', 'coded', 'finalised'])
+export const codingEventActionEnum = pgEnum('coding_event_action', ['claim', 'assign', 'release', 'raise_query', 'resume', 'mark_coded', 'finalise', 'reopen', 'edit_after_coded'])
+export const codingQueryStatusEnum = pgEnum('coding_query_status', ['open', 'answered', 'closed', 'withdrawn'])
+// end SP6 enums
+
 export const diagnoses = pgTable('diagnoses', {
   id: serial('id').primaryKey(),
   patientId: text('patient_id').notNull().references(() => patients.id),
+  // Legacy free text, NOT NULL. An SP6-written diagnosis without a code stores code = ''.
   code: text('code').notNull(),
   description: text('description').notNull(),
   date: date('date'),
-})
+  // SP6: per-encounter coded diagnoses. All nullable or defaulted, so legacy rows (no
+  // encounter) are untouched and read as `uncoded`. Removal is a soft void (voidedAt).
+  encounterId: integer('encounter_id').references(() => encounters.id),
+  codeId: integer('code_id').references(() => codes.id),
+  codeSystemKind: codeSystemKindEnum('code_system_kind'),
+  codeDisplay: text('code_display'),
+  diagnosisType: diagnosisTypeEnum('diagnosis_type'),
+  codingStatus: codeEntryStatusEnum('coding_status').default('uncoded').notNull(),
+  sequence: integer('sequence'),
+  proposedByName: text('proposed_by_name'),
+  proposedAt: timestamp('proposed_at'),
+  codedByName: text('coded_by_name'),
+  codedAt: timestamp('coded_at'),
+  voidedAt: timestamp('voided_at'),
+  voidedByName: text('voided_by_name'),
+  createdByName: text('created_by_name'),
+  createdAt: timestamp('created_at'),
+  // end SP6
+}, (t) => [
+  // SP6
+  index('diagnoses_encounter_id_idx').on(t.encounterId),
+  uniqueIndex('diagnoses_one_primary_per_encounter').on(t.encounterId).where(sql`${t.diagnosisType} = 'primary' AND ${t.voidedAt} IS NULL`),
+  check('diagnoses_coded_complete', sql`${t.codingStatus} <> 'coded' OR (${t.codeId} IS NOT NULL AND ${t.encounterId} IS NOT NULL AND ${t.diagnosisType} IS NOT NULL)`),
+  check('diagnoses_proposed_has_code', sql`${t.codingStatus} <> 'proposed' OR ${t.codeId} IS NOT NULL`),
+  check('diagnoses_code_kind_pair', sql`(${t.codeId} IS NULL) = (${t.codeSystemKind} IS NULL)`),
+])
 
 export const medicationEpisodes = pgTable('medication_episodes', {
   id: serial('id').primaryKey(),
@@ -897,6 +934,178 @@ export const followUpContactAttempts = pgTable('follow_up_contact_attempts', {
 export type EncounterRow = typeof encounters.$inferSelect
 export type FollowUpOrderRow = typeof followUpOrders.$inferSelect
 export type FollowUpContactAttemptRow = typeof followUpContactAttempts.$inferSelect
+
+// SP6 clinical coding (scripts/migrations/2026-10-07-sp6-b-clinical-coding.sql). Enums are
+// declared above `diagnoses`, which gains its SP6 columns in place.
+// MIGRATION-ONLY: the `pg_trgm` extension and `codes_display_trgm_idx` (GIN over
+// lower(display) gin_trgm_ops) exist only in that migration; drizzle cannot express them.
+// After `db:push` on a fresh DB, apply the SP6 migrations; text search works without the
+// index, only slower. Never `db:push` against a DB that has it (push would drop it).
+
+// One row per imported version of a code set; never deleted or updated in place.
+export const codeSystems = pgTable('code_systems', {
+  id: serial('id').primaryKey(),
+  kind: codeSystemKindEnum('kind').notNull(),
+  version: text('version').notNull(),
+  name: text('name').notNull(),
+  isSample: boolean('is_sample').default(false).notNull(),
+  isCurrent: boolean('is_current').default(false).notNull(),
+  licenceNote: text('licence_note'),
+  sourceFileName: text('source_file_name').notNull(),
+  sourceSha256: text('source_sha256').notNull(),
+  codeCount: integer('code_count').notNull(),
+  importedByName: text('imported_by_name').notNull(),
+  importedAt: timestamp('imported_at').defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('code_systems_kind_version_unique').on(t.kind, t.version),
+  uniqueIndex('code_systems_one_current_per_kind').on(t.kind).where(sql`${t.isCurrent}`),
+  check('code_systems_count_nonneg', sql`${t.codeCount} >= 0`),
+  check('code_systems_licence_unless_sample', sql`${t.isSample} OR ${t.licenceNote} IS NOT NULL`),
+])
+
+export const codes = pgTable('codes', {
+  id: serial('id').primaryKey(),
+  codeSystemId: integer('code_system_id').notNull().references(() => codeSystems.id),
+  code: text('code').notNull(),
+  display: text('display').notNull(),
+  parentCode: text('parent_code'),
+  selectable: boolean('selectable').default(true).notNull(),
+  active: boolean('active').default(true).notNull(),
+  effectiveFrom: date('effective_from'),
+  effectiveTo: date('effective_to'),
+  sexRestriction: text('sex_restriction', { enum: ['male', 'female'] }),
+  ageMinYears: integer('age_min_years'),
+  ageMaxYears: integer('age_max_years'),
+  excludes: text('excludes').array().default(sql`'{}'::text[]`).notNull(),
+}, (t) => [
+  uniqueIndex('codes_system_code_unique').on(t.codeSystemId, t.code),
+  index('codes_code_prefix_idx').on(t.codeSystemId, t.code.op('text_pattern_ops')),
+  check('codes_effective_range', sql`${t.effectiveTo} IS NULL OR ${t.effectiveFrom} IS NULL OR ${t.effectiveTo} >= ${t.effectiveFrom}`),
+  check('codes_age_range', sql`(${t.ageMinYears} IS NULL OR ${t.ageMinYears} BETWEEN 0 AND 150) AND (${t.ageMaxYears} IS NULL OR ${t.ageMaxYears} BETWEEN 0 AND 150) AND (${t.ageMinYears} IS NULL OR ${t.ageMaxYears} IS NULL OR ${t.ageMinYears} <= ${t.ageMaxYears})`),
+])
+
+export const encounterProcedures = pgTable('encounter_procedures', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  description: text('description').notNull(),
+  codeId: integer('code_id').references(() => codes.id),
+  codeSystemKind: codeSystemKindEnum('code_system_kind'),
+  code: text('code'),
+  codeDisplay: text('code_display'),
+  codingStatus: codeEntryStatusEnum('coding_status').default('uncoded').notNull(),
+  performedOn: date('performed_on').notNull(),
+  performedByProviderId: integer('performed_by_provider_id').references(() => providers.id),
+  serviceId: integer('service_id').references(() => serviceCatalog.id),
+  sequence: integer('sequence'),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  proposedByName: text('proposed_by_name'),
+  proposedAt: timestamp('proposed_at'),
+  codedByName: text('coded_by_name'),
+  codedAt: timestamp('coded_at'),
+  voidedAt: timestamp('voided_at'),
+  voidedByName: text('voided_by_name'),
+}, (t) => [
+  index('encounter_procedures_encounter_id_idx').on(t.encounterId),
+  index('encounter_procedures_patient_id_idx').on(t.patientId),
+  check('encounter_procedures_code_required', sql`${t.codingStatus} = 'uncoded' OR (${t.codeId} IS NOT NULL AND ${t.code} IS NOT NULL)`),
+  check('encounter_procedures_code_kind_pair', sql`(${t.codeId} IS NULL) = (${t.codeSystemKind} IS NULL)`),
+])
+
+// The coding status of one encounter; no row = uncoded.
+export const encounterCoding = pgTable('encounter_coding', {
+  encounterId: integer('encounter_id').primaryKey().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  status: encounterCodingStatusEnum('status').default('uncoded').notNull(),
+  assignedToUserId: integer('assigned_to_user_id').references(() => users.id),
+  assignedToName: text('assigned_to_name'),
+  assignedAt: timestamp('assigned_at'),
+  codedAt: timestamp('coded_at'),
+  codedByName: text('coded_by_name'),
+  finalisedAt: timestamp('finalised_at'),
+  finalisedByName: text('finalised_by_name'),
+  reopenCount: integer('reopen_count').default(0).notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  index('encounter_coding_status_idx').on(t.status),
+  index('encounter_coding_assignee_idx').on(t.assignedToUserId),
+  check('encounter_coding_finalised_stamp', sql`${t.status} <> 'finalised' OR ${t.finalisedAt} IS NOT NULL`),
+])
+
+// Append-only status history; reopen reasons live here, never in the audit log.
+export const encounterCodingEvents = pgTable('encounter_coding_events', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().references(() => encounters.id),
+  action: codingEventActionEnum('action').notNull(),
+  fromStatus: encounterCodingStatusEnum('from_status').notNull(),
+  toStatus: encounterCodingStatusEnum('to_status').notNull(),
+  reason: text('reason'),
+  byName: text('by_name').notNull(),
+  byUserId: integer('by_user_id').references(() => users.id),
+  at: timestamp('at').defaultNow().notNull(),
+}, (t) => [
+  index('encounter_coding_events_encounter_idx').on(t.encounterId),
+  index('encounter_coding_events_at_idx').on(t.at),
+  check('encounter_coding_events_reason_len', sql`${t.reason} IS NULL OR char_length(${t.reason}) <= 500`),
+])
+
+export const codingQueries = pgTable('coding_queries', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  addressedToProviderId: integer('addressed_to_provider_id').notNull().references(() => providers.id),
+  question: text('question').notNull(),
+  status: codingQueryStatusEnum('status').default('open').notNull(),
+  raisedByName: text('raised_by_name').notNull(),
+  raisedByUserId: integer('raised_by_user_id').references(() => users.id),
+  raisedAt: timestamp('raised_at').defaultNow().notNull(),
+  answeredAt: timestamp('answered_at'),
+  closedAt: timestamp('closed_at'),
+  closedByName: text('closed_by_name'),
+}, (t) => [
+  index('coding_queries_encounter_idx').on(t.encounterId),
+  index('coding_queries_provider_status_idx').on(t.addressedToProviderId, t.status),
+  check('coding_queries_question_len', sql`char_length(${t.question}) BETWEEN 1 AND 1000`),
+])
+
+export const codingQueryResponses = pgTable('coding_query_responses', {
+  id: serial('id').primaryKey(),
+  queryId: integer('query_id').notNull(),
+  authorName: text('author_name').notNull(),
+  authorRole: roleEnum('author_role').notNull(),
+  body: text('body').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  foreignKey({ name: 'coding_query_responses_query_fk', columns: [t.queryId], foreignColumns: [codingQueries.id] }).onDelete('cascade'),
+  index('coding_query_responses_query_idx').on(t.queryId),
+  check('coding_query_responses_body_len', sql`char_length(${t.body}) BETWEEN 1 AND 2000`),
+])
+
+// Service catalogue <-> procedure/package code map; version-independent (kind + code value).
+export const serviceProcedureCodes = pgTable('service_procedure_codes', {
+  id: serial('id').primaryKey(),
+  serviceId: integer('service_id').notNull().references(() => serviceCatalog.id),
+  codeSystemKind: codeSystemKindEnum('code_system_kind').notNull(),
+  code: text('code').notNull(),
+  isPrimary: boolean('is_primary').default(false).notNull(),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('service_procedure_codes_unique').on(t.serviceId, t.codeSystemKind, t.code),
+  uniqueIndex('service_procedure_codes_one_primary').on(t.serviceId).where(sql`${t.isPrimary}`),
+])
+
+export type DiagnosisRow = typeof diagnoses.$inferSelect
+export type CodeSystemRow = typeof codeSystems.$inferSelect
+export type CodeRow = typeof codes.$inferSelect
+export type EncounterProcedureRow = typeof encounterProcedures.$inferSelect
+export type EncounterCodingRow = typeof encounterCoding.$inferSelect
+export type EncounterCodingEventRow = typeof encounterCodingEvents.$inferSelect
+export type CodingQueryRow = typeof codingQueries.$inferSelect
+export type CodingQueryResponseRow = typeof codingQueryResponses.$inferSelect
+export type ServiceProcedureCodeRow = typeof serviceProcedureCodes.$inferSelect
+// end SP6
 
 export const noteTypeEnum = pgEnum('note_type', ['progress', 'nursing', 'intake'])
 export const noteStatusEnum = pgEnum('note_status', ['draft', 'signed'])

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId } from '@/lib/http'
 import { getDb } from '@/db/client'
 import { formChartDiscrepancies } from '@/db/schema'
 import { eq } from 'drizzle-orm'
@@ -14,10 +15,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!CLINICAL_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const [existing] = await getDb().select().from(formChartDiscrepancies).where(eq(formChartDiscrepancies.id, Number(id)))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const [existing] = await getDb().select().from(formChartDiscrepancies).where(eq(formChartDiscrepancies.id, numericId))
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  await resolveDiscrepancy(Number(id), session.name)
+  await resolveDiscrepancy(numericId, session.name)
   await invalidateCache(patientDetailCacheKey(existing.patientId))
   await logAudit(session, `resolved form-vs-chart discrepancy: ${existing.questionLabel}`, existing.patientId)
 

@@ -114,4 +114,23 @@ describe('observationsToFhir', () => {
     const criticalFhir = fhirList.find((o) => o.id === `observation-${criticalOrder.id}`)!
     expect(criticalFhir.interpretation).toEqual([{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation', code: 'AA' }] }])
   })
+
+  // SP6 Task 15 (ruling 11): a LOINC system only for a test code found in a loaded, non-sample LOINC set.
+  const order = {
+    id: 3, testName: 'Glucose, fasting', testCode: '1558-6', status: 'resulted',
+    result: { value: '92', unit: 'mg/dL', referenceRange: null, flag: 'normal', resultedAt: new Date('2099-03-01T05:00:00Z') },
+  } as unknown as PatientLabOrderRow
+
+  it('adds http://loinc.org only when the test code is in a loaded LOINC set', () => {
+    expect(observationToFhir('RD-1', order, { kind: 'loinc', version: '2.78', isSample: false })!.code.coding![0]).toMatchObject({ system: 'http://loinc.org', version: '2.78' })
+    expect(observationToFhir('RD-1', order)!.code.coding![0].system).toBeUndefined()
+    expect(observationToFhir('RD-1', order, { kind: 'loinc', version: 'SAMPLE-LOINC-0', isSample: true })!.code.coding).toEqual([{ code: '1558-6', display: 'Glucose, fasting' }])
+  })
+
+  it('observationsToFhir looks each test code up in the loaded LOINC bindings', () => {
+    const other = { ...order, id: 4, testCode: 'TSH' } as PatientLabOrderRow
+    const out = observationsToFhir('RD-1', [order, other], new Map([['1558-6', { kind: 'loinc' as const, version: '2.78', isSample: false }]]))
+    expect(out[0].code.coding).toEqual([{ system: 'http://loinc.org', version: '2.78', code: '1558-6', display: 'Glucose, fasting' }])
+    expect(out[1].code.coding).toEqual([{ code: 'TSH', display: 'Glucose, fasting' }])
+  })
 })

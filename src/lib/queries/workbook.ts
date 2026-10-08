@@ -1,7 +1,9 @@
+import { ageOnDate, istDateOf, todayIsoIn } from '@/lib/india-time'
 import { getDb } from '@/db/client'
 import { patients, diagnoses, medicationEpisodes } from '@/db/schema'
 import { getOrSetCache, workbookListCacheKey } from '@/lib/cache'
 import { publicPatientColumns } from '@/lib/queries/patient-columns'
+import { liveDiagnosis } from '@/lib/queries/diagnoses' // SP6
 
 // One row per patient, covering the columns of the source IPMG
 // pre-screening workbook (Symbiosys_IPMG_Prescreening_Proposal.pdf) --
@@ -50,19 +52,15 @@ export interface WorkbookRow {
 }
 
 export function calculateAge(dob: string): number {
-  const birth = new Date(dob)
-  const now = new Date()
-  let age = now.getFullYear() - birth.getFullYear()
-  const monthDiff = now.getMonth() - birth.getMonth()
-  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) age--
-  return age
+  // Age on today's IST calendar date.
+  return ageOnDate(dob, todayIsoIn())
 }
 
 export async function listWorkbookRows(): Promise<WorkbookRow[]> {
   return getOrSetCache(workbookListCacheKey(), 30, async () => {
     const db = getDb()
     const allPatients = await db.select(publicPatientColumns).from(patients).orderBy(patients.id)
-    const allDx = await db.select().from(diagnoses)
+    const allDx = await db.select().from(diagnoses).where(liveDiagnosis) // SP6: voided rows hidden
     const allMeds = await db.select().from(medicationEpisodes)
 
     return allPatients.map((p): WorkbookRow => {
@@ -72,7 +70,7 @@ export async function listWorkbookRows(): Promise<WorkbookRow[]> {
 
       return {
         id: p.id,
-        dateAdded: p.dateAdded.toISOString().slice(0, 10),
+        dateAdded: istDateOf(new Date(p.dateAdded)),
         patientName: p.name,
         currentProvider: p.currentProvider,
         ratingScales: (p.ratingScales ?? []).map((r) => `${r.name}: ${r.score} (${r.date})`).join('; '),

@@ -1,3 +1,4 @@
+import { formatIstDate, formatIstDateTime } from '@/lib/india-time'
 import { notFound, redirect } from 'next/navigation'
 import { CalendarClock, CalendarCheck2, Stethoscope, Pill, ClipboardList } from 'lucide-react'
 import { BackLink } from '@/components/BackLink'
@@ -22,13 +23,18 @@ import { listLabTests } from '@/lib/queries/lab-tests'
 import { listFormSubmissions } from '@/lib/queries/form-submissions'
 import { listCarePlansForPatient } from '@/lib/queries/care-plans'
 import { resolveSessionProvider } from '@/lib/provider-identity'
+// SP6
+import { CODE_PROPOSE_ROLES, CODING_QUERY_RESPOND_ROLES } from '@/lib/role-policy'
+import { listEncounterCodingForPatient } from '@/lib/queries/coding-workspace'
+import { EncounterCodingPanel } from '@/components/coding/EncounterCodingPanel'
+// end SP6
 
 const SECTION = 'rounded-md border border-border bg-card p-5 shadow-none'
 const SECTION_HEADING = 'mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
 
 function formatDate(value: string | Date | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return formatIstDate(value)
 }
 
 function VisitStat({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
@@ -92,6 +98,10 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
   const [labOrders, labTests] = await Promise.all([listOrdersForPatient(anonId), listLabTests()])
   const screeningSubmissions = (await listFormSubmissions({ patientId: anonId, status: 'completed' })).filter((s) => s.bandLabel !== null)
   const carePlans = await listCarePlansForPatient(anonId)
+  // SP6: the patient's recent visits with their coding; doctors propose, doctors/admin reply, crc reads.
+  const visitCoding = await listEncounterCodingForPatient(anonId)
+  const canProposeCodes = CODE_PROPOSE_ROLES.includes(session.role)
+  const canRespondToCodingQueries = CODING_QUERY_RESPOND_ROLES.includes(session.role)
   await logAudit(session, 'viewed patient medical record', anonId)
 
   const name = patient.name
@@ -120,7 +130,7 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
           <div>
             <h1 className="text-xl font-bold text-foreground">{name}</h1>
             <p className="font-mono text-xs text-muted-foreground">{patient.id} · DOB {patient.dob}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">Chart data as of {new Date(patient.chartDataAsOf).toLocaleString()}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Chart data as of {formatIstDateTime(patient.chartDataAsOf)}</p>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
@@ -141,13 +151,32 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
         ) : (
           <ul className="space-y-1.5 text-sm text-foreground">
             {patient.diagnoses.map((d) => (
-              <li key={`dx-${d.id}`} className="border-b border-border py-1.5 last:border-b-0">
-                <span className="font-mono text-xs text-muted-foreground">{d.code}</span> — {d.description}
+              <li key={`dx-${d.id}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border py-1.5 last:border-b-0">
+                {/* SP6: a legacy row (no visit) keeps its free-text code, shown as unverified (ruling 3). */}
+                {d.code && <span className="font-mono text-xs text-muted-foreground">{d.code}</span>}
+                {d.code && d.encounterId === null && <span className="text-xs text-muted-foreground">(unverified)</span>}
+                {d.code && <span aria-hidden="true">—</span>}
+                <span>{d.description}</span>
+                {d.encounterId === null && (
+                  <span className="inline-flex whitespace-nowrap rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-foreground">Uncoded (legacy)</span>
+                )}
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {/* SP6: Visit coding */}
+      <section id="visit-coding" aria-labelledby="visit-coding-heading" className={SECTION}>
+        <h2 id="visit-coding-heading" className={SECTION_HEADING}>Visit coding</h2>
+        <EncounterCodingPanel
+          patientId={anonId}
+          encounters={visitCoding}
+          canPropose={canProposeCodes}
+          canRespond={canRespondToCodingQueries}
+        />
+      </section>
+      {/* end SP6 */}
 
       <section className={SECTION}>
         <MedicationHistorySection

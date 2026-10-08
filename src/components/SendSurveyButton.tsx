@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Send, Info } from 'lucide-react'
@@ -26,18 +27,13 @@ export function SendSurveyButton({ candidates }: { candidates: Candidate[] }) {
     if (selected === null) return
     setSending(true)
     setError(null)
-    const res = await fetch('/api/reviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ formSubmissionId: selected }),
-    })
+    const res = await sendJson('/api/reviews', 'POST', { formSubmissionId: selected })
     setSending(false)
     if (res.ok) {
       setOpen(false)
       router.refresh()
     } else {
-      const body = await res.json()
-      setError(body.error ?? 'Could not send survey.')
+      setError(res.error)
     }
   }
 
@@ -69,7 +65,7 @@ export function SendSurveyButton({ candidates }: { candidates: Candidate[] }) {
               >
                 {candidates.map((c) => <option key={c.formSubmissionId} value={c.formSubmissionId}>{c.patientName} — {c.templateName}</option>)}
               </select>
-              {error && <p className="mb-2 text-sm text-destructive">{error}</p>}
+              {error && <p role="alert" className="mb-2 text-sm text-destructive">{error}</p>}
               <button onClick={send} disabled={sending} className="w-full rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
                 {sending ? 'Sending…' : 'Send'}
               </button>

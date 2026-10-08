@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useId, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -56,22 +57,16 @@ export function OrderLabTestModal({ patientId, labTests, onClose }: { patientId:
     // Catalog order, so the request (and the requisition's lines) read like the checklist.
     const labTestIds = labTests.filter((t) => selected.includes(t.id)).map((t) => t.id)
     setSubmitting(true)
-    const res = await fetch(`/api/patients/${patientId}/lab-orders`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ labTestIds, followUp }),
-    })
+    const res = await sendJson<{ patientIsLocal?: boolean } | null>(`/api/patients/${patientId}/lab-orders`, 'POST', { labTestIds, followUp })
     setSubmitting(false)
     if (res.ok) {
-      const body = await res.json().catch(() => null)
       // SP5: imaging is never home-collected, so an imaging-only order gets no home-collection line.
       const includesLabTest = labTests.some((t) => labTestIds.includes(t.id) && t.category === 'lab')
-      setPlaced({ patientIsLocal: body?.patientIsLocal === true, includesLabTest })
+      setPlaced({ patientIsLocal: res.data?.patientIsLocal === true, includesLabTest })
       router.refresh()
       return
     }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not order these tests.')
+    setError(res.error)
   }
 
   const count = selected.length

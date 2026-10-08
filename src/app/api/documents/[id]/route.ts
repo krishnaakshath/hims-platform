@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { del } from '@vercel/blob'
 import { getDb } from '@/db/client'
@@ -28,9 +29,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   const { id } = await params
-  const docId = Number(id)
+  const docId = parseId(id)
+  if (docId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const parsed = updateDocumentSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = updateDocumentSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid document update', details: parsed.error.flatten() }, { status: 400 })
 
   const existing = await getDocument(docId)
@@ -126,7 +130,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const deleted = await deleteDocument(Number(id))
+  const numericId = parseId(id)
+  if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const deleted = await deleteDocument(numericId)
   if (!deleted) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   if (deleted.fileUrl) {

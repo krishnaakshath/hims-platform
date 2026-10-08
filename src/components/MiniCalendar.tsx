@@ -1,10 +1,11 @@
 import Link from 'next/link'
-import { formatDateParam, getMonthGridDays, isSameDay } from '@/lib/calendar-dates'
+import { formatDateParam, getMonthGridDays, isSameDay, istDayOfMonth, istMonthIndex } from '@/lib/calendar-dates'
+import { formatIstMonthYear } from '@/lib/india-time'
 
 export function MiniCalendar({ anchor, providerIdsParam }: { anchor: Date; providerIdsParam: string | undefined }) {
   const days = getMonthGridDays(anchor)
-  const monthLabel = anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-  const currentMonth = anchor.getMonth()
+  const monthLabel = formatIstMonthYear(anchor)
+  const currentMonth = istMonthIndex(anchor)
   const today = new Date()
 
   function hrefFor(day: Date): string {
@@ -23,7 +24,7 @@ export function MiniCalendar({ anchor, providerIdsParam }: { anchor: Date; provi
           <span key={i} className="text-muted-foreground">{d}</span>
         ))}
         {days.map((day) => {
-          const inMonth = day.getMonth() === currentMonth
+          const inMonth = istMonthIndex(day) === currentMonth
           const isToday = isSameDay(day, today)
           const isSelected = isSameDay(day, anchor)
           const stateClassName = isSelected
@@ -35,7 +36,7 @@ export function MiniCalendar({ anchor, providerIdsParam }: { anchor: Date; provi
                 : 'text-muted-foreground/50 hover:bg-secondary'
           return (
             <Link key={day.toISOString()} href={hrefFor(day)} className={`rounded-full py-1 transition-colors ${stateClassName}`}>
-              {day.getDate()}
+              {istDayOfMonth(day)}
             </Link>
           )
         })}

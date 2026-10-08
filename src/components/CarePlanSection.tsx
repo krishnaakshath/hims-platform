@@ -1,4 +1,6 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
+import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Trash2 } from 'lucide-react'
@@ -15,7 +17,7 @@ const SECTION_HEADING = 'border-l-2 border-primary/40 pl-2.5 text-xs font-semibo
 
 function formatDate(value: string | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return formatIstDate(value)
 }
 
 // Same dot + plain-text-label convention as NoteStatusPill (never color
@@ -46,15 +48,10 @@ function GoalRow({ goal, canWrite }: { goal: CarePlanGoal; canWrite: boolean }) 
   async function setStatus(status: 'met' | 'not_met' | 'discontinued') {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/care-plan-goals/${goal.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    })
+    const res = await sendJson(`/api/care-plan-goals/${goal.id}`, 'PATCH', { status })
     setSubmitting(false)
     if (res.ok) { router.refresh(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not update this goal.')
+    setError(res.error)
   }
 
   return (
@@ -64,7 +61,7 @@ function GoalRow({ goal, canWrite }: { goal: CarePlanGoal; canWrite: boolean }) 
         <GoalStatusPill status={goal.status} />
       </div>
       <p className="mt-0.5 text-xs text-muted-foreground">Target date: {formatDate(goal.targetDate)}</p>
-      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="mt-1 text-xs text-destructive">{error}</p>}
       {canWrite && goal.status === 'active' && (
         <div className="mt-2 flex flex-wrap gap-2">
           <Button size="xs" variant="outline" onClick={() => setStatus('met')} disabled={submitting}>Mark met</Button>
@@ -109,21 +106,16 @@ function NewCarePlanForm({ patientId, hasCurrentPlan }: { patientId: string; has
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const res = await fetch(`/api/patients/${patientId}/care-plans`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title,
-        ...(nextReviewDate ? { nextReviewDate } : {}),
-        goals: goals
-          .filter((g) => g.description.trim().length > 0)
-          .map((g) => ({ description: g.description, ...(g.targetDate ? { targetDate: g.targetDate } : {}) })),
-      }),
+    const res = await sendJson(`/api/patients/${patientId}/care-plans`, 'POST', {
+      title,
+      ...(nextReviewDate ? { nextReviewDate } : {}),
+      goals: goals
+        .filter((g) => g.description.trim().length > 0)
+        .map((g) => ({ description: g.description, ...(g.targetDate ? { targetDate: g.targetDate } : {}) })),
     })
     setSubmitting(false)
     if (res.ok) { router.refresh(); setOpen(false); reset(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not create this care plan.')
+    setError(res.error)
   }
 
   return (
@@ -191,7 +183,7 @@ function NewCarePlanForm({ patientId, hasCurrentPlan }: { patientId: string; has
                   <Plus /> Add goal
                 </Button>
               </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => { setOpen(false); reset() }}>Cancel</Button>

@@ -8,7 +8,7 @@ import * as dbClient from '@/db/client'
 import { getDb } from '@/db/client'
 import { staffMembers, staffCredentials } from '@/db/schema'
 
-let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'collector' = 'admin'
+let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | 'collector' = 'admin'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Dr. R. Kunam' })) }))
 
 const createdStaffIds: number[] = []
@@ -44,7 +44,7 @@ describe('GET /api/staff', () => {
     expect(res.status).toBe(200)
   })
 
-  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'collector'] as const)('returns exactly { error: Forbidden } 403 for role %s, before any DB read', async (role) => {
+  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const)('returns exactly { error: Forbidden } 403 for role %s, before any DB read', async (role) => {
     sessionRole = role
     const dbSpy = vi.spyOn(dbClient, 'getDb')
     const res = await listRoute()
@@ -93,7 +93,7 @@ describe('GET /api/staff/[id]', () => {
     expect(body.credentials).toEqual([])
   })
 
-  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'collector'] as const)('returns exactly { error: Forbidden } 403 for role %s, before any DB read', async (role) => {
+  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const)('returns exactly { error: Forbidden } 403 for role %s, before any DB read', async (role) => {
     sessionRole = role
     const dbSpy = vi.spyOn(dbClient, 'getDb')
     const res = await detailRoute(new Request('http://localhost') as never, params(1))

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
@@ -15,11 +16,7 @@ export function NewFolderButton() {
     setCreating(true)
     setError(null)
     try {
-      const res = await fetch('/api/form-template-folders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
-      })
+      const res = await sendJson('/api/form-template-folders', 'POST', { name: name.trim() })
       if (res.ok) {
         setEditing(false)
         setName('')
@@ -65,7 +62,7 @@ export function NewFolderButton() {
             Cancel
           </button>
         </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
     )
   }

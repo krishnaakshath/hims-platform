@@ -46,7 +46,7 @@ describe('GET /api/tariff/resolve', () => {
       expect(res.status, role).toBe(200)
     }
     const denied = ALL_ROLES.filter((r) => !TARIFF_LOOKUP_ROLES.includes(r))
-    expect(denied).toEqual(expect.arrayContaining(['pi', 'pharmacy', 'labs', 'collector']))
+    expect(denied).toEqual(expect.arrayContaining(['pi', 'pharmacy', 'labs', 'coder', 'collector']))
     vi.mocked(loadPricingContext).mockClear()
     for (const role of denied) {
       sessionRole = role

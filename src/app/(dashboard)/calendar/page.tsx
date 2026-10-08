@@ -5,8 +5,9 @@ import { SCHEDULING_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { listAppointmentsInRange, type AppointmentWithDetails } from '@/lib/queries/appointments'
-import { listPatientsWithStatus } from '@/lib/queries/patients'
-import { addDays, formatDateParam, getMonthGridDays, getViewRange, getWeekDays, isSameDay, parseDateParam, type CalendarView } from '@/lib/calendar-dates'
+import { getPickedPatient } from '@/lib/queries/search' // Wave C
+import { addDays, addMonths, formatDateParam, getMonthGridDays, getViewRange, getWeekDays, isSameDay, istDayOfMonth, istMonthIndex, parseDateParam, type CalendarView } from '@/lib/calendar-dates'
+import { formatIstDate, formatIstMonthYear, formatIstTime, formatIstWeekdayDay } from '@/lib/india-time'
 import { MiniCalendar } from '@/components/MiniCalendar'
 import { CalendarProviderFilter } from '@/components/CalendarProviderFilter'
 import { CalendarNewEventButton } from '@/components/CalendarNewEventButton'
@@ -31,21 +32,25 @@ function buildCalendarHref(view: CalendarView, date: Date, providerIdsParam: str
   return `/calendar?${params.toString()}`
 }
 
-function formatTime(date: Date): string {
-  return new Date(date).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+// All calendar times and day groupings are IST (src/lib/calendar-dates.ts).
+function formatTime(date: Date | string): string {
+  return formatIstTime(date)
 }
 
-export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ view?: string; date?: string; providerIds?: string }> }) {
+export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ view?: string; date?: string; providerIds?: string; book?: string }> }) {
   // Must be the first statement — see the comment in patients/page.tsx.
   const session = await requireSessionOrRedirect()
   if (!SCHEDULING_ROLES.includes(session.role)) redirect('/')
 
-  const { view: viewParam, date: dateParam, providerIds: providerIdsParam } = await searchParams
+  const { view: viewParam, date: dateParam, providerIds: providerIdsParam, book: bookParam } = await searchParams
   const view = parseView(viewParam)
   const anchor = parseDateParam(dateParam)
   const explicitProviderIds = parseProviderIdsParam(providerIdsParam)
 
-  const [allProviders, allPatients] = await Promise.all([listActiveProviders(), listPatientsWithStatus(null)])
+  // Wave C: no whole patient list for the New Event modal (it uses the
+  // PatientPicker); ?book=<chart id> preselects one patient (quick path).
+  const bookId = typeof bookParam === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(bookParam) ? bookParam : null
+  const [allProviders, bookPatient] = await Promise.all([listActiveProviders(), bookId ? getPickedPatient(bookId) : Promise.resolve(null)])
   const selectedProviderIds = explicitProviderIds ?? allProviders.map((p) => p.id)
 
   const { start, end } = getViewRange(view, anchor)
@@ -53,18 +58,17 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
   await logAudit(session, 'viewed calendar', null)
 
-  const patientOptions = allPatients.map((p) => ({ id: p.id, name: p.name }))
   const providerOptions = allProviders.map((p) => ({ id: p.id, name: p.name, colorTag: p.colorTag }))
 
   const today = new Date()
-  const prevAnchor = view === 'day' ? addDays(anchor, -1) : view === 'week' ? addDays(anchor, -7) : new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1)
-  const nextAnchor = view === 'day' ? addDays(anchor, 1) : view === 'week' ? addDays(anchor, 7) : new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1)
+  const prevAnchor = view === 'day' ? addDays(anchor, -1) : view === 'week' ? addDays(anchor, -7) : addMonths(anchor, -1)
+  const nextAnchor = view === 'day' ? addDays(anchor, 1) : view === 'week' ? addDays(anchor, 7) : addMonths(anchor, 1)
 
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Calendar</h1>
-        <CalendarNewEventButton patients={patientOptions} providers={providerOptions} defaultDate={formatDateParam(anchor)} />
+        <CalendarNewEventButton providers={providerOptions} defaultDate={formatDateParam(anchor)} initialPatient={bookPatient} />
       </div>
 
       <div className="mb-4 flex items-center justify-between">
@@ -73,7 +77,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           <Link href={buildCalendarHref(view, today, providerIdsParam)} className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary">Today</Link>
           <Link href={buildCalendarHref(view, nextAnchor, providerIdsParam)} className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary">Next</Link>
           <span className="ml-2 text-sm font-medium text-foreground">
-            {view === 'month' ? anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : `${start.toLocaleDateString()} – ${end.toLocaleDateString()}`}
+            {view === 'month' ? formatIstMonthYear(anchor) : view === 'day' ? formatIstDate(start) : `${formatIstDate(start)} – ${formatIstDate(end)}`} <span className="text-xs font-normal text-muted-foreground">(IST)</span>
           </span>
         </div>
         <div className="flex gap-1 rounded-lg bg-secondary p-1 text-sm">
@@ -140,7 +144,7 @@ function WeekView({ anchor, appointments, providerIdsParam }: { anchor: Date; ap
         return (
           <div key={day.toISOString()} className="rounded-lg border border-border bg-card p-2">
             <Link href={buildCalendarHref('day', day, providerIdsParam)} className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-primary">
-              {day.toLocaleDateString(undefined, { weekday: 'short' })} {day.getDate()}
+              {formatIstWeekdayDay(day)}
             </Link>
             {dayAppointments.length === 0 ? (
               <p className="text-xs text-muted-foreground">No appointments to show.</p>
@@ -164,7 +168,7 @@ function WeekView({ anchor, appointments, providerIdsParam }: { anchor: Date; ap
 
 function MonthView({ anchor, appointments, providerIdsParam }: { anchor: Date; appointments: AppointmentWithDetails[]; providerIdsParam: string | undefined }) {
   const days = getMonthGridDays(anchor)
-  const currentMonth = anchor.getMonth()
+  const currentMonth = istMonthIndex(anchor)
   const MAX_VISIBLE = 3
 
   return (
@@ -173,7 +177,7 @@ function MonthView({ anchor, appointments, providerIdsParam }: { anchor: Date; a
         <div key={d} className="p-1 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">{d}</div>
       ))}
       {days.map((day) => {
-        const inMonth = day.getMonth() === currentMonth
+        const inMonth = istMonthIndex(day) === currentMonth
         const dayAppointments = appointments
           .filter((a) => isSameDay(new Date(a.startsAt), day))
           .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
@@ -186,7 +190,7 @@ function MonthView({ anchor, appointments, providerIdsParam }: { anchor: Date; a
             href={buildCalendarHref('day', day, providerIdsParam)}
             className={`min-h-24 rounded-md border border-border p-1.5 text-xs transition-colors hover:border-primary ${inMonth ? 'bg-card' : 'bg-muted/40 text-muted-foreground'}`}
           >
-            <div className="mb-1 font-medium">{day.getDate()}</div>
+            <div className="mb-1 font-medium">{istDayOfMonth(day)}</div>
             <ul className="space-y-0.5">
               {visible.map((a) => (
                 <li key={a.id} className="flex items-center gap-1 truncate">

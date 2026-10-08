@@ -1,5 +1,7 @@
 'use client'
-import { useEffect, useState, type ComponentProps } from 'react'
+import { sendJson } from '@/lib/client-fetch'
+import { formatIstTime } from '@/lib/india-time'
+import { useState, type ComponentProps } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowUp, ArrowDown, Trash2, Plus, ShieldAlert } from 'lucide-react'
@@ -53,9 +55,9 @@ export function FormBuilderEditor({
   const [showSend, setShowSend] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify({ name: initialName, category: initialCategory, diagnosisTag: initialDiagnosisTag, folderId: initialFolderId, questions: initialQuestions }))
+  // Null until the first save in this session: the status reads plain "Saved"
+  // (identical on server and client), then "Saved · <IST time>" after a save.
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
-  // Set after mount (not in the initial state) so server and client renders agree.
-  useEffect(() => { setLastSavedAt(new Date()) }, [])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -138,11 +140,7 @@ export function FormBuilderEditor({
         optionScores: q.optionScores ? keepIndices.map((i) => q.optionScores![i]) : q.optionScores,
       }
     })
-    const res = await fetch(`/api/form-templates/${templateId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, category, diagnosisTag, folderId, questions: cleaned }),
-    })
+    const res = await sendJson(`/api/form-templates/${templateId}`, 'PUT', { name, category, diagnosisTag, folderId, questions: cleaned })
     setSaving(false)
     if (res.ok) {
       setQuestions(cleaned)
@@ -150,23 +148,17 @@ export function FormBuilderEditor({
       setLastSavedAt(new Date())
       router.refresh()
     } else {
-      const body = await res.json().catch(() => null)
-      setSaveError(body?.error ?? 'Could not save this form. Please try again.')
+      setSaveError(res.error)
     }
   }
 
   async function archive() {
     setSaveError(null)
-    const res = await fetch(`/api/form-templates/${templateId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: false }),
-    })
+    const res = await sendJson(`/api/form-templates/${templateId}`, 'PUT', { isActive: false })
     if (res.ok) {
       router.push('/forms')
     } else {
-      const body = await res.json().catch(() => null)
-      setSaveError(body?.error ?? 'Could not archive this form. Please try again.')
+      setSaveError(res.error)
     }
   }
 
@@ -181,7 +173,7 @@ export function FormBuilderEditor({
         <button onClick={() => setShowPreview(true)} className={btn}>Preview</button>
         <button onClick={() => setTab(tab === 'consents' ? 'questions' : 'consents')} aria-pressed={tab === 'consents'} className={`${btn} ${tab === 'consents' ? 'bg-secondary' : ''}`}>Consent Forms</button>
         <span className="ml-auto text-xs text-muted-foreground" role="status">
-          {isDirty ? 'Unsaved changes' : lastSavedAt ? `Saved · ${lastSavedAt.toLocaleTimeString()}` : 'Saved'}
+          {isDirty ? 'Unsaved changes' : lastSavedAt ? `Saved · ${formatIstTime(lastSavedAt)}` : 'Saved'}
         </span>
         <button onClick={save} disabled={saving} className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
           {saving ? 'Saving…' : 'Save Form'}
@@ -279,7 +271,7 @@ export function FormBuilderEditor({
 
       )}
 
-      {saveError && <p className="mt-3 text-sm text-destructive">{saveError}</p>}
+      {saveError && <p role="alert" className="mt-3 text-sm text-destructive">{saveError}</p>}
     </div>
 
     <aside className="w-64 shrink-0 space-y-3 rounded-xl border border-primary/10 bg-card/80 p-4 text-sm shadow-sm">

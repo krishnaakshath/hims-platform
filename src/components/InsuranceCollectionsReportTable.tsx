@@ -1,7 +1,7 @@
 'use client'
 import { ReportTable, type ReportColumn } from '@/components/ReportTable'
 import type { DataGridFilterField } from '@/components/DataGridToolbar'
-import { formatCents } from '@/lib/format'
+import { formatPaise } from '@/lib/format'
 
 export interface InsuranceCollectionsRow {
   id: number
@@ -34,8 +34,8 @@ const COLUMNS: ReportColumn<InsuranceCollectionsRow>[] = [
   { key: 'patientName', label: 'Patient', render: (r) => r.patientName },
   { key: 'payerName', label: 'Payer', render: (r) => r.payerName },
   { key: 'status', label: 'Status', render: (r) => STATUS_LABEL[r.status] ?? r.status },
-  { key: 'billedAmountCents', label: 'Billed Amount', render: (r) => formatCents(r.billedAmountCents) },
-  { key: 'paidAmountCents', label: 'Paid Amount', render: (r) => (r.paidAmountCents != null ? formatCents(r.paidAmountCents) : '—') },
+  { key: 'billedAmountCents', label: 'Billed Amount', render: (r) => formatPaise(r.billedAmountCents) },
+  { key: 'paidAmountCents', label: 'Paid Amount', render: (r) => (r.paidAmountCents != null ? formatPaise(r.paidAmountCents) : '—') },
   // serviceDate/submittedDate are Drizzle `date` columns (plain strings, not
   // timestamps) -- no Date/string cache-shape hazard here, but still render
   // directly rather than re-parsing through `new Date()` for the same

@@ -4,8 +4,7 @@ import { NextResponse } from 'next/server'
 import type { ZodError } from 'zod'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 
-export { readJsonBody } from '@/lib/follow-ups/route-responses'
-export { parseId } from '@/lib/tariff/route-responses'
+export { parseId, readJsonBody } from '@/lib/http'
 
 export const WINDOW_OVERLAP_MESSAGE = 'This window overlaps another active window'
 

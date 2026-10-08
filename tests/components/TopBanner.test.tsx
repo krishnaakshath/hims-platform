@@ -26,7 +26,7 @@ describe('TopBanner', () => {
     expect(screen.getByLabelText('Notifications')).toBeInTheDocument()
   })
 
-  it.each(['pharmacy', 'labs', 'collector'] as const)('hides the search box for %s', (role) => {
+  it.each(['pharmacy', 'labs', 'coder', 'collector'] as const)('hides the search box for %s', (role) => {
     render(<TopBanner userName="Jamie Ruiz" role={role} />)
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })

@@ -1,3 +1,4 @@
+import { formatIstDateTime } from '@/lib/india-time'
 export interface MessageRow {
   id: number
   senderRole: 'provider' | 'patient' | 'system'
@@ -32,7 +33,7 @@ export function MessageThreadView({ messages, viewerRole }: { messages: MessageR
               <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">AUTOMATED NOTICE</p>
               <p className="whitespace-pre-wrap">{m.body}</p>
               <p className="italic text-muted-foreground">This is an automated note, not a reply from your care team.</p>
-              <p className="mt-1 text-[10px] text-muted-foreground">{new Date(m.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</p>
+              <p className="mt-1 text-[10px] text-muted-foreground">{formatIstDateTime(m.createdAt)}</p>
             </div>
           )
         }
@@ -46,7 +47,7 @@ export function MessageThreadView({ messages, viewerRole }: { messages: MessageR
               )}
             </p>
             <p className="whitespace-pre-wrap">{m.body}</p>
-            <p className="mt-1 text-[10px] text-muted-foreground">{new Date(m.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">{formatIstDateTime(m.createdAt)}</p>
           </div>
         )
       })}

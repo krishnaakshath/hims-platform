@@ -21,6 +21,7 @@ import {
   TRIAL_CRITERIA_EDIT_ROLES,
   hasSearchScope,
 } from '@/lib/role-policy'
+import { PATIENT_PICKER_ROLES, DEMOGRAPHICS_CORRECTION_ROLES } from '@/lib/role-policy' // Wave C
 import { CHECK_IN_ROLES, DISCHARGE_ROLES, ENCOUNTER_STATUS_ROLES, FOLLOW_UP_BOOKING_ROLES, FOLLOW_UP_PLAN_ROLES } from '@/lib/role-policy' // SP3
 import { gateIt } from '../pages/page-gates-harness'
 
@@ -382,6 +383,8 @@ import { GET as listDepartmentsRoute, POST as postDepartment } from '@/app/api/d
 import { PATCH as patchDepartment } from '@/app/api/departments/[id]/route'
 import { PUT as putProvider } from '@/app/api/providers/[id]/route'
 import { GET as search } from '@/app/api/search/route'
+import { GET as patientLookup } from '@/app/api/patients/lookup/route' // Wave C
+import { PATCH as patchDemographics } from '@/app/api/patients/[anonId]/demographics/route' // Wave C
 import { GET as listTariffServices, POST as postTariffService } from '@/app/api/tariff/services/route'
 import { PATCH as patchTariffService } from '@/app/api/tariff/services/[id]/route'
 import { GET as listRoomCategoriesRoute, POST as postRoomCategory } from '@/app/api/tariff/room-categories/route'
@@ -431,6 +434,35 @@ import { PUT as putHomeCollectionCollector } from '@/app/api/home-collections/[i
 import { COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy'
 import { POST as collectHomeCollectionRoute } from '@/app/api/home-collections/[id]/collect/route'
 // end SP5
+// SP6: the clinical-note write routes (the coder must never write or sign a note)
+import { POST as postNote } from '@/app/api/patients/[anonId]/notes/route'
+import { PUT as signNoteRoute } from '@/app/api/patients/[anonId]/notes/[id]/sign/route'
+// end SP6
+// SP6: code systems and code search
+import { CODE_LOOKUP_ROLES, CODE_SYSTEM_ADMIN_ROLES, CODING_ROLES } from '@/lib/role-policy'
+import { GET as getCodes } from '@/app/api/coding/codes/route'
+import { GET as listCodeSystemsRoute } from '@/app/api/coding/code-systems/route'
+import { POST as postCodeImport } from '@/app/api/coding/code-systems/import/route'
+import { PATCH as patchCodeSystem } from '@/app/api/coding/code-systems/[id]/route'
+// end SP6
+// SP6: encounter coding entries, status actions and coding queries
+import { CODING_ENTRY_ROLES, CODING_QUERY_RESPOND_ROLES } from '@/lib/role-policy'
+import { POST as postCodingDx } from '@/app/api/coding/encounters/[id]/diagnoses/route'
+import { PATCH as patchCodingDx, DELETE as deleteCodingDx } from '@/app/api/coding/encounters/[id]/diagnoses/[diagnosisId]/route'
+import { POST as postCodingProc } from '@/app/api/coding/encounters/[id]/procedures/route'
+import { PATCH as patchCodingProc, DELETE as deleteCodingProc } from '@/app/api/coding/encounters/[id]/procedures/[procedureId]/route'
+import { POST as postCodingStatus } from '@/app/api/coding/encounters/[id]/status/route'
+import { POST as postCodingQuery } from '@/app/api/coding/encounters/[id]/queries/route'
+import { PATCH as patchCodingQuery } from '@/app/api/coding/queries/[queryId]/route'
+import { POST as postCodingQueryResponse } from '@/app/api/coding/queries/[queryId]/responses/route'
+// end SP6
+// SP6: service <-> procedure-code map
+import { GET as getServiceCodes, PUT as putServiceCodes } from '@/app/api/coding/services/[serviceId]/procedure-codes/route'
+// end SP6
+// SP6: FHIR Procedure and Encounter exports
+import { GET as getFhirProcedure } from '@/app/api/patients/[anonId]/fhir/Procedure/route'
+import { GET as getFhirEncounter } from '@/app/api/patients/[anonId]/fhir/Encounter/route'
+// end SP6
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -441,6 +473,7 @@ const get = (path: string) => new NextRequest(url(path))
 const send = (method: 'POST' | 'PUT' | 'PATCH', path: string, body: unknown = {}) =>
   new NextRequest(url(path), { method, body: typeof body === 'string' ? body : JSON.stringify(body) })
 const ctx = <T extends Record<string, string>>(p: T) => ({ params: Promise.resolve(p) })
+const del = (path: string) => new NextRequest(url(path), { method: 'DELETE' }) // SP6
 
 // A handler that THROWS after the gate (e.g. drizzle rejecting an empty
 // `.set({})` for an allowed role's `{}` body) still proves the gate let that
@@ -478,6 +511,10 @@ export const API_GATES: ApiGateCase[] = [
   fhir('MedicationRequest', getFhirMedicationRequest),
   fhir('Observation', getFhirObservation),
   fhir('Patient', getFhirPatient),
+  // SP6: same CLINICAL_ROLES gate as the other FHIR exports (the coder is denied)
+  fhir('Procedure', getFhirProcedure),
+  fhir('Encounter', getFhirEncounter),
+  // end SP6
   // POLICY.md: Identity PUT -- admin, crc, frontdesk
   {
     name: 'PUT /api/patients/[anonId]/identity',
@@ -652,8 +689,42 @@ export const API_GATES: ApiGateCase[] = [
   // SP5 collector route (Task 12): `{}` fails validation before any query.
   { name: 'POST /api/home-collections/[id]/collect', call: () => settle(() => collectHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/collect`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
   // end SP5
+  // SP6 (ruling 4): clinical notes are written and signed by pi/admin only -- the coder reads
+  // signed notes in the coding workspace but is 403'd here. Inline allowlists in both routes.
+  { name: 'POST /api/patients/[anonId]/notes', call: () => settle(() => postNote(send('POST', `/api/patients/${BOGUS_PATIENT}/notes`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'pi'] },
+  { name: 'PUT /api/patients/[anonId]/notes/[id]/sign', call: () => settle(() => signNoteRoute(send('PUT', `/api/patients/${BOGUS_PATIENT}/notes/${BOGUS_ID}/sign`), ctx({ anonId: BOGUS_PATIENT, id: BOGUS_ID }))), allowed: ['admin', 'pi'] },
+  // end SP6
+  // SP6 code systems: code search (no PHI) for CODE_LOOKUP_ROLES, the version list for CODING_ROLES,
+  // import / set current for CODE_SYSTEM_ADMIN_ROLES. Allowed roles' bodies fail validation before any write.
+  { name: 'GET /api/coding/codes', call: () => settle(() => getCodes(get('/api/coding/codes'))), allowed: [...CODE_LOOKUP_ROLES] },
+  { name: 'GET /api/coding/code-systems', call: () => settle(() => listCodeSystemsRoute()), allowed: [...CODING_ROLES] },
+  { name: 'POST /api/coding/code-systems/import', call: () => settle(() => postCodeImport(send('POST', '/api/coding/code-systems/import'))), allowed: [...CODE_SYSTEM_ADMIN_ROLES] },
+  { name: 'PATCH /api/coding/code-systems/[id]', call: () => settle(() => patchCodeSystem(send('PATCH', `/api/coding/code-systems/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...CODE_SYSTEM_ADMIN_ROLES] },
+  // end SP6
+  // SP6 encounter coding: entry writes for CODING_ENTRY_ROLES (pi proposes, coder/admin code), status
+  // actions and raise/close queries for CODING_ROLES, replies for CODING_QUERY_RESPOND_ROLES.
+  { name: 'POST /api/coding/encounters/[id]/diagnoses', call: () => settle(() => postCodingDx(send('POST', `/api/coding/encounters/${BOGUS_ID}/diagnoses`), ctx({ id: BOGUS_ID }))), allowed: [...CODING_ENTRY_ROLES] },
+  { name: 'PATCH /api/coding/encounters/[id]/diagnoses/[diagnosisId]', call: () => settle(() => patchCodingDx(send('PATCH', `/api/coding/encounters/${BOGUS_ID}/diagnoses/${BOGUS_ID}`), ctx({ id: BOGUS_ID, diagnosisId: BOGUS_ID }))), allowed: [...CODING_ENTRY_ROLES] },
+  { name: 'DELETE /api/coding/encounters/[id]/diagnoses/[diagnosisId]', call: () => settle(() => deleteCodingDx(del(`/api/coding/encounters/${BOGUS_ID}/diagnoses/${BOGUS_ID}`), ctx({ id: BOGUS_ID, diagnosisId: BOGUS_ID }))), allowed: [...CODING_ENTRY_ROLES] },
+  { name: 'POST /api/coding/encounters/[id]/procedures', call: () => settle(() => postCodingProc(send('POST', `/api/coding/encounters/${BOGUS_ID}/procedures`), ctx({ id: BOGUS_ID }))), allowed: [...CODING_ENTRY_ROLES] },
+  { name: 'PATCH /api/coding/encounters/[id]/procedures/[procedureId]', call: () => settle(() => patchCodingProc(send('PATCH', `/api/coding/encounters/${BOGUS_ID}/procedures/${BOGUS_ID}`), ctx({ id: BOGUS_ID, procedureId: BOGUS_ID }))), allowed: [...CODING_ENTRY_ROLES] },
+  { name: 'DELETE /api/coding/encounters/[id]/procedures/[procedureId]', call: () => settle(() => deleteCodingProc(del(`/api/coding/encounters/${BOGUS_ID}/procedures/${BOGUS_ID}`), ctx({ id: BOGUS_ID, procedureId: BOGUS_ID }))), allowed: [...CODING_ENTRY_ROLES] },
+  { name: 'POST /api/coding/encounters/[id]/status', call: () => settle(() => postCodingStatus(send('POST', `/api/coding/encounters/${BOGUS_ID}/status`), ctx({ id: BOGUS_ID }))), allowed: [...CODING_ROLES] },
+  { name: 'POST /api/coding/encounters/[id]/queries', call: () => settle(() => postCodingQuery(send('POST', `/api/coding/encounters/${BOGUS_ID}/queries`), ctx({ id: BOGUS_ID }))), allowed: [...CODING_ROLES] },
+  { name: 'PATCH /api/coding/queries/[queryId]', call: () => settle(() => patchCodingQuery(send('PATCH', `/api/coding/queries/${BOGUS_ID}`), ctx({ queryId: BOGUS_ID }))), allowed: [...CODING_ROLES] },
+  { name: 'POST /api/coding/queries/[queryId]/responses', call: () => settle(() => postCodingQueryResponse(send('POST', `/api/coding/queries/${BOGUS_ID}/responses`), ctx({ queryId: BOGUS_ID }))), allowed: [...CODING_QUERY_RESPOND_ROLES] },
+  // end SP6
+  // SP6 service <-> procedure-code map: lookup (no PHI) for CODE_LOOKUP_ROLES, replace for CODING_ROLES.
+  // An allowed PUT's `{}` body fails validation before any write.
+  { name: 'GET /api/coding/services/[serviceId]/procedure-codes', call: () => settle(() => getServiceCodes(get(`/api/coding/services/${BOGUS_ID}/procedure-codes`), ctx({ serviceId: BOGUS_ID }))), allowed: [...CODE_LOOKUP_ROLES] },
+  { name: 'PUT /api/coding/services/[serviceId]/procedure-codes', call: () => settle(() => putServiceCodes(send('PUT', `/api/coding/services/${BOGUS_ID}/procedure-codes`), ctx({ serviceId: BOGUS_ID }))), allowed: [...CODING_ROLES] },
+  // end SP6
   // POLICY.md: global search -- only roles with a search scope
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
+  // Wave C P0-04: patient picker -- PATIENT_PICKER_ROLES (directory roles + pharmacy + billing; never labs)
+  { name: 'GET /api/patients/lookup', call: () => patientLookup(get('/api/patients/lookup?q=')), allowed: [...PATIENT_PICKER_ROLES] },
+  // Wave C P1-11: name/DOB correction -- DEMOGRAPHICS_CORRECTION_ROLES (admin); `{}` fails validation before any query.
+  { name: 'PATCH /api/patients/[anonId]/demographics', call: () => settle(() => patchDemographics(send('PATCH', `/api/patients/${BOGUS_PATIENT}/demographics`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...DEMOGRAPHICS_CORRECTION_ROLES] },
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -716,7 +787,27 @@ const SP5_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/home-collections/[id]/collect', call: () => collectHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/collect`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: COLLECTOR_ROUTE_ROLES },
 ]
 // end SP5
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP5_WRITE_GATES])('$name (deny before parse)', (c) => {
+// SP6 writes: the same deny-before-parse contract.
+const SP6_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  // The import route 415s anything but application/json, so this row declares it (as the tariff import row does).
+  { name: 'POST /api/coding/code-systems/import', call: () => postCodeImport(new NextRequest(url('/api/coding/code-systems/import'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: NOT_JSON })), allowed: CODE_SYSTEM_ADMIN_ROLES },
+  { name: 'PATCH /api/coding/code-systems/[id]', call: () => patchCodeSystem(send('PATCH', `/api/coding/code-systems/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CODE_SYSTEM_ADMIN_ROLES },
+  { name: 'POST /api/coding/encounters/[id]/diagnoses', call: () => postCodingDx(send('POST', `/api/coding/encounters/${BOGUS_ID}/diagnoses`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CODING_ENTRY_ROLES },
+  { name: 'PATCH /api/coding/encounters/[id]/diagnoses/[diagnosisId]', call: () => patchCodingDx(send('PATCH', `/api/coding/encounters/${BOGUS_ID}/diagnoses/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID, diagnosisId: BOGUS_ID })), allowed: CODING_ENTRY_ROLES },
+  { name: 'POST /api/coding/encounters/[id]/procedures', call: () => postCodingProc(send('POST', `/api/coding/encounters/${BOGUS_ID}/procedures`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CODING_ENTRY_ROLES },
+  { name: 'PATCH /api/coding/encounters/[id]/procedures/[procedureId]', call: () => patchCodingProc(send('PATCH', `/api/coding/encounters/${BOGUS_ID}/procedures/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID, procedureId: BOGUS_ID })), allowed: CODING_ENTRY_ROLES },
+  { name: 'POST /api/coding/encounters/[id]/status', call: () => postCodingStatus(send('POST', `/api/coding/encounters/${BOGUS_ID}/status`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CODING_ROLES },
+  { name: 'POST /api/coding/encounters/[id]/queries', call: () => postCodingQuery(send('POST', `/api/coding/encounters/${BOGUS_ID}/queries`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CODING_ROLES },
+  { name: 'PATCH /api/coding/queries/[queryId]', call: () => patchCodingQuery(send('PATCH', `/api/coding/queries/${BOGUS_ID}`, NOT_JSON), ctx({ queryId: BOGUS_ID })), allowed: CODING_ROLES },
+  { name: 'POST /api/coding/queries/[queryId]/responses', call: () => postCodingQueryResponse(send('POST', `/api/coding/queries/${BOGUS_ID}/responses`, NOT_JSON), ctx({ queryId: BOGUS_ID })), allowed: CODING_QUERY_RESPOND_ROLES },
+  { name: 'PUT /api/coding/services/[serviceId]/procedure-codes', call: () => putServiceCodes(send('PUT', `/api/coding/services/${BOGUS_ID}/procedure-codes`, NOT_JSON), ctx({ serviceId: BOGUS_ID })), allowed: CODING_ROLES }, // SP6 Task 14
+]
+// end SP6
+// Wave C writes: the same deny-before-parse contract.
+const WAVE_C_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'PATCH /api/patients/[anonId]/demographics', call: () => patchDemographics(send('PATCH', `/api/patients/${BOGUS_PATIENT}/demographics`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: DEMOGRAPHICS_CORRECTION_ROLES },
+]
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role

@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { MfaEnrollStep } from '@/components/mfa/MfaEnrollStep'
 
@@ -13,22 +14,15 @@ export function PatientPortalSecurityPanel({ initialMfaEnabled }: { initialMfaEn
   async function startEnroll() {
     setBusy(true)
     setError(null)
-    const res = await fetch('/api/patient-portal/account/mfa/enroll', { method: 'POST' })
+    const res = await sendJson<{ qrDataUrl: string; manualKey: string }>('/api/patient-portal/account/mfa/enroll', 'POST')
     setBusy(false)
-    if (!res.ok) { setError('Could not start enrollment.'); return }
-    setEnrollment(await res.json())
+    if (!res.ok) { setError(res.error); return }
+    setEnrollment(res.data)
   }
 
   async function confirmEnroll(code: string): Promise<string | null> {
-    const res = await fetch('/api/patient-portal/account/mfa/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    })
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      return body?.error ?? 'Could not confirm that code.'
-    }
+    const res = await sendJson('/api/patient-portal/account/mfa/confirm', 'POST', { code }, { passThrough: [401] })
+    if (!res.ok) return res.error
     setEnrollment(null)
     setMfaEnabled(true)
     return null
@@ -38,15 +32,10 @@ export function PatientPortalSecurityPanel({ initialMfaEnabled }: { initialMfaEn
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const res = await fetch('/api/patient-portal/account/mfa/reset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: resetPassword }),
-    })
+    const res = await sendJson('/api/patient-portal/account/mfa/reset', 'POST', { password: resetPassword }, { passThrough: [401] })
     setBusy(false)
     if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not turn off two-factor authentication.')
+      setError(res.error)
       return
     }
     setMfaEnabled(false)
@@ -68,7 +57,7 @@ export function PatientPortalSecurityPanel({ initialMfaEnabled }: { initialMfaEn
         <span className="text-foreground">{mfaEnabled ? 'Two-factor authentication is on' : 'Two-factor authentication is off'}</span>
       </div>
 
-      {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
 
       {!mfaEnabled && !showReset && (
         <button onClick={startEnroll} disabled={busy} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">

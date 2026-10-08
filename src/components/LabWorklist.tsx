@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -249,41 +250,32 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
     reportGroups.set(key, [...(reportGroups.get(key) ?? []), o])
   }
 
-  async function post(id: number, path: string, fallback: string, init: RequestInit = { method: 'POST' }) {
+  // Shared client fetch helper: a failure is always shown, with the route's own 400/404/409
+  // text or a fixed message (never server internals).
+  async function post(id: number, path: string, body?: unknown): Promise<Record<string, unknown> | null> {
     setBusyId(id)
     setRowError(null)
-    try {
-      const res = await fetch(`/api/lab-orders/${id}/${path}`, init)
-      const body = await res.json().catch(() => null)
-      if (res.ok) return body ?? {}
-      setRowError({ id, message: body?.error ?? fallback })
-      return null
-    } catch {
-      setRowError({ id, message: fallback })
-      return null
-    } finally {
-      setBusyId(null)
-    }
+    const res = await sendJson<Record<string, unknown> | null>(`/api/lab-orders/${id}/${path}`, 'POST', body)
+    setBusyId(null)
+    if (res.ok) return res.data ?? {}
+    setRowError({ id, message: res.error })
+    return null
   }
 
   async function markCollected(id: number) {
-    const body = await post(id, 'collect', 'Could not mark this order collected.')
+    const body = await post(id, 'collect')
     if (!body) return
     if (typeof body.sampleId === 'string') setCollectedNotice({ id, sampleId: body.sampleId })
     router.refresh()
   }
 
   async function verify(id: number) {
-    if (await post(id, 'verify', 'Could not verify this result.')) router.refresh()
+    if (await post(id, 'verify')) router.refresh()
   }
 
   async function confirmCancel() {
     if (!cancelFor || !cancelFor.reason.trim()) return
-    const ok = await post(cancelFor.id, 'cancel', 'Could not cancel this order.', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: cancelFor.reason }),
-    })
+    const ok = await post(cancelFor.id, 'cancel', { reason: cancelFor.reason })
     if (ok) { setCancelFor(null); router.refresh() }
   }
 

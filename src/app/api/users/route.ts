@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -7,7 +8,7 @@ import { listAllUsers, createUser } from '@/lib/queries/users'
 const createUserSchema = z.object({
   name: z.string().trim().min(1),
   email: z.string().trim().email(),
-  role: z.enum(['admin', 'pi', 'crc', 'frontdesk', 'pharmacy', 'billing', 'labs', 'collector' /* SP5 */]),
+  role: z.enum(['admin', 'pi', 'crc', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder' /* SP6 */, 'collector' /* SP5 */]),
 }).strict()
 
 export async function GET() {
@@ -25,7 +26,9 @@ export async function POST(request: NextRequest) {
   if (session instanceof NextResponse) return session
   if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
 
-  const parsed = createUserSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = createUserSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 400 })
 
   const result = await createUser(parsed.data)

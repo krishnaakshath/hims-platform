@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -12,8 +13,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (session instanceof NextResponse) return session
   if (!['admin', 'crc', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
-  const templateId = Number(id)
-  if (!Number.isInteger(templateId) || !(await getFormTemplate(templateId))) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const templateId = parseId(id)
+  if (templateId === null || !(await getFormTemplate(templateId))) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json(await listConsentsForTemplate(templateId))
 }
 
@@ -22,10 +23,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (session instanceof NextResponse) return session
   if (!['admin', 'crc', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
-  const templateId = Number(id)
-  if (!Number.isInteger(templateId)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const templateId = parseId(id)
+  if (templateId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const parsed = attachSchema.safeParse(await request.json().catch(() => null))
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = attachSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid attach payload', details: parsed.error.flatten() }, { status: 400 })
 
   const result = await attachConsentToTemplate(templateId, parsed.data.consentDocumentId)

@@ -46,7 +46,7 @@ export function SignatureCapture({
         <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} aria-label="Attestation" className="mt-0.5" />
         <span>{attestationLabel}</span>
       </label>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <Button size="sm" onClick={() => onSign(typedName.trim())} disabled={!canSubmit}>{submitLabel}</Button>
     </div>
   )

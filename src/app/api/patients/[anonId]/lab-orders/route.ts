@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
+import { patientExists } from '@/lib/queries/patient-exists'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 // SP5: the doctor's order is a requisition of one or more tests, priced from the tariff master.
@@ -29,6 +30,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const parsed = createLabRequisitionSchema.safeParse(json.body)
   if (!parsed.success) return invalidBody(parsed.error, 'Invalid lab order payload')
   // end SP5
+
+  if (!(await patientExists(anonId))) return NextResponse.json({ error: 'Patient not found' }, { status: 404 })
 
   // Resolves who ordered this test with the shared acting-provider resolver
   // (resolveDoctorQueueProvider: the users -> staff -> provider FK link

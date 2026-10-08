@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -7,14 +8,15 @@ import { getDb } from '@/db/client'
 import { doctorAssignments } from '@/db/schema'
 import { scheduleAssignmentIntoAppointment, notifyPatientOfScheduledAssignment } from '@/lib/queries/doctor-assignments'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
+import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
 
 // Only the time slot comes from the client. The visit reason is taken from
 // the stored assignment row server-side, so a crafted body cannot put
 // arbitrary text into the patient's automated confirmation; .strict() makes a
 // stray `visitReason` key a 400 like any other unknown key.
 const scheduleSchema = z.object({
-  startsAt: z.string().min(1),
-  endsAt: z.string().min(1),
+  startsAt: appointmentInstantSchema,
+  endsAt: appointmentInstantSchema,
 }).strict()
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -23,10 +25,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (session.role !== 'pi') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const assignmentId = Number(id)
-  if (!Number.isInteger(assignmentId)) return NextResponse.json({ error: 'Invalid assignment id' }, { status: 400 })
+  const assignmentId = parseId(id)
+  if (assignmentId === null) return NextResponse.json({ error: 'Invalid assignment id' }, { status: 400 })
 
-  const parsed = scheduleSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = scheduleSchema.safeParse(json.body)
+  if (!parsed.success && isTimeFieldError(parsed.error)) return invalidAppointmentTime()
   if (!parsed.success) return NextResponse.json({ error: 'Invalid schedule payload', details: parsed.error.flatten() }, { status: 400 })
 
   const startsAt = new Date(parsed.data.startsAt)

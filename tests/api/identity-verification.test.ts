@@ -4,7 +4,7 @@ import { getDb } from '@/db/client'
 import { patients, identityVerifications, auditLog } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 
-let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'collector' = 'crc'
+let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | 'collector' = 'crc'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Jamie Ruiz', userId: null })) }))
 
 // The positive-path PUT genuinely writes an identity-verification row (it's
@@ -44,7 +44,7 @@ describe('PUT /api/patients/[anonId]/identity', () => {
   // is parsed or any row is read/written -- a valid payload proves the 403
   // comes from the role gate, not validation.
   it('403s pi, pharmacy, billing, labs', async () => {
-    for (const role of ['pi', 'pharmacy', 'billing', 'labs', 'collector'] as const) {
+    for (const role of ['pi', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const) {
       sessionRole = role
       const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ idType: 'passport', idNumber: 'P0000001' }) })
       const res = await PUT(req as never, { params: Promise.resolve({ anonId: TEST_PATIENT_ID }) })

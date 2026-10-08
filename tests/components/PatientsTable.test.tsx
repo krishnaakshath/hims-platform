@@ -87,3 +87,23 @@ describe('PatientsTable', () => {
     expect(screen.queryByRole('navigation', { name: /pagination/i })).not.toBeInTheDocument()
   })
 })
+
+// Wave C front-desk quick path from the patient list.
+describe('PatientsTable quick actions', () => {
+  it('shows Check in / Book links per card only when enabled', () => {
+    render(<PatientsTable patients={ROWS} quickActions={{ checkIn: true, book: true }} />)
+    expect(screen.getByRole('link', { name: 'Check in Maria Alvarez' })).toHaveAttribute('href', '/front-desk/check-in?patient=RD-0001')
+    expect(screen.getByRole('link', { name: 'Book appointment for James Thornton' })).toHaveAttribute('href', '/calendar?book=RD-0002')
+  })
+
+  it('shows only the actions the role may use', () => {
+    render(<PatientsTable patients={ROWS} quickActions={{ checkIn: false, book: true }} />)
+    expect(screen.queryByRole('link', { name: /^check in/i })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /book appointment/i })).toHaveLength(2)
+  })
+
+  it('shows none by default', () => {
+    render(<PatientsTable patients={ROWS} />)
+    expect(screen.queryByRole('link', { name: /^check in|book appointment/i })).not.toBeInTheDocument()
+  })
+})

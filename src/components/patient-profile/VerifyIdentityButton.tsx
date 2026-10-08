@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ShieldCheck } from 'lucide-react'
@@ -36,14 +37,9 @@ export function VerifyIdentityButton({ anonId, verified }: { anonId: string; ver
     if (containsAadhaarLike(number)) { setError(NO_AADHAAR); setIdNumber(''); return }
     setSaving(true)
     try {
-      const res = await fetch(`/api/patients/${encodeURIComponent(anonId)}/identity`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idType, idNumber: number }),
-      })
+      const res = await sendJson(`/api/patients/${encodeURIComponent(anonId)}/identity`, 'PUT', { idType, idNumber: number })
       if (res.ok) { close(); router.refresh(); return }
-      const body = await res.json().catch(() => null)
-      setError(body && typeof body.error === 'string' && body.error ? body.error : 'Could not save the verification. Please try again.')
+      setError(res.error)
     } catch {
       setError('Could not reach the server. Check your connection and try again.')
     } finally {

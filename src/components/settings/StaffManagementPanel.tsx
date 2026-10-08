@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { UserPlus, Copy, Check } from 'lucide-react'
@@ -7,11 +8,11 @@ export interface StaffRow {
   id: number
   name: string
   email: string
-  role: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'collector' // SP5: + collector
+  role: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' /* SP6: + coder */ | 'collector' // SP5: + collector
   mfaEnabled: boolean
 }
 
-const ROLE_LABEL: Record<StaffRow['role'], string> = { admin: 'Administrator', pi: 'Principal Investigator', crc: 'Coordinator', frontdesk: 'Front Desk', pharmacy: 'Pharmacy', billing: 'Billing', labs: 'Labs', collector: 'Sample Collector' /* SP5 */ }
+const ROLE_LABEL: Record<StaffRow['role'], string> = { admin: 'Administrator', pi: 'Principal Investigator', crc: 'Coordinator', frontdesk: 'Front Desk', pharmacy: 'Pharmacy', billing: 'Billing', labs: 'Labs', coder: 'Clinical Coder' /* SP6 */, collector: 'Sample Collector' /* SP5 */ }
 const ROLE_BADGE: Record<StaffRow['role'], string> = {
   admin: 'bg-accent/10 text-accent',
   pi: 'bg-primary/10 text-primary',
@@ -21,6 +22,7 @@ const ROLE_BADGE: Record<StaffRow['role'], string> = {
   billing: 'bg-amber-500/10 text-amber-700',
   labs: 'bg-rose-500/10 text-rose-700',
   collector: 'bg-orange-500/10 text-orange-700', // SP5
+  coder: 'bg-teal-500/10 text-teal-700', // SP6
 }
 
 function AddStaffForm({ onCreated }: { onCreated: (row: StaffRow, password: string) => void }) {
@@ -35,18 +37,13 @@ function AddStaffForm({ onCreated }: { onCreated: (row: StaffRow, password: stri
     e.preventDefault()
     setSaving(true)
     setError(null)
-    const res = await fetch('/api/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, role }),
-    })
+    const result = await sendJson<{ id: number; name: string; email: string; role: StaffRow['role']; password: string }>('/api/users', 'POST', { name, email, role })
     setSaving(false)
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error ?? 'Could not create this account.')
+    if (!result.ok) {
+      setError(result.error)
       return
     }
-    const created = await res.json()
+    const created = result.data
     onCreated({ id: created.id, name: created.name, email: created.email, role: created.role, mfaEnabled: false }, created.password)
     setName('')
     setEmail('')
@@ -88,10 +85,12 @@ function AddStaffForm({ onCreated }: { onCreated: (row: StaffRow, password: stri
             <option value="billing">Billing</option>
             <option value="labs">Labs</option>
             <option value="collector">Sample Collector</option>{/* SP5 */}
+            {/* SP6 */}
+            <option value="coder">Clinical Coder</option>
           </select>
         </div>
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <div className="flex items-center gap-3">
         <button type="submit" disabled={saving} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
           {saving ? 'Creating…' : 'Create account'}
@@ -129,6 +128,7 @@ export function StaffManagementPanel({ staff, isAdmin }: { staff: StaffRow[]; is
   const router = useRouter()
   const [newCredential, setNewCredential] = useState<{ row: StaffRow; password: string } | null>(null)
   const [resetting, setResetting] = useState<number | null>(null)
+  const [resetError, setResetError] = useState<string | null>(null)
 
   function handleCreated(row: StaffRow, password: string) {
     setNewCredential({ row, password })
@@ -137,8 +137,10 @@ export function StaffManagementPanel({ staff, isAdmin }: { staff: StaffRow[]; is
 
   async function resetMfa(id: number) {
     setResetting(id)
-    await fetch(`/api/users/${id}/reset-mfa`, { method: 'POST' })
+    setResetError(null)
+    const result = await sendJson(`/api/users/${id}/reset-mfa`, 'POST')
     setResetting(null)
+    if (!result.ok) { setResetError(result.error); return }
     router.refresh()
   }
 
@@ -148,6 +150,7 @@ export function StaffManagementPanel({ staff, isAdmin }: { staff: StaffRow[]; is
         <p className="text-xs text-muted-foreground">{staff.length} staff account{staff.length === 1 ? '' : 's'}</p>
         {isAdmin && <AddStaffForm onCreated={handleCreated} />}
       </div>
+      {resetError && <p role="alert" className="mb-3 text-xs text-destructive">{resetError}</p>}
       {newCredential && <NewCredentialBanner row={newCredential.row} password={newCredential.password} onDismiss={() => setNewCredential(null)} />}
       {staff.length === 0 ? (
         <p className="text-sm text-muted-foreground">No staff accounts yet.</p>

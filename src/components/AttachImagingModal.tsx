@@ -1,4 +1,5 @@
 'use client'
+import { fetchJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -41,11 +42,10 @@ export function AttachImagingModal({
     if (trimmedName && trimmedName !== file.name) fd.set('name', trimmedName)
     // No Content-Type header -- the browser sets the multipart boundary
     // itself, same as InsuranceCardUpload's fetch().
-    const res = await fetch(`/api/lab-orders/${orderId}/imaging`, { method: 'POST', body: fd })
+    const res = await fetchJson(`/api/lab-orders/${orderId}/imaging`, { method: 'POST', body: fd })
     setSubmitting(false)
     if (res.ok) { router.refresh(); onClose(); return }
-    const body = await res.json().catch(() => null)
-    setError(body?.error ?? 'Could not attach this image.')
+    setError(res.error)
   }
 
   const canSubmit = Boolean(file) && !submitting
@@ -71,7 +71,7 @@ export function AttachImagingModal({
             aria-label="Name"
             className="w-full rounded-md border border-border px-3 py-2 text-sm"
           />
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

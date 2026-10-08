@@ -1,6 +1,7 @@
+import { formatIstDate } from '@/lib/india-time'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { DollarSign, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags } from 'lucide-react'
+import { IndianRupee, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags } from 'lucide-react'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
 import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
@@ -11,7 +12,7 @@ import { listPatientCollections } from '@/lib/queries/patient-collections'
 import { countEligibilityFollowUps } from '@/lib/queries/insurance-eligibility'
 import { ArAgingChart } from '@/components/ArAgingChart'
 import { EligibilityCheckButton } from '@/components/EligibilityCheckButton'
-import { formatCents } from '@/lib/format'
+import { formatPaise } from '@/lib/format'
 import type { ChargeStatus } from '@/lib/charge-status'
 
 const SECTION = 'overflow-hidden rounded-md border border-border bg-card'
@@ -68,7 +69,7 @@ export default async function BillingHomePage() {
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-md border border-border bg-card p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Outstanding A/R</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{formatCents(arData.outstandingArCents)}</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{formatPaise(arData.outstandingArCents)}</p>
         </div>
         <div className="rounded-md border border-border bg-card p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gross Collection Rate</p>
@@ -80,7 +81,7 @@ export default async function BillingHomePage() {
         </div>
         <div className="rounded-md border border-border bg-card p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Total Billed</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{formatCents(totalBilledCents)}</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{formatPaise(totalBilledCents)}</p>
         </div>
       </div>
 
@@ -146,7 +147,7 @@ export default async function BillingHomePage() {
               { href: '/billing/charges', icon: Receipt, label: 'Charges', sub: 'Manage & approve charges' },
               { href: '/billing/insurance-collections', icon: ShieldCheck, label: 'Insurance Collections', sub: 'Claims & EOBs' },
               { href: '/billing/patient-collections', icon: HandCoins, label: 'Patient Collections', sub: 'Balances & statements' },
-              { href: '/billing/statements', icon: DollarSign, label: 'Statements', sub: 'Generate patient statements' },
+              { href: '/billing/statements', icon: IndianRupee, label: 'Statements', sub: 'Generate patient statements' },
               { href: '/billing/analytics', icon: BarChart3, label: 'Analytics', sub: 'Revenue trends & reports' },
               // Wave B P0-01: Tariffs only for the roles its page admits (TARIFF_MANAGE_ROLES).
               ...(TARIFF_MANAGE_ROLES.includes(session.role) ? [{ href: '/tariffs', icon: Tags, label: 'Tariffs', sub: 'Service catalogue & price lists' }] : []),
@@ -189,8 +190,8 @@ export default async function BillingHomePage() {
                     <Link href={`/billing/charges/${charge.id}`} className="hover:underline">{charge.patientName}</Link>
                   </td>
                   <td className="p-3 text-muted-foreground">{charge.providerName}</td>
-                  <td className="p-3 text-muted-foreground">{new Date(charge.dateOfService).toLocaleDateString()}</td>
-                  <td className="p-3 text-right font-medium tabular-nums text-foreground">{formatCents(charge.amountCents)}</td>
+                  <td className="p-3 text-muted-foreground">{formatIstDate(charge.dateOfService)}</td>
+                  <td className="p-3 text-right font-medium tabular-nums text-foreground">{formatPaise(charge.amountCents)}</td>
                   <td className="p-3">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${CHARGE_STATUS_BADGE[charge.status] ?? 'bg-muted text-muted-foreground'}`}>
                       {charge.status}
@@ -221,8 +222,8 @@ export default async function BillingHomePage() {
                   {outstandingCollections.slice(0, 5).map((col) => (
                     <tr key={col.patientId} className="border-b border-border last:border-0 hover:bg-muted/20">
                       <td className="p-3 font-medium text-foreground">{col.patientName}</td>
-                      <td className="p-3 text-right font-medium tabular-nums text-destructive">{formatCents(col.balanceCents)}</td>
-                      <td className="p-3 text-right tabular-nums text-muted-foreground">{formatCents(col.unappliedCents)}</td>
+                      <td className="p-3 text-right font-medium tabular-nums text-destructive">{formatPaise(col.balanceCents)}</td>
+                      <td className="p-3 text-right tabular-nums text-muted-foreground">{formatPaise(col.unappliedCents)}</td>
                     </tr>
                   ))}
                 </tbody>

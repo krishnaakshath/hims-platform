@@ -1,4 +1,5 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 
 export function PatientPortalAccessPanel({ anonId, initialConfigured, mfaEnabled, isAdmin }: { anonId: string; initialConfigured: boolean; mfaEnabled: boolean; isAdmin: boolean }) {
@@ -12,10 +13,10 @@ export function PatientPortalAccessPanel({ anonId, initialConfigured, mfaEnabled
   async function generate() {
     setBusy(true)
     setError(null)
-    const res = await fetch(`/api/patients/${anonId}/portal-password`, { method: 'POST' })
+    const res = await sendJson<{ password: string }>(`/api/patients/${anonId}/portal-password`, 'POST')
     setBusy(false)
-    if (!res.ok) { setError('Could not generate a portal password.'); return }
-    const body = await res.json()
+    if (!res.ok) { setError(res.error); return }
+    const body = res.data
     setGeneratedPassword(body.password)
     setConfigured(true)
   }
@@ -23,9 +24,9 @@ export function PatientPortalAccessPanel({ anonId, initialConfigured, mfaEnabled
   async function revoke() {
     setBusy(true)
     setError(null)
-    const res = await fetch(`/api/patients/${anonId}/portal-password`, { method: 'DELETE' })
+    const res = await sendJson(`/api/patients/${anonId}/portal-password`, 'DELETE')
     setBusy(false)
-    if (!res.ok) { setError('Could not revoke portal access.'); return }
+    if (!res.ok) { setError(res.error); return }
     setConfigured(false)
     setGeneratedPassword(null)
   }
@@ -33,9 +34,9 @@ export function PatientPortalAccessPanel({ anonId, initialConfigured, mfaEnabled
   async function resetMfa() {
     setMfaResetting(true)
     setError(null)
-    const res = await fetch(`/api/patients/${anonId}/reset-mfa`, { method: 'POST' })
+    const res = await sendJson(`/api/patients/${anonId}/reset-mfa`, 'POST')
     setMfaResetting(false)
-    if (!res.ok) { setError('Could not reset MFA.'); return }
+    if (!res.ok) { setError(res.error); return }
     setMfaWasReset(true)
   }
 
@@ -74,7 +75,7 @@ export function PatientPortalAccessPanel({ anonId, initialConfigured, mfaEnabled
         )}
       </div>
       {mfaWasReset && <p className="text-xs text-muted-foreground">MFA has been reset for this patient.</p>}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }

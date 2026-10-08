@@ -1,6 +1,8 @@
 import type { PatientLabOrderRow } from '@/lib/queries/lab-orders'
+import { normalizeCode, type CodeBinding } from '@/lib/coding/code-systems' // SP6
 import type { FhirCodeableConcept, FhirReference } from './types'
 import { fhirObservationStatusFor } from '@/lib/labs/status' // SP5
+import { codingFor } from './condition' // SP6
 
 export interface FhirObservation {
   resourceType: 'Observation'
@@ -17,16 +19,12 @@ export interface FhirObservation {
 
 const INTERPRETATION_CODE: Record<'normal' | 'abnormal' | 'critical', string> = { normal: 'N', abnormal: 'A', critical: 'AA' }
 
-// `code.coding` is the one place this module includes a real `code`+`display`
-// pair (every other resource here carries free text only, with no
-// system/code that this app never actually assigned). `labTests.code` is
-// seed/reference data shaped like a LOINC code, but this codebase has never
-// verified it against a real LOINC database -- so, consistent with the
-// same "never claim a coded system you didn't actually code against"
-// discipline used for Condition and the med resources, this deliberately
-// omits a `system` URI (e.g. http://loinc.org) even here. Only the bare
-// code+display travels, not a claimed LOINC system binding.
-export function observationToFhir(patientId: string, order: PatientLabOrderRow): FhirObservation | null {
+// `code.coding` carries the lab test's code + display. `labTests.code` is reference data shaped like
+// a LOINC code but never verified against a real LOINC release, so on its own it gets NO `system`
+// URI. SP6 ruling 11: when the same code value is present and active in the CURRENT, loaded,
+// non-sample LOINC version (`loinc`, found by gather's `loincBindings`), the coding gains
+// `system: 'http://loinc.org'` and that version -- through the shared `codingFor`.
+export function observationToFhir(patientId: string, order: PatientLabOrderRow, loinc: CodeBinding | null = null): FhirObservation | null {
   if (!order.result) return null
   // SP5: only resulted (preliminary) and verified/reported (final) orders carry an Observation.
   const status = fhirObservationStatusFor(order.status)
@@ -40,7 +38,7 @@ export function observationToFhir(patientId: string, order: PatientLabOrderRow):
     id: `observation-${order.id}`,
     status,
     subject: { reference: `Patient/${patientId}` },
-    code: { text: order.testName, coding: [{ code: order.testCode, display: order.testName }] },
+    code: { text: order.testName, coding: codingFor(order.testCode, order.testName, loinc && loinc.kind === 'loinc' ? loinc : null) },
     ...(isNumeric ? { valueQuantity: { value: numeric, ...(result.unit ? { unit: result.unit } : {}) } } : { valueString: result.value }),
     ...(result.referenceRange ? { referenceRange: [{ text: result.referenceRange }] } : {}),
     interpretation: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation', code: INTERPRETATION_CODE[result.flag] }] }],
@@ -53,6 +51,8 @@ export function observationToFhir(patientId: string, order: PatientLabOrderRow):
 // not the status field, so a data anomaly (e.g. status says `resulted` but
 // the result row is somehow missing) can't silently fabricate an
 // Observation with made-up values.
-export function observationsToFhir(patientId: string, orders: PatientLabOrderRow[]): FhirObservation[] {
-  return orders.map((o) => observationToFhir(patientId, o)).filter((o): o is FhirObservation => o !== null)
+export function observationsToFhir(patientId: string, orders: PatientLabOrderRow[], loincBindings: Map<string, CodeBinding> = new Map()): FhirObservation[] {
+  return orders
+    .map((o) => observationToFhir(patientId, o, loincBindings.get(normalizeCode(o.testCode)) ?? null))
+    .filter((o): o is FhirObservation => o !== null)
 }

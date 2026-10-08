@@ -102,7 +102,7 @@ describe('POST /api/encounters/[id]/status', () => {
   })
 
   it('403s a role outside the gate before parsing the body', async () => {
-    for (const r of ['billing', 'labs', 'pharmacy', 'collector']) {
+    for (const r of ['billing', 'labs', 'pharmacy', 'coder', 'collector']) {
       role = r
       const res = await POST(send('{not json'), ctx('3'))
       expect(res.status).toBe(403)

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Mic, MicOff, Video, VideoOff, PhoneOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { TelemedicineSessionStatus } from '@/lib/queries/telemedicine-sessions'
+import { readError, sendJson } from '@/lib/client-fetch'
 
 // STUN-only, no TURN relay -- per spec §1's explicit, flagged-not-fixed
 // scope boundary: a real TURN server is a real infra/vendor decision this
@@ -67,17 +68,18 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
   const [cameraOn, setCameraOn] = useState(true)
   const [ended, setEnded] = useState(false)
   const [mediaError, setMediaError] = useState<string | null>(null)
+  // A failed signal send/poll or end-call: shown, never swallowed. Cleared by
+  // the next successful poll.
+  const [signalError, setSignalError] = useState<string | null>(null)
+  const [ending, setEnding] = useState(false)
 
   // Same origin, same path, for both directions -- every signaling route
   // this component talks to (Task 2 and Task 3) handles both POST (send a
   // signal) and GET (poll for the other side's signals) at the one URL the
   // caller supplies.
   const postSignal = useCallback(async (signalType: SignalRow['signalType'], payload: unknown) => {
-    await fetch(pollUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ signalType, payload }),
-    })
+    const result = await sendJson(pollUrl, 'POST', { signalType, payload })
+    if (!result.ok) setSignalError(`Connection problem: ${result.error}`)
   }, [pollUrl])
 
   const teardown = useCallback(() => {
@@ -144,11 +146,15 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
         if (role === 'patient' && res.status === 404 && !cancelled) {
           teardown()
           setEnded(true)
+          return
         }
+        const message = await readError(res)
+        if (!cancelled) setSignalError(`Connection problem: ${message}`)
         return
       }
       const data: PollResponse = await res.json()
       if (cancelled) return
+      setSignalError(null)
       setSessionStatus(data.sessionStatus)
 
       for (const signal of data.signals) {
@@ -233,13 +239,15 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
       // provider's pollUrl is always .../telemedicine/[sessionId]/signal, so
       // the sibling .../end route is a fixed sibling path away.
       const endUrl = pollUrl.replace(/\/signal$/, '/end')
-      try {
-        await fetch(endUrl, { method: 'POST' })
-      } finally {
-        teardown()
-        setEnded(true)
-        onEnd?.()
-      }
+      setEnding(true)
+      const result = await sendJson(endUrl, 'POST')
+      setEnding(false)
+      // The session stays open on the server if this failed, so the patient
+      // would keep waiting: keep the call up and let the doctor retry.
+      if (!result.ok) { setSignalError(`Could not end the call: ${result.error}`); return }
+      teardown()
+      setEnded(true)
+      onEnd?.()
       return
     }
     teardown()
@@ -269,7 +277,7 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
   if (mediaError) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
-        <p className="text-sm font-medium text-destructive">{mediaError}</p>
+        <p role="alert" className="text-sm font-medium text-destructive">{mediaError}</p>
       </div>
     )
   }
@@ -285,6 +293,7 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
         </span>
         <span className="text-xs uppercase tracking-wide text-muted-foreground">{sessionStatus.replace('_', ' ')}</span>
       </div>
+      {signalError && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2 text-sm text-destructive">{signalError}</p>}
 
       <div className="relative grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="relative aspect-video overflow-hidden rounded-xl border border-border bg-black">
@@ -308,7 +317,7 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
         <Button type="button" variant={cameraOn ? 'outline' : 'destructive'} size="icon" onClick={toggleCamera} aria-label={cameraOn ? 'Turn camera off' : 'Turn camera on'}>
           {cameraOn ? <Video /> : <VideoOff />}
         </Button>
-        <Button type="button" variant="destructive" onClick={handleEndCall}>
+        <Button type="button" variant="destructive" onClick={handleEndCall} disabled={ending}>
           <PhoneOff /> End call
         </Button>
       </div>

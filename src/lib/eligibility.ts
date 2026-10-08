@@ -1,3 +1,4 @@
+import { ageOnDate, istDateOf } from '@/lib/india-time'
 import type { Verdict } from '@/lib/rule-engine'
 
 export interface EligibilityCriterionResult {
@@ -28,15 +29,12 @@ export interface PatientChartSnapshot {
 }
 
 function calculateAge(dob: string, asOf: Date): number {
-  const birth = new Date(dob)
-  let age = asOf.getFullYear() - birth.getFullYear()
-  const hadBirthdayThisYear = asOf.getMonth() > birth.getMonth() || (asOf.getMonth() === birth.getMonth() && asOf.getDate() >= birth.getDate())
-  if (!hadBirthdayThisYear) age--
-  return age
+  // Age on asOf's IST calendar date.
+  return ageOnDate(dob, istDateOf(asOf))
 }
 
 const today = () => new Date()
-const isoDate = (d: Date) => d.toISOString().slice(0, 10)
+const isoDate = (d: Date) => istDateOf(d)
 
 /**
  * The actual inclusion/exclusion rule engine: given a trial's configured

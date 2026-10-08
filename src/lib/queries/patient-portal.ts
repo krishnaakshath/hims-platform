@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
 import { patients, patientContacts, diagnoses, medicationEpisodes, appointments, providers, formSubmissions, formTemplates, formSubmissionConsents } from '@/db/schema'
 import { eq, desc, asc, gte, lt, and, sql } from 'drizzle-orm'
+import { liveDiagnosis } from './diagnoses' // SP6
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { getUnreadCountForPatient } from '@/lib/queries/messages'
 import { getAadhaarStatus } from '@/lib/queries/patient-profile'
@@ -61,7 +62,7 @@ export async function getPatientPortalData(patientId: string) {
   if (!row) return null
   const { patient, portalConfigured } = row
 
-  const dx = await getDb().select({ code: diagnoses.code, description: diagnoses.description, date: diagnoses.date }).from(diagnoses).where(eq(diagnoses.patientId, patientId))
+  const dx = await getDb().select({ code: diagnoses.code, description: diagnoses.description, date: diagnoses.date }).from(diagnoses).where(and(eq(diagnoses.patientId, patientId), liveDiagnosis)) // SP6: voided rows hidden
   const meds = await getDb()
     .select({ id: medicationEpisodes.id, name: medicationEpisodes.name, medicationClass: medicationEpisodes.medicationClass, dose: medicationEpisodes.dose, startDate: medicationEpisodes.startDate, stopDate: medicationEpisodes.stopDate, status: medicationEpisodes.status })
     .from(medicationEpisodes)

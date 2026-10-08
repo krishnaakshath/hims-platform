@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { SCHEDULING_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { insertAppointmentIfFree, listAppointmentsInRange } from '@/lib/queries/appointments'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
+import { startOfIstDay } from '@/lib/india-time'
+import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
 
 const createAppointmentSchema = z.object({
   patientId: z.string().min(1),
   providerId: z.number().int().positive(),
-  startsAt: z.string().min(1),
-  endsAt: z.string().min(1),
+  startsAt: appointmentInstantSchema,
+  endsAt: appointmentInstantSchema,
   visitReason: visitReasonSchema,
   status: z.enum(['scheduled', 'completed', 'cancelled', 'no_show']).optional(),
 }).strict()
@@ -27,10 +30,15 @@ export async function GET(request: NextRequest) {
 
   const providerIdsParam = url.searchParams.get('providerIds')
   const providerIds = providerIdsParam !== null
-    ? (providerIdsParam === '' ? [] : providerIdsParam.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))
+    ? (providerIdsParam === '' ? [] : providerIdsParam.split(',').map(parseId).filter((n): n is number => n !== null))
     : undefined
 
-  const results = await listAppointmentsInRange(new Date(from), new Date(to), providerIds)
+  // A bare YYYY-MM-DD is an IST calendar day: `from` starts it, `to` includes all of it.
+  const DAY = /^\d{4}-\d{2}-\d{2}$/
+  const fromInstant = DAY.test(from) ? startOfIstDay(from) : new Date(from)
+  const toInstant = DAY.test(to) ? new Date(startOfIstDay(to).getTime() + 24 * 60 * 60 * 1000 - 1) : new Date(to)
+  if (isNaN(fromInstant.getTime()) || isNaN(toInstant.getTime())) return NextResponse.json({ error: 'from and to must be dates' }, { status: 400 })
+  const results = await listAppointmentsInRange(fromInstant, toInstant, providerIds)
   await logAudit(session, 'viewed appointments', null)
   return NextResponse.json(results)
 }
@@ -40,7 +48,10 @@ export async function POST(request: NextRequest) {
   if (session instanceof NextResponse) return session
   if (!SCHEDULING_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const parsed = createAppointmentSchema.safeParse(await request.json())
+  const json = await readJsonBody(request)
+  if (!json.ok) return json.response
+  const parsed = createAppointmentSchema.safeParse(json.body)
+  if (!parsed.success && isTimeFieldError(parsed.error)) return invalidAppointmentTime()
   if (!parsed.success) return NextResponse.json({ error: 'Invalid appointment payload', details: parsed.error.flatten() }, { status: 400 })
 
   const startsAt = new Date(parsed.data.startsAt)

@@ -1,11 +1,16 @@
 'use client'
+import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { formatPaise, parseRupeesToPaise } from '@/lib/format'
 
 interface DxRow { code: string; description: string }
-interface ProcRow { code: string; description: string; units: number; chargeCents: number }
+// priceText is the rupee amount as typed; the API field chargeCents carries integer paise.
+interface ProcRow { code: string; description: string; units: number; priceText: string }
+
+const rowPaise = (p: ProcRow) => parseRupeesToPaise(p.priceText) ?? 0
 
 export function NewChargeModal({ patients }: { patients: { id: string; name: string }[] }) {
   const router = useRouter()
@@ -14,11 +19,11 @@ export function NewChargeModal({ patients }: { patients: { id: string; name: str
   const [providerName, setProviderName] = useState('Dr. R. Kunam')
   const [dateOfService, setDateOfService] = useState('')
   const [dx, setDx] = useState<DxRow[]>([{ code: '', description: '' }])
-  const [proc, setProc] = useState<ProcRow[]>([{ code: '', description: '', units: 1, chargeCents: 0 }])
+  const [proc, setProc] = useState<ProcRow[]>([{ code: '', description: '', units: 1, priceText: '' }])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const amountCents = proc.reduce((sum, p) => sum + p.chargeCents * p.units, 0)
+  const amountCents = proc.reduce((sum, p) => sum + rowPaise(p) * p.units, 0)
 
   function updateDx(i: number, patch: Partial<DxRow>) {
     setDx(dx.map((row, idx) => (idx === i ? { ...row, ...patch } : row)))
@@ -30,18 +35,13 @@ export function NewChargeModal({ patients }: { patients: { id: string; name: str
   async function submit() {
     setSaving(true)
     setError(null)
-    const res = await fetch('/api/charges', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patientId, providerName, dateOfService, diagnosisCodes: dx, procedureCodes: proc }),
-    })
+    const res = await sendJson('/api/charges', 'POST', { patientId, providerName, dateOfService, diagnosisCodes: dx, procedureCodes: proc.map((p) => ({ code: p.code, description: p.description, units: p.units, chargeCents: rowPaise(p) })) })
     setSaving(false)
     if (res.ok) {
       setOpen(false)
       router.refresh()
     } else {
-      const body = await res.json()
-      setError(body.error ?? 'Failed to create charge.')
+      setError(res.error)
     }
   }
 
@@ -53,7 +53,7 @@ export function NewChargeModal({ patients }: { patients: { id: string; name: str
           <DialogHeader>
             <DialogTitle>New Charge</DialogTitle>
           </DialogHeader>
-          {error && <p className="text-sm font-medium text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm font-medium text-destructive">{error}</p>}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -91,7 +91,7 @@ export function NewChargeModal({ patients }: { patients: { id: string; name: str
           <div>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Procedure Codes</h3>
-              <button type="button" onClick={() => setProc([...proc, { code: '', description: '', units: 1, chargeCents: 0 }])} className="text-xs font-medium text-primary hover:underline">+ Add</button>
+              <button type="button" onClick={() => setProc([...proc, { code: '', description: '', units: 1, priceText: '' }])} className="text-xs font-medium text-primary hover:underline">+ Add</button>
             </div>
             <div className="space-y-2">
               {proc.map((row, i) => (
@@ -99,14 +99,14 @@ export function NewChargeModal({ patients }: { patients: { id: string; name: str
                   <input value={row.code} onChange={(e) => updateProc(i, { code: e.target.value })} placeholder="CPT code" className="w-24 shrink-0 rounded-md border border-border px-2 py-1.5 text-sm" />
                   <input value={row.description} onChange={(e) => updateProc(i, { description: e.target.value })} placeholder="Description" className="min-w-0 flex-1 rounded-md border border-border px-2 py-1.5 text-sm" />
                   <input type="number" min={1} value={row.units} onChange={(e) => updateProc(i, { units: Number(e.target.value) })} placeholder="Units" className="w-16 shrink-0 rounded-md border border-border px-2 py-1.5 text-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" />
-                  <input type="number" min={0} value={row.chargeCents / 100} onChange={(e) => updateProc(i, { chargeCents: Math.round(Number(e.target.value) * 100) })} placeholder="$ per unit" className="w-24 shrink-0 rounded-md border border-border px-2 py-1.5 text-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" />
+                  <input inputMode="decimal" value={row.priceText} onChange={(e) => updateProc(i, { priceText: e.target.value })} placeholder="₹ per unit" aria-label="Price per unit in rupees" aria-invalid={row.priceText !== '' && parseRupeesToPaise(row.priceText) === null} className="w-24 shrink-0 rounded-md border border-border px-2 py-1.5 text-sm" />
                   <button type="button" onClick={() => setProc(proc.filter((_, idx) => idx !== i))} disabled={proc.length === 1} className="shrink-0 rounded px-2 text-xs text-destructive hover:bg-secondary disabled:opacity-30">Remove</button>
                 </div>
               ))}
             </div>
           </div>
 
-          <p className="text-sm font-semibold text-foreground">Total amount: ${(amountCents / 100).toFixed(2)}</p>
+          <p className="text-sm font-semibold text-foreground">Total amount: {formatPaise(amountCents)}</p>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
