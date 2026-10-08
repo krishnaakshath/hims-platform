@@ -6,6 +6,10 @@ const get = vi.fn()
 vi.mock('@vercel/blob', () => ({ put: (...a: unknown[]) => put(...a), get: (...a: unknown[]) => get(...a) }))
 
 import { putPrivateBlob, streamPrivateBlob } from '@/lib/blob-store'
+import { ServiceNotConfiguredError } from '@/lib/service-config'
+
+// blob-store refuses to reach the (mocked) blob SDK without a configured store.
+beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
 
 const URL = 'https://store.private.blob.vercel-storage.com/lab-reports/1/LR-2099-000001-x.pdf'
 
@@ -58,5 +62,14 @@ describe('blob-store', () => {
     expect(await streamPrivateBlob(URL, { filename: 'a.pdf', disposition: 'inline' })).toBeNull()
     expect(logged()).toContain('BlobNotFoundError')
     expect(logged()).not.toContain(URL)
+  })
+
+  it('throws ServiceNotConfiguredError(blob) without a store, before calling the SDK', async () => {
+    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
+    vi.stubEnv('BLOB_STORE_ID', '')
+    await expect(putPrivateBlob('x.pdf', new Uint8Array([1]), 'application/pdf')).rejects.toMatchObject({ name: 'ServiceNotConfiguredError', service: 'blob' })
+    await expect(streamPrivateBlob(URL, { filename: 'a.pdf', disposition: 'inline' })).rejects.toBeInstanceOf(ServiceNotConfiguredError)
+    expect(put).not.toHaveBeenCalled()
+    expect(get).not.toHaveBeenCalled()
   })
 })

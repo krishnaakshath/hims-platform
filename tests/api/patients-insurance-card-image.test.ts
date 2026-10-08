@@ -1,8 +1,11 @@
-import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll, beforeEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { GET } from '@/app/api/patients/[anonId]/insurance-card/[side]/route'
 import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
+
+// The routes refuse to reach the (mocked) blob SDK without a configured store.
+beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | 'collector' | 'rcm' = 'frontdesk'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Taylor Nguyen', userId: null })) }))

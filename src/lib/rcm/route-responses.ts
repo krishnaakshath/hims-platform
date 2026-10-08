@@ -2,6 +2,7 @@
 // handler checks its allowlist inline, right after requireSession(), before any body read.
 import { NextResponse } from 'next/server'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { serviceErrorResponse } from '@/lib/service-config'
 import { RCM_ERROR_MESSAGE, RCM_ERROR_STATUS, type RcmWriteResult } from './errors'
 import { RCM_UPLOAD_MAX_BYTES, RCM_UPLOAD_TYPES } from './constants'
 
@@ -20,10 +21,13 @@ export function rcmErrorResponse(r: Extract<RcmWriteResult<unknown>, { ok: false
 }
 
 /**
- * A thrown error: a deadlock or serialization failure (nothing was written) is a 409 asking to try
+ * A thrown error: a missing blob store or unreachable database is a 503 (one [config] log
+ * line); a deadlock or serialization failure (nothing was written) is a 409 asking to try
  * again; anything else a generic 500. Logs only the pg code and constraint, never the message or input.
  */
 export function rcmServerError(tag: string, err: unknown, message: string) {
+  const unavailable = serviceErrorResponse(err, tag)
+  if (unavailable) return unavailable
   if (isRetryableConflict(err)) return rcmError(409, RETRY_MESSAGE)
   console.error(`[rcm] ${tag} failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
   return rcmError(500, message)

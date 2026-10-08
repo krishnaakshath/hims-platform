@@ -10,11 +10,11 @@ import { NextResponse } from 'next/server'
 // limited routes are unavailable. There is deliberately no in-memory fallback
 // (it would reset per serverless instance and stop protecting anything).
 
-export type Service = 'database' | 'redis'
+export type Service = 'database' | 'redis' | 'blob'
 
 export const SERVICE_UNAVAILABLE_MESSAGE = 'Service temporarily unavailable'
 
-const SERVICE_LABEL: Record<Service, string> = { database: 'DATABASE_URL', redis: 'REDIS' }
+const SERVICE_LABEL: Record<Service, string> = { database: 'DATABASE_URL', redis: 'REDIS', blob: 'BLOB_READ_WRITE_TOKEN' }
 
 export class ServiceNotConfiguredError extends Error {
   constructor(public service: Service) {
@@ -44,12 +44,25 @@ export function databaseUnavailableCode(e: unknown): string | null {
   return null
 }
 
+/**
+ * The private file store (Vercel Blob): a read-write token, or a store id for
+ * OIDC auth on Vercel. Without either, every stored-file read and write fails.
+ */
+export function isBlobConfigured(env: Record<string, string | undefined> = process.env): boolean {
+  return (env.BLOB_READ_WRITE_TOKEN ?? '').trim() !== '' || (env.BLOB_STORE_ID ?? '').trim() !== ''
+}
+
+/** Throws ServiceNotConfiguredError('blob') before any stored-file read or write when there is no store. */
+export function requireBlobStore(): void {
+  if (!isBlobConfigured()) throw new ServiceNotConfiguredError('blob')
+}
+
 export function serviceUnavailableResponse(): NextResponse {
   return NextResponse.json({ error: SERVICE_UNAVAILABLE_MESSAGE }, { status: 503, headers: { 'Retry-After': '30' } })
 }
 
 /**
- * Wraps a route handler so a missing or unreachable database/Redis answers
+ * Wraps a route handler so a missing or unreachable database/Redis/blob store answers
  * 503 instead of an unhandled 500. `feature` names what is unavailable in the
  * log line ("login", "patient login", ...). Every other error is rethrown.
  */
@@ -61,16 +74,27 @@ export function withServiceGuard<A extends unknown[], R extends Response>(
     try {
       return await handler(...args)
     } catch (e) {
-      if (e instanceof ServiceNotConfiguredError) {
-        console.error(`[config] ${SERVICE_LABEL[e.service]} not configured: ${feature} is unavailable`)
-        return serviceUnavailableResponse()
-      }
-      const code = databaseUnavailableCode(e)
-      if (code) {
-        console.error(`[config] database unreachable (${code}): ${feature} is unavailable`)
-        return serviceUnavailableResponse()
-      }
+      const unavailable = serviceErrorResponse(e, feature)
+      if (unavailable) return unavailable
       throw e
     }
   }
+}
+
+/**
+ * The 503 (after its one [config] log line) when `e` means a backing service is
+ * missing or unreachable, else null. For routes that already catch every error
+ * into their own 500 (the lab and RCM routes): call this first.
+ */
+export function serviceErrorResponse(e: unknown, feature: string): NextResponse | null {
+  if (e instanceof ServiceNotConfiguredError) {
+    console.error(`[config] ${SERVICE_LABEL[e.service]} not configured: ${feature} is unavailable`)
+    return serviceUnavailableResponse()
+  }
+  const code = databaseUnavailableCode(e)
+  if (code) {
+    console.error(`[config] database unreachable (${code}): ${feature} is unavailable`)
+    return serviceUnavailableResponse()
+  }
+  return null
 }

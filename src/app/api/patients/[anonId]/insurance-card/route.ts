@@ -6,6 +6,7 @@ import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
+import { requireBlobStore, withServiceGuard } from '@/lib/service-config'
 
 // Scope Decision 2 (docs/superpowers/sdd .../document-insurance-assignment plan):
 // this list stays image-only on purpose, and it is an intended divergence
@@ -22,7 +23,7 @@ import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_BYTES = 8 * 1024 * 1024
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
+export const POST = withServiceGuard('insurance card upload', async function POST(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   if (!['admin', 'crc', 'frontdesk'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!ALLOWED_TYPES.includes(file.type)) return NextResponse.json({ error: 'File must be a JPEG, PNG, or WebP image' }, { status: 400 })
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'File must be under 8MB' }, { status: 400 })
 
+  requireBlobStore()
   const blob = await put(`insurance-cards/${anonId}-primary-${side}-${Date.now()}`, file, { access: 'private', contentType: file.type })
 
   const column = side === 'front' ? { primaryCardFrontUrl: blob.url } : { primaryCardBackUrl: blob.url }
@@ -51,4 +53,4 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   await logAudit(session, `uploaded insurance card (${side})`, anonId)
   return NextResponse.json({ url: blob.url })
-}
+})

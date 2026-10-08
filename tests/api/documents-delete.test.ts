@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { DELETE } from '@/app/api/documents/[id]/route'
 import { getDb } from '@/db/client'
 import { documents } from '@/db/schema'
@@ -9,6 +9,9 @@ vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessio
 vi.mock('@vercel/blob', () => ({ del: vi.fn(async () => {}) }))
 
 import { del as mockedDel } from '@vercel/blob'
+
+// The routes refuse to reach the (mocked) blob SDK without a configured store.
+beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
 
 const createdDocumentIds: number[] = []
 

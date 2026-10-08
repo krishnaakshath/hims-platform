@@ -8,11 +8,14 @@
 // strict webidl brand check on each value, which a jsdom File fails even
 // though it's a genuine File -- see tests/api/login.test.ts and
 // tests/lib/auth.test.ts for the same class of jsdom/Node realm mismatch.
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { POST as uploadRoute } from '@/app/api/patients/[anonId]/insurance-card/route'
 import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
+
+// The routes refuse to reach the (mocked) blob SDK without a configured store.
+beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' = 'frontdesk'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Taylor Nguyen' })) }))

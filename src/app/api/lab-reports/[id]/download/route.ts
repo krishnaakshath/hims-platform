@@ -7,8 +7,9 @@ import { streamPrivateBlob } from '@/lib/blob-store'
 import { LAB_REPORT_READ_ROLES } from '@/lib/role-policy'
 import { getLabReportForDownload } from '@/lib/queries/lab-reports'
 import { errorResponse, parseId } from '@/lib/labs/route-responses'
+import { withServiceGuard } from '@/lib/service-config'
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withServiceGuard('lab report download', async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   if (!LAB_REPORT_READ_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -22,4 +23,4 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!res) return errorResponse(404, 'Stored file is missing')
   await logAudit(session, 'downloaded lab report', report.patientId, `report=${report.id}`)
   return res
-}
+})

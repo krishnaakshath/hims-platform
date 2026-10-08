@@ -5,6 +5,7 @@ import { INSURANCE_CARD_READ_ROLES } from '@/lib/role-policy'
 import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
 import { eq } from 'drizzle-orm'
+import { requireBlobStore, withServiceGuard } from '@/lib/service-config'
 
 // Serves the actual card image bytes. The blob store is private, so the
 // Medical Record page's <img>/<a> can no longer point at patients.primaryCard*Url
@@ -12,7 +13,7 @@ import { eq } from 'drizzle-orm'
 // own. This route is the only thing that can reach the bytes (server-side,
 // using our own token), gated to INSURANCE_CARD_READ_ROLES (admin, crc, pi,
 // frontdesk, billing).
-export async function GET(request: NextRequest, { params }: { params: Promise<{ anonId: string; side: string }> }) {
+export const GET = withServiceGuard('insurance card view', async function GET(request: NextRequest, { params }: { params: Promise<{ anonId: string; side: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   if (!INSURANCE_CARD_READ_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const storedUrl = side === 'front' ? row?.front : row?.back
   if (!storedUrl) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  requireBlobStore()
   const blob = await get(storedUrl, { access: 'private' })
   if (!blob || blob.statusCode !== 200) return NextResponse.json({ error: 'Stored file is missing' }, { status: 404 })
 
@@ -36,4 +38,4 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       'Cache-Control': 'private, max-age=0, must-revalidate',
     },
   })
-}
+})

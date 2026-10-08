@@ -5,7 +5,7 @@
 // there is no in-memory fallback.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
-import { ServiceNotConfiguredError, SERVICE_UNAVAILABLE_MESSAGE, withServiceGuard } from '@/lib/service-config'
+import { ServiceNotConfiguredError, SERVICE_UNAVAILABLE_MESSAGE, isBlobConfigured, serviceErrorResponse, withServiceGuard } from '@/lib/service-config'
 import { getRedis } from '@/lib/cache'
 import { getDb } from '@/db/client'
 
@@ -43,6 +43,14 @@ describe('withServiceGuard', () => {
     expect(log.mock.calls[0][0]).toBe('[config] REDIS not configured: login is unavailable')
   })
 
+  it('turns a missing blob store into a 503 naming the token in the log only', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await withServiceGuard('lab report download', async () => { throw new ServiceNotConfiguredError('blob') })()
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: SERVICE_UNAVAILABLE_MESSAGE })
+    expect(log.mock.calls).toEqual([['[config] BLOB_READ_WRITE_TOKEN not configured: lab report download is unavailable']])
+  })
+
   it('turns a missing DATABASE_URL into a 503', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const res = await withServiceGuard('login', async () => { throw new ServiceNotConfiguredError('database') })()
@@ -78,6 +86,23 @@ describe('withServiceGuard', () => {
     const res = await handler(1, 'z')
     expect(res.status).toBe(201)
     expect(await res.text()).toBe('1z')
+  })
+})
+
+describe('isBlobConfigured', () => {
+  it('needs a read-write token or a store id (OIDC)', () => {
+    expect(isBlobConfigured({})).toBe(false)
+    expect(isBlobConfigured({ BLOB_READ_WRITE_TOKEN: '  ' })).toBe(false)
+    expect(isBlobConfigured({ BLOB_READ_WRITE_TOKEN: 'vercel_blob_rw_x' })).toBe(true)
+    expect(isBlobConfigured({ BLOB_STORE_ID: 'store_x' })).toBe(true)
+  })
+})
+
+describe('serviceErrorResponse', () => {
+  it('is null for an ordinary error and logs nothing', () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(serviceErrorResponse(new Error('bug'), 'x')).toBeNull()
+    expect(log).not.toHaveBeenCalled()
   })
 })
 
