@@ -82,7 +82,26 @@ describe.skipIf(!enabled)('db:migrate against a scratch database', () => {
     })
   })
 
-  it('a second run is a no-op', { timeout: 60_000 }, async () => {
+  // Data safety (docs/OPERATIONS.md, "Nothing is lost"): deleting a parent row
+  // must never silently take clinical or financial rows with it. Every FK is
+  // NO ACTION (the delete fails) except these two detail tables, whose rows
+  // are meaningless without their parent. A new CASCADE must be added here
+  // deliberately, with its reason.
+  it('cascades deletes only into the two known detail tables, and audit_log has no FK at all', async () => {
+    await onScratch(async (c) => {
+      const r = await c.query(`SELECT cl.relname AS child, fcl.relname AS parent
+        FROM pg_constraint co JOIN pg_class cl ON cl.oid = co.conrelid JOIN pg_class fcl ON fcl.oid = co.confrelid
+        WHERE co.contype = 'f' AND co.confdeltype = 'c' ORDER BY 1`)
+      expect(r.rows).toEqual([
+        { child: 'coding_query_responses', parent: 'coding_queries' },
+        { child: 'follow_up_contact_attempts', parent: 'follow_up_orders' },
+      ])
+      const audit = await c.query(`SELECT count(*)::int AS n FROM pg_constraint WHERE contype = 'f' AND conrelid = 'audit_log'::regclass`)
+      expect(audit.rows[0].n).toBe(0)
+    })
+  })
+
+  it('a second run is a no-op',{ timeout: 60_000 }, async () => {
     const result = await runMigrations({ connectionString: urlFor(scratchName), log: quiet })
     expect(result.mode).toBe('incremental')
     expect(result.applied).toEqual([])
