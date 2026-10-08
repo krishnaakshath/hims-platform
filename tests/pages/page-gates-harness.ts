@@ -316,9 +316,24 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/coding/encounters/[id]', load: () => import('@/app/(dashboard)/coding/encounters/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'coder'] },
   // SP6: /coding/service-codes -- CODING_ROLES (linked from the worklist; not a nav entry)
   { route: '/coding/service-codes', load: () => import('@/app/(dashboard)/coding/service-codes/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
+  // SP7: LeftNav NAV_ITEMS /rcm and /rcm/claims -- RCM_ROLES; the new-claim and workspace pages are reached from them.
+  { route: '/rcm', load: () => import('@/app/(dashboard)/rcm/page'), allowed: ['admin', 'rcm'] },
+  { route: '/rcm/claims', load: () => import('@/app/(dashboard)/rcm/claims/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/claims/new', load: () => import('@/app/(dashboard)/rcm/claims/new/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/claims/[id]', load: () => import('@/app/(dashboard)/rcm/claims/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/preauths', load: () => import('@/app/(dashboard)/rcm/preauths/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/preauths/new', load: () => import('@/app/(dashboard)/rcm/preauths/new/page'), props: { searchParams: Promise.resolve({ patientId: 'RD-ZZZZ' }) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/preauths/[id]', load: () => import('@/app/(dashboard)/rcm/preauths/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/payers', load: () => import('@/app/(dashboard)/rcm/payers/page'), allowed: ['admin', 'rcm'] },
+  { route: '/rcm/payers/[id]', load: () => import('@/app/(dashboard)/rcm/payers/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/policies', load: () => import('@/app/(dashboard)/rcm/policies/page'), props: { searchParams: Promise.resolve({ patientId: 'RD-ZZZZ' }) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/reports', load: () => import('@/app/(dashboard)/rcm/reports/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'rcm'] },
+  // SP7: LeftNav NAV_TRAILING_ITEMS /rcm/settings -- RCM_SETTINGS_ROLES
+  { route: '/rcm/settings', load: () => import('@/app/(dashboard)/rcm/settings/page'), allowed: ['admin'] },
+  // end SP7
   // end SP6
   // Wave B P1-05: price lookup -- TARIFF_LOOKUP_ROLES (LeftNav NAV_TRAILING_ITEMS /price-lookup).
-  { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
+  { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'billing', 'crc', 'frontdesk', 'rcm'] }, // SP7: + rcm (TARIFF_LOOKUP_ROLES)
   // Wave B P1-01: own account (MFA method, self-reset, capabilities) -- ACCOUNT_ROLES = every staff role.
   // SP4 billing screens -- NAV_BILLING_ITEMS are gated to exactly BILLING_ROLES (= CHARGE_CAPTURE_ROLES).
   { route: '/billing/capture', load: () => import('@/app/(dashboard)/billing/capture/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
@@ -330,7 +345,7 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/cash-desk', load: () => import('@/app/(dashboard)/cash-desk/page'), props: { searchParams: Promise.resolve({ patientId: 'RD-0001' }) }, allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
   { route: '/print/receipts/[id]', load: () => import('@/app/print/receipts/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
   // end SP4
-  { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] },
+  { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] },
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).
   {

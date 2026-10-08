@@ -170,7 +170,7 @@ export default async function ChargeCapturePage({ searchParams }: { searchParams
         </section>
         <section className="rounded-lg border border-border bg-card p-4">
           <h2 className="mb-3 text-lg font-semibold">Add a charge</h2>
-          <ChargeCaptureForm context={ref} canOverride={BILLING_AUTHORITY_ROLES.includes(session.role)} hasPayer={header.primaryPayerId !== null} today={todayIsoIn()} />
+          <ChargeCaptureForm context={ref} canOverride={BILLING_AUTHORITY_ROLES.includes(session.role)} hasPayer={header.primaryPayerId !== null} today={todayIsoIn()} patientId={header.patientId} />
         </section>
       </div>
     </div>

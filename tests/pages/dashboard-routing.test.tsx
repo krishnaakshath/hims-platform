@@ -74,4 +74,19 @@ describe('dashboard role routing', () => {
     expect(listPatients).not.toHaveBeenCalled()
   })
   // end SP6
+
+  // SP7: the rcm desk's home is the RCM dashboard, never the coordinator dashboard.
+  it('redirects an rcm session to /rcm before loading any dashboard data', async () => {
+    vi.resetModules()
+    const redirectThrows = vi.fn(() => { throw new Error('NEXT_REDIRECT') })
+    const listPatients = vi.fn(async () => [])
+    vi.doMock('next/navigation', () => ({ redirect: redirectThrows }))
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'rcm', name: 'Farah Siddiqui' })) }))
+    vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: listPatients }))
+    const { default: Page } = await import('@/app/(dashboard)/page')
+    await expect(Page()).rejects.toThrow('NEXT_REDIRECT')
+    expect(redirectThrows).toHaveBeenCalledWith('/rcm')
+    expect(listPatients).not.toHaveBeenCalled()
+  })
+  // end SP7
 })

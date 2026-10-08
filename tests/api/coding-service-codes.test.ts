@@ -46,7 +46,7 @@ describe('GET /api/coding/services/[serviceId]/procedure-codes', () => {
   })
 
   it('returns the mapped codes for lookup roles (billing included), [] when unmapped', async () => {
-    for (const role of ['admin', 'coder', 'pi', 'crc', 'billing'] as Role[]) {
+    for (const role of ['admin', 'coder', 'pi', 'crc', 'billing', 'rcm'] as Role[]) { // SP7: + rcm
       sessionRole = role
       const res = await get()
       expect(res.status).toBe(200)
@@ -67,7 +67,7 @@ describe('GET /api/coding/services/[serviceId]/procedure-codes', () => {
 
 describe('PUT /api/coding/services/[serviceId]/procedure-codes', () => {
   it('403s every role outside CODING_ROLES before reading the body', async () => {
-    for (const role of ['pi', 'crc', 'billing', 'frontdesk', 'pharmacy', 'labs'] as Role[]) {
+    for (const role of ['pi', 'crc', 'billing', 'frontdesk', 'pharmacy', 'labs', 'rcm'] as Role[]) {
       sessionRole = role
       const res = await put('{not json')
       expect(res.status).toBe(403)

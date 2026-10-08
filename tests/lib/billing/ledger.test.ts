@@ -16,7 +16,7 @@ describe('patient ledger', () => {
   })
   it('a credit note reverses its invoice', () => {
     const r = computeLedger([e('invoice', 1, '2026-10-20T05:00:00Z', 100_00), e('credit_note', 1, '2026-10-21T05:00:00Z', 100_00), e('receipt', 2, '2026-10-22T05:00:00Z', 40_00)])
-    expect(r.summary).toEqual({ invoicedPaise: 100_00, creditedPaise: 100_00, receivedPaise: 40_00, refundedPaise: 0, balancePaise: -40_00, outstandingPaise: 0, creditBalancePaise: 40_00 })
+    expect(r.summary).toEqual({ invoicedPaise: 100_00, creditedPaise: 100_00, receivedPaise: 40_00, refundedPaise: 0, balancePaise: -40_00, outstandingPaise: 0, creditBalancePaise: 40_00, insurerSettledPaise: 0, writtenOffPaise: 0 /* SP7 */ })
   })
   it('a refund pays the credit back out', () => {
     const r = computeLedger([e('receipt', 1, '2026-10-20T05:00:00Z', 40_00), e('refund', 1, '2026-10-21T05:00:00Z', 40_00)])
@@ -35,7 +35,7 @@ describe('patient ledger', () => {
     expect(input).toEqual(copy)
   })
   it('an empty ledger is zero', () => {
-    expect(computeLedger([])).toEqual({ rows: [], summary: { invoicedPaise: 0, creditedPaise: 0, receivedPaise: 0, refundedPaise: 0, balancePaise: 0, outstandingPaise: 0, creditBalancePaise: 0 } })
+    expect(computeLedger([])).toEqual({ rows: [], summary: { invoicedPaise: 0, creditedPaise: 0, receivedPaise: 0, refundedPaise: 0, balancePaise: 0, outstandingPaise: 0, creditBalancePaise: 0, insurerSettledPaise: 0, writtenOffPaise: 0 /* SP7 */ } })
   })
   it('admission deposit counts only that admission, net of refunds', () => {
     const entries = [e('advance', 1, '2026-10-20T05:00:00Z', 5000, 9), e('advance', 2, '2026-10-20T06:00:00Z', 7000, 8), e('refund', 1, '2026-10-21T05:00:00Z', 2000, 9), e('receipt', 3, '2026-10-21T06:00:00Z', 900, 9)]
@@ -47,3 +47,18 @@ describe('patient ledger', () => {
     expect(admissionDepositPaise([e('advance', 1, '2026-10-20T05:00:00Z', 100, 9), e('refund', 1, '2026-10-21T05:00:00Z', 500, 9)], 9)).toBe(0)
   })
 })
+
+// SP7 (ruling 5)
+describe('SP7 insurer credits', () => {
+  it('insurer settlements and write-offs credit the patient ledger', () => {
+    const at = new Date('2099-06-01T06:00:00Z')
+    const { summary, rows } = computeLedger([
+      { kind: 'invoice', id: 1, number: 'INV/1', at, amountPaise: 1_00_000_00, admissionId: null },
+      { kind: 'insurer_settlement', id: 2, number: 'CLM-2099-000001/S2', at, amountPaise: 80_000_00, admissionId: null },
+      { kind: 'write_off', id: 3, number: 'CLM-2099-000001/W3', at, amountPaise: 5_000_00, admissionId: null },
+    ])
+    expect(summary).toMatchObject({ balancePaise: 15_000_00, outstandingPaise: 15_000_00, insurerSettledPaise: 80_000_00, writtenOffPaise: 5_000_00, receivedPaise: 0 })
+    expect(rows.map((r) => r.kind)).toEqual(['invoice', 'insurer_settlement', 'write_off'])
+  })
+})
+// end SP7

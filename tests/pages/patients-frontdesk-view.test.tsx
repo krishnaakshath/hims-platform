@@ -105,6 +105,9 @@ function mockCommon(role: Role) {
   vi.doMock('@/lib/queries/encounters', () => ({ listEncountersForPatient: async () => [] }))
   vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: async () => [] }))
   vi.doMock('@/lib/queries/departments', () => ({ listDepartments: async () => [] }))
+  // SP7: the Insurance tab's loaders
+  vi.doMock('@/lib/queries/rcm-policies', () => ({ listPatientPolicies: async () => [], legacyPolicyPrefill: async () => null }))
+  vi.doMock('@/lib/queries/rcm-payers', () => ({ listRcmPayers: async () => [] }))
   return spies
 }
 
@@ -290,7 +293,7 @@ describe('/patients/[anonId] detail', () => {
 })
 
 describe('roles without the patient directory never load patient data', () => {
-  it.each(['pharmacy', 'billing', 'labs', 'coder', 'collector'] as const)('%s is redirected from /patients before any query', async (role) => {
+  it.each(['pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] as const)('%s is redirected from /patients before any query', async (role) => {
     const spies = mockCommon(role)
     const { default: PatientsPage } = await import('@/app/(dashboard)/patients/page')
     await expect(PatientsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow('NEXT_REDIRECT:/')
@@ -300,7 +303,7 @@ describe('roles without the patient directory never load patient data', () => {
     expect(spies.getDb).not.toHaveBeenCalled()
   })
 
-  it.each(['pharmacy', 'billing', 'labs', 'coder', 'collector'] as const)('%s is redirected from /patients/[anonId] before any query', async (role) => {
+  it.each(['pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] as const)('%s is redirected from /patients/[anonId] before any query', async (role) => {
     const spies = mockCommon(role)
     const { default: PatientDetailPage } = await import('@/app/(dashboard)/patients/[anonId]/page')
     await expect(PatientDetailPage({ params: Promise.resolve({ anonId: 'RD-T1' }) })).rejects.toThrow('NEXT_REDIRECT:/')

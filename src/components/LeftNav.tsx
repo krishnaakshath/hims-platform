@@ -13,6 +13,7 @@ import {
   BookOpenCheck, FileCode2, // SP6
   UserCircle2, Calculator,
   ClipboardPlus, Banknote, SlidersHorizontal, // SP4
+  Landmark, FileStack, FileCheck2, Building2, Settings2, FileSpreadsheet, // SP7
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
@@ -96,6 +97,15 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   { href: '/coding', label: 'Coding', icon: FileCode2, roles: ['admin', 'coder'] as Role[] },
   // end SP6
 
+  // SP7: revenue cycle (insurance desk) -- RCM_ROLES. No billing, clinical or patient-directory entries for rcm.
+  { href: '/rcm', label: 'RCM Dashboard', icon: Landmark, roles: ['admin', 'rcm'] as Role[] },
+  { href: '/rcm/claims', label: 'Claims', icon: FileStack, roles: ['admin', 'rcm'] as Role[] },
+  { href: '/rcm/preauths', label: 'Pre-authorisations', icon: FileCheck2, roles: ['admin', 'rcm'] as Role[] },
+  { href: '/rcm/payers', label: 'Insurers & TPAs', icon: Building2, roles: ['admin', 'rcm'] as Role[] },
+  { href: '/rcm/policies', label: 'Policies', icon: IdCard, roles: ['admin', 'rcm'] as Role[] },
+  { href: '/rcm/reports', label: 'RCM Reports', icon: FileSpreadsheet, roles: ['admin', 'rcm'] as Role[] },
+  // end SP7
+
   // Staff directory — admin/crc/pi (pi view-only; NOT frontdesk, NOT billing, NOT pharmacy, NOT labs)
   { href: '/staff', label: 'Staff', icon: IdCard, roles: ['crc', 'admin', 'pi'] as Role[] },
 
@@ -142,6 +152,8 @@ export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; role
   // SP6: code-system versions and import -- admin only (CODE_SYSTEM_ADMIN_ROLES).
   { href: '/coding/code-systems', label: 'Code Systems', icon: BookOpenCheck, roles: ['admin'] as Role[] },
   // end SP6
+  // SP7: hospital ROHINI / HFR identifiers -- RCM_SETTINGS_ROLES (admin).
+  { href: '/rcm/settings', label: 'RCM Settings', icon: Settings2, roles: ['admin'] as Role[] },
   // Settings: admin and the PI only, no other role -- explicit product direction.
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['admin', 'pi'] as Role[] },
   // Wave B P1-05: price lookup (GET /api/tariff/resolve) -- TARIFF_LOOKUP_ROLES.

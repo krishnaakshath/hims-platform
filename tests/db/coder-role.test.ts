@@ -15,7 +15,7 @@ describe('SP6 coder role', () => {
   // second to last: the enum order matches the migration apply order.
   it('roleEnum equals ALL_ROLES with coder right before the SP5 collector', () => {
     expect(roleEnum.enumValues).toEqual([...ALL_ROLES])
-    expect(ALL_ROLES.slice(-2)).toEqual(['coder', 'collector'])
+    expect(ALL_ROLES.slice(-3)).toEqual(['coder', 'collector', 'rcm']) // SP5: + collector; SP7: + rcm
   })
 
   it('coder-role migration is idempotent and adds the value', () => {
@@ -35,7 +35,7 @@ describe('SP6 coder role', () => {
     expect([...CODING_ENTRY_ROLES]).toEqual(['admin', 'coder', 'pi'])
     expect([...CODE_PROPOSE_ROLES]).toEqual(['pi'])
     expect([...CODING_QUERY_RESPOND_ROLES]).toEqual(['admin', 'pi', 'coder'])
-    expect([...CODE_LOOKUP_ROLES]).toEqual(['admin', 'coder', 'pi', 'crc', 'billing'])
+    expect([...CODE_LOOKUP_ROLES]).toEqual(['admin', 'coder', 'pi', 'crc', 'billing', 'rcm']) // SP7: + rcm
     expect([...CODE_SYSTEM_ADMIN_ROLES]).toEqual(['admin'])
   })
 })

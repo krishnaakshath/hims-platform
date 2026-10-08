@@ -402,7 +402,7 @@ export function demoEmail(name: string): string {
 // Staff demo logins (local part of the email -> display name)
 // ---------------------------------------------------------------------------
 
-export const DEMO_USERS: { local: string; name: string; role: 'admin' | 'crc' | 'pi' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'collector' | 'coder' }[] = [
+export const DEMO_USERS: { local: string; name: string; role: 'admin' | 'crc' | 'pi' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'collector' | 'coder' | 'rcm' }[] = [
   { local: 'admin', name: 'Sanjay Patil', role: 'admin' },
   { local: 'crc', name: 'Jaya Raman', role: 'crc' },
   { local: 'pi', name: 'Dr. R. Kunam', role: 'pi' },
@@ -413,4 +413,5 @@ export const DEMO_USERS: { local: string; name: string; role: 'admin' | 'crc' | 
   { local: 'pathologist', name: 'Dr. Suresh Babu', role: 'labs' },
   { local: 'collector', name: 'Ravi Kumar', role: 'collector' },
   { local: 'coder', name: 'Asha Menon', role: 'coder' },
+  { local: 'rcm', name: 'Farah Siddiqui', role: 'rcm' }, // SP7
 ]

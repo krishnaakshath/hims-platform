@@ -21,6 +21,11 @@ import { CorrectDemographicsButton } from '@/components/patient-profile/CorrectD
 import { PatientQuickActions, RegisteredBanner } from '@/components/patient-profile/PatientQuickActions' // Wave C
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { FollowUpPanel } from '@/components/follow-ups/FollowUpPanel'
+// SP7
+import { PatientPoliciesPanel } from '@/components/rcm/PatientPoliciesPanel'
+import { legacyPolicyPrefill, listPatientPolicies } from '@/lib/queries/rcm-policies'
+import { listRcmPayers } from '@/lib/queries/rcm-payers'
+import { POLICY_READ_ROLES, POLICY_WRITE_ROLES } from '@/lib/role-policy'
 import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
 import { NOTIFICATION_PREFERENCE_ROLES } from '@/lib/role-policy' // SP5
 import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
@@ -227,6 +232,18 @@ export default async function PatientDetailPage({ params, searchParams }: { para
     />
   )
 
+  // SP7: insurance policies for POLICY_READ_ROLES on this page (admin, crc, frontdesk); editable for
+  // POLICY_WRITE_ROLES. Covered by this page's 'viewed patient detail' audit.
+  const canSeePolicies = POLICY_READ_ROLES.includes(session.role)
+  const [policies, policyPayers, legacyPrefill] = canSeePolicies
+    ? await Promise.all([listPatientPolicies(anonId), listRcmPayers(), legacyPolicyPrefill(anonId)])
+    : [[], [], null] as const
+  const policiesTab = canSeePolicies ? (
+    <PatientPoliciesPanel patientId={patient.id} policies={[...policies]} todayIso={todayIso} canEdit={POLICY_WRITE_ROLES.includes(session.role)} legacyPrefill={legacyPrefill}
+      payers={policyPayers.filter((p) => p.profile?.active).map((p) => ({ payerId: p.payerId, name: p.name, kind: p.profile!.kind }))} />
+  ) : null
+  // end SP7
+
   const followUpTab = (
     <FollowUpPanel
       patientId={patient.id}
@@ -309,6 +326,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         ]),
         { id: 'identity', label: 'Verification', content: identityAndPortalTab },
         ...(FOLLOW_UP_VIEW_ROLES.includes(session.role) ? [{ id: 'follow-up', label: 'Visits & follow-up', content: followUpTab }] : []),
+        ...(policiesTab ? [{ id: 'insurance', label: 'Insurance', content: policiesTab }] : []), // SP7
         ...(admissionHistory.length > 0 ? [{ id: 'inpatient', label: <span className="inline-flex items-center gap-1.5"><BedDouble className="h-3.5 w-3.5" aria-hidden="true" />Inpatient History</span>, content: inpatientTab }] : []),
       ]} />
     </div>

@@ -7,6 +7,7 @@ import { cookieName } from '@/lib/brand'
 
 export type Role = 'crc' | 'pi' | 'admin' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' // SP6: + coder
   | 'collector' // SP5
+  | 'rcm' // SP7
 export interface Session { role: Role; name: string; userId: number | null }
 
 const VALID_ROLES: readonly Role[] = ALL_ROLES

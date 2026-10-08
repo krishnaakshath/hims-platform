@@ -34,7 +34,7 @@ export const chargeCaptureSchema = z.object({
   performingProviderId: positiveInt.optional(),
   manualUnitPricePaise: z.number().int().min(0).max(MAX_AMOUNT_PAISE).optional(),
   priceOverrideReason: z.string().trim().max(300).optional(),
-  overrides: z.array(z.object({ code: z.enum(CHARGE_RULE_CODES), reason: z.string().trim().max(300) }).strict()).max(11).optional(),
+  overrides: z.array(z.object({ code: z.enum(CHARGE_RULE_CODES), reason: z.string().trim().max(300) }).strict()).max(CHARGE_RULE_CODES.length).optional(), // SP7: one per rule code
 }).strict().superRefine((v, ctx) => {
   if (v.manualUnitPricePaise !== undefined && (v.priceOverrideReason ?? '').trim().length < OVERRIDE_REASON_MIN) {
     ctx.addIssue({ code: 'custom', path: ['priceOverrideReason'], message: 'Give a reason for the manual price (at least 5 characters)' })

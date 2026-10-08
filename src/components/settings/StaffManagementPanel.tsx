@@ -8,11 +8,11 @@ export interface StaffRow {
   id: number
   name: string
   email: string
-  role: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' /* SP6: + coder */ | 'collector' // SP5: + collector
+  role: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' /* SP6: + coder */ | 'collector' | 'rcm' // SP5: + collector; SP7: + rcm
   mfaEnabled: boolean
 }
 
-const ROLE_LABEL: Record<StaffRow['role'], string> = { admin: 'Administrator', pi: 'Principal Investigator', crc: 'Coordinator', frontdesk: 'Front Desk', pharmacy: 'Pharmacy', billing: 'Billing', labs: 'Labs', coder: 'Clinical Coder' /* SP6 */, collector: 'Sample Collector' /* SP5 */ }
+const ROLE_LABEL: Record<StaffRow['role'], string> = { admin: 'Administrator', pi: 'Principal Investigator', crc: 'Coordinator', frontdesk: 'Front Desk', pharmacy: 'Pharmacy', billing: 'Billing', labs: 'Labs', coder: 'Clinical Coder' /* SP6 */, collector: 'Sample Collector' /* SP5 */, rcm: 'Revenue Cycle (RCM)' /* SP7 */ }
 const ROLE_BADGE: Record<StaffRow['role'], string> = {
   admin: 'bg-accent/10 text-accent',
   pi: 'bg-primary/10 text-primary',
@@ -23,6 +23,7 @@ const ROLE_BADGE: Record<StaffRow['role'], string> = {
   labs: 'bg-rose-500/10 text-rose-700',
   collector: 'bg-orange-500/10 text-orange-700', // SP5
   coder: 'bg-teal-500/10 text-teal-700', // SP6
+  rcm: 'bg-indigo-500/10 text-indigo-700', // SP7
 }
 
 function AddStaffForm({ onCreated }: { onCreated: (row: StaffRow, password: string) => void }) {
@@ -87,6 +88,8 @@ function AddStaffForm({ onCreated }: { onCreated: (row: StaffRow, password: stri
             <option value="collector">Sample Collector</option>{/* SP5 */}
             {/* SP6 */}
             <option value="coder">Clinical Coder</option>
+            {/* SP7 */}
+            <option value="rcm">Revenue Cycle (RCM)</option>
           </select>
         </div>
       </div>

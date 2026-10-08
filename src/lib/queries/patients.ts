@@ -13,8 +13,11 @@ import {
   labRequisitions, homeCollectionVisits, labReports, notificationDeliveries,
   // SP6
   codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures,
+  // SP7
+  patientPolicies, preauths, preauthEvents, preauthDocuments, rcmQueries, rcmQueryResponses, claims, claimInvoices,
+  claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
 } from '@/db/schema'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
@@ -433,6 +436,17 @@ async function hasFinancialRecords(db: DeleteTx, anonId: string): Promise<boolea
 }
 // end SP4
 
+// SP7 (ruling 11): a claim beyond draft/withdrawn, any submitted claim version, or a
+// pre-auth beyond draft/cancelled is an insurance record that must be kept.
+async function hasRetainedClaimRecords(db: DeleteTx, anonId: string): Promise<boolean> {
+  const result = await db.execute<{ found: boolean }>(sql`
+    select exists (select 1 from claims where patient_id = ${anonId} and status not in ('draft', 'withdrawn'))
+        or exists (select 1 from claim_submissions s join claims c on c.id = s.claim_id where c.patient_id = ${anonId})
+        or exists (select 1 from preauths where patient_id = ${anonId} and status not in ('draft', 'cancelled')) as found`)
+  return Boolean(result.rows[0]?.found)
+}
+// end SP7
+
 /**
  * Permanently removes a patient and every row that references them, as ONE
  * transaction: either the whole chart goes or (on any error) nothing does --
@@ -471,6 +485,53 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   if (!patient) return null
   // SP4: refuse before anything is deleted (the whole transaction rolls back).
   if (await hasFinancialRecords(db, anonId)) throw new PatientHasFinancialRecordsError()
+  if (await hasRetainedClaimRecords(db, anonId)) throw new PatientHasFinancialRecordsError() // SP7
+
+  // SP7, children-first and before the SP4 deletes (claim_invoices reference invoices,
+  // charge_lines.preauth_id references preauths). After the check above only draft/withdrawn
+  // claims with no submission and draft/cancelled pre-auths remain. Their event rows are
+  // append-only (migration C), so the purge setting is switched on for these deletes only and
+  // switched off again, keeping the SP4 issued-document guards as the backstop below.
+  const rcmClaimIds = (await db.select({ id: claims.id }).from(claims).where(eq(claims.patientId, anonId))).map((r) => r.id)
+  const rcmPreauthIds = (await db.select({ id: preauths.id }).from(preauths).where(eq(preauths.patientId, anonId))).map((r) => r.id)
+  if (rcmClaimIds.length > 0 || rcmPreauthIds.length > 0) {
+    await db.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+    const queryIds = (await db.select({ id: rcmQueries.id }).from(rcmQueries).where(or(
+      rcmClaimIds.length > 0 ? inArray(rcmQueries.claimId, rcmClaimIds) : sql`false`,
+      rcmPreauthIds.length > 0 ? inArray(rcmQueries.preauthId, rcmPreauthIds) : sql`false`,
+    ))).map((r) => r.id)
+    if (rcmClaimIds.length > 0) {
+      await db.delete(claimWriteOffs).where(inArray(claimWriteOffs.claimId, rcmClaimIds))
+      await db.delete(claimSettlements).where(inArray(claimSettlements.claimId, rcmClaimIds))
+      await db.delete(claimDisallowances).where(inArray(claimDisallowances.claimId, rcmClaimIds))
+      await db.delete(claimDocuments).where(inArray(claimDocuments.claimId, rcmClaimIds))
+    }
+    if (rcmPreauthIds.length > 0) await db.delete(preauthDocuments).where(inArray(preauthDocuments.preauthId, rcmPreauthIds))
+    if (queryIds.length > 0) {
+      await db.delete(rcmQueryResponses).where(inArray(rcmQueryResponses.queryId, queryIds))
+      await db.delete(rcmQueries).where(inArray(rcmQueries.id, queryIds))
+    }
+    if (rcmClaimIds.length > 0) {
+      await db.delete(claimEvents).where(inArray(claimEvents.claimId, rcmClaimIds))
+      // Backstops: the retention check above means no submission exists for a deletable patient.
+      const submissionIds = (await db.select({ id: claimSubmissions.id }).from(claimSubmissions).where(inArray(claimSubmissions.claimId, rcmClaimIds))).map((r) => r.id)
+      if (submissionIds.length > 0) {
+        await db.delete(claimDispatches).where(inArray(claimDispatches.submissionId, submissionIds))
+        await db.delete(claimSubmissions).where(inArray(claimSubmissions.id, submissionIds))
+      }
+      await db.delete(claimInvoices).where(inArray(claimInvoices.claimId, rcmClaimIds))
+      await db.delete(claims).where(inArray(claims.id, rcmClaimIds))
+    }
+    if (rcmPreauthIds.length > 0) {
+      await db.update(chargeLines).set({ preauthId: null }).where(inArray(chargeLines.preauthId, rcmPreauthIds))
+      await db.delete(preauthEvents).where(inArray(preauthEvents.preauthId, rcmPreauthIds))
+      await db.delete(preauths).where(inArray(preauths.id, rcmPreauthIds))
+    }
+    await db.execute(sql`select set_config('hims.allow_document_purge', 'off', true)`)
+  }
+  // Policies go with the patient (claims and pre-auths that referenced them are gone).
+  await db.delete(patientPolicies).where(eq(patientPolicies.patientId, anonId))
+  // end SP7
 
   // SP4 billing, children-first. After the check above only captured/void lines and
   // draft/discarded invoices remain, and they are deleted. The payment/refund deletes are a

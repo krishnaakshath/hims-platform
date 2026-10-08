@@ -142,7 +142,7 @@ describe('toAadhaarSummary / toAadhaarView', () => {
     const s = onFile()
     expect(toAadhaarView(s, 'admin').masked).toBe('XXXX XXXX 0124')
     expect(toAadhaarView(s, 'crc').masked).toBe('XXXX XXXX 0124')
-    for (const r of ['pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const) {
+    for (const r of ['pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] as const) {
       expect(toAadhaarView(s, r)).toEqual({ status: 'on_file', masked: null, declineReason: null })
       expect(JSON.stringify(toAadhaarView(s, r))).not.toContain('0124')
     }
@@ -154,7 +154,7 @@ describe('toAadhaarSummary / toAadhaarView', () => {
 
   it('shows the decline reason only to admin and crc; everyone else sees status only', () => {
     const declined = toAadhaarSummary({ aadhaarLast4: null, declineReason: 'foreign_national', consentRecordedAt: null, recordedByName: 'Asha' })
-    for (const r of ['pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'patient'] as Role[]) {
+    for (const r of ['pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm', 'patient'] as Role[]) {
       expect(toAadhaarView(declined, r)).toEqual({ status: 'declined', masked: null, declineReason: null })
     }
     expect(toAadhaarView(declined, 'admin').declineReason).toBe('foreign_national')

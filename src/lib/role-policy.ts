@@ -11,6 +11,7 @@ import type { Role } from '@/lib/auth'
 export const ALL_ROLES = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs',
   'coder', // SP6
   'collector', // SP5
+  'rcm', // SP7
 ] as const
 
 // Compile-time guard: adding a Role without adding it to ALL_ROLES fails tsc.
@@ -63,7 +64,7 @@ export const AADHAAR_MASKED_READ_ROLES: readonly Role[] = ['admin', 'crc']
 // packages, room categories, CSV import). Lookup = the price lookup and the
 // service search only (GET /api/tariff/resolve, GET /api/tariff/services).
 export const TARIFF_MANAGE_ROLES: readonly Role[] = ['admin', 'billing']
-export const TARIFF_LOOKUP_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'frontdesk']
+export const TARIFF_LOOKUP_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'frontdesk', 'rcm'] // SP7: + rcm (pre-auth estimate service search)
 
 // SP3 follow-up and encounters. View = see follow-ups on the patient page.
 // Plan = create/change/cancel the clinical plan. Booking = book, reschedule,
@@ -131,9 +132,28 @@ export const CODING_ENTRY_ROLES: readonly Role[] = ['admin', 'coder', 'pi']
 // completed visits only), so admin codes from the coding workspace, not the chart.
 export const CODE_PROPOSE_ROLES: readonly Role[] = ['pi']
 export const CODING_QUERY_RESPOND_ROLES: readonly Role[] = ['admin', 'pi', 'coder']
-export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc', 'billing']
+export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc', 'billing', 'rcm'] // SP7: + rcm (pre-auth diagnosis/procedure search)
 export const CODE_SYSTEM_ADMIN_ROLES: readonly Role[] = ['admin']
 // end SP6
+
+// SP7 RCM, insurer/TPA and claims (plan 2026-10-07-sp7-rcm-claims.md, RBAC table).
+// RCM = every /rcm page except settings; claims, pre-auths, their documents, insurer
+// updates, settlements, reconciliation, write-off requests and the pre-auth estimate.
+// Payer master = insurer/TPA profile, contacts, network and document-requirement writes.
+// Settings = the hospital ROHINI / HFR identifiers. Policy read/write = a patient's
+// policies and policy-card images. Pre-auth lookup = the approved pre-auths of a patient
+// (the charge-capture picker). Write-off approve = the second person on a write-off.
+// Claim ABHA read = ABHA on a claim whose payer requires it. rcm is deliberately in
+// neither CLINICAL_ROLES nor PATIENT_DIRECTORY_ROLES nor any SP4 billing list.
+export const RCM_ROLES: readonly Role[] = ['admin', 'rcm']
+export const PAYER_MASTER_ROLES: readonly Role[] = ['admin', 'rcm']
+export const RCM_SETTINGS_ROLES: readonly Role[] = ['admin']
+export const POLICY_READ_ROLES: readonly Role[] = ['admin', 'rcm', 'frontdesk', 'billing', 'crc']
+export const POLICY_WRITE_ROLES: readonly Role[] = ['admin', 'rcm', 'frontdesk']
+export const PREAUTH_LOOKUP_ROLES: readonly Role[] = ['admin', 'rcm', 'billing', 'crc']
+export const WRITE_OFF_APPROVE_ROLES: readonly Role[] = ['admin']
+export const CLAIM_ABHA_READ_ROLES: readonly Role[] = ['admin', 'rcm']
+// end SP7
 
 // Wave B: account self-service and reachability.
 // Account = /account (own MFA method, MFA self-reset, "what you can do"):

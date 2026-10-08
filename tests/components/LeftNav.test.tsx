@@ -43,7 +43,7 @@ describe('LeftNav', () => {
       expect(screen.getByRole('link', { name: /^staff$/i })).toHaveAttribute('href', '/staff')
       unmount()
     }
-    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const) {
+    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] as const) {
       const { unmount } = render(<LeftNav role={role} />)
       expect(screen.queryByRole('link', { name: /^staff$/i })).not.toBeInTheDocument()
       unmount()
@@ -56,7 +56,7 @@ describe('LeftNav', () => {
       expect(screen.getByRole('link', { name: /^documents$/i })).toHaveAttribute('href', '/documents')
       unmount()
     }
-    for (const role of ['pharmacy', 'billing', 'labs', 'coder', 'collector'] as const) {
+    for (const role of ['pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] as const) {
       const { unmount } = render(<LeftNav role={role} />)
       expect(screen.queryByRole('link', { name: /^documents$/i })).not.toBeInTheDocument()
       unmount()
@@ -73,7 +73,7 @@ describe('LeftNav', () => {
   })
 
   it('hides the forms hub from billing, pharmacy and labs', () => {
-    for (const role of ['billing', 'pharmacy', 'labs', 'coder', 'collector'] as const) {
+    for (const role of ['billing', 'pharmacy', 'labs', 'coder', 'collector', 'rcm'] as const) {
       const { unmount } = render(<LeftNav role={role} />)
       expect(screen.queryByRole('link', { name: /form templates/i })).not.toBeInTheDocument()
       expect(screen.queryByRole('link', { name: /consent documents/i })).not.toBeInTheDocument()
@@ -127,8 +127,8 @@ describe('LeftNav', () => {
     expect(screen.getByRole('link', { name: /experience surveys.*demo/i })).toHaveAttribute('href', '/experience-surveys')
   })
 
-  it('shows Price Lookup to admin, billing, crc and frontdesk only', () => {
-    for (const role of ['admin', 'billing', 'crc', 'frontdesk'] as const) {
+  it('shows Price Lookup to admin, billing, crc, frontdesk and rcm only', () => {
+    for (const role of ['admin', 'billing', 'crc', 'frontdesk', 'rcm'] as const) { // SP7: + rcm (TARIFF_LOOKUP_ROLES)
       const { unmount } = render(<LeftNav role={role} />)
       expect(screen.getByRole('link', { name: /price lookup/i })).toHaveAttribute('href', '/price-lookup')
       unmount()
@@ -167,7 +167,7 @@ describe('LeftNav', () => {
       expect(screen.getByRole('link', { name: /cash desk/i })).toBeInTheDocument()
       unmount()
     }
-    for (const role of ['pi', 'pharmacy', 'labs', 'coder'] as const) {
+    for (const role of ['pi', 'pharmacy', 'labs', 'coder', 'rcm'] as const) {
       const { unmount } = render(<LeftNav role={role} />)
       expect(screen.queryByRole('link', { name: /cash desk/i })).not.toBeInTheDocument()
       unmount()
@@ -191,4 +191,13 @@ describe('LeftNav', () => {
       r.unmount()
     }
   })
+
+  // SP7
+  it('rcm sees RCM Dashboard and Claims, and no billing or clinical entries', () => {
+    render(<LeftNav role="rcm" />)
+    expect(screen.getByRole('link', { name: /rcm dashboard/i })).toHaveAttribute('href', '/rcm')
+    expect(screen.getByRole('link', { name: /^claims$/i })).toHaveAttribute('href', '/rcm/claims')
+    for (const label of [/charge capture/i, /invoices/i, /cash desk/i, /patients/i, /coding/i]) expect(screen.queryByRole('link', { name: label })).not.toBeInTheDocument()
+  })
+  // end SP7
 })

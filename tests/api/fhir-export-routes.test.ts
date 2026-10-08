@@ -5,7 +5,7 @@ import { getDb } from '@/db/client'
 import { patients, allergies, diagnoses, auditLog } from '@/db/schema'
 import { encounterProcedures, encounters, providers } from '@/db/schema' // SP6
 
-let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | 'collector' | null = 'crc'
+let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | 'collector' | 'rcm' | null = 'crc'
 vi.mock('@/lib/auth', () => ({
   requireSession: vi.fn(async () =>
     sessionRole === null
@@ -141,7 +141,7 @@ describe('FHIR export routes -- session gating', () => {
   })
 
   it('403s frontdesk, coder and the other non-clinical roles on all 10 routes (FHIR/C-CDA is CLINICAL_ROLES only)', async () => {
-    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const) {
+    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] as const) {
       sessionRole = role
       for (const { name, handler } of ROUTES) {
         const res = await callRoute(handler, patientAId)

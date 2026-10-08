@@ -5,7 +5,7 @@ import { POST as administerRoute } from '@/app/api/inpatient/admissions/[id]/med
 import { getDb } from '@/db/client'
 import { patients, providers, rooms, admissions, medicationAdministrations, medicationEpisodes } from '@/db/schema'
 
-let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | 'collector' = 'admin'
+let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | 'collector' | 'rcm' = 'admin'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Test Admin' })) }))
 
 const createdMarIds: number[] = []
@@ -45,7 +45,7 @@ describe('GET /api/inpatient/admissions/[id]/medications', () => {
 
   it('403s frontdesk, pharmacy, billing and labs', async () => {
     const admission = await makeAdmission()
-    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const) {
+    for (const role of ['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] as const) {
       sessionRole = role
       const res = await listRoute(new Request('http://localhost') as never, { params: Promise.resolve({ id: String(admission.id) }) })
       expect(res.status, `role ${role}`).toBe(403)

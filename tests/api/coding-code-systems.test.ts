@@ -57,7 +57,7 @@ describe('POST /api/coding/code-systems/import', () => {
   it('401s without a session and 403s every role but admin before reading the body', async () => {
     sessionRole = null
     expect((await POST(jsonReq(BODY))).status).toBe(401)
-    for (const role of ['coder', 'pi', 'crc', 'billing', 'frontdesk', 'pharmacy', 'labs'] as Role[]) {
+    for (const role of ['coder', 'pi', 'crc', 'billing', 'frontdesk', 'pharmacy', 'labs', 'rcm'] as Role[]) {
       sessionRole = role
       const res = await POST(jsonReq('{not json'))
       expect(res.status, role).toBe(403)
@@ -204,7 +204,7 @@ describe('GET /api/coding/codes', () => {
   })
 
   it('admits every lookup role and denies the rest', async () => {
-    for (const role of ['admin', 'coder', 'pi', 'crc', 'billing'] as Role[]) {
+    for (const role of ['admin', 'coder', 'pi', 'crc', 'billing', 'rcm'] as Role[]) { // SP7: + rcm
       sessionRole = role
       expect((await GET_CODES(get('/api/coding/codes?kind=icd10&q=e11'))).status, role).toBe(200)
     }

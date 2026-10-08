@@ -149,7 +149,7 @@ describe('Provider call screen page (/telemedicine/[sessionId]) — role/ownersh
 })
 
 describe('Provider call screen page: role gate runs before any session lookup', () => {
-  for (const role of ['crc', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector']) {
+  for (const role of ['crc', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm']) {
     it(`redirects ${role} without calling getSessionById, listActiveProviders or logAudit`, async () => {
       vi.resetModules()
       const logAudit = vi.fn(async () => undefined)

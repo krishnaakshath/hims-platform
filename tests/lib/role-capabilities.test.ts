@@ -4,7 +4,7 @@ import type { Role } from '@/lib/auth'
 
 describe('ROLE_CAPABILITIES', () => {
   it('has an entry for exactly the real roles, no more, no less', () => {
-    const expectedRoles: Role[] = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] // SP5: + collector
+    const expectedRoles: Role[] = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] // SP5: + collector
     expect(new Set(Object.keys(ROLE_CAPABILITIES))).toEqual(new Set(expectedRoles))
   })
 
@@ -145,3 +145,16 @@ describe('SP5 lab and home-collection capabilities', () => {
 })
 // end SP5
 // end SP6
+
+// SP7
+describe('SP7 rcm capabilities', () => {
+  const has = (role: Role, re: RegExp) => ROLE_CAPABILITIES[role].bullets.some((b) => re.test(b))
+  it('states the rcm capabilities and no clinical-note write', () => {
+    expect(has('rcm', /pre-authorisation/i)).toBe(true); expect(has('rcm', /hospital copy/i)).toBe(true)
+    expect(has('rcm', /encounter note|care plan|prescri|finalise an invoice/i)).toBe(false); expect(has('admin', /write-offs/i)).toBe(true)
+    expect(ROLE_CAPABILITIES.rcm.label).toBe('Revenue Cycle (Insurance Desk)')
+    expect(has('frontdesk', /insurance policy and card/i)).toBe(true)
+    expect(has('billing', /approved pre-authorisation/i)).toBe(true); expect(has('crc', /approved pre-authorisation/i)).toBe(true)
+  })
+})
+// end SP7
