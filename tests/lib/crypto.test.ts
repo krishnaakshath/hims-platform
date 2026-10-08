@@ -31,3 +31,25 @@ describe('encryptSensitive / decryptSensitive', () => {
     expect(() => decryptSensitive('a::c')).toThrow(/malformed/i)
   })
 })
+
+// SP8: encryptSensitive / decryptSensitive delegate to the key-parameterised pair.
+describe('encryptWithKey / decryptWithKey', () => {
+  it('encryptSensitive still round-trips through encryptWithKey', async () => {
+    const { encryptWithKey, decryptWithKey } = await import('@/lib/crypto')
+    const key = Buffer.from(process.env.IDENTITY_ENCRYPTION_KEY!, 'base64')
+    expect(decryptWithKey(encryptSensitive('D1234567'), key)).toBe('D1234567')
+    expect(decryptSensitive(encryptWithKey('D1234567', key))).toBe('D1234567')
+  })
+
+  it('uses only the key it is given', async () => {
+    const { encryptWithKey, decryptWithKey } = await import('@/lib/crypto')
+    const { randomBytes } = await import('node:crypto')
+    const a = randomBytes(32)
+    const b = randomBytes(32)
+    const stored = encryptWithKey('{"x":1}', a)
+    expect(stored.split(':')).toHaveLength(3)
+    expect(decryptWithKey(stored, a)).toBe('{"x":1}')
+    expect(() => decryptWithKey(stored, b)).toThrow()
+    expect(() => encryptWithKey('x', randomBytes(16))).toThrow(/32 bytes/)
+  })
+})
