@@ -8,6 +8,7 @@ import { EMPTY_REGISTRATION_FORM, type RegistrationFormState } from '@/component
 import { INDIAN_STATES } from '@/lib/india/reference'
 import type { ShareQueueRow, SharePrefill } from '@/lib/queries/abdm-profile-shares'
 import { SANDBOX_MOCK_LABEL } from './AbhaVerifyDialog'
+import { formatIstTime } from '@/lib/india-time'
 
 const GENDER: Record<string, string> = { M: 'male', F: 'female', O: 'other', T: 'transgender' }
 
@@ -66,7 +67,7 @@ export function ProfileShareQueue({ rows }: { rows: ShareQueueRow[] }) {
               <td>{r.name ?? 'Not shared'}{r.isMock && <span className="ml-2 text-xs font-semibold text-amber-800">{SANDBOX_MOCK_LABEL}</span>}</td>
               <td>{[r.gender, r.yearOfBirth].filter(Boolean).join(' / ') || '-'}</td>
               <td><span className="font-mono">{r.abhaMasked ?? '-'}</span>{r.abhaAddress ? <span className="block text-xs text-muted-foreground">{r.abhaAddress}</span> : null}</td>
-              <td className="text-xs">{new Date(r.receivedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}</td>
+              <td className="text-xs">{formatIstTime(r.receivedAt)}</td>
               <td className="space-x-2 text-right">
                 {r.existingPatientId ? (
                   <Button type="button" size="sm" disabled={busy === r.id} onClick={() => resolve(r.id, { action: 'linked', patientId: r.existingPatientId! })}>
