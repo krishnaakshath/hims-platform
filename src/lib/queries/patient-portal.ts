@@ -127,12 +127,13 @@ export async function getPatientPortalData(patientId: string) {
  * getPatientPortalData() fetches for whichever single page is active.
  */
 export async function getPatientPortalIdentity(patientId: string) {
-  const [patient] = await getDb().select({ id: patients.id, name: patients.name, dob: patients.dob }).from(patients).where(eq(patients.id, patientId))
+  const [patient] = await getDb().select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid }).from(patients).where(eq(patients.id, patientId))
   if (!patient) return null
   return {
     id: patient.id,
     name: patient.name,
     dob: patient.dob,
+    uhid: patient.uhid, // Wave J (P1-20): the top bar shows the UHID, not the internal id
   }
 }
 
