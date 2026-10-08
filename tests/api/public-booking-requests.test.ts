@@ -70,7 +70,12 @@ describe('POST /api/public/booking-requests', () => {
     expect(row.reviewedAt).toBeNull()
     expect(row.declineReason).toBeNull()
     expect(row.resultingAppointmentId).toBeNull()
+    // Wave J: a public /book request is a plain 'new' request with no patient and no appointment.
+    expect(row.requestKind).toBe('new')
+    expect(row.patientId).toBeNull()
+    expect(row.appointmentId).toBeNull()
     expect(Object.keys(row).sort()).toEqual([
+      'appointmentId', 'patientId', 'requestKind', // Wave J portal requests
       'declineReason', 'id', 'preferredDateRangeEnd', 'preferredDateRangeStart', 'preferredProviderId',
       'reason', 'requesterDob', 'requesterEmail', 'requesterName', 'requesterPhone',
       'resultingAppointmentId', 'reviewedAt', 'reviewedByName', 'status', 'submittedAt',
