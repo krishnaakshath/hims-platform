@@ -12,6 +12,7 @@
     "db:push": "dotenv -e .env.local -- drizzle-kit push",
     "db:migrate": "dotenv -e .env.local -- tsx scripts/db/migrate.ts",
     "db:migrate:status": "dotenv -e .env.local -- tsx scripts/db/migrate.ts --status",
+    "db:schema-diff": "dotenv -e .env.local -- tsx scripts/db/schema-diff.ts",
     "db:backup": "dotenv -e .env.local -- tsx scripts/db/backup.ts",
     "db:restore-check": "dotenv -e .env.local -- tsx scripts/db/restore-check.ts",
     "db:seed": "dotenv -e .env.local -- tsx src/db/seed.ts",
