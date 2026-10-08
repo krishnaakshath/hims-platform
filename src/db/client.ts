@@ -4,6 +4,7 @@ import { Pool } from 'pg'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import * as schema from './schema'
 import { sslFor } from './url'
+import { ServiceNotConfiguredError } from '@/lib/service-config'
 
 // TCP (node-postgres), not Neon's HTTP driver -- the HTTP driver issues
 // every query as an HTTPS fetch to Neon's data-plane endpoint, and this
@@ -78,6 +79,9 @@ function createDb() {
 let _db: ReturnType<typeof createDb> | null = null
 
 export function getDb() {
+  // Without this, pg silently falls back to localhost:5432 and every query
+  // fails with a connection error that does not say what is wrong.
+  if (!process.env.DATABASE_URL) throw new ServiceNotConfiguredError('database')
   if (!_db) _db = createDb()
   return _db
 }

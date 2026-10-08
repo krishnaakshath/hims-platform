@@ -10,6 +10,7 @@ import { users, appSettings } from '@/db/schema'
 import { findUserByEmail, resetUserMfa } from '@/lib/queries/users'
 import { getAppSettings, resetAdminMfa } from '@/lib/queries/settings'
 import { checkAccountMfaResetRateLimit } from '@/lib/rate-limit'
+import { withServiceGuard } from '@/lib/service-config'
 
 const methodSchema = z.object({
   method: z.enum(['totp', 'sms', 'email']),
@@ -31,7 +32,7 @@ function getClientIp(request: NextRequest): string {
 // the same rate limiting as a fresh login attempt, and identity resolved by
 // email (never by display name, which has no unique constraint and could
 // let one staff member silently overwrite another's MFA config).
-export async function PUT(request: NextRequest) {
+export const PUT = withServiceGuard('MFA method change', async function PUT(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
 
@@ -74,4 +75,4 @@ export async function PUT(request: NextRequest) {
   }
 
   return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
-}
+})

@@ -5,6 +5,7 @@ import { requirePatientSession } from '@/lib/patient-session'
 import { verifyPatientPortalCredentials, resetPatientMfa } from '@/lib/queries/patient-portal'
 import { checkPatientLoginRateLimit } from '@/lib/rate-limit'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
+import { withServiceGuard } from '@/lib/service-config'
 
 const resetSchema = z.object({ password: z.string().min(1) }).strict()
 
@@ -17,7 +18,7 @@ function getClientIp(request: NextRequest): string {
 // Also doubles as "turn MFA back off" -- MFA is opt-in for patients, so
 // disabling it is a self-service action, not an admin-only one the way a
 // staff reset is.
-export async function POST(request: NextRequest) {
+export const POST = withServiceGuard('patient MFA reset', async function POST(request: NextRequest) {
   const session = await requirePatientSession()
   if (session instanceof NextResponse) return session
 
@@ -37,4 +38,4 @@ export async function POST(request: NextRequest) {
   await logPatientPortalAction('reset own MFA', session.patientId)
 
   return NextResponse.json({ ok: true })
-}
+})

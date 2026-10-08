@@ -8,6 +8,7 @@ import { getPendingPatientMfaSession, clearPendingPatientMfaCookie } from '@/lib
 import { getPatientMfaState } from '@/lib/queries/patient-portal'
 import { checkPatientMfaRateLimit } from '@/lib/rate-limit'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
+import { withServiceGuard } from '@/lib/service-config'
 
 const mfaSchema = z.object({ code: z.string().trim().length(6) }).strict()
 
@@ -17,7 +18,7 @@ function getClientIp(request: NextRequest): string {
   return request.headers.get('x-real-ip') ?? 'unknown'
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withServiceGuard('patient MFA verification', async function POST(request: NextRequest) {
   const pending = await getPendingPatientMfaSession()
   if (!pending) return NextResponse.json({ error: 'Your login session expired. Please sign in again.' }, { status: 401 })
 
@@ -44,4 +45,4 @@ export async function POST(request: NextRequest) {
   await logPatientPortalAction('completed MFA login', pending.patientId)
 
   return NextResponse.json({ ok: true })
-}
+})

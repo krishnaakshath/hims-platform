@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis'
+import { ServiceNotConfiguredError } from '@/lib/service-config'
 
 // Vercel's Upstash Redis integration provisions KV_REST_API_URL / KV_REST_API_TOKEN
 // (not UPSTASH_REDIS_REST_URL/TOKEN, which is what Redis.fromEnv() looks for) —
@@ -27,7 +28,11 @@ export function isCacheConfigured(): boolean {
 }
 
 let _redis: Redis | null = null
+// Callers that need Redis (rate limits, OTP, MFA replay protection) get a
+// ServiceNotConfiguredError instead of a client with an undefined URL; routes
+// wrapped in withServiceGuard turn that into a 503 and one log line.
 export function getRedis() {
+  if (!isCacheConfigured()) throw new ServiceNotConfiguredError('redis')
   if (!_redis) _redis = createRedis()
   return _redis
 }
