@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'crypto'
 import { getQueueDisplayPin } from '@/lib/queries/settings'
 import { getQueueDisplayRows } from '@/lib/queries/queue-display'
 import { checkQueueDisplayPinRateLimit } from '@/lib/rate-limit'
+import { withServiceGuard } from '@/lib/service-config'
 
 const PIN_HEADER = 'x-queue-display-pin'
 
@@ -31,7 +32,7 @@ function pinsMatch(supplied: string, stored: string): boolean {
 // no staff login (spec §3), gated instead by a shared PIN checked against
 // appSettings.queueDisplayPin. An unset PIN fails closed (401), never
 // silently serves real data with no gate at all.
-export async function GET(request: NextRequest) {
+export const GET = withServiceGuard('queue display', async function GET(request: NextRequest) {
   // Rate-limited before the PIN check itself: like every other unauthenticated
   // secret-checking endpoint in this codebase (see src/lib/rate-limit.ts),
   // this throttles brute-force PIN guessing and caps the DB round-trip a
@@ -49,4 +50,4 @@ export async function GET(request: NextRequest) {
   }
   const tickets = await getQueueDisplayRows()
   return NextResponse.json({ tickets })
-}
+})

@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
   // correctly installed, since nodemailer's own use of Node-specific
   // features (TLS/DNS internals in its SMTP transport) isn't bundler-safe.
   serverExternalPackages: ['nodemailer'],
+  // GET /api/health compares the migration ledger with the files in
+  // scripts/migrations (src/lib/config-check.ts); ship their names with it.
+  outputFileTracingIncludes: {
+    '/api/health': ['./scripts/migrations/*.sql'],
+    '/api/health/ready': ['./scripts/migrations/*.sql'],
+  },
   experimental: {
     // Neon's HTTP driver (@neondatabase/serverless via drizzle-orm/neon-http)
     // issues its queries as `fetch()` calls under the hood. Next's dev-only

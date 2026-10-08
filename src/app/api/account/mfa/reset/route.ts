@@ -7,6 +7,7 @@ import { findUserByEmail, resetUserMfa } from '@/lib/queries/users'
 import { resetAdminMfa } from '@/lib/queries/settings'
 import { logAudit } from '@/lib/audit'
 import { checkAccountMfaResetRateLimit } from '@/lib/rate-limit'
+import { withServiceGuard } from '@/lib/service-config'
 
 const resetSchema = z.object({ email: z.string().trim().email(), password: z.string().min(1) }).strict()
 
@@ -22,7 +23,7 @@ function getClientIp(request: NextRequest): string {
 // re-authenticated identity against the CALLER's own session before
 // clearing anything, so this can only ever reset your own MFA, never
 // someone else's.
-export async function POST(request: NextRequest) {
+export const POST = withServiceGuard('staff MFA reset', async function POST(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
 
@@ -57,4 +58,4 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
-}
+})

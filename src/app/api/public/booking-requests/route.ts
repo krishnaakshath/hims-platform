@@ -6,6 +6,7 @@ import { providers } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { checkBookingRequestRateLimit } from '@/lib/rate-limit'
 import { createBookingRequest } from '@/lib/queries/booking-requests'
+import { withServiceGuard } from '@/lib/service-config'
 
 // Vercel/most proxies set the client IP as the first entry in
 // x-forwarded-for; NextRequest no longer exposes `.ip` directly.
@@ -42,7 +43,7 @@ const bookingRequestSchema = z.object({
 // lands in booking_requests with status 'pending' and never touches
 // patients/appointments directly; a staff member reviews and either
 // confirms (Task 3, which creates the real appointment) or declines it.
-export async function POST(request: NextRequest) {
+export const POST = withServiceGuard('public booking requests', async function POST(request: NextRequest) {
   const ip = getClientIp(request)
   const { allowed } = await checkBookingRequestRateLimit(ip)
   if (!allowed) return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 })
@@ -96,4 +97,4 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ id: created.id }, { status: 201 })
-}
+})

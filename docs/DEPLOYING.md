@@ -35,7 +35,8 @@ region where the provider offers one) for latency and data-localisation.
 
 | Variable | Required | Notes |
 |---|---|---|
-| `DATABASE_URL` | yes | Client's own Postgres |
+| `DATABASE_URL` | yes | Client's own Postgres. On Vercel+Neon this is the pooled URL, used by the app |
+| `DATABASE_URL_UNPOOLED` | set by Neon | Direct URL; used only when running `db:migrate` / `db:backup` (not read by the app) |
 | `SESSION_SECRET` | yes | Unique per client, 32+ random chars: `openssl rand -base64 48` |
 | `IDENTITY_ENCRYPTION_KEY` | yes | Unique per client, 32 bytes base64: `openssl rand -base64 32`. Back it up; losing it makes encrypted ID numbers unreadable |
 | `NEXT_PUBLIC_APP_URL` | yes | Public https URL of the deployment |
@@ -59,51 +60,84 @@ commit them. Generate each client's secrets fresh.
 > cache). **Changing `BRAND_COOKIE_PREFIX` signs everyone out**, so set it once
 > before go-live.
 
-## 4. Create the schema (migration)
+## 4. Create the schema (`npm run db:migrate`)
 
-Run once against the client's new, **empty** database, from a machine that has
-the client's `DATABASE_URL` (for example after `vercel env pull .env.local`
-linked to the client's project):
+The schema of every client database is created and upgraded by one command,
+`npm run db:migrate`. It is safe to run on every deploy: it takes an advisory
+lock (two runs cannot overlap), applies only what the `schema_migrations`
+ledger does not already record, refuses to run if an applied file was edited,
+and stops (rolling back that file) at the first error. **`db:push` is not part
+of any deployment or production flow**; see "Never" below.
 
-```bash
-npm ci
-npm run db:push        # dotenv -e .env.local -- drizzle-kit push
-```
+Step by step, for a new client:
 
-`db:push` applies `src/db/schema.ts` to the database. It is only safe on a
-fresh per-client database: against a database that holds other tables it
-would drop anything the schema does not declare. Never point it at a shared
-or populated one; for later schema changes, apply additive SQL by hand
-(`scripts/apply-sql.mjs`, see the README). Verify the tables exist before
-continuing.
+1. **Create the database.** In the client's Vercel project: Storage > Create
+   Database > **Neon** (Marketplace). Pick the region nearest the client's
+   users (an India region for Indian clients) and connect it to the
+   Production environment. The integration sets `DATABASE_URL` (pooled, used
+   by the app) and `DATABASE_URL_UNPOOLED` (direct, used for migrations and
+   backups), among others.
+2. **Create Redis.** Storage > Create Database > **Upstash for Redis**
+   (Marketplace), same region, connected to the project. It sets
+   `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Without Redis, sign-in, MFA,
+   one-time codes and the booking widget answer 503 (rate limits fail closed
+   on purpose; there is no in-memory fallback).
+3. **Create the Blob store** (Storage > Blob) and connect it: `BLOB_READ_WRITE_TOKEN`.
+4. **Set the secrets** from section 3 (`SESSION_SECRET`,
+   `IDENTITY_ENCRYPTION_KEY`, `ADMIN_*`, `NEXT_PUBLIC_APP_URL`, SMTP/SMS).
+   Record `IDENTITY_ENCRYPTION_KEY` in the client's key escrow first (see
+   [OPERATIONS.md](OPERATIONS.md#encryption-keys)).
+5. **Run the migration** from a trusted machine with this repository checked
+   out at the commit you are deploying:
 
-Then apply every file in `scripts/migrations/`, in name order
-(`node --env-file=.env.local scripts/apply-sql.mjs <file>`). They are
-idempotent, so applying one that `db:push` already covered is harmless.
+   ```bash
+   npm ci
+   vercel link                                   # the client's project
+   vercel env pull .env.production.local --environment=production
+   # direct (unpooled) endpoint: the runner refuses the "-pooler" host
+   npx dotenv -e .env.production.local -- sh -c 'DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:migrate:status'
+   npx dotenv -e .env.production.local -- sh -c 'DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:migrate'
+   rm .env.production.local                      # it holds production secrets
+   ```
 
-Do not rely on `db:push` to manage the SP2 exclusion constraint
-`tariff_rates_no_overlap` (an `EXCLUDE USING gist` that also needs the
-`btree_gist` extension): it cannot be expressed in `schema.ts` and exists only
-in the migrations. Do not re-run `db:push` against a database that already has
-it, because `db:push` would offer to drop it.
+   On the empty database this applies `scripts/db/baseline.sql` and then
+   every `scripts/migrations/*.sql` in name order, including the parts
+   `schema.ts` cannot express (the `btree_gist` and `pg_trgm` extensions,
+   the `tariff_rates_no_overlap` exclusion constraint, the
+   `codes_display_trgm_idx` index, the billing immutability triggers).
+   Run `db:migrate:status` again: every line must read `applied`.
+6. **Deploy** (section 5) and check `https://<client-domain>/api/health/ready`
+   answers 200 with `{"status":"ok","checks":{"database":"ok","redis":"ok","migrations":"up_to_date","secrets":"ok"}}`.
+   Any other word names the missing piece; it never shows values.
+7. **Create the first admin** (section 6).
+8. **Code sets.** No code sets ship with the app. The owner loads the licensed
+   ones (ICD-10, ICD-10-PCS, SNOMED CT, LOINC, PM-JAY HBP) with
+   `npm run codes:import`; see [docs/CODE-SYSTEMS.md](CODE-SYSTEMS.md). Until a
+   set is loaded, coders cannot assign codes of that kind.
 
-Clinical coding (SP6) adds two migrations,
-`2026-10-07-sp6-a-coder-role.sql` (the `coder` role value) and
-`2026-10-07-sp6-b-clinical-coding.sql` (code systems, coded diagnoses and
-procedures, the coding workflow tables). Apply them like the others, in name
-order. The `pg_trgm` extension and the `codes_display_trgm_idx` index (fast
-code-display search) are **migration-only**, like the tariff exclusion above:
-`db:push` cannot create them and would offer to drop the index, so never
-re-run `db:push` once the SP6 migrations are applied. Search still works
-without the index, only more slowly.
+**Every later release** that adds files to `scripts/migrations/`: run step 5
+(`db:migrate:status`, then `db:migrate`) against production **before**
+promoting the deployment, because new code may read the new columns. The
+migrations are additive and idempotent, so the old deployment keeps working
+on the migrated database. `/api/health` shows `"migrations":"pending"` while a
+deployment's files are not all applied.
 
-No code sets ship with the app. After the migrations, the owner loads the
-licensed code sets (ICD-10, ICD-10-PCS, SNOMED CT, LOINC, PM-JAY HBP) with
-`npm run codes:import`; see [docs/CODE-SYSTEMS.md](CODE-SYSTEMS.md). Until a
-set is loaded, coders cannot assign codes of that kind.
+**An existing database built with `db:push`** (before the ledger existed) is
+adopted on the first `db:migrate`: the baseline is recorded as already
+present, every migration file is re-run (all are idempotent) and recorded.
+Nothing is dropped. Take a backup first anyway (OPERATIONS.md).
 
-To avoid a local `.env.local`, you can pass the variable inline instead:
-`DATABASE_URL=... npx drizzle-kit push`.
+**Never**:
+
+- run `npm run db:push` (or `db:generate`) against a client, staging or shared
+  database. It diffs `schema.ts` against the whole database and offers to
+  drop what it does not declare: the exclusion constraint, the trigram index,
+  tables of a newer release.
+- edit a migration file or `scripts/db/baseline.sql` after it has been applied
+  anywhere. Put the change in a new dated file; `db:migrate` refuses to run on
+  a changed file and names it.
+- point `db:migrate` at the pooled `-pooler` host; it refuses, because the
+  advisory lock and per-file transactions need a direct connection.
 
 ## 5. Deploy
 
@@ -144,6 +178,13 @@ SEED_DEMO_PASSWORD='<12+ chars>' npm run db:seed
 
 After each deploy, check (replace the host with the client's):
 
+- [ ] `/api/health/ready` answers 200 and every check reads `ok` /
+      `up_to_date`. A 503 names the failing piece: `database: fail` (wrong
+      `DATABASE_URL` or Neon suspended), `redis: not_configured` (sign-in
+      will answer 503 "Service temporarily unavailable"), `migrations:
+      pending` (run `db:migrate`), `secrets: missing` (`SESSION_SECRET` or a
+      32-byte `IDENTITY_ENCRYPTION_KEY`). The function log carries one
+      `[config] ...` line per refused request naming what is missing.
 - [ ] `/login` loads and shows the client's name, logo and colour (and not
       "HIMS" when `BRAND_NAME` is set).
 - [ ] `/patient-portal/login` loads with the same branding.
@@ -189,7 +230,11 @@ Devanagari to the repository and embed it in `src/lib/labs/report-pdf.ts`.
 ## Rolling back and rotating
 
 - Roll back an app change from the Vercel deployments list (Promote a
-  previous deployment). Database changes are not rolled back automatically.
+  previous deployment). Database changes are not rolled back: migrations are
+  additive, so the previous deployment runs on the migrated schema. To undo
+  data damage, use Neon point-in-time restore (OPERATIONS.md), never a
+  hand-written down-migration on the live database.
 - Rotating `SESSION_SECRET` signs everyone out. Rotating
   `IDENTITY_ENCRYPTION_KEY` requires re-encrypting stored values first;
-  do not change it on a live database without that plan.
+  do not change it on a live database without that plan. Backups, restore
+  drills and key custody: [OPERATIONS.md](OPERATIONS.md).
