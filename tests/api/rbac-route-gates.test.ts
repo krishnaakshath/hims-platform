@@ -82,6 +82,10 @@ import { POST as postNhcxStatus } from '@/app/api/rcm/nhcx/exchanges/[id]/status
 import { NHCX_ELIGIBILITY_ROLES } from '@/lib/role-policy'
 import { POST as postNhcxEligibility } from '@/app/api/nhcx/eligibility/route'
 import { GET as getNhcxEligibility } from '@/app/api/nhcx/eligibility/[id]/route'
+import { INTEGRATION_SETTINGS_ROLES } from '@/lib/role-policy'
+import { GET as getNhcxPayload } from '@/app/api/rcm/nhcx/exchanges/[id]/payload/route'
+import { POST as postNhcxReview } from '@/app/api/rcm/nhcx/exchanges/[id]/review/route'
+import { POST as postIntegrationTest } from '@/app/api/settings/integrations/test/route'
 // end SP8
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -105,7 +109,7 @@ vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
 // SP8: the ABHA routes rate-limit (Redis) right after the gate; this harness only probes the gate.
 vi.mock('@/lib/rate-limit', async () => {
   const actual = await vi.importActual<typeof import('@/lib/rate-limit')>('@/lib/rate-limit')
-  return { ...actual, checkAbhaRateLimit: vi.fn(async () => ({ allowed: true })) }
+  return { ...actual, checkAbhaRateLimit: vi.fn(async () => ({ allowed: true })), checkIntegrationTestRateLimit: vi.fn(async () => ({ allowed: true })) }
 })
 
 export { ALL_ROLES }
@@ -905,6 +909,10 @@ export const API_GATES: ApiGateCase[] = [
   // SP8 NHCX eligibility (NHCX_ELIGIBILITY_ROLES): `{}` is a 400 and a bogus check a 404 after the gate.
   { name: 'POST /api/nhcx/eligibility', call: () => settle(() => postNhcxEligibility(send('POST', '/api/nhcx/eligibility'))), allowed: [...NHCX_ELIGIBILITY_ROLES] },
   { name: 'GET /api/nhcx/eligibility/[id]', call: () => settle(() => getNhcxEligibility(get(`/api/nhcx/eligibility/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...NHCX_ELIGIBILITY_ROLES] },
+  // SP8 NHCX response review (NHCX_EXCHANGE_ROLES) and the connection test (INTEGRATION_SETTINGS_ROLES).
+  { name: 'GET /api/rcm/nhcx/exchanges/[id]/payload', call: () => settle(() => getNhcxPayload(get(`/api/rcm/nhcx/exchanges/${BOGUS_ID}/payload`), ctx({ id: BOGUS_ID }))), allowed: [...NHCX_EXCHANGE_ROLES] },
+  { name: 'POST /api/rcm/nhcx/exchanges/[id]/review', call: () => settle(() => postNhcxReview(send('POST', `/api/rcm/nhcx/exchanges/${BOGUS_ID}/review`), ctx({ id: BOGUS_ID }))), allowed: [...NHCX_EXCHANGE_ROLES] },
+  { name: 'POST /api/settings/integrations/test', call: () => settle(() => postIntegrationTest(send('POST', '/api/settings/integrations/test'))), allowed: [...INTEGRATION_SETTINGS_ROLES] },
   // end SP8
 ]
 
@@ -1055,6 +1063,8 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/rcm/preauths/[id]/nhcx', call: () => postPreauthNhcx(send('POST', `/api/rcm/preauths/${BOGUS_ID}/nhcx`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: NHCX_EXCHANGE_ROLES },
   { name: 'POST /api/rcm/nhcx/exchanges/[id]/status', call: () => postNhcxStatus(send('POST', `/api/rcm/nhcx/exchanges/${BOGUS_ID}/status`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: NHCX_EXCHANGE_ROLES },
   { name: 'POST /api/nhcx/eligibility', call: () => postNhcxEligibility(send('POST', '/api/nhcx/eligibility', NOT_JSON)), allowed: NHCX_ELIGIBILITY_ROLES },
+  { name: 'POST /api/rcm/nhcx/exchanges/[id]/review', call: () => postNhcxReview(send('POST', `/api/rcm/nhcx/exchanges/${BOGUS_ID}/review`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: NHCX_EXCHANGE_ROLES },
+  { name: 'POST /api/settings/integrations/test', call: () => postIntegrationTest(send('POST', '/api/settings/integrations/test', NOT_JSON)), allowed: INTEGRATION_SETTINGS_ROLES },
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

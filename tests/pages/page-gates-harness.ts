@@ -333,6 +333,8 @@ export const PAGE_GATES: PageGateCase[] = [
   // end SP7
   // SP8: LeftNav NAV_ITEMS /front-desk/abdm-shares -- ABDM_SHARE_QUEUE_ROLES
   { route: '/front-desk/abdm-shares', load: () => import('@/app/(dashboard)/front-desk/abdm-shares/page'), allowed: ['admin', 'frontdesk'] },
+  // SP8: LeftNav NAV_TRAILING_ITEMS /settings/integrations -- INTEGRATION_SETTINGS_ROLES
+  { route: '/settings/integrations', load: () => import('@/app/(dashboard)/settings/integrations/page'), allowed: ['admin'] },
   // end SP8
   // end SP6
   // Wave B P1-05: price lookup -- TARIFF_LOOKUP_ROLES (LeftNav NAV_TRAILING_ITEMS /price-lookup).

@@ -411,4 +411,12 @@ export async function checkNhcxCallbackRateLimit(ip: string): Promise<{ allowed:
   const [a, b] = await Promise.all([_nhcxCallbackIp.limit(ip), _nhcxCallbackAll.limit('all')])
   return { allowed: a.success && b.success }
 }
+
+// The ABDM / NHCX test-connection button: 5 a minute per staff member.
+let _integrationTestLimiter: Ratelimit | null = null
+export async function checkIntegrationTestRateLimit(staffName: string): Promise<{ allowed: boolean }> {
+  if (!_integrationTestLimiter) _integrationTestLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(5, '60 s'), prefix: 'ratelimit:integration-test' })
+  const { success } = await _integrationTestLimiter.limit(staffName.toLowerCase())
+  return { allowed: success }
+}
 // end SP8

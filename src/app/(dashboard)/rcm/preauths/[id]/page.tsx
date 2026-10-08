@@ -18,6 +18,9 @@ import { EligibilityCheckPanel } from '@/components/nhcx/EligibilityCheckPanel'
 import { listRcmPayers } from '@/lib/queries/rcm-payers'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { nhcxEligibilityAvailable, payersOnNhcx } from '@/lib/queries/nhcx-eligibility'
+import { NHCX_EXCHANGE_ROLES } from '@/lib/role-policy'
+import { listExchangesFor, preauthNhcxState } from '@/lib/queries/nhcx-review'
+import { NhcxExchangePanel } from '@/components/nhcx/NhcxExchangePanel'
 
 export default async function PreauthPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSessionOrRedirect()
@@ -32,6 +35,7 @@ export default async function PreauthPage({ params }: { params: Promise<{ id: st
   const openQuery = d.queries.find((q) => q.status === 'open') ?? null
   // SP8: NHCX eligibility on the pre-auth's policy (auth-requirements).
   const [payerRows, activeProviders] = d.policy ? await Promise.all([listRcmPayers(), listActiveProviders()]) : [[], []]
+  const [nhcxSend, exchanges] = await Promise.all([preauthNhcxState(id), listExchangesFor({ preauthId: id })])
   const onNhcx = d.policy ? payersOnNhcx([d.policy], new Map(payerRows.map((r) => [r.payerId, r.profile?.nhcxParticipantCode ?? null])))[d.policy.id] ?? false : false
   return (
     <div className="space-y-4">
@@ -64,6 +68,7 @@ export default async function PreauthPage({ params }: { params: Promise<{ id: st
         <ul>{d.documents.map((doc) => <li key={doc.id}><a className="text-primary hover:underline" href={`/api/rcm/preauth-documents/${doc.id}`} target="_blank" rel="noreferrer">{doc.title}</a> <span className="font-mono text-xs text-muted-foreground">{doc.sha256.slice(0, 12)}</span></li>)}</ul>
         <PreauthDocumentUpload preauthId={id} />
       </section>
+      <NhcxExchangePanel exchanges={exchanges} canAct={NHCX_EXCHANGE_ROLES.includes(session.role)} sendPreauthId={id} canSendPreauth={nhcxSend.canSend} sendReason={nhcxSend.reason} />
       <PreauthTimeline events={d.events} />
     </div>
   )

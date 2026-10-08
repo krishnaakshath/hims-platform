@@ -21,7 +21,7 @@ import { ACCOUNT_ROLES, TARIFF_LOOKUP_ROLES } from '@/lib/role-policy' // Wave B
 import { CASH_DESK_ROLES, COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy' // SP4, SP5
 import { ENCOUNTER_REGISTER_ROLES } from '@/lib/role-policy' // Wave F
 import { NotebookTabs } from 'lucide-react' // Wave F
-import { QrCode } from 'lucide-react' // SP8
+import { QrCode, Plug } from 'lucide-react' // SP8
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -158,6 +158,8 @@ export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; role
   // end SP6
   // SP7: hospital ROHINI / HFR identifiers -- RCM_SETTINGS_ROLES (admin).
   { href: '/rcm/settings', label: 'RCM Settings', icon: Settings2, roles: ['admin'] as Role[] },
+  // SP8: ABDM / NHCX connection -- INTEGRATION_SETTINGS_ROLES (admin).
+  { href: '/settings/integrations', label: 'ABDM / NHCX', icon: Plug, roles: ['admin'] as Role[] },
   // Settings: admin and the PI only, no other role -- explicit product direction.
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['admin', 'pi'] as Role[] },
   // Wave B P1-05: price lookup (GET /api/tariff/resolve) -- TARIFF_LOOKUP_ROLES.
