@@ -20,17 +20,17 @@ describe('TopBanner', () => {
   })
 
   // Wave G P2-01: the bell is every role's own feed (no longer the admin audit log).
-  it.each(['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const)('shows the notification bell for %s', (role) => {
+  it.each(['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] as const)('shows the notification bell for %s', (role) => {
     render(<TopBanner userName="Test User" role={role} />)
     expect(screen.getByRole('button', { name: /^notifications/i })).toBeInTheDocument()
   })
 
-  it.each(['pharmacy', 'labs', 'coder', 'collector', 'rcm'] as const)('hides the search box for %s', (role) => {
+  it.each(['pharmacy', 'labs', 'coder', 'collector'] as const)('hides the search box for %s', (role) => {
     render(<TopBanner userName="Jamie Ruiz" role={role} />)
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
 
-  it.each(['admin', 'crc', 'pi', 'frontdesk', 'billing'] as const)('shows the search box for %s', (role) => {
+  it.each(['admin', 'crc', 'pi', 'frontdesk', 'billing', 'rcm' /* SP7: services only */] as const)('shows the search box for %s', (role) => {
     render(<TopBanner userName="Jamie Ruiz" role={role} />)
     expect(screen.getByRole('combobox', { name: /search/i })).toBeInTheDocument()
   })

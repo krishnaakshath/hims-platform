@@ -42,7 +42,15 @@ describe('GET /api/search', () => {
     expect(Array.isArray(body.services)).toBe(true)
   })
 
-  for (const role of ['pharmacy', 'labs', 'coder', 'collector', 'rcm'] as const) {
+  // SP7 + Wave G: rcm is a price-lookup role, so it searches the service catalogue only, never patients.
+  it('gives rcm the service catalogue only, without reading patients', async () => {
+    sessionRole = 'rcm'
+    const body = await (await search('RD-0001')).json()
+    expect(body.patients).toEqual([]); expect(body.trials).toEqual([]); expect(body.formTemplates).toEqual([])
+    expect(Array.isArray(body.services)).toBe(true)
+  })
+
+  for (const role of ['pharmacy', 'labs', 'coder', 'collector'] as const) {
     it(`403s ${role} without touching the database`, async () => {
       sessionRole = role
       const res = await search('RD-0001')
