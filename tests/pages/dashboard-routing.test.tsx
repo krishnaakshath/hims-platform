@@ -35,14 +35,14 @@ describe('dashboard role routing', () => {
     vi.doMock('@/lib/queries/rooms', () => ({ listAvailableRooms: vi.fn(async () => [{ id: 1, ward: 'Ward A', roomNumber: '101', bedNumber: 'A' }]) }))
     vi.doMock('@/lib/queries/doctor-assignments', () => ({ listTodaysAssignments: vi.fn(async () => [
       { id: 1, patientId: 'RD-0001', providerId: 1, visitType: 'outpatient', urgency: 'urgent', reason: 'Test visit', status: 'pending', roomId: null, assignedByName: 'Taylor Nguyen', appointmentId: null, declineReason: null, createdAt: new Date() },
-    ]), countAllPendingAssignments: vi.fn(async () => 1) }))
+    ]), countAllPendingAssignments: vi.fn(async () => 1), countUnacknowledgedDeclines: vi.fn(async () => 0) }))
     vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 1, name: 'Dr. R. Kunam' }]), listAllProviders: vi.fn(async () => [{ id: 1, name: 'Dr. R. Kunam' }]) }))
     vi.doMock('@/lib/queries/insurance-eligibility', () => ({ countEligibilityFollowUps: vi.fn(async () => 0) }))
     const { default: DashboardHomePageWithFrontDesk } = await import('@/app/(dashboard)/page')
     const { render, screen } = await import('@testing-library/react')
     const jsx = await DashboardHomePageWithFrontDesk()
     render(jsx)
-    expect(screen.getByText(/rooms available/i)).toBeInTheDocument()
+    expect(screen.getByText(/opd tokens today/i)).toBeInTheDocument() // Wave E
     expect(screen.getByText('Test visit')).toBeInTheDocument()
   })
   // SP5

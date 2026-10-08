@@ -10,6 +10,7 @@ import { listExpiringOrExpiredCredentials } from '@/lib/queries/staff-credential
 import { AdminDashboard } from '@/components/dashboards/AdminDashboard'
 import { CoordinatorDashboard } from '@/components/dashboards/CoordinatorDashboard'
 import { FrontDeskDashboard } from '@/components/dashboards/FrontDeskDashboard'
+import { getHospitalSnapshot } from '@/lib/queries/hospital-kpis' // Wave E
 
 export default async function DashboardHomePage() {
   const session = await requireSessionOrRedirect()
@@ -50,13 +51,14 @@ export default async function DashboardHomePage() {
   const rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
   const rangeEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
 
-  const [data, templates, patients, appointmentsInRange, allStaff, expiringCredentials] = await Promise.all([
+  const [data, templates, patients, appointmentsInRange, allStaff, expiringCredentials, hospital] = await Promise.all([
     getDashboardData(),
     listFormTemplates(),
     listPatientsWithStatus(null),
     listAppointmentsInRange(rangeStart, rangeEnd),
     listAllUsers(),
     listExpiringOrExpiredCredentials(),
+    getHospitalSnapshot(session.role), // Wave E: scoped to what this role may open
   ])
   await logAudit(session, 'viewed home dashboard', null)
 
@@ -81,6 +83,7 @@ export default async function DashboardHomePage() {
     // here with this true, but the check is written against the full
     // allow-list to match the API route's own role gate exactly.
     canStartTelemedicine: (['admin', 'pi'] as string[]).includes(session.role),
+    hospital,
   }
 
   return session.role === 'admin'

@@ -127,7 +127,7 @@ export const PAGE_GATES: PageGateCase[] = [
   // billing/page.tsx:31 -- the billing home, same gate as its sub-pages
   { route: '/billing', load: () => import('@/app/(dashboard)/billing/page'), allowed: ['admin', 'crc', 'billing'] },
   // LeftNav.tsx:98 — showBilling
-  { route: '/billing/charges', load: () => import('@/app/(dashboard)/billing/charges/page'), allowed: ['admin', 'crc', 'billing'] },
+  { route: '/billing/charges', load: () => import('@/app/(dashboard)/billing/charges/page'), props: { searchParams: Promise.resolve({ status: 'draft' }) }, allowed: ['admin', 'crc', 'billing'] }, // Wave E: ?status=
   // LeftNav.tsx:98 — showBilling
   {
     route: '/billing/charges/[chargeId]',
@@ -226,7 +226,7 @@ export const PAGE_GATES: PageGateCase[] = [
   // LeftNav.tsx:41 — { href: '/inpatient/beds', roles: ['frontdesk', 'admin', 'crc', 'pi'] }
   { route: '/inpatient/beds', load: () => import('@/app/(dashboard)/inpatient/beds/page'), allowed: ['frontdesk', 'admin', 'crc', 'pi'] },
   // LeftNav.tsx:43 — { href: '/labs', roles: ['admin', 'crc', 'pi', 'labs'] }
-  { route: '/labs', load: () => import('@/app/(dashboard)/labs/page'), allowed: ['admin', 'crc', 'pi', 'labs'] },
+  { route: '/labs', load: () => import('@/app/(dashboard)/labs/page'), props: { searchParams: Promise.resolve({ stage: 'to-verify' }) }, allowed: ['admin', 'crc', 'pi', 'labs'] }, // Wave E: ?stage=
   // LeftNav.tsx:45 — { href: '/booking-requests', roles: ['frontdesk', 'admin', 'crc', 'pi'] }
   { route: '/booking-requests', load: () => import('@/app/(dashboard)/booking-requests/page'), allowed: ['frontdesk', 'admin', 'crc', 'pi'] },
   // LeftNav.tsx:65 — { href: '/audit-log', roles: ['admin'] }
@@ -290,7 +290,7 @@ export const PAGE_GATES: PageGateCase[] = [
     props: { params: Promise.resolve({ id: '1' }) },
     allowed: ['admin', 'crc', 'pi'],
   },
-  { route: '/pharmacy', load: () => import('@/app/(dashboard)/pharmacy/page'), allowed: ['crc', 'pi', 'admin', 'pharmacy'] },
+  { route: '/pharmacy', load: () => import('@/app/(dashboard)/pharmacy/page'), props: { searchParams: Promise.resolve({ stock: 'low' }) }, allowed: ['crc', 'pi', 'admin', 'pharmacy'] }, // Wave E: ?stock=
   { route: '/pharmacy/patient-lookup', load: () => import('@/app/(dashboard)/pharmacy/patient-lookup/page'), allowed: ['pharmacy', 'admin'] },
   { route: '/pharmacy/billing', load: () => import('@/app/(dashboard)/pharmacy/billing/page'), allowed: ['pharmacy', 'admin'] },
   // POLICY.md: Staff directory -- admin, crc, pi (view)

@@ -1,19 +1,25 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import { deadLinks } from '../../pages/dashboard-link-gates'
 
 vi.mock('@/lib/queries/rooms', () => ({ listAvailableRooms: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/doctor-assignments', () => ({
   listTodaysAssignments: vi.fn(async () => []),
   countAllPendingAssignments: vi.fn(async () => 0),
+  countUnacknowledgedDeclines: vi.fn(async () => 0),
 }))
+// Wave E: the hospital KPI snapshot (scoped to frontdesk) and patient labels.
+vi.mock('@/lib/queries/hospital-kpis', async () => {
+  const { HOSPITAL_SNAPSHOT } = await import('../../fixtures/hospital-snapshot')
+  return {
+    getHospitalSnapshot: vi.fn(async () => ({ ...HOSPITAL_SNAPSHOT, labs: null, billing: null, claims: null })),
+    listPatientLabels: vi.fn(async () => [{ id: 'RD-0042', name: 'Asha Verma', uhid: 'UH-000042' }]),
+  }
+})
 vi.mock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/booking-requests', () => ({ listBookingRequests: vi.fn(async () => []) }))
-vi.mock('@/lib/queries/staff-credentials', () => ({
-  listExpiringOrExpiredCredentials: vi.fn(async () => [
-    { id: 1, staffMemberId: 5, staffMemberName: 'Sam Staffer', credentialType: 'RN Licence', expiresOn: '2026-10-20', daysUntilExpiry: 15, status: 'expiring' },
-    { id: 2, staffMemberId: 6, staffMemberName: 'Old Timer', credentialType: 'CPR', expiresOn: '2026-09-01', daysUntilExpiry: -34, status: 'expired' },
-  ]),
-}))
+vi.mock('@/lib/queries/staff-credentials', () => ({ listExpiringOrExpiredCredentials: vi.fn(async () => { throw new Error('front desk must not load staff credentials') }) }))
+vi.mock('@/components/AddPatientButton', () => ({ AddPatientButton: () => <button type="button">Add New Patient</button> }))
 vi.mock('@/components/CheckInButton', () => ({ CheckInButton: () => null }))
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }), usePathname: () => '/' }))
 
@@ -39,28 +45,61 @@ function bookingRequest(id: number, status: 'pending' | 'confirmed' | 'declined'
 }
 
 describe('FrontDeskDashboard', () => {
-  it('renders the credentials tile and rows with no link to /staff (front desk cannot open the directory)', async () => {
+  it('Wave E P1-06: no staff credential data on the front desk home (a role barred from /staff)', async () => {
     const { FrontDeskDashboard } = await import('@/components/dashboards/FrontDeskDashboard')
     const { container } = render(await FrontDeskDashboard({ session: SESSION }))
-    expect(container.querySelector('a[href="/staff"]')).toBeNull()
+    expect(screen.queryByText(/credential/i)).toBeNull()
     expect(container.querySelector('a[href^="/staff"]')).toBeNull()
-    expect(screen.getByText('Expiring / Expired Credentials')).toBeInTheDocument()
-    expect(screen.getByText('Sam Staffer')).toBeInTheDocument()
-    expect(screen.getByText('Old Timer')).toBeInTheDocument()
-    expect(screen.getByText('15d left')).toBeInTheDocument()
-    expect(screen.getByText('Expired')).toBeInTheDocument()
-    // Sibling tiles keep their links.
-    expect(container.querySelector('a[href="/front-desk/assignments"]')).not.toBeNull()
   })
 
-  it('credentials tile counts every expired AND expiring credential the list shows, and says so', async () => {
+  it('Wave E P1-06: hospital KPIs for the desk -- OPD tokens, beds, collections, recalls -- and no labs, billing or claims', async () => {
+    const { FrontDeskDashboard } = await import('@/components/dashboards/FrontDeskDashboard')
+    const { container } = render(await FrontDeskDashboard({ session: SESSION }))
+    expect(tileValue('OPD tokens today')).toBe('42')
+    expect(tileValue('Follow-ups to recall')).toBe('9')
+    expect(tileValue('Collected today')).toBe('₹1,22,956.00')
+    expect(container.querySelector('a[href="/front-desk/follow-ups?bucket=overdue"]')).not.toBeNull()
+    expect(screen.queryByText('Lab orders open')).toBeNull()
+    expect(screen.queryByText('Draft invoices')).toBeNull()
+    expect(screen.getByText('General Ward')).toBeInTheDocument()
+  })
+
+  it('Wave E P1-06: quick actions -- register a patient, the queue display and the price lookup', async () => {
+    const { FrontDeskDashboard } = await import('@/components/dashboards/FrontDeskDashboard')
+    const { container } = render(await FrontDeskDashboard({ session: SESSION }))
+    expect(screen.getByRole('button', { name: 'Add New Patient' })).toBeInTheDocument()
+    expect(container.querySelector('a[href="/display/queue"]')).not.toBeNull()
+    expect(container.querySelector('a[href="/price-lookup"]')).not.toBeNull()
+  })
+
+  it('Wave E P1-06: today\'s assignments show patient name, UHID and token, never the raw internal id', async () => {
+    const { listTodaysAssignments } = await import('@/lib/queries/doctor-assignments')
+    vi.mocked(listTodaysAssignments).mockResolvedValueOnce([
+      { id: 1, patientId: 'RD-0042', providerId: 1, visitType: 'outpatient', urgency: 'routine', reason: 'Fever', status: 'pending', roomId: null, assignedByName: 'Fran', appointmentId: null, declineReason: null, queueTicketNumber: 17, createdAt: new Date() },
+    ] as never)
     const { FrontDeskDashboard } = await import('@/components/dashboards/FrontDeskDashboard')
     render(await FrontDeskDashboard({ session: SESSION }))
-    expect(tileValue('Expiring / Expired Credentials')).toBe('2')
-    expect(screen.queryByText('Credentials Expiring')).toBeNull()
+    expect(screen.getByText('Asha Verma')).toBeInTheDocument()
+    expect(screen.getByText('UH-000042')).toBeInTheDocument()
+    expect(screen.getByText('#17')).toBeInTheDocument()
+    expect(screen.queryByText('RD-0042')).toBeNull()
   })
 
-  it('booking tile counts ALL pending requests (not capped at the 5 previewed), and ignores resolved ones', async () => {
+  it('Wave E P1-25: the declines tile counts what the Assignments nav badge counts (unacknowledged declines)', async () => {
+    const { countUnacknowledgedDeclines } = await import('@/lib/queries/doctor-assignments')
+    vi.mocked(countUnacknowledgedDeclines).mockResolvedValueOnce(3)
+    const { FrontDeskDashboard } = await import('@/components/dashboards/FrontDeskDashboard')
+    render(await FrontDeskDashboard({ session: SESSION }))
+    expect(tileValue('Declines to acknowledge')).toBe('3')
+  })
+
+  it('every link on the front desk home opens a page frontdesk may open', async () => {
+    const { FrontDeskDashboard } = await import('@/components/dashboards/FrontDeskDashboard')
+    const { container } = render(await FrontDeskDashboard({ session: SESSION }))
+    expect(deadLinks(container, 'frontdesk')).toEqual([])
+  })
+
+  it('booking preview lists at most 5 pending requests, ignoring resolved ones; the tile shows the live pending count', async () => {
     const { listBookingRequests } = await import('@/lib/queries/booking-requests')
     vi.mocked(listBookingRequests).mockResolvedValueOnce([
       ...[1, 2, 3, 4, 5, 6, 7].map((id) => bookingRequest(id, 'pending')),
@@ -69,8 +108,7 @@ describe('FrontDeskDashboard', () => {
     ] as never)
     const { FrontDeskDashboard } = await import('@/components/dashboards/FrontDeskDashboard')
     render(await FrontDeskDashboard({ session: SESSION }))
-    expect(tileValue('Pending Booking Requests')).toBe('7')
-    // The preview list beside it still shows at most 5.
+    expect(tileValue('Booking requests')).toBe('6')
     expect(screen.getAllByText(/^Requester \d$/)).toHaveLength(5)
   })
 

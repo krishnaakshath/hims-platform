@@ -20,6 +20,9 @@ vi.mock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(as
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => null) }))
 // SP6: the "Coding queries for you" card; empty by default so no test reaches the DB.
 vi.mock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider: vi.fn(async () => []) }))
+// Wave E P1-02/P1-03: the doctor's own workload; empty by default (no DB).
+const EMPTY_WORKLOAD = { encountersToday: [], inpatients: [], resultsToVerify: [], labsAwaitingResult: 0, followUps: [], unsignedNotes: 0, draftNotes: [] }
+vi.mock('@/lib/queries/hospital-kpis', () => ({ getDoctorWorkload: vi.fn(async () => EMPTY_WORKLOAD) }))
 
 describe('PI dashboard (/doctor)', () => {
   it('keeps the panel stat tiles (content parity)', async () => {
@@ -195,40 +198,94 @@ describe('PI dashboard (/doctor)', () => {
     expect(screen.getByText('Urgent')).toBeInTheDocument()
   })
 
-  // SP5 Task 9: the pi verifies results, so their own patients' resulted orders are listed.
-  it('lists my patients\' resulted orders under "Results to verify", linking to /labs', async () => {
+  // SP5 Task 9 + Wave E P1-02: results to verify are the orders this doctor PLACED (orderedByProviderId,
+  // not the free-text panel match), critical first, from the workload query.
+  it('lists results on my own orders under "Results to verify", critical first, linking to the verify stage', async () => {
     vi.resetModules()
     vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam', userId: null })) }))
     vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
-    vi.doMock('@/lib/queries/patients', () => ({
-      listPatientsWithStatus: vi.fn(async () => [
-        { id: 'RD-0001', overallStatus: 'green', name: 'Jane Doe', dob: '1990-01-01', currentProvider: 'Dr. R. Kunam', referralType: null, lastCommunication: null, criteriaSummary: null },
-      ]),
-    }))
+    vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: vi.fn(async () => []) }))
     vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 1, name: 'Dr. R. Kunam' }]) }))
     vi.doMock('@/lib/queries/doctor-assignments', () => ({ listPendingAssignmentsForProvider: vi.fn(async () => []) }))
     vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(async () => []) }))
-    const row = (id: number, patientId: string, status: string, testName: string) => ({
-      id, patientId, patientName: patientId === 'RD-0001' ? 'Jane Doe' : 'Someone Else', status, testName, testCode: 'X', orderedAt: new Date('2099-05-01T04:30:00Z'),
-      collectedAt: new Date('2099-05-01T05:00:00Z'), category: 'lab', attachments: [], orderedByProviderId: 1, orderedByProviderName: 'Dr. R. Kunam',
-    })
-    vi.doMock('@/lib/queries/lab-orders', () => ({
-      listWorklist: vi.fn(async () => [
-        row(1, 'RD-0001', 'resulted', 'HbA1c mine'),
-        row(2, 'RD-0002', 'resulted', 'Lipids not mine'),
-        row(3, 'RD-0001', 'verified', 'TSH already verified'),
-      ]),
-    }))
-    vi.doMock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(async () => []) }))
     vi.doMock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 1, name: 'Dr. R. Kunam' })) }))
+    const getDoctorWorkload = vi.fn(async () => ({
+      ...EMPTY_WORKLOAD,
+      labsAwaitingResult: 4,
+      resultsToVerify: [
+        { orderId: 9, patientId: 'RD-0009', patientName: 'Kiran Rao', uhid: 'UH-9', testName: 'Potassium critical', flag: 'critical', resultedAt: '2026-10-08T05:00:00.000Z' },
+        { orderId: 1, patientId: 'RD-0001', patientName: 'Jane Doe', uhid: 'UH-1', testName: 'HbA1c mine', flag: 'normal', resultedAt: '2026-10-08T04:00:00.000Z' },
+      ],
+    }))
+    vi.doMock('@/lib/queries/hospital-kpis', () => ({ getDoctorWorkload }))
     const { default: Page } = await import('@/app/(dashboard)/doctor/page')
     const { render, screen } = await import('@testing-library/react')
     render(await Page())
+    expect(getDoctorWorkload).toHaveBeenCalledWith(1, 'Dr. R. Kunam')
     expect(screen.getByRole('heading', { name: 'Results to verify' })).toBeInTheDocument()
     expect(screen.getByText(/HbA1c mine/)).toBeInTheDocument()
-    expect(screen.queryByText(/Lipids not mine/)).toBeNull()
-    expect(screen.queryByText(/TSH already verified/)).toBeNull()
-    expect(screen.getByRole('link', { name: 'Verify' }).getAttribute('href')).toBe('/labs')
+    expect(screen.getByText('Critical')).toBeInTheDocument()
+    expect(screen.getByText(/4 orders awaiting results/i)).toBeInTheDocument()
+    // The old "Lab Reports for Review" counted merely-ordered tests: gone.
+    expect(screen.queryByRole('heading', { name: /lab reports for review/i })).toBeNull()
+    for (const link of screen.getAllByRole('link', { name: 'Verify' })) expect(link.getAttribute('href')).toBe('/labs?stage=to-verify')
+    // Action needed = critical results + urgent/emergency assignments (1 + 0).
+    const action = screen.getByText(/action needed/i).previousElementSibling
+    expect(action?.textContent).toBe('1')
+  })
+
+  it('Wave E P1-03: today\'s OPD, my inpatients, follow-ups due and unsigned notes, each linking into the chart', async () => {
+    vi.resetModules()
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam', userId: null })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 1, name: 'Dr. R. Kunam' }]) }))
+    vi.doMock('@/lib/queries/doctor-assignments', () => ({ listPendingAssignmentsForProvider: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(async () => []) }))
+    vi.doMock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 1, name: 'Dr. R. Kunam' })) }))
+    vi.doMock('@/lib/queries/hospital-kpis', () => ({
+      getDoctorWorkload: vi.fn(async () => ({
+        ...EMPTY_WORKLOAD,
+        encountersToday: [{ encounterId: 5, patientId: 'RD-0005', patientName: 'Opd Patient', uhid: 'UH-5', opdToken: 12, status: 'checked_in' }],
+        inpatients: [{ admissionId: 3, patientId: 'RD-0003', patientName: 'Ward Patient', uhid: 'UH-3', ward: 'General Ward', bed: '101-A', admittedAt: '2026-10-07T04:00:00.000Z' }],
+        followUps: [{ id: 8, patientId: 'RD-0008', patientName: 'Recall Patient', uhid: 'UH-8', bucket: 'overdue', dueDate: '2026-10-01', reason: 'BP review' }],
+        unsignedNotes: 1,
+        draftNotes: [{ noteId: 2, patientId: 'RD-0002', patientName: 'Note Patient', uhid: 'UH-2', createdAt: '2026-10-08T03:00:00.000Z' }],
+      })),
+    }))
+    const { default: Page } = await import('@/app/(dashboard)/doctor/page')
+    const { render, screen } = await import('@testing-library/react')
+    const { deadLinks } = await import('./dashboard-link-gates')
+    const { container } = render(await Page())
+    expect(screen.getByRole('heading', { name: /today's opd/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /opd patient/i })).toHaveAttribute('href', '/patients/RD-0005')
+    expect(screen.getByText('#12')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /my inpatients/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /ward patient/i })).toHaveAttribute('href', '/patients/RD-0003')
+    expect(screen.getByText(/General Ward · 101-A/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /follow-ups due/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /recall patient/i })).toHaveAttribute('href', '/patients/RD-0008')
+    expect(screen.getByText('Overdue')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /unsigned notes/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /note patient/i })).toHaveAttribute('href', '/patients/RD-0002/medical-record')
+    expect(container.querySelector('a[href="/encounters?doctor=1"]')).not.toBeNull()
+    expect(deadLinks(container, 'pi')).toEqual([])
+  })
+
+  it('Wave E: no workload query (and no panels) without a matched provider row', async () => {
+    vi.resetModules()
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. Nobody', userId: null })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/doctor-assignments', () => ({ listPendingAssignmentsForProvider: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(async () => []) }))
+    vi.doMock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => null) }))
+    const getDoctorWorkload = vi.fn(async () => EMPTY_WORKLOAD)
+    vi.doMock('@/lib/queries/hospital-kpis', () => ({ getDoctorWorkload }))
+    const { default: Page } = await import('@/app/(dashboard)/doctor/page')
+    const { render } = await import('@testing-library/react')
+    render(await Page())
+    expect(getDoctorWorkload).not.toHaveBeenCalled()
   })
 
   // SP6 Task 13

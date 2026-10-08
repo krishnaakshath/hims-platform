@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { AdminDashboard, type DashboardPageProps } from '@/components/dashboards/AdminDashboard'
+import { HOSPITAL_SNAPSHOT } from '../../fixtures/hospital-snapshot'
+import { deadLinks } from '../../pages/dashboard-link-gates'
 
 // jsdom has no ResizeObserver, but recharts' <ResponsiveContainer> (used by
 // PatientsByMonthChart / ScreeningBreakdownChart, both rendered here) requires
@@ -27,6 +29,7 @@ const baseProps: DashboardPageProps = {
   appointmentsInRange: [],
   staffByRole: [{ role: 'admin', count: 1 }, { role: 'pi', count: 2 }, { role: 'crc', count: 3 }],
   canStartTelemedicine: true,
+  hospital: HOSPITAL_SNAPSHOT,
 }
 
 describe('AdminDashboard', () => {
@@ -72,10 +75,38 @@ describe('AdminDashboard', () => {
     expect(screen.getAllByText('66')).toHaveLength(2)
   })
 
-  it('adds the new admin-only staff roster card, linking to the existing Settings page', () => {
+  it('Wave E P1-07: the staff card opens the staff directory (/staff), not Settings', () => {
     render(<AdminDashboard {...baseProps} />)
-    expect(screen.getByText(/staff/i)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /staff/i })).toHaveAttribute('href', '/settings')
+    expect(screen.getByRole('link', { name: /staff roster/i })).toHaveAttribute('href', '/staff')
+  })
+
+  it('Wave E P1-07: shows the live hospital KPIs, linked to the pages that list them', () => {
+    const { container } = render(<AdminDashboard {...baseProps} />)
+    expect(screen.getByText('OPD tokens today')).toBeInTheDocument()
+    expect(screen.getByText('Insurer outstanding')).toBeInTheDocument()
+    expect(screen.getByText('₹1,22,956.00')).toBeInTheDocument()
+    for (const href of ['/encounters', '/inpatient/beds', '/cash-desk', '/billing/invoices?status=draft', '/front-desk/follow-ups?bucket=overdue', '/labs', '/booking-requests', '/rcm']) {
+      expect(container.querySelector(`a[href="${href}"]`), href).not.toBeNull()
+    }
+    expect(screen.getByText('General Ward')).toBeInTheDocument()
+    expect(screen.getByText(/claim ageing/i)).toBeInTheDocument()
+  })
+
+  it('Wave E P1-07: a configuration card links tariffs, departments/UHID, staff, audit log, beds, check-in and follow-ups', () => {
+    const { container } = render(<AdminDashboard {...baseProps} />)
+    for (const href of ['/tariffs', '/settings', '/staff', '/audit-log', '/inpatient/beds', '/front-desk/check-in', '/front-desk/follow-ups', '/billing/rules', '/rcm/settings']) {
+      expect(container.querySelector(`a[href="${href}"]`), href).not.toBeNull()
+    }
+  })
+
+  it('Wave E P1-07: trial widgets live under a Research tab', () => {
+    render(<AdminDashboard {...baseProps} />)
+    expect(screen.getByRole('button', { name: /research/i })).toBeInTheDocument()
+  })
+
+  it('every link on the admin home opens a page admin may open', () => {
+    const { container } = render(<AdminDashboard {...baseProps} />)
+    expect(deadLinks(container, 'admin')).toEqual([])
   })
 
   it('renders the Credential Expiry widget with each entry\'s staff name, credential type, and expiry phrase', () => {

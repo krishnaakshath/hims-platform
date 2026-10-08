@@ -7,8 +7,9 @@ export interface TabDef {
   content: ReactNode
 }
 
-export function Tabs({ tabs }: { tabs: TabDef[] }) {
-  const [active, setActive] = useState(tabs[0]?.id)
+// `initialId` (Wave E): the tab to open first, e.g. from a URL parameter; defaults to the first tab.
+export function Tabs({ tabs, initialId }: { tabs: TabDef[]; initialId?: string }) {
+  const [active, setActive] = useState(initialId && tabs.some((t) => t.id === initialId) ? initialId : tabs[0]?.id)
   return (
     <div>
       <div className="mb-4 flex items-center gap-1 overflow-x-auto rounded-lg border border-primary/10 bg-card/80 p-1 text-sm backdrop-blur-sm">
