@@ -53,6 +53,14 @@ import { POST as mockPayment } from '@/app/api/mock-payments/route'
 import { POST as postCarePlan } from '@/app/api/patients/[anonId]/care-plans/route'
 import { POST as postNote } from '@/app/api/patients/[anonId]/notes/route'
 import { POST as postLabOrder } from '@/app/api/patients/[anonId]/lab-orders/route'
+// SP5: lab lifecycle, home collection and lab report id routes
+import { POST as collectLabOrderRoute } from '@/app/api/lab-orders/[id]/collect/route'
+import { POST as verifyLabOrderRoute } from '@/app/api/lab-orders/[id]/verify/route'
+import { POST as releaseLabReportRoute } from '@/app/api/lab-requisitions/[id]/report/route'
+import { GET as downloadLabReportRoute } from '@/app/api/lab-reports/[id]/download/route'
+import { POST as cancelHomeVisitRoute } from '@/app/api/home-collections/[id]/cancel/route'
+import { POST as collectHomeVisitRoute } from '@/app/api/home-collections/[id]/collect/route'
+// end SP5
 import { POST as postPrescription } from '@/app/api/patients/[anonId]/prescriptions/route'
 import { PATCH as stopPrescription } from '@/app/api/patients/[anonId]/prescriptions/[id]/route'
 import { POST as postPatient } from '@/app/api/patients/route'
@@ -198,6 +206,14 @@ const ID_CASES: IdCase[] = [
   { name: 'POST /api/inpatient/rooms/[id]/block', call: (id) => blockRoom(send('POST', '/x', '{}'), ctx({ id })) },
   { name: 'PATCH /api/staff/[id]', call: (id) => patchStaff(send('PATCH', '/x', '{}'), ctx({ id })) },
   { name: 'PATCH /api/patients/[anonId]/prescriptions/[id]', call: (id) => stopPrescription(send('PATCH', '/x'), ctx({ anonId: BOGUS_PATIENT, id })) },
+  // SP5
+  { name: 'POST /api/lab-orders/[id]/collect', call: (id) => collectLabOrderRoute(send('POST', '/x'), ctx({ id })) },
+  { name: 'POST /api/lab-orders/[id]/verify', call: (id) => verifyLabOrderRoute(send('POST', '/x'), ctx({ id })) },
+  { name: 'POST /api/lab-requisitions/[id]/report', call: (id) => releaseLabReportRoute(send('POST', '/x'), ctx({ id })) },
+  { name: 'GET /api/lab-reports/[id]/download', call: (id) => downloadLabReportRoute(send('GET', '/x'), ctx({ id })) },
+  { name: 'POST /api/home-collections/[id]/cancel', call: (id) => cancelHomeVisitRoute(send('POST', '/x', '{"reason":"patient_request"}'), ctx({ id })) },
+  { name: 'POST /api/home-collections/[id]/collect', call: (id) => collectHomeVisitRoute(send('POST', '/x', '{"sampleIds":[]}'), ctx({ id })) },
+  // end SP5
 ]
 
 describe.each(ID_CASES)('$name (bad path ids)', (c) => {
