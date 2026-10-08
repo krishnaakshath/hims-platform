@@ -11,6 +11,8 @@ import {
   chargeLines, invoices, patientPayments, refunds,
   // SP6
   codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures,
+  // SP7
+  patientPolicies,
 } from '@/db/schema'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
@@ -480,6 +482,10 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   await db.delete(chargeLines).where(eq(chargeLines.patientId, anonId))
   await db.delete(invoices).where(eq(invoices.patientId, anonId))
   // end SP4
+  // SP7 (ruling 11): a patient's policies go with the patient (nothing else references them
+  // once the claim and pre-auth rows of a deletable patient are gone).
+  await db.delete(patientPolicies).where(eq(patientPolicies.patientId, anonId))
+  // end SP7
 
   const screenings = await db.select({ id: patientTrialScreenings.id, trialId: patientTrialScreenings.trialId }).from(patientTrialScreenings).where(eq(patientTrialScreenings.patientId, anonId))
   const screeningIds = screenings.map((s) => s.id)

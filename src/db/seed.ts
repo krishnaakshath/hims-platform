@@ -47,6 +47,8 @@ import {
   invoices,
   documentCounters,
   // end SP4
+  // SP7
+  patientPolicies,
   // SP3
   encounters,
   followUpOrders,
@@ -981,6 +983,10 @@ async function clearExistingData() {
   // end SP6
   await db.delete(encounters)
   await db.delete(appointments)
+  // SP7: policies reference patients and payers. The payer master (payers and their SP7
+  // profiles, networks, contacts, requirements) and reason codes are reference data and are
+  // never cleared here, like payers themselves.
+  await db.delete(patientPolicies)
   await db.delete(patients)
   // staffCredentials/staffMembers FK into providers/users, so both must be
   // deleted before providers/users below -- previously missing here, which

@@ -968,6 +968,10 @@ export const billingSettings = pgTable('billing_settings', {
   pharmacyHsn: text('pharmacy_hsn').default('3004').notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   updatedByName: text('updated_by_name'),
+  // SP7 hospital identifiers for claims (scripts/migrations/2026-10-09-sp7-b-payers-policies.sql)
+  rohiniId: text('rohini_id'),
+  hfrId: text('hfr_id'),
+  // end SP7
 }, (t) => [
   check('billing_settings_singleton', sql`${t.id} = 1`),
   check('billing_settings_consultation_window_range', sql`${t.consultationWindowDays} BETWEEN 1 AND 365`),
@@ -1368,6 +1372,147 @@ export type CodingQueryRow = typeof codingQueries.$inferSelect
 export type CodingQueryResponseRow = typeof codingQueryResponses.$inferSelect
 export type ServiceProcedureCodeRow = typeof serviceProcedureCodes.$inferSelect
 // end SP6
+
+// SP7 RCM, insurer/TPA and claims. Migration B: scripts/migrations/2026-10-09-sp7-b-payers-policies.sql
+// (payer profiles, networks, contacts, document requirements, reason codes, patient policies).
+// A payer becomes an insurer, TPA, government scheme or corporate through a 1:1 profile row;
+// payers.payer_type (the US enum) is ignored by SP7 (ruling 6). Money is bigint paise.
+export const payerKindEnum = pgEnum('payer_kind', ['insurer', 'tpa', 'government_scheme', 'corporate'])
+export const submissionChannelEnum = pgEnum('claim_submission_channel', ['portal', 'email', 'nhcx', 'courier', 'hand_delivery'])
+export const empanelmentStatusEnum = pgEnum('empanelment_status', ['empanelled', 'pending', 'suspended', 'not_empanelled'])
+export const policyTypeEnum = pgEnum('policy_type', ['individual', 'family_floater', 'group_corporate', 'government_scheme'])
+export const policyRelationshipEnum = pgEnum('policy_relationship', ['self', 'spouse', 'child', 'parent', 'sibling', 'other'])
+export const policyPriorityEnum = pgEnum('policy_priority', ['primary', 'secondary'])
+export const policyStatusEnum = pgEnum('policy_status', ['active', 'inactive'])
+export const claimTypeEnum = pgEnum('claim_type', ['ipd', 'daycare', 'opd'])
+export const claimDocumentKindEnum = pgEnum('claim_document_kind', [
+  'id_proof', 'policy_card', 'claim_form', 'discharge_summary', 'itemised_bill', 'investigation_reports',
+  'preauth_approval', 'operation_notes', 'prescription', 'query_response', 'appeal_letter', 'settlement_advice', 'other',
+])
+export const rcmReasonCategoryEnum = pgEnum('rcm_reason_category', ['disallowance', 'rejection', 'query', 'write_off'])
+
+export const payerProfiles = pgTable('payer_profiles', {
+  payerId: integer('payer_id').primaryKey().references(() => payers.id),
+  kind: payerKindEnum('kind').notNull(),
+  shortName: text('short_name'),
+  irdaiRegistrationNo: text('irdai_registration_no'),
+  nhcxParticipantCode: text('nhcx_participant_code'),
+  defaultChannel: submissionChannelEnum('default_channel').default('portal').notNull(),
+  portalUrl: text('portal_url'),
+  claimsEmail: text('claims_email'),
+  empanelmentStatus: empanelmentStatusEnum('empanelment_status').default('pending').notNull(),
+  empanelledFrom: date('empanelled_from'),
+  empanelledTo: date('empanelled_to'),
+  agreementReference: text('agreement_reference'),
+  preauthSlaHours: integer('preauth_sla_hours').default(1).notNull(),
+  claimSettlementSlaDays: integer('claim_settlement_sla_days').default(30).notNull(),
+  queryResponseDays: integer('query_response_days').default(7).notNull(),
+  submissionWindowDays: integer('submission_window_days').default(15).notNull(),
+  requiresAbha: boolean('requires_abha').default(false).notNull(),
+  requiresPreauthForIpd: boolean('requires_preauth_for_ipd').default(true).notNull(),
+  active: boolean('active').default(true).notNull(),
+  notes: text('notes'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  updatedByName: text('updated_by_name').notNull(),
+}, (t) => [
+  check('payer_profiles_sla_ranges', sql`${t.preauthSlaHours} BETWEEN 1 AND 720 AND ${t.claimSettlementSlaDays} BETWEEN 1 AND 365 AND ${t.queryResponseDays} BETWEEN 1 AND 90 AND ${t.submissionWindowDays} BETWEEN 1 AND 365`),
+  check('payer_profiles_empanelment_dates', sql`${t.empanelledTo} IS NULL OR ${t.empanelledFrom} IS NULL OR ${t.empanelledTo} >= ${t.empanelledFrom}`),
+])
+
+// Which TPAs service which insurer.
+export const payerNetworks = pgTable('payer_networks', {
+  id: serial('id').primaryKey(),
+  insurerPayerId: integer('insurer_payer_id').notNull().references(() => payers.id),
+  tpaPayerId: integer('tpa_payer_id').notNull().references(() => payers.id),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('payer_networks_pair_unique').on(t.insurerPayerId, t.tpaPayerId),
+])
+
+export const payerContacts = pgTable('payer_contacts', {
+  id: serial('id').primaryKey(),
+  payerId: integer('payer_id').notNull().references(() => payers.id),
+  name: text('name').notNull(),
+  designation: text('designation'),
+  phone: text('phone'),
+  email: text('email'),
+  isEscalation: boolean('is_escalation').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('payer_contacts_payer_idx').on(t.payerId),
+])
+
+// Per-payer overrides of DEFAULT_REQUIRED_DOCUMENTS (src/lib/rcm/readiness.ts).
+export const payerDocumentRequirements = pgTable('payer_document_requirements', {
+  id: serial('id').primaryKey(),
+  payerId: integer('payer_id').notNull().references(() => payers.id),
+  claimType: claimTypeEnum('claim_type').notNull(),
+  documentKind: claimDocumentKindEnum('document_kind').notNull(),
+  required: boolean('required').notNull(),
+  updatedByName: text('updated_by_name').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('payer_document_requirements_unique').on(t.payerId, t.claimType, t.documentKind),
+])
+
+// Reference data, seeded by migration B; never cleared by the seed.
+export const rcmReasonCodes = pgTable('rcm_reason_codes', {
+  code: text('code').primaryKey(),
+  label: text('label').notNull(),
+  category: rcmReasonCategoryEnum('category').notNull(),
+  patientRecoverableDefault: boolean('patient_recoverable_default').notNull(),
+  active: boolean('active').default(true).notNull(),
+  sortOrder: integer('sort_order').notNull(),
+}, (t) => [
+  check('rcm_reason_codes_code_format', sql`${t.code} ~ '^[A-Z0-9_]{2,16}$'`),
+])
+
+// A patient's insurance policy / card. Card images live in the private blob store; the URL
+// never leaves the server. One active primary per patient (partial unique index).
+export const patientPolicies = pgTable('patient_policies', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  insurerPayerId: integer('insurer_payer_id').notNull().references(() => payers.id),
+  tpaPayerId: integer('tpa_payer_id').references(() => payers.id),
+  policyNumber: text('policy_number').notNull(),
+  memberId: text('member_id').notNull(),
+  planName: text('plan_name'),
+  policyType: policyTypeEnum('policy_type').notNull(),
+  corporateName: text('corporate_name'),
+  employeeId: text('employee_id'),
+  holderName: text('holder_name').notNull(),
+  relationship: policyRelationshipEnum('relationship').notNull(),
+  validFrom: date('valid_from').notNull(),
+  validTo: date('valid_to').notNull(),
+  sumInsuredPaise: bigint('sum_insured_paise', { mode: 'number' }),
+  copayBp: integer('copay_bp'),
+  roomRentLimitPaise: bigint('room_rent_limit_paise', { mode: 'number' }),
+  priority: policyPriorityEnum('priority').default('primary').notNull(),
+  status: policyStatusEnum('status').default('active').notNull(),
+  cardFrontBlobUrl: text('card_front_blob_url'),
+  cardFrontSha256: text('card_front_sha256'),
+  cardBackBlobUrl: text('card_back_blob_url'),
+  cardBackSha256: text('card_back_sha256'),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  updatedByName: text('updated_by_name'),
+}, (t) => [
+  index('patient_policies_patient_idx').on(t.patientId),
+  uniqueIndex('patient_policies_one_active_primary').on(t.patientId).where(sql`status = 'active' AND priority = 'primary'`),
+  check('patient_policies_dates', sql`${t.validTo} >= ${t.validFrom}`),
+  check('patient_policies_amounts', sql`(${t.sumInsuredPaise} IS NULL OR ${t.sumInsuredPaise} BETWEEN 0 AND 1000000000000) AND (${t.roomRentLimitPaise} IS NULL OR ${t.roomRentLimitPaise} BETWEEN 0 AND 1000000000000) AND (${t.copayBp} IS NULL OR ${t.copayBp} BETWEEN 0 AND 10000)`),
+  check('patient_policies_card_pairs', sql`(${t.cardFrontBlobUrl} IS NULL) = (${t.cardFrontSha256} IS NULL) AND (${t.cardBackBlobUrl} IS NULL) = (${t.cardBackSha256} IS NULL)`),
+])
+
+export type PayerProfileRow = typeof payerProfiles.$inferSelect
+export type PayerNetworkRow = typeof payerNetworks.$inferSelect
+export type PayerContactRow = typeof payerContacts.$inferSelect
+export type PayerDocumentRequirementRow = typeof payerDocumentRequirements.$inferSelect
+export type RcmReasonCodeRow = typeof rcmReasonCodes.$inferSelect
+export type PatientPolicyRow = typeof patientPolicies.$inferSelect
+// end SP7 migration B
 
 export const noteTypeEnum = pgEnum('note_type', ['progress', 'nursing', 'intake'])
 export const noteStatusEnum = pgEnum('note_status', ['draft', 'signed'])

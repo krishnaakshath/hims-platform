@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS: BillingSettingsRow = {
   id: 1, legalName: null, gstin: null, stateCode: null, address: null, placeOfSupplyMode: 'location_of_service',
   consultationWindowDays: 30, ipdDepositThresholdPaise: 0, roomRentServiceId: null, pharmacyGstRateBp: 500, pharmacyHsn: '3004',
   updatedAt: new Date(0), updatedByName: null,
+  rohiniId: null, hfrId: null, // SP7
 }
 
 export async function getBillingSettings(executor: WriteExecutor = getDb()): Promise<BillingSettingsRow> {
