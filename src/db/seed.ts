@@ -48,7 +48,8 @@ import {
   documentCounters,
   // end SP4
   // SP7
-  patientPolicies,
+  patientPolicies, preauths, preauthEvents, preauthDocuments, rcmQueries, rcmQueryResponses, claims, claimInvoices,
+  claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
   // SP3
   encounters,
   followUpOrders,
@@ -928,6 +929,24 @@ async function clearExistingData() {
   // service link is released before service_catalog is deleted below.
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+    // SP7: claims and pre-auths reference invoices, policies, encounters, admissions, users and
+    // charge lines reference pre-auths, so they go first, in purgeRcmFixtures' order.
+    await tx.delete(claimWriteOffs)
+    await tx.delete(claimSettlements)
+    await tx.delete(claimDisallowances)
+    await tx.delete(claimDocuments)
+    await tx.delete(preauthDocuments)
+    await tx.delete(rcmQueryResponses)
+    await tx.delete(rcmQueries)
+    await tx.delete(claimEvents)
+    await tx.delete(claimDispatches)
+    await tx.delete(claimSubmissions)
+    await tx.delete(claimInvoices)
+    await tx.update(chargeLines).set({ preauthId: null })
+    await tx.delete(claims)
+    await tx.delete(preauthEvents)
+    await tx.delete(preauths)
+    // end SP7
     await tx.delete(refunds)
     await tx.delete(patientPayments)
     await tx.delete(creditNotes)

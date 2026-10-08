@@ -16,7 +16,9 @@ describe('SP4 migration A (charge lines)', () => {
     const s = readMigration(MIGRATION)
     expect(idempotencyProblems(s)).toEqual([])
     // charge_lines.invoice_id (and its FK and index) arrive with migration B (Task 5).
-    for (const t of TABLES) expect(missingColumns(t, s).filter((c) => !(t === chargeLines && c === 'invoice_id'))).toEqual([])
+    // SP7 adds billing_settings.rohini_id / hfr_id (sp7 migration B) and charge_lines.preauth_id (sp7 migration C).
+    const later = new Set(['invoice_id', 'preauth_id', 'rohini_id', 'hfr_id'])
+    for (const t of TABLES) expect(missingColumns(t, s).filter((c) => !later.has(c))).toEqual([])
     for (const c of ['requires_preauth', 'max_quantity', 'gstin', 'state_code']) expect(s).toContain(c)
   })
 
@@ -27,7 +29,7 @@ describe('SP4 migration A (charge lines)', () => {
   })
 
   it('every FK, unique, check and index name of the new tables is in the SQL and fits 63 chars', () => {
-    const s = readMigration(MIGRATION) + readMigration('2026-10-08-sp4-b-invoices-ledger.sql')
+    const s = readMigration(MIGRATION) + readMigration('2026-10-08-sp4-b-invoices-ledger.sql') + readMigration('2026-10-09-sp7-c-preauth-claims.sql') // SP7: charge_lines.preauth_id
     for (const t of [...TABLES, serviceCatalog]) {
       const c = getTableConfig(t)
       const names = [

@@ -3,6 +3,8 @@ import { sql } from 'drizzle-orm'
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
+// SP7
+import type { ClaimSnapshot, CodedEntry, EstimateLine, PreauthSnapshot } from '../lib/rcm/snapshot'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
 export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'rcm']) // SP6: + coder (scripts/migrations/2026-10-07-sp6-a-coder-role.sql); SP7: + rcm (2026-10-09-sp7-a-rcm-role.sql)
@@ -1027,6 +1029,9 @@ export const chargeLines = pgTable('charge_lines', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   // Migration B: the draft or issued invoice this line is on (null = unbilled).
   invoiceId: integer('invoice_id').references(() => invoices.id),
+  // SP7 (ruling 7): the approved pre-auth a payer line was validated against
+  // (scripts/migrations/2026-10-09-sp7-c-preauth-claims.sql).
+  preauthId: integer('preauth_id').references(() => preauths.id),
 }, (t) => [
   index('charge_lines_patient_idx').on(t.patientId),
   index('charge_lines_encounter_idx').on(t.encounterId),
@@ -1513,6 +1518,358 @@ export type PayerDocumentRequirementRow = typeof payerDocumentRequirements.$infe
 export type RcmReasonCodeRow = typeof rcmReasonCodes.$inferSelect
 export type PatientPolicyRow = typeof patientPolicies.$inferSelect
 // end SP7 migration B
+
+// SP7 migration C: scripts/migrations/2026-10-09-sp7-c-preauth-claims.sql (pre-auths, queries,
+// claims, invoice links, submission versions, dispatches, events, documents, disallowances,
+// settlements, write-offs). Pre-auth and claim numbers come from Postgres sequences (ruling 8).
+// MIGRATION-ONLY IMMUTABILITY (like SP4's issued-document triggers; drizzle cannot express them):
+//   - claim_submissions, claim_events, claim_disallowances, preauth_events, preauth_documents:
+//     no UPDATE or DELETE at all (sp7_append_only);
+//   - claim_dispatches: no DELETE; an UPDATE only while insurer_reference is null and only of
+//     insurer_reference / acknowledged_on / acknowledged_by_name (sp7_dispatch_guard);
+//   - claim_settlements: no DELETE; an UPDATE only while reconciled_at is null and only of
+//     bank_credit_date / reconciled_at / reconciled_by_name (sp7_settlement_guard);
+//   - claim_write_offs: no DELETE; an UPDATE only while status = 'requested' and only of the
+//     decision columns (sp7_write_off_guard).
+// Each raises SQLSTATE 55000 unless the transaction ran
+// `select set_config('hims.allow_document_purge', 'on', true)` (seed clear, deletePatient's
+// purge of a deletable patient's drafts, and test fixtures only).
+export const preauthStatusEnum = pgEnum('preauth_status', [
+  'draft', 'requested', 'queried', 'approved', 'enhancement_requested', 'enhancement_queried', 'enhanced', 'rejected', 'cancelled',
+])
+export const preauthActionEnum = pgEnum('preauth_action', [
+  'request', 'record_query', 'respond_query', 'approve', 'reject', 'request_enhancement', 'approve_enhancement', 'reject_enhancement', 'cancel',
+])
+export const claimStatusEnum = pgEnum('claim_status', [
+  'draft', 'submitted', 'queried', 'approved', 'partially_approved', 'rejected', 'appealed', 'settled', 'closed', 'withdrawn',
+])
+export const claimEventActionEnum = pgEnum('claim_event_action', [
+  'submit', 'record_query', 'respond_query', 'record_approval', 'record_partial_approval', 'record_rejection',
+  'appeal', 'record_settlement', 'close', 'reopen', 'withdraw', 'note',
+])
+export const submissionKindEnum = pgEnum('claim_submission_kind', ['initial', 'query_response', 'appeal', 'resubmission'])
+export const rcmQueryStatusEnum = pgEnum('rcm_query_status', ['open', 'answered', 'closed'])
+export const writeOffStatusEnum = pgEnum('claim_write_off_status', ['requested', 'approved', 'rejected'])
+export const documentSourceEnum = pgEnum('claim_document_source', ['upload', 'invoice', 'lab_report', 'discharge_summary', 'preauth_letter', 'policy_card', 'waiver'])
+export const ID_PROOF_TYPE_VALUES = ['pan', 'voter_id', 'passport', 'driving_licence', 'masked_uid', 'other_government_id'] as const
+
+export const preauthNumberSeq = pgSequence('preauth_number_seq')
+export const claimNumberSeq = pgSequence('claim_number_seq')
+
+export const preauths = pgTable('preauths', {
+  id: serial('id').primaryKey(),
+  preauthNumber: text('preauth_number').notNull().unique(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  policyId: integer('policy_id').notNull().references(() => patientPolicies.id),
+  insurerPayerId: integer('insurer_payer_id').notNull().references(() => payers.id),
+  tpaPayerId: integer('tpa_payer_id').references(() => payers.id),
+  admissionId: integer('admission_id').references(() => admissions.id),
+  encounterId: integer('encounter_id').references(() => encounters.id),
+  claimType: claimTypeEnum('claim_type').notNull(),
+  status: preauthStatusEnum('status').default('draft').notNull(),
+  plannedAdmissionDate: date('planned_admission_date').notNull(),
+  expectedLengthOfStayDays: integer('expected_length_of_stay_days').notNull(),
+  roomCategoryCode: text('room_category_code'),
+  treatingProviderId: integer('treating_provider_id').notNull().references(() => providers.id),
+  diagnoses: jsonb('diagnoses').$type<CodedEntry[]>().default([]).notNull(),
+  procedures: jsonb('procedures').$type<CodedEntry[]>().default([]).notNull(),
+  provisionalDiagnosisText: text('provisional_diagnosis_text'),
+  estimateLines: jsonb('estimate_lines').$type<EstimateLine[]>().notNull(),
+  estimatedPaise: bigint('estimated_paise', { mode: 'number' }).notNull(),
+  requestedPaise: bigint('requested_paise', { mode: 'number' }).notNull(),
+  approvedPaise: bigint('approved_paise', { mode: 'number' }),
+  approvalReference: text('approval_reference'),
+  validUntil: date('valid_until'),
+  firstRequestedAt: timestamp('first_requested_at'),
+  lastRequestedAt: timestamp('last_requested_at'),
+  decidedAt: timestamp('decided_at'),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  index('preauths_patient_idx').on(t.patientId),
+  index('preauths_status_idx').on(t.status),
+  uniqueIndex('preauths_insurer_reference_unique').on(t.insurerPayerId, sql`lower(approval_reference)`).where(sql`approval_reference IS NOT NULL`),
+  check('preauths_approved_fields', sql`${t.status} NOT IN ('approved', 'enhancement_requested', 'enhancement_queried', 'enhanced') OR (${t.approvedPaise} IS NOT NULL AND ${t.approvalReference} IS NOT NULL AND ${t.validUntil} IS NOT NULL)`),
+  check('preauths_amounts_range', sql`${t.estimatedPaise} BETWEEN 0 AND 1000000000000 AND ${t.requestedPaise} BETWEEN 0 AND 1000000000000 AND (${t.approvedPaise} IS NULL OR ${t.approvedPaise} BETWEEN 0 AND 1000000000000) AND ${t.expectedLengthOfStayDays} BETWEEN 1 AND 365`),
+])
+
+export const preauthEvents = pgTable('preauth_events', {
+  id: serial('id').primaryKey(),
+  preauthId: integer('preauth_id').notNull().references(() => preauths.id),
+  action: preauthActionEnum('action').notNull(),
+  fromStatus: preauthStatusEnum('from_status'),
+  toStatus: preauthStatusEnum('to_status').notNull(),
+  amountPaise: bigint('amount_paise', { mode: 'number' }),
+  reasonCode: text('reason_code').references(() => rcmReasonCodes.code),
+  note: text('note'),
+  snapshot: jsonb('snapshot').$type<PreauthSnapshot>(),
+  snapshotSha256: text('snapshot_sha256'),
+  byName: text('by_name').notNull(),
+  byUserId: integer('by_user_id').references(() => users.id),
+  at: timestamp('at').defaultNow().notNull(),
+}, (t) => [
+  index('preauth_events_preauth_idx').on(t.preauthId),
+  check('preauth_events_note_len', sql`${t.note} IS NULL OR length(${t.note}) <= 1000`),
+  check('preauth_events_snapshot_pair', sql`(${t.snapshot} IS NULL) = (${t.snapshotSha256} IS NULL)`),
+])
+
+// An insurer query on a pre-auth or a claim (exactly one subject).
+export const rcmQueries = pgTable('rcm_queries', {
+  id: serial('id').primaryKey(),
+  preauthId: integer('preauth_id').references(() => preauths.id),
+  claimId: integer('claim_id').references(() => claims.id),
+  question: text('question').notNull(),
+  raisedOn: date('raised_on').notNull(),
+  dueOn: date('due_on').notNull(),
+  status: rcmQueryStatusEnum('status').default('open').notNull(),
+  answeredAt: timestamp('answered_at'),
+  closedAt: timestamp('closed_at'),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('rcm_queries_claim_idx').on(t.claimId),
+  index('rcm_queries_preauth_idx').on(t.preauthId),
+  check('rcm_queries_one_subject', sql`(${t.preauthId} IS NULL) <> (${t.claimId} IS NULL)`),
+  check('rcm_queries_due_after_raised', sql`${t.dueOn} >= ${t.raisedOn}`),
+  check('rcm_queries_question_len', sql`length(${t.question}) BETWEEN 1 AND 2000`),
+])
+
+export const rcmQueryResponses = pgTable('rcm_query_responses', {
+  id: serial('id').primaryKey(),
+  queryId: integer('query_id').notNull(),
+  body: text('body').notNull(),
+  respondedOn: date('responded_on').notNull(),
+  submissionId: integer('submission_id').references(() => claimSubmissions.id),
+  byName: text('by_name').notNull(),
+  at: timestamp('at').defaultNow().notNull(),
+}, (t) => [
+  foreignKey({ name: 'rcm_query_responses_query_fk', columns: [t.queryId], foreignColumns: [rcmQueries.id] }),
+  index('rcm_query_responses_query_idx').on(t.queryId),
+])
+
+export const preauthDocuments = pgTable('preauth_documents', {
+  id: serial('id').primaryKey(),
+  preauthId: integer('preauth_id').notNull().references(() => preauths.id),
+  kind: claimDocumentKindEnum('kind').notNull(),
+  title: text('title').notNull(),
+  blobUrl: text('blob_url').notNull(),
+  contentType: text('content_type').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  sha256: text('sha256').notNull(),
+  queryResponseId: integer('query_response_id').references(() => rcmQueryResponses.id),
+  uploadedByName: text('uploaded_by_name').notNull(),
+  uploadedAt: timestamp('uploaded_at').defaultNow().notNull(),
+}, (t) => [
+  index('preauth_documents_preauth_idx').on(t.preauthId),
+])
+
+export const claims = pgTable('claims', {
+  id: serial('id').primaryKey(),
+  claimNumber: text('claim_number').notNull().unique(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  policyId: integer('policy_id').notNull().references(() => patientPolicies.id),
+  insurerPayerId: integer('insurer_payer_id').notNull().references(() => payers.id),
+  tpaPayerId: integer('tpa_payer_id').references(() => payers.id),
+  billingPayerId: integer('billing_payer_id').notNull().references(() => payers.id),
+  claimType: claimTypeEnum('claim_type').notNull(),
+  admissionId: integer('admission_id').references(() => admissions.id),
+  encounterId: integer('encounter_id').references(() => encounters.id),
+  preauthId: integer('preauth_id').references(() => preauths.id),
+  status: claimStatusEnum('status').default('draft').notNull(),
+  claimedPaise: bigint('claimed_paise', { mode: 'number' }).default(0).notNull(),
+  approvedPaise: bigint('approved_paise', { mode: 'number' }),
+  disallowedPaise: bigint('disallowed_paise', { mode: 'number' }).default(0).notNull(),
+  nonRecoverableDisallowedPaise: bigint('non_recoverable_disallowed_paise', { mode: 'number' }).default(0).notNull(),
+  settledPaise: bigint('settled_paise', { mode: 'number' }).default(0).notNull(),
+  writtenOffPaise: bigint('written_off_paise', { mode: 'number' }).default(0).notNull(),
+  currentDecisionEventId: integer('current_decision_event_id'), // no FK: avoids a claims <-> claim_events cycle
+  currentVersion: integer('current_version').default(0).notNull(),
+  rowVersion: integer('row_version').default(0).notNull(),
+  insurerClaimReference: text('insurer_claim_reference'),
+  firstSubmittedAt: timestamp('first_submitted_at'),
+  lastStatusAt: timestamp('last_status_at'),
+  closedAt: timestamp('closed_at'),
+  createdByName: text('created_by_name').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  index('claims_patient_idx').on(t.patientId),
+  index('claims_status_idx').on(t.status),
+  index('claims_billing_payer_idx').on(t.billingPayerId),
+  check('claims_context', sql`(${t.claimType} = 'opd' AND ${t.encounterId} IS NOT NULL AND ${t.admissionId} IS NULL) OR (${t.claimType} IN ('ipd', 'daycare') AND ${t.admissionId} IS NOT NULL)`),
+  check('claims_amounts_nonneg', sql`${t.claimedPaise} BETWEEN 0 AND 1000000000000 AND (${t.approvedPaise} IS NULL OR ${t.approvedPaise} >= 0) AND ${t.disallowedPaise} >= 0 AND ${t.nonRecoverableDisallowedPaise} >= 0 AND ${t.settledPaise} >= 0 AND ${t.writtenOffPaise} >= 0`),
+  check('claims_approved_le_claimed', sql`${t.approvedPaise} IS NULL OR ${t.approvedPaise} <= ${t.claimedPaise}`),
+  check('claims_credits_le_claimed', sql`${t.settledPaise} + ${t.writtenOffPaise} <= ${t.claimedPaise}`),
+  check('claims_nonrecoverable_le_disallowed', sql`${t.nonRecoverableDisallowedPaise} <= ${t.disallowedPaise}`),
+])
+
+// The invoices a claim covers. invoice_total_paise is the invoice total at link time; one
+// invoice may sit on several claims as long as the claimed amounts never exceed its total
+// (enforced under the per-patient billing lock, ruling 2).
+export const claimInvoices = pgTable('claim_invoices', {
+  claimId: integer('claim_id').notNull().references(() => claims.id),
+  invoiceId: integer('invoice_id').notNull().references(() => invoices.id),
+  invoiceTotalPaise: bigint('invoice_total_paise', { mode: 'number' }).notNull(),
+  claimedPaise: bigint('claimed_paise', { mode: 'number' }).notNull(),
+  addedByName: text('added_by_name').notNull(),
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+}, (t) => [
+  primaryKey({ name: 'claim_invoices_pk', columns: [t.claimId, t.invoiceId] }),
+  index('claim_invoices_invoice_idx').on(t.invoiceId),
+  check('claim_invoices_claimed_range', sql`${t.claimedPaise} BETWEEN 1 AND ${t.invoiceTotalPaise}`),
+])
+
+// One row per outbound package (ruling 3): the canonical snapshot, its SHA-256 and both copies.
+export const claimSubmissions = pgTable('claim_submissions', {
+  id: serial('id').primaryKey(),
+  claimId: integer('claim_id').notNull().references(() => claims.id),
+  version: integer('version').notNull(),
+  kind: submissionKindEnum('kind').notNull(),
+  snapshot: jsonb('snapshot').$type<ClaimSnapshot>().notNull(),
+  snapshotSha256: text('snapshot_sha256').notNull(),
+  rcmCopyBlobUrl: text('rcm_copy_blob_url').notNull(),
+  rcmCopySha256: text('rcm_copy_sha256').notNull(),
+  insurerCopyBlobUrl: text('insurer_copy_blob_url').notNull(),
+  insurerCopySha256: text('insurer_copy_sha256').notNull(),
+  createdByName: text('created_by_name').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('claim_submissions_claim_version_unique').on(t.claimId, t.version),
+])
+
+export const claimDispatches = pgTable('claim_dispatches', {
+  id: serial('id').primaryKey(),
+  submissionId: integer('submission_id').notNull().unique().references(() => claimSubmissions.id),
+  channel: submissionChannelEnum('channel').notNull(),
+  transport: text('transport', { enum: ['manual', 'nhcx'] }).notNull(),
+  trackingReference: text('tracking_reference'),
+  dispatchedOn: date('dispatched_on').notNull(),
+  dispatchedByName: text('dispatched_by_name').notNull(),
+  dispatchedAt: timestamp('dispatched_at').defaultNow().notNull(),
+  insurerReference: text('insurer_reference'),
+  acknowledgedOn: date('acknowledged_on'),
+  acknowledgedByName: text('acknowledged_by_name'),
+})
+
+export const claimEvents = pgTable('claim_events', {
+  id: serial('id').primaryKey(),
+  claimId: integer('claim_id').notNull().references(() => claims.id),
+  action: claimEventActionEnum('action').notNull(),
+  fromStatus: claimStatusEnum('from_status'),
+  toStatus: claimStatusEnum('to_status').notNull(),
+  submissionId: integer('submission_id').references(() => claimSubmissions.id),
+  amountPaise: bigint('amount_paise', { mode: 'number' }),
+  note: text('note'),
+  portalCheckedOn: date('portal_checked_on'),
+  byName: text('by_name').notNull(),
+  byUserId: integer('by_user_id').references(() => users.id),
+  at: timestamp('at').defaultNow().notNull(),
+}, (t) => [
+  index('claim_events_claim_idx').on(t.claimId),
+  check('claim_events_note_len', sql`${t.note} IS NULL OR length(${t.note}) <= 2000`),
+])
+
+// Rows are never deleted: removal sets superseded_at, so earlier snapshots keep their hashes.
+// source_id points at the source row of a system document (invoice, pre-auth document,
+// lab report, ...) and deliberately has no FK (the source table depends on `source`).
+export const claimDocuments = pgTable('claim_documents', {
+  id: serial('id').primaryKey(),
+  claimId: integer('claim_id').notNull().references(() => claims.id),
+  kind: claimDocumentKindEnum('kind').notNull(),
+  source: documentSourceEnum('source').notNull(),
+  title: text('title').notNull(),
+  blobUrl: text('blob_url'),
+  contentType: text('content_type'),
+  byteSize: integer('byte_size'),
+  sha256: text('sha256'),
+  sourceId: integer('source_id'),
+  idProofType: text('id_proof_type', { enum: ID_PROOF_TYPE_VALUES }),
+  waiverReason: text('waiver_reason'),
+  queryResponseId: integer('query_response_id').references(() => rcmQueryResponses.id),
+  supersededAt: timestamp('superseded_at'),
+  supersededByName: text('superseded_by_name'),
+  uploadedByName: text('uploaded_by_name').notNull(),
+  uploadedAt: timestamp('uploaded_at').defaultNow().notNull(),
+}, (t) => [
+  index('claim_documents_claim_idx').on(t.claimId),
+  check('claim_documents_upload_complete', sql`${t.source} <> 'upload' OR (${t.blobUrl} IS NOT NULL AND ${t.sha256} IS NOT NULL AND ${t.contentType} IS NOT NULL)`),
+  check('claim_documents_waiver_reason', sql`${t.source} <> 'waiver' OR ${t.waiverReason} IS NOT NULL`),
+  check('claim_documents_id_proof_type', sql`${t.kind} <> 'id_proof' OR ${t.source} <> 'upload' OR ${t.idProofType} IS NOT NULL`),
+])
+
+export const claimDisallowances = pgTable('claim_disallowances', {
+  id: serial('id').primaryKey(),
+  claimId: integer('claim_id').notNull().references(() => claims.id),
+  eventId: integer('event_id').notNull().references(() => claimEvents.id),
+  reasonCode: text('reason_code').notNull().references(() => rcmReasonCodes.code),
+  amountPaise: bigint('amount_paise', { mode: 'number' }).notNull(),
+  patientRecoverable: boolean('patient_recoverable').notNull(),
+  note: text('note'),
+}, (t) => [
+  index('claim_disallowances_claim_idx').on(t.claimId),
+  check('claim_disallowances_amount_positive', sql`${t.amountPaise} > 0`),
+])
+
+export const claimSettlements = pgTable('claim_settlements', {
+  id: serial('id').primaryKey(),
+  claimId: integer('claim_id').notNull().references(() => claims.id),
+  eventId: integer('event_id').notNull().references(() => claimEvents.id),
+  utr: text('utr').notNull(),
+  paymentDate: date('payment_date').notNull(),
+  receivedPaise: bigint('received_paise', { mode: 'number' }).notNull(),
+  tdsPaise: bigint('tds_paise', { mode: 'number' }).notNull(),
+  bankChargesPaise: bigint('bank_charges_paise', { mode: 'number' }).notNull(),
+  settledPaise: bigint('settled_paise', { mode: 'number' }).notNull(),
+  bankCreditDate: date('bank_credit_date'),
+  reconciledAt: timestamp('reconciled_at'),
+  reconciledByName: text('reconciled_by_name'),
+  recordedByName: text('recorded_by_name').notNull(),
+  recordedAt: timestamp('recorded_at').defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('claim_settlements_claim_utr_unique').on(t.claimId, sql`lower(utr)`),
+  check('claim_settlements_sum', sql`${t.settledPaise} = ${t.receivedPaise} + ${t.tdsPaise} + ${t.bankChargesPaise}`),
+  check('claim_settlements_amounts', sql`${t.receivedPaise} > 0 AND ${t.tdsPaise} >= 0 AND ${t.bankChargesPaise} >= 0`),
+])
+
+export const claimWriteOffs = pgTable('claim_write_offs', {
+  id: serial('id').primaryKey(),
+  claimId: integer('claim_id').notNull().references(() => claims.id),
+  amountPaise: bigint('amount_paise', { mode: 'number' }).notNull(),
+  reasonCode: text('reason_code').notNull().references(() => rcmReasonCodes.code),
+  note: text('note').notNull(),
+  status: writeOffStatusEnum('status').default('requested').notNull(),
+  requestedByName: text('requested_by_name').notNull(),
+  requestedByUserId: integer('requested_by_user_id').references(() => users.id),
+  requestedAt: timestamp('requested_at').defaultNow().notNull(),
+  decidedByName: text('decided_by_name'),
+  decidedByUserId: integer('decided_by_user_id').references(() => users.id),
+  decidedAt: timestamp('decided_at'),
+  decisionNote: text('decision_note'),
+}, (t) => [
+  index('claim_write_offs_claim_idx').on(t.claimId),
+  check('claim_write_offs_amount_positive', sql`${t.amountPaise} > 0`),
+  check('claim_write_offs_decided', sql`${t.status} = 'requested' OR (${t.decidedAt} IS NOT NULL AND ${t.decidedByName} IS NOT NULL)`),
+  check('claim_write_offs_second_person', sql`${t.decidedByUserId} IS NULL OR ${t.decidedByUserId} IS DISTINCT FROM ${t.requestedByUserId}`),
+])
+
+export type PreauthRow = typeof preauths.$inferSelect
+export type PreauthEventRow = typeof preauthEvents.$inferSelect
+export type RcmQueryRow = typeof rcmQueries.$inferSelect
+export type RcmQueryResponseRow = typeof rcmQueryResponses.$inferSelect
+export type PreauthDocumentRow = typeof preauthDocuments.$inferSelect
+export type ClaimRow = typeof claims.$inferSelect
+export type ClaimInvoiceRow = typeof claimInvoices.$inferSelect
+export type ClaimSubmissionRow = typeof claimSubmissions.$inferSelect
+export type ClaimDispatchRow = typeof claimDispatches.$inferSelect
+export type ClaimEventRow = typeof claimEvents.$inferSelect
+export type ClaimDocumentRow = typeof claimDocuments.$inferSelect
+export type ClaimDisallowanceRow = typeof claimDisallowances.$inferSelect
+export type ClaimSettlementRow = typeof claimSettlements.$inferSelect
+export type ClaimWriteOffRow = typeof claimWriteOffs.$inferSelect
+// end SP7
 
 export const noteTypeEnum = pgEnum('note_type', ['progress', 'nursing', 'intake'])
 export const noteStatusEnum = pgEnum('note_status', ['draft', 'signed'])
