@@ -1,10 +1,16 @@
-import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, type AnyPgColumn } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, unique, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
 // SP7
 import type { ClaimSnapshot, CodedEntry, EstimateLine, PreauthSnapshot } from '../lib/rcm/snapshot'
+// SP8
+import { ABHA_VERIFICATION_SOURCES, ABHA_VERIFIED_VIA, ABDM_CONSENT_PURPOSES, ABDM_CONSENT_GIVEN_BY, PROFILE_SHARE_STATUSES, PROFILE_SHARE_ACK_STATES } from '../lib/abdm/constants'
+import {
+  NHCX_ENTITY_TYPES, NHCX_DIRECTIONS, NHCX_EXCHANGE_STATES, NHCX_REVIEW_STATES, ELIGIBILITY_PURPOSES, ELIGIBILITY_CONTEXTS, ELIGIBILITY_STATUSES,
+  INBOUND_CALL_OUTCOMES, type NhcxResponseSummary,
+} from '../lib/nhcx/constants'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
 // SP6: + coder (scripts/migrations/2026-10-07-sp6-a-coder-role.sql)
@@ -139,7 +145,17 @@ export const patients = pgTable('patients', {
   // SP5: per-patient notification opt-out (scripts/migrations/2026-10-08-sp5-lab-home-collection.sql).
   notificationOptOut: boolean('notification_opt_out').default(false).notNull(),
   notificationOptOutAt: timestamp('notification_opt_out_at'),
-})
+  // SP8: an ABHA verified by ABDM or a Scan & Share (ruling 12). All three or none.
+  abhaVerifiedAt: timestamp('abha_verified_at'),
+  abhaVerificationSource: text('abha_verification_source', { enum: ABHA_VERIFICATION_SOURCES }),
+  abhaVerifiedVia: text('abha_verified_via', { enum: ABHA_VERIFIED_VIA }),
+}, (t) => [
+  // SP8
+  check('patients_abha_verification_complete', sql`(${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerificationSource} IS NULL) AND (${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerifiedVia} IS NULL)`),
+  check('patients_abha_verification_source_valid', sql`${t.abhaVerificationSource} IS NULL OR ${t.abhaVerificationSource} IN ('abdm', 'abdm_sandbox_mock')`),
+  // abha_verified_via is checked in TypeScript only (ABHA_VERIFIED_VIA): the SP8 migration carries no
+  // Aadhaar-named literal, which its static test pins.
+])
 
 // SP6 clinical coding enums (scripts/migrations/2026-10-07-sp6-b-clinical-coding.sql). Declared
 // here, ahead of the SP6 table block below, because `diagnoses` uses them eagerly.
@@ -1876,6 +1892,184 @@ export type ClaimDisallowanceRow = typeof claimDisallowances.$inferSelect
 export type ClaimSettlementRow = typeof claimSettlements.$inferSelect
 export type ClaimWriteOffRow = typeof claimWriteOffs.$inferSelect
 // end SP7
+
+// SP8 ABDM / NHCX integration (scripts/migrations/2026-10-10-sp8-abdm-nhcx.sql).
+// Migration-only objects: the append-only triggers on abdm_consents (the one allowed update
+// sets patient_id from NULL) and nhcx_inbound_calls, both bypassed only under the
+// transaction-local hims.allow_document_purge = 'on'. Aadhaar numbers, OTPs and ABDM tokens are
+// never stored in any of these tables (SP8 ruling 4).
+const inList = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(', '))
+
+// Consent captured before an ABHA is created or verified (S1 CRT_ABHA_102). patient_id may be
+// null: consent can be given before the patient is registered.
+export const abdmConsents = pgTable('abdm_consents', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id'),
+  flowId: text('flow_id').notNull(),
+  purpose: text('purpose', { enum: ABDM_CONSENT_PURPOSES }).notNull(),
+  consentCode: text('consent_code').notNull(),
+  consentVersion: text('consent_version').notNull(),
+  textSha256: text('text_sha256').notNull(),
+  givenBy: text('given_by', { enum: ABDM_CONSENT_GIVEN_BY }).notNull(),
+  recordedByName: text('recorded_by_name').notNull(),
+  recordedByUserId: integer('recorded_by_user_id'),
+  recordedAt: timestamp('recorded_at').defaultNow().notNull(),
+}, (t) => [
+  foreignKey({ name: 'abdm_consents_patient_fk', columns: [t.patientId], foreignColumns: [patients.id] }),
+  foreignKey({ name: 'abdm_consents_recorded_by_user_fk', columns: [t.recordedByUserId], foreignColumns: [users.id] }),
+  index('abdm_consents_patient_idx').on(t.patientId),
+  index('abdm_consents_flow_idx').on(t.flowId),
+  check('abdm_consents_purpose_valid', sql`${t.purpose} IN (${inList(ABDM_CONSENT_PURPOSES)})`),
+  check('abdm_consents_given_by_valid', sql`${t.givenBy} IN (${inList(ABDM_CONSENT_GIVEN_BY)})`),
+])
+
+// Scan & Share profile shares (S1 hiecm-scan-and-register.yaml). Unresolved rows are scrubbed
+// after 24 hours (status 'expired' with every profile column null).
+export const abdmProfileShares = pgTable('abdm_profile_shares', {
+  id: serial('id').primaryKey(),
+  requestId: text('request_id').notNull(),
+  hipId: text('hip_id').notNull(),
+  counterId: text('counter_id').notNull(),
+  intent: text('intent').notNull(),
+  abhaNumber: text('abha_number'),
+  abhaAddress: text('abha_address'),
+  name: text('name'),
+  gender: text('gender'),
+  yearOfBirth: integer('year_of_birth'),
+  monthOfBirth: integer('month_of_birth'),
+  dayOfBirth: integer('day_of_birth'),
+  phone: text('phone'),
+  addressLine: text('address_line'),
+  districtName: text('district_name'),
+  stateName: text('state_name'),
+  pincode: text('pincode'),
+  tokenDate: date('token_date').notNull(),
+  tokenNumber: integer('token_number').notNull(),
+  status: text('status', { enum: PROFILE_SHARE_STATUSES }).default('pending').notNull(),
+  patientId: text('patient_id'),
+  ackState: text('ack_state', { enum: PROFILE_SHARE_ACK_STATES }).default('pending').notNull(),
+  isMock: boolean('is_mock').default(false).notNull(),
+  receivedAt: timestamp('received_at').defaultNow().notNull(),
+  resolvedAt: timestamp('resolved_at'),
+  resolvedByName: text('resolved_by_name'),
+}, (t) => [
+  unique('abdm_profile_shares_request_unique').on(t.requestId),
+  foreignKey({ name: 'abdm_profile_shares_patient_fk', columns: [t.patientId], foreignColumns: [patients.id] }),
+  uniqueIndex('abdm_profile_shares_token_unique').on(t.tokenDate, t.counterId, t.tokenNumber),
+  index('abdm_profile_shares_status_idx').on(t.status, t.receivedAt),
+  check('abdm_profile_shares_expired_scrubbed', sql`${t.status} <> 'expired' OR (${t.abhaNumber} IS NULL AND ${t.abhaAddress} IS NULL AND ${t.name} IS NULL AND ${t.phone} IS NULL AND ${t.addressLine} IS NULL)`),
+  check('abdm_profile_shares_status_valid', sql`${t.status} IN (${inList(PROFILE_SHARE_STATUSES)})`),
+  check('abdm_profile_shares_ack_state_valid', sql`${t.ackState} IN (${inList(PROFILE_SHARE_ACK_STATES)})`),
+  check('abdm_profile_shares_token_positive', sql`${t.tokenNumber} > 0`),
+])
+
+// NHCX CoverageEligibilityRequest checks (replacing the simulated eligibility check).
+export const nhcxEligibilityChecks = pgTable('nhcx_eligibility_checks', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull(),
+  policyId: integer('policy_id').notNull(),
+  payerId: integer('payer_id').notNull(),
+  purpose: text('purpose', { enum: ELIGIBILITY_PURPOSES }).notNull(),
+  context: text('context', { enum: ELIGIBILITY_CONTEXTS }).notNull(),
+  status: text('status', { enum: ELIGIBILITY_STATUSES }).default('pending').notNull(),
+  inforce: boolean('inforce'),
+  requestedByName: text('requested_by_name').notNull(),
+  requestedByUserId: integer('requested_by_user_id'),
+  requestedAt: timestamp('requested_at').defaultNow().notNull(),
+  respondedAt: timestamp('responded_at'),
+  isMock: boolean('is_mock').default(false).notNull(),
+}, (t) => [
+  foreignKey({ name: 'nhcx_eligibility_checks_patient_fk', columns: [t.patientId], foreignColumns: [patients.id] }),
+  foreignKey({ name: 'nhcx_eligibility_checks_policy_fk', columns: [t.policyId], foreignColumns: [patientPolicies.id] }),
+  foreignKey({ name: 'nhcx_eligibility_checks_payer_fk', columns: [t.payerId], foreignColumns: [payers.id] }),
+  foreignKey({ name: 'nhcx_eligibility_checks_user_fk', columns: [t.requestedByUserId], foreignColumns: [users.id] }),
+  index('nhcx_eligibility_patient_idx').on(t.patientId),
+  check('nhcx_eligibility_checks_purpose_valid', sql`${t.purpose} IN (${inList(ELIGIBILITY_PURPOSES)})`),
+  check('nhcx_eligibility_checks_context_valid', sql`${t.context} IN (${inList(ELIGIBILITY_CONTEXTS)})`),
+  check('nhcx_eligibility_checks_status_valid', sql`${t.status} IN (${inList(ELIGIBILITY_STATUSES)})`),
+])
+
+// One row per NHCX message, outbound (the transactional outbox) or inbound. The outbound
+// bundle itself is not stored (it is rebuilt from the SP7 snapshot); jwe_encrypted keeps the
+// vault-sealed JWE only until NHCX accepts it, so a retry resends identical bytes.
+export const nhcxExchanges = pgTable('nhcx_exchanges', {
+  id: serial('id').primaryKey(),
+  entityType: text('entity_type', { enum: NHCX_ENTITY_TYPES }).notNull(),
+  direction: text('direction', { enum: NHCX_DIRECTIONS }).notNull(),
+  action: text('action').notNull(),
+  correlationId: uuid('correlation_id').notNull(),
+  apiCallId: uuid('api_call_id').notNull(),
+  senderCode: text('sender_code').notNull(),
+  recipientCode: text('recipient_code').notNull(),
+  state: text('state', { enum: NHCX_EXCHANGE_STATES }).notNull(),
+  protocolStatus: text('protocol_status'),
+  patientId: text('patient_id').notNull(),
+  policyId: integer('policy_id'),
+  preauthId: integer('preauth_id'),
+  preauthEventId: integer('preauth_event_id'),
+  claimId: integer('claim_id'),
+  claimSubmissionId: integer('claim_submission_id'),
+  eligibilityCheckId: integer('eligibility_check_id'),
+  rcmQueryId: integer('rcm_query_id'),
+  relatedExchangeId: integer('related_exchange_id'),
+  attempts: integer('attempts').default(0).notNull(),
+  nextAttemptAt: timestamp('next_attempt_at'),
+  lastErrorCode: text('last_error_code'),
+  lastPolledAt: timestamp('last_polled_at'),
+  bodySha256: text('body_sha256').notNull(),
+  jweEncrypted: text('jwe_encrypted'),
+  payloadEncrypted: text('payload_encrypted'),
+  summary: jsonb('summary').$type<NhcxResponseSummary>(),
+  reviewState: text('review_state', { enum: NHCX_REVIEW_STATES }).default('not_needed').notNull(),
+  reviewedByName: text('reviewed_by_name'),
+  reviewedAt: timestamp('reviewed_at'),
+  isMock: boolean('is_mock').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  respondedAt: timestamp('responded_at'),
+}, (t) => [
+  unique('nhcx_exchanges_api_call_unique').on(t.apiCallId),
+  foreignKey({ name: 'nhcx_exchanges_patient_fk', columns: [t.patientId], foreignColumns: [patients.id] }),
+  foreignKey({ name: 'nhcx_exchanges_policy_fk', columns: [t.policyId], foreignColumns: [patientPolicies.id] }),
+  foreignKey({ name: 'nhcx_exchanges_preauth_fk', columns: [t.preauthId], foreignColumns: [preauths.id] }),
+  foreignKey({ name: 'nhcx_exchanges_preauth_event_fk', columns: [t.preauthEventId], foreignColumns: [preauthEvents.id] }),
+  foreignKey({ name: 'nhcx_exchanges_claim_fk', columns: [t.claimId], foreignColumns: [claims.id] }),
+  foreignKey({ name: 'nhcx_exchanges_claim_submission_fk', columns: [t.claimSubmissionId], foreignColumns: [claimSubmissions.id] }),
+  foreignKey({ name: 'nhcx_exchanges_eligibility_check_fk', columns: [t.eligibilityCheckId], foreignColumns: [nhcxEligibilityChecks.id] }),
+  foreignKey({ name: 'nhcx_exchanges_rcm_query_fk', columns: [t.rcmQueryId], foreignColumns: [rcmQueries.id] }),
+  index('nhcx_exchanges_correlation_idx').on(t.correlationId),
+  index('nhcx_exchanges_claim_idx').on(t.claimId),
+  index('nhcx_exchanges_preauth_idx').on(t.preauthId),
+  index('nhcx_exchanges_due_idx').on(t.state, t.nextAttemptAt),
+  uniqueIndex('nhcx_exchanges_submission_unique').on(t.claimSubmissionId).where(sql`direction = 'outbound' AND claim_submission_id IS NOT NULL`),
+  check('nhcx_exchanges_payload_direction', sql`(${t.direction} = 'inbound' OR ${t.payloadEncrypted} IS NULL) AND (${t.direction} = 'outbound' OR ${t.jweEncrypted} IS NULL)`),
+  check('nhcx_exchanges_attempts_range', sql`${t.attempts} BETWEEN 0 AND 10`),
+  check('nhcx_exchanges_entity_type_valid', sql`${t.entityType} IN (${inList(NHCX_ENTITY_TYPES)})`),
+  check('nhcx_exchanges_direction_valid', sql`${t.direction} IN (${inList(NHCX_DIRECTIONS)})`),
+  check('nhcx_exchanges_state_valid', sql`${t.state} IN (${inList(NHCX_EXCHANGE_STATES)})`),
+  check('nhcx_exchanges_review_state_valid', sql`${t.reviewState} IN (${inList(NHCX_REVIEW_STATES)})`),
+])
+
+// Replay dedupe for inbound callbacks: ids only, purged after 30 days (Task 13).
+export const nhcxInboundCalls = pgTable('nhcx_inbound_calls', {
+  apiCallId: uuid('api_call_id').primaryKey(),
+  action: text('action').notNull(),
+  senderCode: text('sender_code').notNull(),
+  correlationId: uuid('correlation_id').notNull(),
+  outcome: text('outcome', { enum: INBOUND_CALL_OUTCOMES }).notNull(),
+  exchangeId: integer('exchange_id'),
+  receivedAt: timestamp('received_at').defaultNow().notNull(),
+}, (t) => [
+  index('nhcx_inbound_calls_received_idx').on(t.receivedAt),
+  check('nhcx_inbound_calls_outcome_valid', sql`${t.outcome} IN (${inList(INBOUND_CALL_OUTCOMES)})`),
+])
+
+export type AbdmConsentRow = typeof abdmConsents.$inferSelect
+export type AbdmProfileShareRow = typeof abdmProfileShares.$inferSelect
+export type NhcxExchangeRow = typeof nhcxExchanges.$inferSelect
+export type NhcxInboundCallRow = typeof nhcxInboundCalls.$inferSelect
+export type NhcxEligibilityCheckRow = typeof nhcxEligibilityChecks.$inferSelect
+// end SP8
 
 export const noteTypeEnum = pgEnum('note_type', ['progress', 'nursing', 'intake'])
 export const noteStatusEnum = pgEnum('note_status', ['draft', 'signed'])

@@ -55,6 +55,8 @@ import {
   // SP7
   patientPolicies, preauths, preauthEvents, preauthDocuments, rcmQueries, rcmQueryResponses, claims, claimInvoices,
   claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
+  // SP8
+  nhcxInboundCalls, nhcxExchanges, nhcxEligibilityChecks, abdmProfileShares, abdmConsents,
   // SP3
   encounters,
   followUpOrders,
@@ -841,6 +843,15 @@ async function clearExistingData() {
   // service link is released before service_catalog is deleted below.
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+    // SP8: NHCX exchanges reference claims, claim versions, pre-auths, queries, policies and
+    // eligibility checks; eligibility checks reference policies and payers; consents and shares
+    // reference patients. Inbound calls and consents are append-only (purge flag above).
+    await tx.delete(nhcxInboundCalls)
+    await tx.delete(nhcxExchanges)
+    await tx.delete(nhcxEligibilityChecks)
+    await tx.delete(abdmProfileShares)
+    await tx.delete(abdmConsents)
+    // end SP8
     // SP7: claims and pre-auths reference invoices, policies, encounters, admissions, users and
     // charge lines reference pre-auths, so they go first, in purgeRcmFixtures' order.
     await tx.delete(claimWriteOffs)
