@@ -3,8 +3,9 @@
 -- (request_kind: a new visit, or a reschedule / cancellation of one of the patient's own
 -- appointments) and, for the last two, the appointment (appointment_id). Public /book requests
 -- keep request_kind 'new' with no patient and no appointment, so every existing row is valid.
--- At most one pending request per appointment. Both new FKs cascade: a request has no meaning
--- once its patient or appointment is gone, and deletePatient needs no new step.
+-- At most one pending request per appointment. Both new FKs are NO ACTION, like every FK in
+-- this schema outside the two known detail tables: deletePatient removes a patient's portal
+-- requests explicitly before their appointments.
 -- Additive, idempotent. Safe to re-run.
 BEGIN;
 ALTER TABLE booking_requests ADD COLUMN IF NOT EXISTS patient_id text;
@@ -13,13 +14,13 @@ ALTER TABLE booking_requests ADD COLUMN IF NOT EXISTS appointment_id integer;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'booking_requests_patient_id_patients_id_fk') THEN
     ALTER TABLE booking_requests ADD CONSTRAINT booking_requests_patient_id_patients_id_fk
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE;
+      FOREIGN KEY (patient_id) REFERENCES patients(id);
   END IF;
 END $$;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'booking_requests_appointment_id_appointments_id_fk') THEN
     ALTER TABLE booking_requests ADD CONSTRAINT booking_requests_appointment_id_appointments_id_fk
-      FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE;
+      FOREIGN KEY (appointment_id) REFERENCES appointments(id);
   END IF;
 END $$;
 DO $$ BEGIN

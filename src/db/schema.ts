@@ -763,9 +763,9 @@ export const bookingRequests = pgTable('booking_requests', {
   resultingAppointmentId: integer('resulting_appointment_id').references(() => appointments.id),
   // Wave J (P1-20): portal requests (scripts/migrations/2026-10-10-wave-j-portal-appointment-requests.sql).
   // Public /book rows keep kind 'new' with no patient and no appointment.
-  patientId: text('patient_id').references(() => patients.id, { onDelete: 'cascade' }),
+  patientId: text('patient_id').references(() => patients.id),
   requestKind: text('request_kind', { enum: ['new', 'reschedule', 'cancel'] }).default('new').notNull(),
-  appointmentId: integer('appointment_id').references(() => appointments.id, { onDelete: 'cascade' }),
+  appointmentId: integer('appointment_id').references(() => appointments.id),
   // end Wave J
 }, (t) => [
   // Wave J
