@@ -6,7 +6,7 @@ import { constants, createPublicKey, publicEncrypt } from 'node:crypto'
 // short string, not a JOSE operation (ruling 3).
 //
 // Failures throw a fixed message with no `cause`, so neither the plaintext
-// (an Aadhaar number, an OTP, a login id) nor a crypto error that might
+// (a national ID number, an OTP, a login id) nor a crypto error that might
 // quote it can reach a log or a response.
 
 export class AbdmEncryptionError extends Error {

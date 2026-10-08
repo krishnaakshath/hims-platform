@@ -125,7 +125,7 @@ export async function refreshGatewayToken(cfg: AbdmConfig, deps: SessionDeps = d
   return { expiresIn }
 }
 
-/** The ABHA public key (base64 SPKI) used to encrypt Aadhaar numbers, OTPs and login ids. Cached 6 h. */
+/** The ABHA public key (base64 SPKI) used to encrypt national ID numbers, OTPs and login ids. Cached 6 h. */
 export async function getAbhaPublicKey(cfg: AbdmConfig, deps: SessionDeps = defaultSessionDeps()): Promise<string> {
   const cached = publicKeyCache.get(cfg.abhaBaseUrl)
   if (cached && deps.now().getTime() < cached.expiresAt) return cached.publicKey

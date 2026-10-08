@@ -1,4 +1,4 @@
-// The shape of src/lib/integrations/config.ts CapabilityStatus (not imported: config is server-only).
+// The shape of the server-side CapabilityStatus (not imported: the integration config is server-only).
 export type CapabilityStatus = {
   key: 'abha' | 'scan_share' | 'nhcx_submit' | 'nhcx_callbacks' | 'nhcx_eligibility'
   state: 'configured' | 'mock' | 'not_configured'

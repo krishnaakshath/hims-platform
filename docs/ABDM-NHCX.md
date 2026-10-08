@@ -127,3 +127,50 @@ Set `CRON_SECRET` too. The repository does not ship a `vercel.json`, because add
 ## Rollback
 
 Unset the NHCX variables and redeploy. RCM then falls back to the manual channels (portal, email, courier, hand delivery), exactly as in SP7. ABHA works the same way: unset the ABDM variables, and the registration form keeps the typed ABHA fields with the "ABDM not connected" hint.
+
+## NHCX callbacks: caller IPs
+
+`NHCX_CALLBACK_IP_ALLOWLIST` is empty by default, which admits any caller (the bearer JWT and the JWE still have to verify). The NHCX NAT addresses given in the NHCX documentation (S3, UNVERIFIED U6) are `3.109.99.210`, `13.126.152.0` and `13.200.129.223`; confirm them with NHA before setting the allowlist.
+
+## Review of insurer responses
+
+NHCX answers (claim and pre-auth responses, insurer queries, payment notices) never change a claim's status or money by themselves (ruling 6). Each one appears in the NHCX panel of the claim or pre-auth as "to review"; an RCM user opens it, applies the matching action (pre-filled, not submitted) and confirms, or dismisses it with a reason. A confirmed payment notice can send the payment acknowledgement.
+
+## Validating bundles with the HL7 validator (optional)
+
+`npx tsx scripts/nhcx-dump-fixtures.ts out` writes the conformance-matrix bundles to `out/`. Then:
+
+```
+java -jar validator_cli.jar out/*.json -version 4.0.1 -ig ndhm.in#6.5.0
+```
+
+The result is advisory: terminology-binding warnings for the hospital-local service codes are expected (U15).
+
+## Phase 2 (not built): ABDM M2/M3
+
+HIP care-context linking, consent notifications, health-record push (M2) and HIU consent requests (M3) are not needed for NHCX claims and are a separate certification track (functional test and WASA). They reuse the gateway session, the standard headers, the callback JWT check, the bridge URL, `safeLog`, gateway audit rows and the payload vault from this work. See the appendix of `docs/superpowers/plans/2026-10-07-sp8-abdm-nhcx.md`.
+
+## Unverified facts
+
+Each item is a single constant or env value, so it can be corrected without a redesign.
+
+- **U1** NHCX token header name `bearer_auth` (S3 only; S2 Swagger declares no security scheme). Confirm against the NHCX Postman collection in `https://hcxsbx.abdm.gov.in/#/documents`.
+- **U2** NHCX hosts `https://apisbx.abdm.gov.in/hcx`, `https://apisprod.nha.gov.in/hcx` and the participant-service hosts (S3). Env-only; confirm at onboarding.
+- **U3** NHCX authenticates with the ABDM gateway session (`/api/hiecm/gateway/v3/sessions`, same client credentials) (S3). Confirm against "Authenticating with NHCX.pdf" on the portal.
+- **U4** NHCX JWE `alg` `RSA-OAEP-256` (S3) vs HCX v0.8 `RSA-OAEP` (S4). We send `RSA-OAEP-256` and accept both. Confirm against the NHCX encryption document.
+- **U5** `x-hcx-workflow_id` numeric stage codes (S3 "Workflow Status Sheets"). Not sent. Confirm whether NHCX requires it.
+- **U6** NHCX callback JWT signing key source and the NAT IP list (S3). Operator-supplied `NHCX_GATEWAY_SIGNING_CERT` and `NHCX_CALLBACK_IP_ALLOWLIST`. Confirm with NHA.
+- **U7** How NHCX composes the callback URL from `endpoint_url` (with or without `/v1`). Both are accepted.
+- **U8** The NHCX synchronous-ack body `result` object (S3). The S4 `SuccessResponse` is sent.
+- **U9** `/v1/status` request payload and the `on_status` callback path. Polling is off by default.
+- **U10** Participant search request body and `encryption_cert` format on the NHCX participant service (S4 registry shape assumed; S2 lists `/participant/search` and `/fetch/certs`).
+- **U11** Whether NHCX dedupes a resent identical `api_call_id`.
+- **U12** Production ABHA base URL, production `X-CM-ID`, and the production Scan & Share QR host (S1 leaves them blank). Env-only.
+- **U13** ABDM callback JWT verification keys (`/api/hiecm/gateway/v3/certs` appears only in the raw spec; S1 callback-authenticity says "confirm at onboarding"). Env `ABDM_GATEWAY_JWKS_URL`.
+- **U14** The FHIR identifier system for ABHA addresses (none in S5 examples). Emitted without a system.
+- **U15** Insurer acceptance of hospital-local namespaces (service codes, policy numbers, payer ids, claim numbers); NMC/SMC registration as a `MD`-typed Practitioner identifier without an HPR id; the HBP package code system; the resubmission `related` code; which `ClaimResponse.total` category carries the approved amount (`benefit` assumed; the S5 example uses `eligpercent`).
+- **U16** The verbatim NHA consent text for ABHA enrolment (consent code `abha-enrollment` version `1.4` is verified, S1). The owner installs the text file.
+- **U17** The `on-share` `profile.expiry` unit and meaning, and how services and facilities are bound to the bridge (no API found, S1).
+- **U18** The legal retention period for claim correspondence payloads (IRDAI / DPDP); see A1.
+- **U19** The `x-hcx-ben-abha-id` and `x-hcx-request_id` headers (S3 only). ABHA is sent only when the snapshot carries it; `request_id` is not sent.
+- **U20** The NHCX callback 30-second ack deadline and 5 retries (S3). Our handler answers well within 30 s because all work is one short transaction.

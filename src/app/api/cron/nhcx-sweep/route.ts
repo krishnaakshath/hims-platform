@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { runNhcxSweep } from '@/lib/queries/nhcx-exchanges'
+import { safeLog } from '@/lib/integrations/safe-log'
 
 // SP8: the NHCX cron sweep (retries, optional polling, 7-day silence, share
 // expiry, inbound-call purge). Session-less: `Authorization: Bearer
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
   try {
     return NextResponse.json(await runNhcxSweep(new Date()))
   } catch (err) {
-    console.error(`[nhcx-sweep] failed (${err instanceof Error ? err.name : 'UnknownError'})`)
+    safeLog('nhcx-sweep', { outcome: 'failed', errorCode: err instanceof Error ? err.name : 'UnknownError' })
     return NextResponse.json({ error: 'Sweep failed' }, { status: 500 })
   }
 }

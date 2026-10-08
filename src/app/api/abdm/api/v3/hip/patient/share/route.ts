@@ -14,7 +14,7 @@ import { recordProfileShare, sendOnShare, type ShareProfile } from '@/lib/querie
 // acknowledged again without a second row. The on-share acknowledgement is
 // sent after the response.
 
-export const MAX_SHARE_BODY_BYTES = 16 * 1024
+const MAX_SHARE_BODY_BYTES = 16 * 1024
 
 const fixed = (status: number, error: string) => NextResponse.json({ error }, { status })
 const str = (max: number) => z.union([z.string(), z.number()]).transform((v) => String(v)).pipe(z.string().max(max))

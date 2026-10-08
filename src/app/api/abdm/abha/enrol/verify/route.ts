@@ -9,7 +9,7 @@ import { enrolVerifySchema } from '@/lib/validation/abha-flow'
 import { abdmErrorResponse, abhaRateLimitResponse, flowExpiredResponse, flowPrefix, notConfiguredResponse, profileForBrowser, withAbdmErrors } from '@/lib/abdm/route-helpers'
 
 // Step 2 of ABHA creation: the enrolment OTP (encrypted for ABDM, never kept)
-// creates the ABHA, or returns the existing one for that Aadhaar. The user
+// creates the ABHA, or returns the existing one for that national ID. The user
 // token stays in the sealed flow; the browser gets the profile and address
 // suggestions only.
 export async function POST(request: NextRequest) {

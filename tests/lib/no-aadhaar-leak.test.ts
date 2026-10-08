@@ -59,6 +59,13 @@ const EXPORT_PATHS = [
   'src/lib/queries/coding-worklist.ts',
   'src/lib/queries/service-procedure-codes.ts',
   // end SP6
+  // SP8: NHCX protocol, FHIR, callbacks, the RCM NHCX panel and routes, the connection page API.
+  'src/lib/nhcx',
+  'src/app/api/nhcx',
+  'src/app/api/rcm/nhcx',
+  'src/app/api/settings/integrations',
+  'src/components/nhcx',
+  // end SP8
 ]
 
 describe('no Aadhaar leak (static)', () => {

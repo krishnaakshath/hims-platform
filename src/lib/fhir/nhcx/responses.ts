@@ -96,6 +96,15 @@ export function parsePaymentNoticeTaskBundle(bundle: unknown):
   return { ok: true, summary: { ...emptySummary(), paymentAmountPaise: fhirMoneyToPaise(pn.amount), paymentDate: date }, paymentIdentifier: firstIdentifier(pn) }
 }
 
+function withoutContact(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(withoutContact)
+  if (!isObj(v)) return v
+  // Narratives (text.div) are dropped too: the insurer's renderings repeat phone numbers and addresses.
+  return Object.fromEntries(Object.entries(v)
+    .filter(([k, x]) => k !== 'telecom' && k !== 'address' && !(k === 'text' && isObj(x) && 'div' in x))
+    .map(([k, x]) => [k, withoutContact(x)]))
+}
+
 function taskBundle(task: FhirResource, rest: FhirBundleEntry[], created: string): FhirBundle {
   const id = newId()
   return { resourceType: 'Bundle', id, meta: { profile: [PROFILE.TaskBundle] }, identifier: { value: id }, type: 'collection', timestamp: created, entry: [entry(task), ...rest] }
@@ -112,8 +121,10 @@ export function buildCommunicationResponseTaskBundle(i: {
 }): FhirBundle {
   const created = istIsoWithOffset(i.created)
   const ids = { task: newId(), comm: newId(), hospital: newId(), payer: newId() }
+  // The insurer's resources are echoed for context, without contact or address data (spec §3).
   const echoed = (isObj(i.request.fullBundle) && Array.isArray(i.request.fullBundle.entry) ? i.request.fullBundle.entry : [])
     .filter((e): e is FhirBundleEntry => isObj(e) && typeof e.fullUrl === 'string' && isObj(e.resource) && e.resource.resourceType !== 'Task')
+    .map((e) => ({ fullUrl: e.fullUrl, resource: withoutContact(e.resource) as FhirResource }))
   const commRequest = echoed.find((e) => e.resource.resourceType === 'CommunicationRequest')
   const communication: FhirResource = {
     resourceType: 'Communication', id: ids.comm, meta: { profile: [PROFILE.Communication] },
