@@ -1,10 +1,11 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { Pill, Stethoscope, CalendarCheck, FileText, MessageSquare, ArrowRight, Megaphone, Users, Stamp } from 'lucide-react'
+import { Pill, Stethoscope, CalendarCheck, FileText, MessageSquare, ArrowRight, Megaphone, Users, Stamp, FileCheck } from 'lucide-react'
 import { requirePatientSessionOrRedirect } from '@/lib/patient-session'
 import { getPatientPortalData } from '@/lib/queries/patient-portal'
 import { listBroadcastsForPatient } from '@/lib/queries/broadcasts'
 import { getPortalFollowUps } from '@/lib/queries/follow-ups'
+import { listPortalLabReports } from '@/lib/queries/lab-reports' // SP5
 import { formatIstDateTime } from '@/components/follow-ups/format'
 import { PortalFollowUpCard } from '@/components/follow-ups/PortalFollowUpCard'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
@@ -55,7 +56,7 @@ export default async function PatientPortalOverviewPage() {
   const data = await getPatientPortalData(session.patientId)
   if (!data) notFound()
 
-  const [broadcasts, followUps] = await Promise.all([listBroadcastsForPatient(session.patientId), getPortalFollowUps(session.patientId)])
+  const [broadcasts, followUps, labReports] = await Promise.all([listBroadcastsForPatient(session.patientId), getPortalFollowUps(session.patientId), listPortalLabReports(session.patientId)])
   await logPatientPortalAction('viewed patient portal overview', session.patientId)
 
   const nextAppointment = data.upcomingAppointments[0]
@@ -100,6 +101,7 @@ export default async function PatientPortalOverviewPage() {
         <SummaryTile icon={CalendarCheck} value={data.upcomingAppointments.length} label="Upcoming visits" color="accent" href="/patient-portal/appointments" />
         <SummaryTile icon={MessageSquare} value={data.unreadMessageCount} label="New messages" color="success" href="/patient-portal/messages" />
         <SummaryTile icon={Megaphone} value={broadcasts.length} label="Announcements" color="accent" href="/patient-portal/broadcasts" />
+        <SummaryTile icon={FileCheck} value={labReports.length} label="Lab reports" color="success" href="/patient-portal/lab-reports" />{/* SP5 */}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

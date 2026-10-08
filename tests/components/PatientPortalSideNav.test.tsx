@@ -17,4 +17,12 @@ describe('PatientPortalSideNav', () => {
     expect(activeLink.className).toMatch(/rounded-full/)
     expect(activeLink.className).not.toMatch(/border-l-2/)
   })
+
+  // SP5 Task 15
+  it('links Lab reports right after Medications', () => {
+    render(<PatientPortalSideNav />)
+    const labels = screen.getAllByRole('link').map((l) => l.textContent?.trim())
+    expect(screen.getByRole('link', { name: /lab reports/i })).toHaveAttribute('href', '/patient-portal/lab-reports')
+    expect(labels.indexOf('Lab reports')).toBe(labels.indexOf('Medications') + 1)
+  })
 })
