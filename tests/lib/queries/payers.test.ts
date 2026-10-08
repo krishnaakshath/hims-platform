@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { listPayers, getPayerById } from '@/lib/queries/payers'
 
 describe('payer directory queries', () => {
-  it('lists the seeded payers, including at least Aetna and Medicare', async () => {
+  it('lists the seeded Indian payers: an insurer, a TPA and a government scheme', async () => {
     const all = await listPayers()
-    expect(all.length).toBeGreaterThanOrEqual(14)
-    expect(all.some((p) => p.name === 'Aetna')).toBe(true)
-    expect(all.some((p) => p.payerType === 'medicare')).toBe(true)
+    expect(all.length).toBeGreaterThanOrEqual(10)
+    expect(all.some((p) => p.name === 'Star Health and Allied Insurance' && p.payerType === 'commercial')).toBe(true)
+    expect(all.some((p) => p.name === 'Medi Assist TPA')).toBe(true)
+    expect(all.some((p) => p.name === 'Ayushman Bharat PM-JAY')).toBe(true)
   })
 
   it('gets a single payer by id', async () => {
