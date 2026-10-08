@@ -5,6 +5,8 @@ import { invalidIdResponse, parseId, readJsonBody } from '@/lib/http'
 import { ABDM_SHARE_QUEUE_ROLES } from '@/lib/role-policy'
 import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
 import { getSharePrefill, resolveShare } from '@/lib/queries/abdm-profile-shares'
+import { RETRY_MESSAGE, isRetryableConflict, pgErrorCode } from '@/lib/db-errors'
+import { safeLog } from '@/lib/integrations/safe-log'
 
 // The Scan & Share registration queue (ABDM_SHARE_QUEUE_ROLES). GET: the
 // registration prefill of one pending share. POST: register (after the
@@ -46,7 +48,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const parsed = resolveSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
 
-  const r = await resolveShare(id, parsed.data, session)
+  let r: Awaited<ReturnType<typeof resolveShare>>
+  try {
+    r = await resolveShare(id, parsed.data, session)
+  } catch (err) {
+    if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
+    safeLog('abdm', { action: 'share_resolve', errorCode: pgErrorCode(err) ?? 'unknown' })
+    return NextResponse.json({ error: 'Could not update the share' }, { status: 500 })
+  }
   if (!r.ok) {
     const [status, error] = ERROR[r.error]
     return NextResponse.json({ error }, { status })

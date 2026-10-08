@@ -4,6 +4,7 @@ import { formatAbhaNumber } from '@/lib/india/abha'
 import { safeLog } from '@/lib/integrations/safe-log'
 import { checkAbhaRateLimit } from '@/lib/rate-limit'
 import { ServiceNotConfiguredError } from '@/lib/service-config'
+import { RETRY_MESSAGE, isRetryableConflict } from '@/lib/db-errors'
 import { ABDM_ERROR_COPY } from './constants'
 import type { AbdmFailure, AbhaProfileView } from './gateway'
 
@@ -62,6 +63,8 @@ export async function withAbdmErrors(action: string, fn: () => Promise<NextRespo
   } catch (e) {
     const name = e instanceof Error ? e.name : 'UnknownError'
     safeLog('abdm', { action, errorCode: name })
+    // A deadlock or serialization failure wrote nothing: the staff member can simply try again.
+    if (isRetryableConflict(e)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     if (e instanceof ServiceNotConfiguredError || (e instanceof Error && /INTEGRATION_PAYLOAD_KEY/.test(e.message))) return notConfiguredResponse()
     return abdmErrorResponse('abdm_unavailable')
   }
