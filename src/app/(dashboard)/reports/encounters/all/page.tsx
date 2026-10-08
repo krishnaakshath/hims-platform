@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -14,7 +15,12 @@ export default async function AllEncountersReportPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-foreground">All Encounters</h1>
+      <h1 className="mb-2 text-2xl font-bold text-foreground">All Encounters</h1>
+      {/* Wave F P1-04: this legacy report lists completed appointments; hospital visits live in the OPD register. */}
+      <p className="mb-6 text-sm text-muted-foreground">
+        Completed appointments only. For every OPD/IPD visit by token, department, doctor and status, use the{' '}
+        <Link href="/encounters" className="font-medium text-primary hover:underline">OPD Register</Link>.
+      </p>
       <AllEncountersReportTable rows={rows} />
     </div>
   )

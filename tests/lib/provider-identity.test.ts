@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { staffMembers, providers } from '@/db/schema'
+import { staffMembers, providers, users } from '@/db/schema'
 import { resolveSessionProvider } from '@/lib/provider-identity'
 import type { Session } from '@/lib/auth'
 
@@ -31,10 +31,14 @@ beforeAll(async () => {
   kunamUserId = kunamStaff.userId
   kunamProviderId = kunamStaff.providerId
 
-  const [ruizStaff] = await db.select().from(staffMembers).where(eq(staffMembers.name, 'Jamie Ruiz'))
-  if (!ruizStaff || ruizStaff.userId == null) throw new Error('Seeded staff row for Jamie Ruiz not found, or missing userId')
-  if (ruizStaff.providerId !== null) throw new Error('Expected seeded Jamie Ruiz staff row to have providerId: null')
-  ruizUserId = ruizStaff.userId
+  // The seeded CRC (Jamie Ruiz before Wave D, Jaya Raman after): the staff row linked to a crc
+  // user and to no provider, found by that shape rather than by a name that changed.
+  const [crcStaff] = await db.select({ userId: staffMembers.userId, providerId: staffMembers.providerId }).from(staffMembers)
+    .innerJoin(users, eq(users.id, staffMembers.userId))
+    .where(and(eq(users.role, 'crc'), isNull(staffMembers.providerId)))
+    .limit(1)
+  if (!crcStaff || crcStaff.userId == null) throw new Error('Seeded crc staff row not found, or missing userId')
+  ruizUserId = crcStaff.userId
 })
 
 // Every test that mutates employmentStatus/isActive snapshots the row first
@@ -77,8 +81,8 @@ describe('resolveSessionProvider', () => {
     expect(await resolveSessionProvider(session)).toBeNull()
   })
 
-  it('returns null for a staff member whose providerId is null (the seeded crc Jamie Ruiz)', async () => {
-    const session: Session = { role: 'crc', name: 'Jamie Ruiz', userId: ruizUserId }
+  it('returns null for a staff member whose providerId is null (the seeded crc)', async () => {
+    const session: Session = { role: 'crc', name: 'Jaya Raman', userId: ruizUserId }
     expect(await resolveSessionProvider(session)).toBeNull()
   })
 

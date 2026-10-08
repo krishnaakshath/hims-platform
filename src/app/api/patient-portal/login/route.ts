@@ -7,6 +7,7 @@ import { checkPatientLoginRateLimit } from '@/lib/rate-limit'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { setPendingPatientMfaCookie } from '@/lib/mfa-pending-session'
 import { getPatientMfaState } from '@/lib/queries/patient-portal'
+import { withServiceGuard } from '@/lib/service-config'
 
 // `patientId` is the login identifier the patient typed: either their email
 // address or their patient ID (the form asks for "Email address or patient
@@ -23,7 +24,7 @@ function getClientIp(request: NextRequest): string {
   return request.headers.get('x-real-ip') ?? 'unknown'
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withServiceGuard('patient login', async function POST(request: NextRequest) {
   const json = await readJsonBody(request)
   if (!json.ok) return json.response
   const body: unknown = json.body
@@ -70,4 +71,4 @@ export async function POST(request: NextRequest) {
   await setPatientSessionCookie(patientId)
   await logPatientPortalAction('logged in to patient portal', patientId)
   return NextResponse.json({ ok: true })
-}
+})

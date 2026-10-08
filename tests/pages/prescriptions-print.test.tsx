@@ -37,6 +37,10 @@ let episodeA1: number
 let episodeA2: number
 let episodeB1: number
 let episodeAImported: number
+// Wave F P1-16: a doctor with an NMC registration and a late-evening (UTC) prescription.
+let registeredProviderId: number
+let episodeARegistered: number
+let patientAUhid: string | null
 
 beforeAll(async () => {
   const db = getDb()
@@ -87,13 +91,30 @@ beforeAll(async () => {
     patientId: patientA, name: 'Imported Med', medicationClass: 'Test Class', startDate: '2025-01-01', status: 'active',
   }).returning()
   episodeAImported = imported.id
+
+  const [uhidRow] = await db.select({ uhid: patients.uhid }).from(patients).where(eq(patients.id, patientA))
+  patientAUhid = uhidRow?.uhid ?? null
+  const [registered] = await db.insert(providers).values({
+    name: 'Dr. Wave F Registrar', credentials: 'MBBS, MD', specialty: 'General Medicine', colorTag: '#336699',
+    registrationCouncil: 'nmc', registrationNumber: 'WF-778899',
+  }).returning()
+  registeredProviderId = registered.id
+  const [reg] = await db.insert(medicationEpisodes).values({
+    patientId: patientA, name: 'Paracetamol', medicationClass: 'Analgesic', dose: '500 mg',
+    startDate: '2026-09-29', status: 'active', frequencyPerDay: 3, durationDays: 5,
+    instructions: 'After food.', prescribedByProviderId: registeredProviderId,
+    // 20:00 UTC on 29 Sep is 01:30 IST on 30 Sep: the slip prints the IST date.
+    prescribedAt: new Date('2026-09-29T20:00:00Z'), enteredByName: 'Dr. Wave F Registrar',
+  }).returning()
+  episodeARegistered = reg.id
 })
 
 afterAll(async () => {
   const db = getDb()
-  for (const id of [episodeA1, episodeA2, episodeB1, episodeAImported]) {
-    await db.delete(medicationEpisodes).where(eq(medicationEpisodes.id, id))
+  for (const id of [episodeA1, episodeA2, episodeB1, episodeAImported, episodeARegistered]) {
+    if (id) await db.delete(medicationEpisodes).where(eq(medicationEpisodes.id, id))
   }
+  if (registeredProviderId) await db.delete(providers).where(eq(providers.id, registeredProviderId))
 })
 
 afterEach(() => {
@@ -201,5 +222,30 @@ describe('GET /prescriptions/print', () => {
     expect(button.closest('.no-print')).not.toBeNull()
 
     printSpy.mockRestore()
+  })
+
+  // Wave F P1-16: an Indian Rx slip -- hospital header, UHID, age/sex, the
+  // IST date and the doctor's NMC/SMC registration number.
+  it('prints the hospital header, UHID, age/sex, IST date and the NMC registration number', async () => {
+    const jsx = await page({ ids: String(episodeARegistered) })
+    const { render, screen } = await import('@testing-library/react')
+    const { container } = render(jsx)
+    expect(screen.getByRole('heading', { name: /prescription/i })).toBeInTheDocument()
+    expect(screen.getByText(patientAUhid ?? 'UHID not issued')).toBeInTheDocument()
+    expect(screen.getByText(/age \/ sex/i)).toBeInTheDocument()
+    expect(screen.getByText('30 Sep 2026')).toBeInTheDocument()
+    expect(screen.getByText(/Reg\. No\. NMC WF-778899/)).toBeInTheDocument()
+    expect(screen.getByText('Rx')).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/Patient ID:/)
+    expect(container.textContent).not.toMatch(/DOB:/)
+  })
+
+  it('a doctor without a registration prints a visible "not on file" marker, not a blank', async () => {
+    const jsx = await page({ ids: String(episodeA1) })
+    const { render, screen } = await import('@testing-library/react')
+    render(jsx)
+    if (!(await getDb().select({ n: providers.registrationNumber }).from(providers).where(eq(providers.id, providerId)))[0]?.n) {
+      expect(screen.getByText(/Reg\. No\. not on file/)).toBeInTheDocument()
+    }
   })
 })

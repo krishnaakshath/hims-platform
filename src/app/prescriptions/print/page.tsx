@@ -1,14 +1,14 @@
-import { formatIstDate } from '@/lib/india-time'
+import { ageOnDate, formatIstDate, istDateOf } from '@/lib/india-time'
+import { GENDERS } from '@/lib/india/reference'
 import { notFound, redirect } from 'next/navigation'
 import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { getPrintablePrescriptions } from '@/lib/queries/prescriptions'
-import { getPatientIdentityForPrint } from '@/lib/queries/patients'
+import { getPatientDocumentIdentity } from '@/lib/queries/print-slips'
 import { getPracticeIdentity } from '@/lib/queries/settings'
-import { BackLink } from '@/components/BackLink'
-import { PrintButton } from '@/components/PrintButton'
+import { DocField, PrintDocument } from '@/components/print/PrintDocument'
 import { brand } from '@/lib/brand'
 
 // Printing is a read of the prescriptions shown on the chart, so it uses the
@@ -36,9 +36,7 @@ function parseIds(raw: string | undefined): number[] | null {
   return unique
 }
 
-function formatLongDate(value: Date | string): string {
-  return formatIstDate(value)
-}
+const GENDER_LABEL = new Map<string, string>(GENDERS.map((g) => [g.code, g.label]))
 
 export default async function PrescriptionPrintPage({ searchParams }: { searchParams: Promise<{ ids?: string }> }) {
   // First statement, per requireSessionOrRedirect's own documented
@@ -58,7 +56,7 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
   const rows = await getPrintablePrescriptions(ids)
   if (!rows) notFound()
 
-  const patient = await getPatientIdentityForPrint(rows[0].patientId)
+  const patient = await getPatientDocumentIdentity(rows[0].patientId)
   // Defensive only: getPrintablePrescriptions already guarantees
   // medication_episodes.patient_id references a real patient row.
   if (!patient) notFound()
@@ -70,57 +68,70 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
   await logAudit(session, `printed prescription(s) ${ids.join(',')}`, rows[0].patientId)
 
   const first = rows[0]
+  // Wave F P1-16: the age on the (IST) date the prescription was written.
+  const writtenOn = istDateOf(first.prescribedAt)
+  const age = ageOnDate(patient.dob, writtenOn)
+  const sex = patient.gender ? (GENDER_LABEL.get(patient.gender) ?? patient.gender) : '—'
 
   return (
-    <div className="mx-auto max-w-2xl px-8 py-10 text-foreground">
-      <div className="no-print mb-8 flex items-center justify-between">
-        <BackLink href={`/patients/${patient.id}/medical-record`} label="Back to Medical Record" />
-        <PrintButton />
-      </div>
+    <PrintDocument
+      title="Prescription"
+      backHref={`/patients/${patient.id}/medical-record`}
+      backLabel="Back to Medical Record"
+      hospitalName={practice.practiceName ?? brand.legalName}
+      hospitalSubline={practice.practiceSite}
+      meta={[{ label: 'Date', value: formatIstDate(first.prescribedAt) }]}
+      printedAt={new Date()}
+    >
+      <dl className="mt-4 grid grid-cols-4 gap-x-4 gap-y-2 border-b border-neutral-300 pb-3">
+        <div className="col-span-2">
+          <dt className="text-[10px] font-semibold uppercase tracking-wide text-neutral-600">Patient</dt>
+          <dd className="text-base font-semibold">{patient.name}</dd>
+        </div>
+        <DocField label="UHID"><span className="font-mono">{patient.uhid ?? 'UHID not issued'}</span></DocField>
+        <DocField label="Age / Sex">{`${age} y / ${sex}`}</DocField>
+      </dl>
 
-      <header className="mb-8 border-b border-border pb-4">
-        <p className="text-lg font-semibold">{practice.practiceName ?? brand.legalName}</p>
-        {practice.practiceSite && <p className="text-sm text-muted-foreground">{practice.practiceSite}</p>}
-      </header>
-
-      <section className="mb-6">
-        <p className="text-base font-semibold">{patient.name}</p>
-        <p className="text-sm text-muted-foreground">Patient ID: {patient.id}</p>
-        <p className="text-sm text-muted-foreground">DOB: {patient.dob}</p>
+      <section className="mt-5" aria-label="Medicines">
+        <p className="mb-2 font-serif text-3xl font-bold italic leading-none">Rx</p>
+        <ol className="space-y-3">
+          {rows.map((row, i) => (
+            <li key={row.id} className="grid grid-cols-[1.5rem_1fr] gap-x-2 border-b border-neutral-200 pb-2 last:border-b-0">
+              <span className="font-semibold tabular-nums">{i + 1}.</span>
+              <div>
+                <p className="font-semibold">
+                  {row.name} <span className="font-normal text-neutral-600">({row.medicationClass})</span>
+                </p>
+                <div className="flex flex-wrap gap-x-4 text-[13px]">
+                  {row.dose && <p>{row.dose}</p>}
+                  <p>{row.frequencyPerDay} times daily</p>
+                  <p>for {row.durationDays} days</p>
+                </div>
+                {row.instructions && <p className="text-xs italic">{row.instructions}</p>}
+              </div>
+            </li>
+          ))}
+        </ol>
       </section>
 
-      <p className="mb-8 text-sm">Date written: {formatLongDate(first.prescribedAt)}</p>
-
-      <section className="mb-8 space-y-6">
-        {rows.map((row) => (
-          <div key={row.id} className="border-b border-border pb-4 last:border-b-0">
-            <p className="font-semibold">
-              {row.name} <span className="font-normal text-muted-foreground">({row.medicationClass})</span>
-            </p>
-            {row.dose && <p>{row.dose}</p>}
-            <p>{row.frequencyPerDay} times daily</p>
-            <p>for {row.durationDays} days</p>
-            {row.instructions && <p className="text-sm">{row.instructions}</p>}
-          </div>
-        ))}
+      <section className="mt-12 flex items-end justify-between gap-6">
+        <div className="text-xs text-neutral-700">
+          {first.enteredByName && first.enteredByName !== first.prescriber.name && <p>Entered by: {first.enteredByName}</p>}
+        </div>
+        <div className="w-72 text-right">
+          <div className="mb-1 border-t border-black pt-1 text-[10px] uppercase tracking-wide text-neutral-600">Signature</div>
+          <p className="font-semibold">
+            {first.prescriber.name}
+            {first.prescriber.credentials ? `, ${first.prescriber.credentials}` : ''}
+          </p>
+          {first.prescriber.specialty && <p className="text-xs">{first.prescriber.specialty}</p>}
+          <p className="text-xs">{first.prescriberRegistration ? `Reg. No. ${first.prescriberRegistration}` : 'Reg. No. not on file'}</p>
+        </div>
       </section>
 
-      <section className="mb-8">
-        <p className="font-semibold">
-          {first.prescriber.name}
-          {first.prescriber.credentials ? `, ${first.prescriber.credentials}` : ''}
-        </p>
-        {first.prescriber.specialty && <p className="text-sm text-muted-foreground">{first.prescriber.specialty}</p>}
-        <div className="mt-12 w-64 border-t border-foreground pt-1 text-xs text-muted-foreground">Signature</div>
-      </section>
-
-      {first.enteredByName && first.enteredByName !== first.prescriber.name && (
-        <p className="mb-8 text-sm text-muted-foreground">Entered by: {first.enteredByName}</p>
-      )}
-
-      <footer className="border-t border-border pt-4 text-xs text-muted-foreground">
+      <p className="mt-6 text-[10px] text-neutral-600">
         This printout is a record of a prescription entered in {brand.name}. It was not transmitted electronically to a pharmacy.
-      </footer>
-    </div>
+      </p>
+    </PrintDocument>
   )
 }

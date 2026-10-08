@@ -28,6 +28,10 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP4
       'Capture charges and build invoices',
       // end SP4
+      // Wave F
+      'View the OPD register and export it as CSV',
+      'Print discharge summaries and prescription slips',
+      // end Wave F
       // SP7
       'Pick an approved pre-authorisation when capturing a charge billed to an insurer',
       // end SP7
@@ -62,6 +66,10 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Verify lab results before they are reported to the patient',
       // SP6
       'Propose diagnosis and procedure codes for a visit on the chart, and answer coding queries',
+      // Wave F
+      'View the OPD register (no export)',
+      'Print discharge summaries and prescription slips with their NMC/SMC registration number',
+      // end Wave F
     ],
   },
   admin: {
@@ -105,6 +113,10 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Load licensed code sets (ICD-10, ICD-10-PCS, SNOMED CT, LOINC, HBP packages) and choose the current version',
       'Assign coding work to a coder',
       'Correct a patient\'s name or date of birth after registration (with a recorded reason), and clear a medico-legal (MLC) flag',
+      // Wave F
+      'View the OPD register (every visit by date, department, doctor and status) and export it as CSV',
+      'Print discharge summaries and Indian prescription slips',
+      // end Wave F
       // SP7
       'Approve or reject claim write-offs',
       'Set the hospital ROHINI and HFR identifiers',
@@ -132,6 +144,10 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP5
       'Book, reschedule or cancel a home sample collection for a patient in the service area',
       'Find a patient by name, UHID, mobile number or chart ID, and print the OPD token slip and the registration slip / UHID card',
+      // Wave F
+      'View the OPD register (no export)',
+      'Print the administrative copy of a discharge summary (no clinical details)',
+      // end Wave F
       // SP7
       'Record a patient\'s insurance policy and card at registration or admission',
       // end SP7

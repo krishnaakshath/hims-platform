@@ -107,9 +107,10 @@ describe.skipIf(!process.env.DATABASE_URL)('service procedure codes (DB)', () =>
     expect(await replaceServiceProcedureCodes(consultId, [{ kind: 'hbp', code: 'SMP001A', isPrimary: false }], CODER))
       .toEqual({ ok: false, error: 'incompatible', problems: ['This kind of service cannot carry procedure codes'] })
     expect(await replaceServiceProcedureCodes(2147483000, [], CODER)).toEqual({ ok: false, error: 'service_not_found' })
-    // A kind with no current version loaded: not found, named.
-    expect(await replaceServiceProcedureCodes(procedureId, [{ kind: 'icd10pcs', code: 'ZZ00000', isPrimary: false }], CODER))
-      .toEqual({ ok: false, error: 'code_not_found', problems: ['ZZ00000 is not an active ICD-10-PCS code in the current version'] })
+    // A code that is not in the current version (or no version of the kind is loaded): not found, named.
+    // ZZ09999 is in no code set, so this holds whether or not the demo seed loaded the SAMPLE ICD-10-PCS set.
+    expect(await replaceServiceProcedureCodes(procedureId, [{ kind: 'icd10pcs', code: 'ZZ09999', isPrimary: false }], CODER))
+      .toEqual({ ok: false, error: 'code_not_found', problems: ['ZZ09999 is not an active ICD-10-PCS code in the current version'] })
     expect(await getDb().select().from(auditLog).where(eq(auditLog.userName, PROBE_USER))).toEqual([])
   })
 

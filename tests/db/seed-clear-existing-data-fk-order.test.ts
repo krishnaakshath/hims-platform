@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { eq } from 'drizzle-orm'
+import { eq, is } from 'drizzle-orm'
+import { getTableConfig, PgTable } from 'drizzle-orm/pg-core'
+import * as schema from '@/db/schema'
 import { getDb } from '@/db/client'
 import {
   patients, formTemplates, formSubmissions, formSubmissionScores, formChartDiscrepancies,
@@ -198,5 +200,68 @@ describe('forms hub join tables FK ordering (final review I2)', () => {
     expect(pos('formTemplates')).toBeLessThan(pos('formTemplateFolders'))
     expect(pos('formSubmissionConsents')).toBeLessThan(pos('consentDocuments'))
     expect(pos('formTemplateConsents')).toBeLessThan(pos('consentDocuments'))
+  })
+})
+
+// Wave D: the whole clear, checked against every foreign key drizzle knows about. A reset
+// (SEED_RESET=1) runs clearExistingData() on a populated database, so every child table of a
+// table it deletes must be emptied (or its reference nulled) first -- otherwise the reset
+// aborts half way with a foreign-key violation. A new table with a NO ACTION/RESTRICT FK into
+// patients, appointments, rooms, providers, users, ... fails this test until it is added.
+describe('clearExistingData() covers every foreign key in the schema (Wave D)', () => {
+  type Edge = { child: string; parent: string; onDelete: string }
+
+  function schemaEdges(): { edges: Edge[]; sqlNameOf: Map<string, string> } {
+    const tables = Object.entries(schema).filter(([, v]) => is(v, PgTable)) as [string, PgTable][]
+    const sqlNameOf = new Map(tables.map(([k, t]) => [k, getTableConfig(t).name]))
+    const edges: Edge[] = []
+    for (const [, t] of tables) {
+      const cfg = getTableConfig(t)
+      for (const fk of cfg.foreignKeys) {
+        const ref = fk.reference()
+        edges.push({ child: cfg.name, parent: getTableConfig(ref.foreignColumns[0].table).name, onDelete: fk.onDelete ?? 'no action' })
+      }
+    }
+    return { edges, sqlNameOf }
+  }
+
+  function clearSteps(sqlNameOf: Map<string, string>): { kind: 'delete' | 'update'; table: string }[] {
+    const src = readFileSync(join(process.cwd(), 'src/db/seed.ts'), 'utf8')
+    const body = src.slice(src.indexOf('async function clearExistingData()'), src.indexOf('async function insertHeroPatient('))
+    return [...body.matchAll(/(?:db|tx)\.(delete|update)\((\w+)\)/g)].map((m) => {
+      const table = sqlNameOf.get(m[2])
+      if (!table) throw new Error(`clearExistingData() names an unknown table export: ${m[2]}`)
+      return { kind: m[1] as 'delete' | 'update', table }
+    })
+  }
+
+  it('every child of a deleted table is deleted or released before its parent', () => {
+    const { edges, sqlNameOf } = schemaEdges()
+    const steps = clearSteps(sqlNameOf)
+    const deletedAt = new Map<string, number>()
+    const updatedAt = new Map<string, number>()
+    steps.forEach((s, i) => {
+      if (s.kind === 'delete' && !deletedAt.has(s.table)) deletedAt.set(s.table, i)
+      if (s.kind === 'update' && !updatedAt.has(s.table)) updatedAt.set(s.table, i)
+    })
+
+    const problems: string[] = []
+    for (const [parent, at] of deletedAt) {
+      for (const e of edges.filter((x) => x.parent === parent && x.child !== parent)) {
+        if (e.onDelete === 'cascade' || e.onDelete === 'set null') continue
+        const childDeleted = deletedAt.get(e.child)
+        const childReleased = updatedAt.get(e.child)
+        const ok = (childDeleted !== undefined && childDeleted < at) || (childReleased !== undefined && childReleased < at)
+        if (!ok) problems.push(`${e.child} -> ${parent}`)
+      }
+    }
+    expect(problems).toEqual([])
+  })
+
+  it('clears every table that references patients', () => {
+    const { edges, sqlNameOf } = schemaEdges()
+    const deleted = new Set(clearSteps(sqlNameOf).filter((s) => s.kind === 'delete').map((s) => s.table))
+    const children = [...new Set(edges.filter((e) => e.parent === 'patients').map((e) => e.child))]
+    expect(children.filter((c) => !deleted.has(c))).toEqual([])
   })
 })

@@ -12,6 +12,7 @@ import { getAdminMfaState, setAdminMfaSecret } from '@/lib/queries/settings'
 import { findUserByEmail, getUserMfaState, setUserMfaSecret } from '@/lib/queries/users'
 import { logAudit } from '@/lib/audit'
 import { staffMfaBypassEnabled } from '@/lib/demo-features'
+import { withServiceGuard } from '@/lib/service-config'
 
 // Demo/eval toggle: set DISABLE_STAFF_MFA=true in the environment to skip
 // the TOTP enroll/verify challenge entirely and complete login on password
@@ -35,7 +36,7 @@ function getClientIp(request: NextRequest): string {
   return request.headers.get('x-real-ip') ?? 'unknown'
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withServiceGuard('login', async function POST(request: NextRequest) {
   const json = await readJsonBody(request)
   if (!json.ok) return json.response
   const body: unknown = json.body
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
-}
+})
 
 // Mirrors /api/login/mfa's own success path (setSessionCookie + logAudit +
 // {ok:true}) so a DISABLE_STAFF_MFA login is indistinguishable downstream

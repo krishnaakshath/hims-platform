@@ -21,14 +21,15 @@ describe('SP3 role allowlists', () => {
 import { searchScopesFor } from '@/lib/role-policy'
 
 // Wave B P1-24: search per role. Patients only for PATIENT_DIRECTORY_ROLES;
-// the tariff catalogue for TARIFF_MANAGE_ROLES; pharmacy and labs have no
+// the tariff catalogue for TARIFF_LOOKUP_ROLES (Wave G: crc and frontdesk
+// find a service and land on the price lookup); pharmacy and labs have no
 // global search (their worklists/lookups are their search).
 describe('searchScopesFor', () => {
   it('matches the Wave B decision table', () => {
     expect(searchScopesFor('admin')).toEqual({ patients: true, trials: true, formTemplates: true, services: true })
-    expect(searchScopesFor('crc')).toEqual({ patients: true, trials: true, formTemplates: true, services: false })
+    expect(searchScopesFor('crc')).toEqual({ patients: true, trials: true, formTemplates: true, services: true })
     expect(searchScopesFor('pi')).toEqual({ patients: true, trials: true, formTemplates: true, services: false })
-    expect(searchScopesFor('frontdesk')).toEqual({ patients: true, trials: false, formTemplates: false, services: false })
+    expect(searchScopesFor('frontdesk')).toEqual({ patients: true, trials: false, formTemplates: false, services: true })
     expect(searchScopesFor('billing')).toEqual({ patients: false, trials: false, formTemplates: false, services: true })
     expect(searchScopesFor('pharmacy')).toEqual({ patients: false, trials: false, formTemplates: false, services: false })
     expect(searchScopesFor('labs')).toEqual({ patients: false, trials: false, formTemplates: false, services: false })

@@ -7,6 +7,7 @@ import { verifyMfaCode } from '@/lib/mfa'
 import { getPatientMfaState, enablePatientMfa } from '@/lib/queries/patient-portal'
 import { checkPatientMfaRateLimit } from '@/lib/rate-limit'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
+import { withServiceGuard } from '@/lib/service-config'
 
 const confirmSchema = z.object({ code: z.string().trim().length(6) }).strict()
 
@@ -16,7 +17,7 @@ function getClientIp(request: NextRequest): string {
   return request.headers.get('x-real-ip') ?? 'unknown'
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withServiceGuard('patient MFA confirmation', async function POST(request: NextRequest) {
   const session = await requirePatientSession()
   if (session instanceof NextResponse) return session
 
@@ -42,4 +43,4 @@ export async function POST(request: NextRequest) {
   await logPatientPortalAction('enabled MFA', session.patientId)
 
   return NextResponse.json({ ok: true })
-}
+})

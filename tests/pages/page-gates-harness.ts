@@ -333,7 +333,7 @@ export const PAGE_GATES: PageGateCase[] = [
   // end SP7
   // end SP6
   // Wave B P1-05: price lookup -- TARIFF_LOOKUP_ROLES (LeftNav NAV_TRAILING_ITEMS /price-lookup).
-  { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), allowed: ['admin', 'billing', 'crc', 'frontdesk', 'rcm'] }, // SP7: + rcm (TARIFF_LOOKUP_ROLES)
+  { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'billing', 'crc', 'frontdesk', 'rcm'] }, // SP7: + rcm (TARIFF_LOOKUP_ROLES)
   // Wave B P1-01: own account (MFA method, self-reset, capabilities) -- ACCOUNT_ROLES = every staff role.
   // SP4 billing screens -- NAV_BILLING_ITEMS are gated to exactly BILLING_ROLES (= CHARGE_CAPTURE_ROLES).
   { route: '/billing/capture', load: () => import('@/app/(dashboard)/billing/capture/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
@@ -375,4 +375,15 @@ export const PAGE_GATES: PageGateCase[] = [
     props: { params: Promise.resolve({ anonId: 'RD-0001' }) },
     allowed: ['admin', 'frontdesk'],
   },
+  // Wave F P1-13: discharge summary print -- DISCHARGE_SUMMARY_PRINT_ROLES (= PATIENT_DIRECTORY_ROLES;
+  // the front desk gets the administrative copy). Linked from InpatientHistoryPanel, no nav entry.
+  {
+    route: '/print/discharge/[admissionId]',
+    load: () => import('@/app/print/discharge/[admissionId]/page'),
+    props: { params: Promise.resolve({ admissionId: '1' }) },
+    allowed: ['admin', 'crc', 'pi', 'frontdesk'],
+  },
+  // LeftNav.tsx /encounters (OPD Register) -- ENCOUNTER_REGISTER_ROLES.
+  { route: '/encounters', load: () => import('@/app/(dashboard)/encounters/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'pi', 'frontdesk'] },
+  // end Wave F
 ]

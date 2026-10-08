@@ -9,6 +9,7 @@ import { getAdminMfaState, enableAdminMfa } from '@/lib/queries/settings'
 import { getUserMfaState, enableUserMfa } from '@/lib/queries/users'
 import { checkStaffMfaRateLimit } from '@/lib/rate-limit'
 import { logAudit } from '@/lib/audit'
+import { withServiceGuard } from '@/lib/service-config'
 
 const mfaSchema = z.object({ code: z.string().trim().regex(/^\d{6}$/) }).strict()
 
@@ -18,7 +19,7 @@ function getClientIp(request: NextRequest): string {
   return request.headers.get('x-real-ip') ?? 'unknown'
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withServiceGuard('staff MFA verification', async function POST(request: NextRequest) {
   const pending = await getPendingStaffMfaSession()
   if (!pending) return NextResponse.json({ error: 'Your login session expired. Please sign in again.' }, { status: 401 })
 
@@ -72,4 +73,4 @@ export async function POST(request: NextRequest) {
   await logAudit({ role: pending.role, name: pending.name, userId: pending.userId }, pending.mode === 'enroll' ? 'enrolled in MFA and completed login' : 'completed MFA login', null)
 
   return NextResponse.json({ ok: true })
-}
+})

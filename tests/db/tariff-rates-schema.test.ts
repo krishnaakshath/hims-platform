@@ -35,10 +35,13 @@ describe('tariff rates schema', () => {
     ]) expect(s, n).toContain(n)
   })
 
-  it('DEPLOYING.md tells a fresh deploy to apply the migrations after db:push', () => {
+  // The exclusion constraint exists only in the migrations; DEPLOYING.md must
+  // build a fresh database with db:migrate (baseline + migrations), not db:push.
+  it('DEPLOYING.md builds a fresh database with db:migrate, which creates the exclusion constraint', () => {
     const d = readFileSync(join(process.cwd(), 'docs/DEPLOYING.md'), 'utf8')
     expect(d).toContain('tariff_rates_no_overlap')
-    expect(d.indexOf('npm run db:push')).toBeLessThan(d.indexOf('tariff_rates_no_overlap'))
+    expect(d.indexOf('npm run db:migrate')).toBeGreaterThan(-1)
+    expect(d.indexOf('npm run db:migrate')).toBeLessThan(d.indexOf('tariff_rates_no_overlap'))
   })
 })
 
