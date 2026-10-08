@@ -130,3 +130,24 @@ describe('buildDischargeSummary', () => {
   })
 })
 
+
+// Wave J (P1-20): the patient's own copy in the portal.
+describe('buildDischargeSummary patient copy', () => {
+  it('carries the clinical sections with a masked ABHA number and no MLC number, whatever the role argument', () => {
+    for (const d of [buildDischargeSummary(SRC, NOW, null, { patientCopy: true }), buildDischargeSummary(SRC, NOW, 'frontdesk', { patientCopy: true })]) {
+      expect(d.clinical).toEqual({ diagnosis: 'Community-acquired pneumonia', drugs: 'Amoxicillin', devices: 'None', diet: 'Soft', notes: 'Recovered well' })
+      expect(d.patient.abhaNumber).toBe('XX-XXXX-XXXX-0123')
+      expect(d.patient.abhaAddress).toBe('asha.rao@abdm')
+      expect(d.patient).toMatchObject({ isMlc: true, mlcNumber: null })
+      const json = JSON.stringify(d)
+      for (const text of ['MLC-7', '91234567890123', '91-2345-6789']) expect(json).not.toContain(text)
+    }
+  })
+
+  it('includes the stay record when one is loaded', () => {
+    const record = { diagnoses: [], medications: [{ name: 'Paracetamol', dose: '500 mg', given: 3, firstGivenAt: new Date('2026-10-02T00:00:00Z'), lastGivenAt: null }], labs: [], labsNotFinal: 1 }
+    const d = buildDischargeSummary({ ...SRC, record }, NOW, null, { patientCopy: true })
+    expect(d.record?.medications[0]).toMatchObject({ name: 'Paracetamol', given: 3, firstGivenAt: '2026-10-02T00:00:00.000Z' })
+    expect(d.record?.labsNotFinal).toBe(1)
+  })
+})

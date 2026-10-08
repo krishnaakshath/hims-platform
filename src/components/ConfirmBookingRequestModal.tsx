@@ -21,7 +21,9 @@ export function ConfirmBookingRequestModal({ request, providers, onClose }: {
 }) {
   const router = useRouter()
   // Wave C P0-04: found by name, UHID or mobile; the route gets the chart id.
-  const [patient, setPatient] = useState<PickedPatient | null>(null)
+  // Wave J: a portal request is already named to its patient; the picker is not offered.
+  const portalPatient = request.patientId ? { id: request.patientId, name: request.requesterName, uhid: null } : null
+  const [patient, setPatient] = useState<PickedPatient | null>(portalPatient)
   const patientId = patient?.id ?? ''
   const [providerId, setProviderId] = useState<number | ''>(request.preferredProviderId ?? '')
   const [date, setDate] = useState(request.preferredDateRangeStart)
@@ -56,12 +58,21 @@ export function ConfirmBookingRequestModal({ request, providers, onClose }: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Confirm Booking Request</DialogTitle>
+          <DialogTitle>{request.requestKind === 'reschedule' ? 'Confirm Reschedule Request' : 'Confirm Booking Request'}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">{request.requesterName} · requested {request.preferredDateRangeStart} to {request.preferredDateRangeEnd}</p>
-          <PatientPicker value={patient} onChange={setPatient} />
-          <p className="text-xs text-muted-foreground">If {request.requesterName} is a genuinely new patient, register them with Add Patient first, then find them here by name, UHID or mobile.</p>
+          {portalPatient ? (
+            <p className="text-sm text-foreground">
+              Patient: <span className="font-medium">{portalPatient.name}</span> (requested from the patient portal)
+              {request.requestKind === 'reschedule' && <span className="block text-xs text-muted-foreground">Confirming books the new time and cancels appointment #{request.appointmentId}.</span>}
+            </p>
+          ) : (
+            <>
+              <PatientPicker value={patient} onChange={setPatient} />
+              <p className="text-xs text-muted-foreground">If {request.requesterName} is a genuinely new patient, register them with Add Patient first, then find them here by name, UHID or mobile.</p>
+            </>
+          )}
           <select value={providerId} onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))} aria-label="Provider" className="w-full rounded-md border border-border px-3 py-2 text-sm">
             <option value="">Select a provider…</option>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}

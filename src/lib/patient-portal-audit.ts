@@ -10,8 +10,9 @@ import { auditLog } from '@/db/schema'
 // else, only here, for exactly these two legitimate cases: a patient acting
 // on their own record (logPatientPortalAction) and the token-authenticated LIS
 // webhook (logIntegrationEvent).
-export async function logPatientPortalAction(action: string, patientId: string, details?: string): Promise<void> {
-  await getDb().insert(auditLog).values({
+// Wave J: pass `executor` (a transaction) to make the audit row commit or roll back with the work it records.
+export async function logPatientPortalAction(action: string, patientId: string, details?: string, executor: Pick<ReturnType<typeof getDb>, 'insert'> = getDb()): Promise<void> {
+  await executor.insert(auditLog).values({
     userName: 'Patient (self-service)',
     role: null,
     action,

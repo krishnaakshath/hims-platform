@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, FileText, Pill, CalendarCheck, MessageSquare, Megaphone, ShieldCheck, FileCheck } from 'lucide-react'
+import { LayoutDashboard, FileText, Pill, CalendarCheck, MessageSquare, Megaphone, ShieldCheck, FileCheck, ClipboardList, BedDouble, Receipt, ShieldPlus } from 'lucide-react'
 import { BrandLogo } from '@/components/BrandLogo'
 
 type Icon = React.ComponentType<{ className?: string }>
@@ -12,6 +12,12 @@ const ITEMS: { href: string; label: string; icon: Icon }[] = [
   { href: '/patient-portal/broadcasts', label: 'Announcements', icon: Megaphone },
   { href: '/patient-portal/medications', label: 'Medications', icon: Pill },
   { href: '/patient-portal/lab-reports', label: 'Lab reports', icon: FileCheck }, // SP5
+  // Wave J (P1-20)
+  { href: '/patient-portal/prescriptions', label: 'Prescriptions', icon: ClipboardList },
+  { href: '/patient-portal/discharge-summaries', label: 'Discharge summaries', icon: BedDouble },
+  { href: '/patient-portal/bills', label: 'Bills & receipts', icon: Receipt },
+  { href: '/patient-portal/insurance', label: 'Insurance & ABHA', icon: ShieldPlus },
+  // end Wave J
   { href: '/patient-portal/appointments', label: 'Appointments', icon: CalendarCheck },
   { href: '/patient-portal/messages', label: 'Messages', icon: MessageSquare },
   { href: '/patient-portal/security', label: 'Security', icon: ShieldCheck },

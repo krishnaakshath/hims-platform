@@ -31,3 +31,14 @@ describe('PortalFollowUpCard', () => {
     expect(container.textContent).not.toContain('SECRET')
   })
 })
+
+// Wave J (P1-20)
+describe('PortalFollowUpCard request link', () => {
+  it('links a due or missed follow-up to the portal request form; a booked one has no link', () => {
+    const { unmount } = render(<PortalFollowUpCard followUp={PLANNED} />)
+    expect(screen.getByRole('link', { name: 'Request this visit' })).toHaveAttribute('href', '/patient-portal/appointments#request-appointment')
+    unmount()
+    render(<PortalFollowUpCard followUp={BOOKED} />)
+    expect(screen.queryByRole('link', { name: 'Request this visit' })).toBeNull()
+  })
+})

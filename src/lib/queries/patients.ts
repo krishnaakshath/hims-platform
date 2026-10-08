@@ -16,6 +16,7 @@ import {
   // SP7
   patientPolicies, preauths, preauthEvents, preauthDocuments, rcmQueries, rcmQueryResponses, claims, claimInvoices,
   claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
+  bookingRequests, // Wave J
 } from '@/db/schema'
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
@@ -637,6 +638,8 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   await db.delete(encounters).where(eq(encounters.patientId, anonId))
   await db.delete(admissions).where(eq(admissions.patientId, anonId))
   await db.delete(doctorAssignments).where(eq(doctorAssignments.patientId, anonId))
+  // Wave J: the patient's portal requests reference their appointments (no ON DELETE action).
+  await db.delete(bookingRequests).where(eq(bookingRequests.patientId, anonId))
   await db.delete(appointments).where(eq(appointments.patientId, anonId))
   await db.delete(messages).where(eq(messages.patientId, anonId))
   await db.delete(insuranceClaims).where(eq(insuranceClaims.patientId, anonId))

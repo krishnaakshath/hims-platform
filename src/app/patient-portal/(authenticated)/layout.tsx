@@ -28,7 +28,7 @@ export default async function PatientPortalLayout({ children }: { children: Reac
       <PatientPortalSessionTimeoutWarning />
       <PatientPortalSideNav />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <PatientPortalTopBar name={identity.name} dob={identity.dob} patientId={identity.id} />
+        <PatientPortalTopBar name={identity.name} dob={identity.dob} patientId={identity.id} uhid={identity.uhid} />
         <main className="flex-1 overflow-y-auto bg-background p-6">{children}</main>
       </div>
     </div>

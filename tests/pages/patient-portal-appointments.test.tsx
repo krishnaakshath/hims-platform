@@ -4,6 +4,14 @@ import PatientPortalAppointmentsPage from '@/app/patient-portal/(authenticated)/
 
 vi.mock('@/lib/patient-session', () => ({ requirePatientSessionOrRedirect: vi.fn(async () => ({ patientId: 'RD-0001' })) }))
 vi.mock('@/lib/patient-portal-audit', () => ({ logPatientPortalAction: vi.fn(async () => undefined) }))
+// Wave J: the page also reads follow-ups, requests and bookable doctors.
+vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('NEXT_NOT_FOUND') }, useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }))
+vi.mock('@/lib/queries/follow-ups', () => ({ getPortalFollowUps: vi.fn(async () => []) }))
+vi.mock('@/lib/queries/patient-portal-records', () => ({
+  listPortalAppointmentRequests: vi.fn(async () => []),
+  listPortalBookableProviders: vi.fn(async () => []),
+  pendingRequestAppointmentIds: vi.fn(async () => new Set()),
+}))
 
 const LONG_UPCOMING = 'Follow-up\n\nr/o MI   ' + 'detail '.repeat(40)
 const LONG_PAST = '  Old\r\nvisit\t\tnotes ' + 'x'.repeat(200)

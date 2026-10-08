@@ -92,8 +92,12 @@ function address(p: DischargeSummarySource['patient']): string | null {
  * identifiers are included only for CLINICAL_ROLES. Without a role (the
  * default) the document carries no clinical sections, so a caller has to opt in.
  */
-export function buildDischargeSummary(src: DischargeSummarySource, now: Date, viewerRole: Role | null = null): DischargeSummaryData {
-  const clinicalViewer = viewerRole !== null && CLINICAL_ROLES.includes(viewerRole)
+export function buildDischargeSummary(src: DischargeSummarySource, now: Date, viewerRole: Role | null = null, opts: { patientCopy?: boolean } = {}): DischargeSummaryData {
+  // Wave J (P1-20): the patient's own copy carries the clinical content handed over at
+  // discharge, but never the MLC number, and the ABHA number only masked to its last 4.
+  const patientCopy = opts.patientCopy === true
+  const clinicalViewer = patientCopy || (viewerRole !== null && CLINICAL_ROLES.includes(viewerRole))
+  // end Wave J
   const { patient: p, admission: a, attending: doc, followUp: f, signature: s } = src
   const admittedOn = istDateOf(a.admittedAt)
   const dischargedOn = istDateOf(a.dischargedAt)
@@ -109,12 +113,12 @@ export function buildDischargeSummary(src: DischargeSummarySource, now: Date, vi
       ageYears: ageOnDate(p.dob, dischargedOn),
       gender: p.gender ? (GENDER_LABEL.get(p.gender) ?? p.gender) : null,
       // The full number: this is a staff clinical document.
-      abhaNumber: clinicalViewer && p.abhaNumber ? formatAbhaNumber(p.abhaNumber) : null,
+      abhaNumber: clinicalViewer && p.abhaNumber ? (patientCopy ? maskAbhaNumber(p.abhaNumber) : formatAbhaNumber(p.abhaNumber)) : null,
       abhaAddress: clinicalViewer ? p.abhaAddress : null,
       address: address(p),
       isMlc: p.isMlc,
       // The MLC number is a medico-legal identifier: clinical roles only (the isMlc flag stays).
-      mlcNumber: clinicalViewer ? p.mlcNumber : null,
+      mlcNumber: clinicalViewer && !patientCopy ? p.mlcNumber : null,
     },
     admission: {
       id: a.id,
@@ -147,6 +151,11 @@ export function buildDischargeSummary(src: DischargeSummarySource, now: Date, vi
     signature: s ? { signerTypedName: s.signerTypedName, signedAt: s.signedAt.toISOString() } : null,
     record: clinicalViewer && src.record ? recordToIso(src.record) : null,
   }
+}
+
+// Wave J: the patient copy shows only the last 4 digits (same mask as the portal profile).
+function maskAbhaNumber(n: string): string | null {
+  return /^\d{14}$/.test(n) ? `XX-XXXX-XXXX-${n.slice(-4)}` : null
 }
 
 function recordToIso(r: DischargeRecord<Date>): DischargeRecord<string> {

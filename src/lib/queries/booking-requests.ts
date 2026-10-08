@@ -2,6 +2,8 @@ import { getDb } from '@/db/client'
 import { bookingRequests, appointments } from '@/db/schema'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { hasSchedulingConflict, lockProviderSchedule } from '@/lib/queries/appointments'
+import { logAudit } from '@/lib/audit' // Wave J
+import type { Session } from '@/lib/auth' // Wave J
 
 export type BookingRequestRow = typeof bookingRequests.$inferSelect
 
@@ -46,6 +48,8 @@ export interface ConfirmBookingRequestInput {
   endsAt: Date
   visitReason: string
   reviewedByName: string
+  /** Wave J: a portal reschedule request -- this (still scheduled) appointment is cancelled in the same transaction. */
+  rescheduleFromAppointmentId?: number | null
 }
 
 export interface BookingRequestActionResult {
@@ -86,6 +90,12 @@ export async function confirmBookingRequest(id: number, input: ConfirmBookingReq
       }).returning()
 
       await tx.update(bookingRequests).set({ resultingAppointmentId: appointment.id }).where(eq(bookingRequests.id, id))
+      // Wave J: the appointment being moved is released only once its replacement exists.
+      if (input.rescheduleFromAppointmentId) {
+        await tx.update(appointments).set({ status: 'cancelled' })
+          .where(and(eq(appointments.id, input.rescheduleFromAppointmentId), eq(appointments.patientId, input.patientId), eq(appointments.status, 'scheduled')))
+      }
+      // end Wave J
       return { ok: true, appointmentId: appointment.id }
     })
   } catch (err) {
@@ -101,4 +111,21 @@ export async function declineBookingRequest(id: number, input: { reason: string;
     .returning({ id: bookingRequests.id })
   if (updated.length === 0) return { ok: false, error: 'This request has already been resolved.' }
   return { ok: true }
+}
+
+// Wave J (P1-20): confirming a portal cancellation request cancels the patient's appointment.
+// One transaction: the pending->confirmed transition (lost races see "already resolved")
+// and the cancellation of the named appointment, only while it is still scheduled.
+export async function confirmCancelRequest(id: number, session: Session): Promise<BookingRequestActionResult> {
+  return getDb().transaction(async (tx) => {
+    const [req] = await tx.update(bookingRequests)
+      .set({ status: 'confirmed', reviewedByName: session.name, reviewedAt: new Date() })
+      .where(and(eq(bookingRequests.id, id), eq(bookingRequests.status, 'pending'), eq(bookingRequests.requestKind, 'cancel')))
+      .returning({ appointmentId: bookingRequests.appointmentId, patientId: bookingRequests.patientId })
+    if (!req || req.appointmentId === null || req.patientId === null) return { ok: false, error: 'This request has already been resolved.' }
+    await tx.update(appointments).set({ status: 'cancelled' })
+      .where(and(eq(appointments.id, req.appointmentId), eq(appointments.patientId, req.patientId), eq(appointments.status, 'scheduled')))
+    await logAudit(session, 'confirmed appointment cancellation request', req.patientId, `request=${id} appointment=${req.appointmentId}`, tx)
+    return { ok: true, appointmentId: req.appointmentId }
+  })
 }
