@@ -3,24 +3,20 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 
-interface ReportLeaf { href: string; label: string }
-interface ReportGroup { label: string; leaves: ReportLeaf[] }
+import type { Role } from '@/lib/auth'
+import { reportLeavesFor } from '@/lib/reports/catalog'
 
-const GROUPS: ReportGroup[] = [
-  { label: 'Patients', leaves: [{ href: '/reports/patients', label: 'All Patients' }] },
-  { label: 'Appointments', leaves: [{ href: '/reports/appointments/all', label: 'All Appointments' }] },
-  { label: 'Notes', leaves: [{ href: '/reports/notes/unsigned', label: 'Unsigned Notes' }] },
-  { label: 'Encounters', leaves: [{ href: '/reports/encounters/all', label: 'All Encounters' }] },
-  { label: 'Claims', leaves: [{ href: '/reports/claims/insurance-collections', label: 'Insurance Collections' }] },
-]
-
-export function ReportsSidebar() {
+// Wave I (P1-23): leaves come from the report catalogue, filtered to the role --
+// a role sees exactly the reports whose page gate admits it.
+export function ReportsSidebar({ role }: { role: Role }) {
   const pathname = usePathname()
+  const leaves = reportLeavesFor(role)
+  const groups = [...new Set(leaves.map((l) => l.group))].map((label) => ({ label, leaves: leaves.filter((l) => l.group === label) }))
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
   return (
     <nav className="w-64 shrink-0 space-y-1 border-r border-border pr-4">
-      {GROUPS.map((group) => {
+      {groups.map((group) => {
         const isCollapsed = collapsed[group.label] ?? false
         const groupActive = group.leaves.some((l) => pathname === l.href)
         return (

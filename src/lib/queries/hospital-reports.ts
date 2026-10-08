@@ -21,7 +21,7 @@ const istDayStart = (d: SQL) => sql`((${d})::timestamp - interval '5 hours 30 mi
 const between = (col: SQL, r: ReportRange) => sql`${col} between ${r.from}::date and ${r.to}::date`
 
 async function rows<T extends Record<string, unknown>>(q: SQL): Promise<T[]> {
-  return (await getDb().execute<T>(q)).rows
+  return (await getDb().execute<T>(q)).rows as T[]
 }
 
 const n = (v: unknown): number => Number(v ?? 0)

@@ -107,7 +107,7 @@ function findPageFiles(dir: string): string[] {
 }
 
 it('every (dashboard) page file has a PAGE_GATES row or an explicit exemption', () => {
-  const EXEMPT = ['/', '/reports'] // '/' = per-role landing (dashboard-routing.test.tsx); '/reports' = bare redirect
+  const EXEMPT = ['/'] // '/' = per-role landing (dashboard-routing.test.tsx). Wave I: '/reports' is now a gated landing page with its own row.
   const root = join(process.cwd(), 'src', 'app', '(dashboard)')
   const routes = findPageFiles(root).map((f) => toRoute(f, root))
   expect(routes.length).toBeGreaterThan(40)

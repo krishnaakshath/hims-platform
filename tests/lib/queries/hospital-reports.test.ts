@@ -84,12 +84,12 @@ beforeAll(async () => {
   }).returning()
   const [cl] = await db.insert(chargeLines).values({
     patientId: PATIENT, encounterId: es[0].id, source: 'manual', status: 'invoiced', serviceId, itemCode: svc.code, itemName: svc.name,
-    serviceCategory: 'procedure', departmentId: deptId, serviceDate: '2099-03-01', quantity: 1, unitPricePaise: 100000, priceSource: 'tariff',
+    serviceCategory: 'procedure', departmentId: deptId, serviceDate: '2099-03-01', quantity: 1, unitPricePaise: 100000, priceSource: 'base',
     taxablePaise: 100000, gstRateBp: 1800, hsnSac: '999312', createdByName: PROBE, invoiceId: inv.id,
   }).returning()
   await db.insert(invoiceLines).values({
     invoiceId: inv.id, chargeLineId: cl.id, lineNo: 1, itemCode: svc.code, itemName: svc.name, hsnSac: '999312', serviceDate: '2099-03-01',
-    quantity: 1, unitPricePaise: 100000, priceSource: 'tariff', taxablePaise: 100000, gstRateBp: 1800, cgstRateBp: 900, sgstRateBp: 900, igstRateBp: 0,
+    quantity: 1, unitPricePaise: 100000, priceSource: 'base', taxablePaise: 100000, gstRateBp: 1800, cgstRateBp: 900, sgstRateBp: 900, igstRateBp: 0,
     cgstPaise: 9000, sgstPaise: 9000, igstPaise: 0, totalPaise: 118000,
   })
   // Payments: cash advance ₹5,000 and UPI receipt ₹1,180 on 2099-03-02; a ₹500 cash refund on 2099-03-03.
