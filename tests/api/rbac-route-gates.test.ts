@@ -39,6 +39,7 @@ import { POST as postRcmPreauthDocument } from '@/app/api/rcm/preauths/[id]/docu
 import { GET as getRcmPreauthDocument } from '@/app/api/rcm/preauth-documents/[id]/route'
 import { GET as getRcmApprovedPreauths } from '@/app/api/rcm/patients/[anonId]/approved-preauths/route'
 import { WRITE_OFF_APPROVE_ROLES } from '@/lib/role-policy'
+import { GET as getRcmClaimRegister } from '@/app/api/rcm/reports/claims-csv/route'
 import { POST as postRcmClaim } from '@/app/api/rcm/claims/route'
 import { PUT as putRcmClaimInvoices } from '@/app/api/rcm/claims/[id]/invoices/route'
 import { POST as postRcmClaimDocument } from '@/app/api/rcm/claims/[id]/documents/route'
@@ -841,6 +842,8 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/rcm/submissions/[id]/verify', call: () => settle(() => getRcmVerify(get(`/api/rcm/submissions/${BOGUS_ID}/verify`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
   { name: 'POST /api/rcm/settlements/[id]/reconcile', call: () => settle(() => postRcmReconcile(send('POST', `/api/rcm/settlements/${BOGUS_ID}/reconcile`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
   { name: 'POST /api/rcm/write-offs/[id]/decision', call: () => settle(() => postRcmWriteOffDecision(send('POST', `/api/rcm/write-offs/${BOGUS_ID}/decision`), ctx({ id: BOGUS_ID }))), allowed: [...WRITE_OFF_APPROVE_ROLES] },
+  // SP7 claim register CSV (RCM_ROLES): no range is a 400 before any query.
+  { name: 'GET /api/rcm/reports/claims-csv', call: () => settle(() => getRcmClaimRegister(get('/api/rcm/reports/claims-csv'))), allowed: [...RCM_ROLES] },
   // end SP7
 ]
 

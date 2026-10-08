@@ -1,4 +1,6 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { RCM_ROLES } from '@/lib/role-policy' // SP7
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getArDashboardData } from '@/lib/queries/ar-dashboard'
@@ -23,7 +25,9 @@ export default async function ArDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-foreground">A/R Dashboard</h1>
+      <h1 className="text-2xl font-bold text-foreground">A/R Dashboard (legacy demo data)</h1>
+      {/* SP7 (ruling 6): this page shows the legacy demo claims; real claims live under RCM. */}
+      <p className="text-sm text-muted-foreground">Insurance claims are managed under {RCM_ROLES.includes(session.role) ? <Link href="/rcm" className="text-primary hover:underline">RCM</Link> : 'RCM'}.</p>
 
       <div className="grid grid-cols-3 gap-4">
         <KpiCard label="Outstanding A/R" value={formatPaise(data.outstandingArCents)} />

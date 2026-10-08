@@ -30,6 +30,9 @@ const EXPORT_PATHS = [
   'src/lib/rcm/claim-pdf.ts',
   'src/lib/queries/claim-submissions.ts',
   'src/app/api/rcm/claims',
+  'src/lib/queries/rcm-reports.ts',
+  'src/lib/rcm/csv.ts',
+  'src/app/api/rcm/reports',
   // SP4: invoices, their snapshot and the print views carry only id, name, UHID and postal address.
   'src/lib/billing',
   'src/lib/queries/invoices.ts',
