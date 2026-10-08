@@ -257,7 +257,7 @@ Devanagari to the repository and embed it in `src/lib/labs/report-pdf.ts`.
 
 ## Local development with Docker
 
-`docker-compose.yml` starts Postgres 15 (port 55432) and Redis with an Upstash-compatible REST endpoint (port 8079):
+`docker-compose.yml` starts Postgres 15 (port 55432) and Redis with an Upstash-compatible REST endpoint (port 8079; set `REDIS_REST_PORT` to use another host port):
 
 ```
 docker compose up -d
@@ -267,4 +267,6 @@ npm run db:migrate
 SEED_DEMO_PASSWORD='choose-a-password' npm run db:seed
 ```
 
-Production uses Neon (Postgres) and Upstash (Redis) from the Vercel Marketplace; the Docker stack is for local development and tests only. `tests/lib/rate-limit.test.ts` needs a real Upstash database (its rate-limit script uses a flag only Upstash's Redis accepts).
+Production uses Neon (Postgres) and Upstash (Redis) from the Vercel Marketplace; the Docker stack is for local development and tests only.
+
+The REST endpoint on 8079 is `redis-rest`, a small Node proxy (`scripts/dev/redis-rest-shim.mjs`) in front of `redis-http` (serverless-redis-http, not published). Upstash's rate-limit library sends Lua scripts marked `#!lua flags=allow-key-locking`, a flag only Upstash's own Redis accepts; plain Redis 7 rejects them, which made every rate-limited route (staff and patient sign-in, OTP, booking) answer 500 locally. The proxy rewrites that line to `#!lua` and forwards everything else unchanged, so sign-in and `tests/lib/rate-limit.test.ts` work against the local stack. A stack created before this change picks it up with `docker compose up -d` (it replaces the old `redis-rest` container). Never point a deployment at the proxy.
