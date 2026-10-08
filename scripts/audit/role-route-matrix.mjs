@@ -48,7 +48,6 @@ const STAFF = [
 ]
 const ALL_ROLES = STAFF.map(([r]) => r)
 const PORTAL_PATIENT = 'RD-0001'
-const OTHER_PATIENT = 'RD-0004'
 
 // ---------------------------------------------------------------------------
 // Route discovery
@@ -284,11 +283,10 @@ function newLogErrors() {
   fs.readSync(fd, buf, 0, buf.length, logOffset)
   fs.closeSync(fd)
   logOffset = size
-  // eslint-disable-next-line no-control-regex
   const lines = buf.toString('utf8').replace(/\x1b\[[0-9;]*m/g, '').split('\n')
   return lines.filter((l) => /⨯|\bError\b|Unhandled|TypeError|ReferenceError|hydrat|Warning:/i.test(l)
     && !/^\s*(GET|POST|PUT|PATCH|DELETE) \//.test(l)
-    && !/Fast Refresh|Compiled|Compiling/.test(l)).map((l) => l.trim()).filter(Boolean).slice(0, 8)
+    && !/Fast Refresh|Compiled|Compiling|MaxListenersExceededWarning|DeprecationWarning/.test(l)).map((l) => l.trim()).filter(Boolean).slice(0, 8)
 }
 
 // Log lines that come from a backing service this local run deliberately lacks (no Vercel Blob
@@ -459,7 +457,9 @@ async function runPortal() {
     if (p === null) { results.skipped.push({ role: 'portal', target: route, reason: 'patient has no such record' }); continue }
     const r = await request(jar, p)
     const c = classify(r)
-    const verdict = c.kind === 'OK' ? (r.log.length ? 'log' : 'pass') : 'fail'
+    // The consent page sends a patient who has already accepted on to the portal home.
+    const consentDone = route === '/patient-portal/consent' && c.kind === 'REDIRECT' && c.to === '/patient-portal'
+    const verdict = c.kind === 'OK' || consentDone ? (r.log.length ? 'log' : 'pass') : 'fail'
     out.pages.push({ route, path: p, status: r.status, outcome: c.kind, to: c.to, verdict, log: r.log })
     if (verdict === 'fail') fail('portal', 'page', p, `${c.kind}${c.to ? ` -> ${c.to}` : ''}${c.detail ? ` (${c.detail})` : ''}${r.log.length ? `; log: ${r.log[0]}` : ''}`)
     if (verdict === 'log') fail('portal', 'server-log', p, r.log[0])

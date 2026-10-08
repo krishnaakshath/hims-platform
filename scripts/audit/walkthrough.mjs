@@ -49,7 +49,6 @@ function newLogErrors() {
   if (size <= logOffset) return []
   const fd = fs.openSync(SERVER_LOG, 'r'); const buf = Buffer.alloc(size - logOffset)
   fs.readSync(fd, buf, 0, buf.length, logOffset); fs.closeSync(fd); logOffset = size
-  // eslint-disable-next-line no-control-regex
   return buf.toString('utf8').replace(/\x1b\[[0-9;]*m/g, '').split('\n')
     .filter((l) => /⨯|\bError\b|Unhandled|TypeError|hydrat/i.test(l) && !/^\s*(GET|POST|PUT|PATCH|DELETE) \//.test(l)).map((l) => l.trim()).slice(0, 5)
 }
