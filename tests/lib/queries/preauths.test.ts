@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { and, eq, like } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { auditLog, claims, preauthEvents, preauths, rcmQueries } from '@/db/schema'
 import type { Session } from '@/lib/auth'
-import { applyPreauthAction, createPreauth, estimatePreauth } from '@/lib/queries/preauths'
+
+vi.mock('@/lib/blob-store', () => ({ putPrivateBlob: vi.fn(async (path: string) => ({ url: `https://blob.test/${path}` })), streamPrivateBlob: vi.fn() }))
+import { applyPreauthAction, createPreauth, estimatePreauth, getPreauthDetail, getPreauthDocumentBlob, listPreauths, uploadPreauthDocument } from '@/lib/queries/preauths'
 import { snapshotSha256 } from '@/lib/rcm/hash'
 import type { PreauthCreateInput } from '@/lib/rcm/validation'
 import { makePreauthWorld, destroyPreauthWorld, type PreauthWorld } from './preauth-world'
@@ -125,6 +127,21 @@ describe.skipIf(!process.env.DATABASE_URL)('pre-authorisations (DB)', () => {
     expect(rows.length).toBeGreaterThan(5)
     for (const r of rows) expect(`${r.details}`).not.toMatch(/AR\/|scan|stay|patient left|needed/i)
     expect(rows.find((r) => r.action === 'rcm: pre-authorisation approve')?.details).toMatch(/^preauth=\d+ from=(requested|queried) to=approved amount=8000000$/)
+  })
+
+  it('stores a pre-auth document by hash and reads the detail and list without URLs', async () => {
+    const id = await newPreauth()
+    await applyPreauthAction(id, { action: 'request' }, RCM, new Date('2026-10-01T04:00:00Z'))
+    const up = await uploadPreauthDocument(id, { kind: 'preauth_approval', title: 'Approval letter' }, { bytes: new TextEncoder().encode('%PDF'), contentType: 'application/pdf' }, RCM)
+    expect(up.ok).toBe(true); if (!up.ok) return
+    expect(await getPreauthDocumentBlob(up.value.documentId)).toMatchObject({ preauthId: id, patientId: w.patientId, contentType: 'application/pdf' })
+    const d = await getPreauthDetail(id, NOW)
+    expect(d?.documents[0]).toMatchObject({ kind: 'preauth_approval', sha256: expect.stringMatching(/^[0-9a-f]{64}$/) })
+    expect(JSON.stringify(d)).not.toMatch(/blob\.test/)
+    expect(d?.patient).toEqual({ id: w.patientId, name: 'Test SP7 A', uhid: null, gender: 'female', dob: '1990-01-01', ageYears: 109 })
+    expect(d?.events[0]).toMatchObject({ action: 'request', hasSnapshot: true })
+    const list = await listPreauths({ q: d!.preauth.preauthNumber, now: NOW })
+    expect(list.total).toBe(1); expect(list.rows[0]).toMatchObject({ id, status: 'requested', decisionOverdue: true })
   })
 })
 

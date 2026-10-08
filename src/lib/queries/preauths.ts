@@ -2,20 +2,25 @@
 // approval with amount and validity -> enhancement -> rejection/cancellation). Every write runs
 // in one transaction: the SP4 per-patient billing lock first, then the pre-auth row FOR UPDATE,
 // then the event and the audit row. Audit details carry ids, numbers, statuses and paise only.
-import { and, eq, ne, sql } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
+import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
-import { admissions, encounters, preauthEvents, preauths, providers, rcmQueries, rcmQueryResponses, rcmReasonCodes, type PreauthRow } from '@/db/schema'
+import { admissions, encounters, patients, payerProfiles, payers, preauthDocuments, preauthEvents, preauths, providers, rcmQueries, rcmQueryResponses, rcmReasonCodes, type PreauthRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { lineTaxablePaise, sumPaise } from '@/lib/billing/amounts'
 import { lineTax } from '@/lib/billing/gst'
 import { DIAGNOSIS_CODE_KINDS, PROCEDURE_CODE_KINDS, type CodeSystemKind } from '@/lib/coding/code-systems'
-import { istDateOf } from '@/lib/india-time'
+import { ageOnDate, istDateOf, todayIsoIn } from '@/lib/india-time'
+import { putPrivateBlob } from '@/lib/blob-store'
+import { sha256Hex } from '@/lib/rcm/hash'
 import { formatRcmNumber } from '@/lib/rcm/constants'
 import { rcmFail, rcmOk, type RcmWriteResult } from '@/lib/rcm/errors'
 import { isUniqueViolation } from '@/lib/db-errors'
 import { formatPaise } from '@/lib/format'
 import { snapshotSha256 } from '@/lib/rcm/hash'
+import { preauthDecisionOverdue } from '@/lib/rcm/sla'
 import { nextPreauthStatus, type PreauthStatus } from '@/lib/rcm/preauth-status'
 import { buildPreauthSnapshot, type PreauthSnapshot } from '@/lib/rcm/snapshot'
 import type { CodedEntry, EstimateLine } from '@/lib/rcm/snapshot'
@@ -25,6 +30,7 @@ import { lockPatientBilling } from './billing-lock'
 import { getCodesByIds } from './code-systems'
 import type { WriteExecutor } from './executor'
 import { loadPolicyContext, loadRcmPatient, loadSnapshotHospital } from './rcm-context'
+import { getPolicyView, type PolicyView } from './rcm-policies'
 import { loadPricingContext } from './tariff'
 
 /** Prices each service as SP4 charge capture does (payer tariff first), with GST (intra-state). */
@@ -223,5 +229,131 @@ export async function applyPreauthAction(preauthId: number, req: PreauthActionRe
   } catch (err) {
     if (isUniqueViolation(err, 'preauths_insurer_reference_unique')) return rcmFail('duplicate_reference')
     throw err
+  }
+}
+
+const EXTENSION: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' }
+
+/** Stores an approval letter / query reply / other document; hash and blob put happen before the transaction. */
+export async function uploadPreauthDocument(
+  preauthId: number, input: { kind: 'preauth_approval' | 'query_response' | 'other'; title: string; queryResponseId?: number },
+  file: { bytes: Uint8Array; contentType: string }, session: Session,
+): Promise<RcmWriteResult<{ documentId: number }>> {
+  const [found] = await getDb().select({ patientId: preauths.patientId }).from(preauths).where(eq(preauths.id, preauthId)).limit(1)
+  if (!found) return rcmFail('preauth_not_found')
+  const ext = EXTENSION[file.contentType]
+  if (!ext) return rcmFail('upload_invalid')
+  if (input.queryResponseId !== undefined) {
+    const [r] = await getDb().select({ preauthId: rcmQueries.preauthId }).from(rcmQueryResponses)
+      .innerJoin(rcmQueries, eq(rcmQueries.id, rcmQueryResponses.queryId)).where(eq(rcmQueryResponses.id, input.queryResponseId)).limit(1)
+    if (!r || r.preauthId !== preauthId) return rcmFail('query_not_found')
+  }
+  const sha256 = sha256Hex(file.bytes)
+  const { url } = await putPrivateBlob(`rcm/preauths/${preauthId}/${randomUUID()}.${ext}`, file.bytes, file.contentType)
+  return getDb().transaction(async (tx) => {
+    await lockPatientBilling(tx, found.patientId)
+    const [row] = await tx.insert(preauthDocuments).values({
+      preauthId, kind: input.kind, title: input.title, blobUrl: url, contentType: file.contentType, byteSize: file.bytes.byteLength, sha256,
+      queryResponseId: input.queryResponseId ?? null, uploadedByName: session.name,
+    }).returning({ id: preauthDocuments.id })
+    await logAudit(session, 'rcm: uploaded pre-authorisation document', found.patientId, `preauth=${preauthId} document=${row.id} kind=${input.kind}`, tx)
+    return rcmOk({ documentId: row.id })
+  })
+}
+
+/** Server-side only: a pre-auth document's blob (never returned in JSON). */
+export async function getPreauthDocumentBlob(documentId: number): Promise<{ url: string; preauthId: number; patientId: string; contentType: string; title: string } | null> {
+  const [r] = await getDb().select({ url: preauthDocuments.blobUrl, preauthId: preauthDocuments.preauthId, patientId: preauths.patientId, contentType: preauthDocuments.contentType, title: preauthDocuments.title })
+    .from(preauthDocuments).innerJoin(preauths, eq(preauths.id, preauthDocuments.preauthId)).where(eq(preauthDocuments.id, documentId)).limit(1)
+  return r ?? null
+}
+
+export interface RcmPatientMinimum { id: string; name: string; uhid: string | null; gender: string | null; dob: string | null; ageYears: number | null }
+
+export interface PreauthDetail {
+  preauth: Omit<PreauthRow, never>
+  events: { id: number; action: string; fromStatus: PreauthStatus | null; toStatus: PreauthStatus; amountPaise: number | null; reasonCode: string | null; note: string | null; hasSnapshot: boolean; byName: string; at: Date }[]
+  queries: { id: number; question: string; raisedOn: string; dueOn: string; status: string; responses: { id: number; body: string; respondedOn: string; byName: string; at: Date }[] }[]
+  documents: { id: number; kind: string; title: string; contentType: string; byteSize: number; sha256: string; queryResponseId: number | null; uploadedByName: string; uploadedAt: Date }[]
+  patient: RcmPatientMinimum
+  policy: PolicyView | null
+  preauthSlaHours: number
+}
+
+async function slaHoursFor(insurerPayerId: number, tpaPayerId: number | null): Promise<number> {
+  const [r] = await getDb().select({ h: payerProfiles.preauthSlaHours }).from(payerProfiles).where(eq(payerProfiles.payerId, tpaPayerId ?? insurerPayerId)).limit(1)
+  return r?.h ?? 1
+}
+
+export async function getPreauthDetail(id: number, now: Date = new Date()): Promise<PreauthDetail | null> {
+  const db = getDb()
+  const [p] = await db.select().from(preauths).where(eq(preauths.id, id)).limit(1)
+  if (!p) return null
+  const [events, queries, docs, patient, policy, sla] = await Promise.all([
+    db.select({
+      id: preauthEvents.id, action: preauthEvents.action, fromStatus: preauthEvents.fromStatus, toStatus: preauthEvents.toStatus, amountPaise: preauthEvents.amountPaise,
+      reasonCode: preauthEvents.reasonCode, note: preauthEvents.note, hasSnapshot: sql<boolean>`${preauthEvents.snapshotSha256} is not null`, byName: preauthEvents.byName, at: preauthEvents.at,
+    }).from(preauthEvents).where(eq(preauthEvents.preauthId, id)).orderBy(asc(preauthEvents.at), asc(preauthEvents.id)),
+    db.select().from(rcmQueries).where(eq(rcmQueries.preauthId, id)).orderBy(asc(rcmQueries.id)),
+    db.select({
+      id: preauthDocuments.id, kind: preauthDocuments.kind, title: preauthDocuments.title, contentType: preauthDocuments.contentType, byteSize: preauthDocuments.byteSize,
+      sha256: preauthDocuments.sha256, queryResponseId: preauthDocuments.queryResponseId, uploadedByName: preauthDocuments.uploadedByName, uploadedAt: preauthDocuments.uploadedAt,
+    }).from(preauthDocuments).where(eq(preauthDocuments.preauthId, id)).orderBy(asc(preauthDocuments.id)),
+    db.select({ id: patients.id, name: patients.name, uhid: patients.uhid, gender: patients.gender, dob: patients.dob }).from(patients).where(eq(patients.id, p.patientId)).limit(1),
+    getPolicyView(p.policyId),
+    slaHoursFor(p.insurerPayerId, p.tpaPayerId),
+  ])
+  const queryIds = queries.map((q) => q.id)
+  const responses = queryIds.length === 0 ? [] : await db.select().from(rcmQueryResponses).where(inArray(rcmQueryResponses.queryId, queryIds)).orderBy(asc(rcmQueryResponses.id))
+  const pt = patient[0]
+  return {
+    preauth: p,
+    events: events.map((e) => ({ ...e, hasSnapshot: Boolean(e.hasSnapshot) })),
+    queries: queries.map((q) => ({
+      id: q.id, question: q.question, raisedOn: q.raisedOn, dueOn: q.dueOn, status: q.status,
+      responses: responses.filter((r) => r.queryId === q.id).map((r) => ({ id: r.id, body: r.body, respondedOn: r.respondedOn, byName: r.byName, at: r.at })),
+    })),
+    documents: docs,
+    patient: { id: pt.id, name: pt.name, uhid: pt.uhid, gender: pt.gender, dob: pt.dob, ageYears: pt.dob ? ageOnDate(pt.dob, todayIsoIn(undefined, now)) : null },
+    policy,
+    preauthSlaHours: sla,
+  }
+}
+
+export interface PreauthListRow {
+  id: number; preauthNumber: string; status: PreauthStatus; claimType: string; patientId: string; patientName: string; uhid: string | null
+  insurerName: string; requestedPaise: number; approvedPaise: number | null; validUntil: string | null; plannedAdmissionDate: string
+  lastRequestedAt: Date | null; decisionOverdue: boolean
+}
+
+const PAGE_SIZE = 50
+const insurerPayer = alias(payers, 'preauth_insurer')
+const billingProfile = alias(payerProfiles, 'preauth_billing_profile')
+
+export async function listPreauths(opts: { status?: PreauthStatus; q?: string; page?: number; now?: Date } = {}): Promise<{ rows: PreauthListRow[]; total: number }> {
+  const now = opts.now ?? new Date()
+  const page = Math.max(1, opts.page ?? 1)
+  const term = opts.q?.trim()
+  const escaped = term ? term.replace(/[\\%_]/g, (c) => `\\${c}`) : ''
+  const where = and(
+    opts.status ? eq(preauths.status, opts.status) : undefined,
+    term ? or(ilike(preauths.preauthNumber, `%${escaped}%`), ilike(patients.name, `%${escaped}%`), sql`upper(${patients.uhid}) = upper(${term})`) : undefined,
+  )
+  const db = getDb()
+  const [rows, count] = await Promise.all([
+    db.select({
+      id: preauths.id, preauthNumber: preauths.preauthNumber, status: preauths.status, claimType: preauths.claimType, patientId: preauths.patientId,
+      patientName: patients.name, uhid: patients.uhid, insurerName: insurerPayer.name, requestedPaise: preauths.requestedPaise, approvedPaise: preauths.approvedPaise,
+      validUntil: preauths.validUntil, plannedAdmissionDate: preauths.plannedAdmissionDate, lastRequestedAt: preauths.lastRequestedAt, slaHours: billingProfile.preauthSlaHours,
+    }).from(preauths)
+      .innerJoin(patients, eq(patients.id, preauths.patientId))
+      .innerJoin(insurerPayer, eq(insurerPayer.id, preauths.insurerPayerId))
+      .leftJoin(billingProfile, eq(billingProfile.payerId, sql`coalesce(${preauths.tpaPayerId}, ${preauths.insurerPayerId})`))
+      .where(where).orderBy(desc(preauths.updatedAt), desc(preauths.id)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db.select({ n: sql<number>`count(*)::int` }).from(preauths).innerJoin(patients, eq(patients.id, preauths.patientId)).where(where),
+  ])
+  return {
+    rows: rows.map(({ slaHours, ...r }) => ({ ...r, decisionOverdue: preauthDecisionOverdue({ status: r.status, lastRequestedAt: r.lastRequestedAt, now, preauthSlaHours: slaHours ?? 1 }) })),
+    total: count[0]?.n ?? 0,
   }
 }
