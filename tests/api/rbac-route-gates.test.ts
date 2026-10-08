@@ -385,6 +385,9 @@ import { PATCH as patchDepartment } from '@/app/api/departments/[id]/route'
 import { PUT as putProvider } from '@/app/api/providers/[id]/route'
 import { GET as search } from '@/app/api/search/route'
 import { GET as priceSheet } from '@/app/api/tariff/services/[id]/price-sheet/route' // Wave G
+import { GET as getNotifications } from '@/app/api/notifications/route' // Wave G
+import { POST as markNotificationsRead } from '@/app/api/notifications/read/route' // Wave G
+import { NOTIFICATION_FEED_ROLES } from '@/lib/role-policy' // Wave G
 import { GET as patientLookup } from '@/app/api/patients/lookup/route' // Wave C
 import { PATCH as patchDemographics } from '@/app/api/patients/[anonId]/demographics/route' // Wave C
 import { GET as listTariffServices, POST as postTariffService } from '@/app/api/tariff/services/route'
@@ -767,6 +770,9 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/search', call: () => search(get('/api/search?q=')), allowed: ALL_ROLES.filter(hasSearchScope) },
   // Wave C P0-04: patient picker -- PATIENT_PICKER_ROLES (directory roles + pharmacy + billing; never labs)
   { name: 'GET /api/patients/lookup', call: () => patientLookup(get('/api/patients/lookup?q=')), allowed: [...PATIENT_PICKER_ROLES] },
+  // Wave G P2-01: notification feed and mark-read -- NOTIFICATION_FEED_ROLES (every staff role; content is per role).
+  { name: 'GET /api/notifications', call: () => settle(() => getNotifications()), allowed: [...NOTIFICATION_FEED_ROLES] },
+  { name: 'POST /api/notifications/read', call: () => settle(() => markNotificationsRead(send('POST', '/api/notifications/read'))), allowed: [...NOTIFICATION_FEED_ROLES] },
   // Wave C P1-11: name/DOB correction -- DEMOGRAPHICS_CORRECTION_ROLES (admin); `{}` fails validation before any query.
   { name: 'PATCH /api/patients/[anonId]/demographics', call: () => settle(() => patchDemographics(send('PATCH', `/api/patients/${BOGUS_PATIENT}/demographics`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...DEMOGRAPHICS_CORRECTION_ROLES] },
 ]
@@ -868,7 +874,11 @@ const SP6_WRITE_GATES: typeof SP1_WRITE_GATES = [
 const WAVE_C_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PATCH /api/patients/[anonId]/demographics', call: () => patchDemographics(send('PATCH', `/api/patients/${BOGUS_PATIENT}/demographics`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: DEMOGRAPHICS_CORRECTION_ROLES },
 ]
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES])('$name (deny before parse)', (c) => {
+// Wave G writes: the same deny-before-parse contract.
+const WAVE_G_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'POST /api/notifications/read', call: () => markNotificationsRead(send('POST', '/api/notifications/read', NOT_JSON)), allowed: NOTIFICATION_FEED_ROLES },
+]
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role

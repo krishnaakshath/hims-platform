@@ -59,6 +59,7 @@ import { POST as verifyLabOrderRoute } from '@/app/api/lab-orders/[id]/verify/ro
 import { POST as releaseLabReportRoute } from '@/app/api/lab-requisitions/[id]/report/route'
 import { GET as downloadLabReportRoute } from '@/app/api/lab-reports/[id]/download/route'
 import { GET as priceSheetRoute } from '@/app/api/tariff/services/[id]/price-sheet/route' // Wave G
+import { POST as markNotificationsReadRoute } from '@/app/api/notifications/read/route' // Wave G
 import { POST as cancelHomeVisitRoute } from '@/app/api/home-collections/[id]/cancel/route'
 import { POST as collectHomeVisitRoute } from '@/app/api/home-collections/[id]/collect/route'
 // end SP5
@@ -156,6 +157,7 @@ const JSON_GATES: JsonCase[] = [
   { name: 'POST /api/trials/[trialId]/regulatory-documents', call: () => postRegulatoryDoc(send('POST', '/x', NOT_JSON), ctx({ trialId: TRIAL })), allowed: ['crc', 'pi', 'admin'] },
   { name: 'PUT /api/account/mfa-method', call: () => putMfaMethod(send('PUT', '/x', NOT_JSON)), allowed: ALL_ROLES },
   { name: 'POST /api/account/mfa/reset', call: () => resetOwnMfa(send('POST', '/x', NOT_JSON)), allowed: ALL_ROLES },
+  { name: 'POST /api/notifications/read', call: () => markNotificationsReadRoute(send('POST', '/x', NOT_JSON)), allowed: ALL_ROLES }, // Wave G
 ]
 
 describe.each(JSON_GATES)('$name (malformed JSON after the gate)', (c) => {

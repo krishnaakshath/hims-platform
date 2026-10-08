@@ -182,3 +182,9 @@ export function hasSearchScope(role: Role): boolean {
   const s = searchScopesFor(role)
   return s.patients || s.trials || s.formTemplates || s.services
 }
+
+// Wave G (P2-01): the staff notification feed (GET /api/notifications, POST
+// /api/notifications/read, the TopBanner bell): every staff role. What each role
+// SEES is decided per source in src/lib/notifications/staff-feed.ts.
+export const NOTIFICATION_FEED_ROLES: readonly Role[] = ALL_ROLES
+// end Wave G
