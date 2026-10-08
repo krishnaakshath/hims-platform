@@ -1,6 +1,6 @@
 import { getDb } from '@/db/client'
 import { medicationDispenses, medicationInventory, medicationEpisodes, patients, medications, charges, admissions, chargeLines } from '@/db/schema'
-import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm'
 import { invalidateChargesList } from '@/lib/queries/charges'
 // SP4
 import { MAX_LINE_QUANTITY, lineTaxablePaise } from '@/lib/billing/amounts'
@@ -246,3 +246,11 @@ export async function listAllDispensesWithBilling(): Promise<PharmacyBillingRow[
     charge: r.chargeId != null ? { id: r.chargeId, status: r.chargeStatus!, amountCents: r.chargeAmountCents! } : null,
   }))
 }
+
+// Wave E P1-19: ids of the legacy charges raised from a dispense (pharmacy bills), so
+// /billing/charges?source=pharmacy can list only those for review.
+export async function listPharmacyChargeIds(): Promise<number[]> {
+  const rows = await getDb().select({ id: medicationDispenses.chargeId }).from(medicationDispenses).where(isNotNull(medicationDispenses.chargeId))
+  return rows.map((r) => r.id).filter((id): id is number => id !== null)
+}
+// end Wave E

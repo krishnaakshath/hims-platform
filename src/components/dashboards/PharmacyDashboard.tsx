@@ -1,7 +1,9 @@
 'use client'
 import { useState } from 'react'
-import { AlertTriangle, XCircle, Pill, PackagePlus } from 'lucide-react'
-import { CountUp } from '@/components/CountUp'
+import Link from 'next/link'
+import { AlertTriangle, XCircle, Pill, PackagePlus, PackageCheck, Clock, Search } from 'lucide-react'
+import { KpiTile } from '@/components/dashboards/KpiTile'
+import type { PharmacyKpi } from '@/lib/queries/hospital-kpis'
 import { Button } from '@/components/ui/button'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
 import { AddMedicationModal } from '@/components/AddMedicationModal'
@@ -42,23 +44,6 @@ function StockPill({ status }: { status: StockStatus }) {
   )
 }
 
-// Same visual language as MiniStatTile in the other dashboards, minus the
-// Link wrapper -- there's no separate drill-down page for any of these
-// counts, so a non-navigable tile is the honest affordance here.
-function StatTile({ value, label, icon: Icon, tone }: { value: number; label: string; icon: React.ComponentType<{ className?: string }>; tone: string }) {
-  return (
-    <div className="flex items-center gap-3 rounded-md border border-border bg-card p-4">
-      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tone}`} aria-hidden="true">
-        <Icon className="h-4.5 w-4.5" />
-      </span>
-      <div>
-        <p className="text-2xl font-bold tabular-nums text-foreground"><CountUp to={value} /></p>
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-      </div>
-    </div>
-  )
-}
-
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</h2>
 }
@@ -83,12 +68,20 @@ export function PharmacyDashboard({
   canDispense,
   prescribedSummary,
   canAddMedication,
+  kpis,
+  stockFilter = null,
+  canUseCounter = false,
 }: {
   session: Session
   medications: MedicationWithInventory[]
   canDispense: boolean
   prescribedSummary: ActiveMedicationSummaryRow[]
   canAddMedication: boolean
+  // Wave E P1-18: the day's dispensing figures, the ?stock= filter, and whether this role
+  // works the counter (may open /pharmacy/patient-lookup and /pharmacy/billing).
+  kpis: PharmacyKpi
+  stockFilter?: 'out' | 'low' | null
+  canUseCounter?: boolean
 }) {
   const [dispensing, setDispensing] = useState<MedicationWithInventory | null>(null)
   // `null` = closed; `{}` = open with no prefill (header button);
@@ -100,6 +93,7 @@ export function PharmacyDashboard({
   const lowStockCount = medications.filter((m) => stockStatus(m.quantityOnHand, m.reorderThreshold) === 'low').length
   const activePrescriptionCount = prescribedSummary.reduce((sum, r) => sum + r.activeEpisodeCount, 0)
   const notInCatalogCount = prescribedSummary.filter((r) => !r.inCatalog).length
+  const shownMedications = stockFilter ? medications.filter((m) => stockStatus(m.quantityOnHand, m.reorderThreshold) === stockFilter) : medications
 
   return (
     <div>
@@ -108,18 +102,33 @@ export function PharmacyDashboard({
           <h1 className="text-3xl font-bold text-foreground">Hello, {session.name}!</h1>
           <p className="text-sm text-muted-foreground">Here&apos;s the dispensing counter, at a glance.</p>
         </div>
+        {canUseCounter && (
+          <Link href="/pharmacy/patient-lookup" className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            <Search className="h-4 w-4" aria-hidden="true" />Dispense against a prescription
+          </Link>
+        )}
       </div>
 
+      {/* Wave E P1-18: every tile drills somewhere -- stock tiles filter the table below. */}
       <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatTile value={outOfStockCount} label="Out of Stock" icon={XCircle} tone="bg-destructive/10 text-destructive" />
-        <StatTile value={lowStockCount} label="Low Stock" icon={AlertTriangle} tone="bg-warning/10 text-warning" />
-        <StatTile value={activePrescriptionCount} label="Active Prescriptions" icon={Pill} tone="bg-primary/10 text-primary" />
-        <StatTile value={notInCatalogCount} label="Not in Catalog" icon={PackagePlus} tone="bg-accent/10 text-accent" />
+        <KpiTile label="Out of Stock" value={outOfStockCount} href="/pharmacy?stock=out" icon={XCircle} tone="danger" />
+        <KpiTile label="Low Stock" value={lowStockCount} href="/pharmacy?stock=low" icon={AlertTriangle} tone="warning" />
+        <KpiTile label="Active Prescriptions" value={activePrescriptionCount} href="/pharmacy#prescribed" icon={Pill} />
+        <KpiTile label="Not in Catalog" value={notInCatalogCount} href="/pharmacy#prescribed" icon={PackagePlus} tone="muted" />
+        {canUseCounter && (
+          <>
+            <KpiTile label="Dispensed today" value={kpis.dispensedToday} href="/pharmacy/billing" icon={PackageCheck} tone="success" />
+            <KpiTile label="Awaiting billing" value={kpis.unbilledDispenses} sub="Dispensed, no bill yet" href="/pharmacy/billing" icon={Clock} tone={kpis.unbilledDispenses > 0 ? 'warning' : 'muted'} />
+          </>
+        )}
       </div>
 
       <section className={`${CARD_SURFACE} p-5`}>
-        <SectionHeading>Medication Stock</SectionHeading>
-        {medications.length === 0 ? (
+        <SectionHeading>Medication Stock{stockFilter ? ` -- ${STATUS_LABELS[stockFilter].toLowerCase()} only` : ''}</SectionHeading>
+        {stockFilter && (
+          <p className="mb-3 text-xs text-muted-foreground">{shownMedications.length} of {medications.length} medications. <Link href="/pharmacy" className="font-medium text-primary hover:underline">Show all stock</Link></p>
+        )}
+        {shownMedications.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No medications on file.</p>
         ) : (
           <div className="overflow-hidden rounded-lg border border-border">
@@ -134,7 +143,7 @@ export function PharmacyDashboard({
                 </tr>
               </thead>
               <tbody>
-                {medications.map((m, i) => {
+                {shownMedications.map((m, i) => {
                   const status = stockStatus(m.quantityOnHand, m.reorderThreshold)
                   return (
                     <tr key={m.id} className={`border-b border-border last:border-b-0 ${i % 2 === 1 ? 'bg-muted/40' : ''} transition-colors hover:bg-secondary`}>
@@ -148,7 +157,10 @@ export function PharmacyDashboard({
                       <td className="p-3"><StockPill status={status} /></td>
                       {canDispense && (
                         <td className="p-3">
-                          <Button size="sm" variant="outline" onClick={() => setDispensing(m)}>Dispense</Button>
+                          {/* Wave E P1-18: the counter dispenses against a prescription (patient lookup), never a free-typed patient id. */}
+                          {canUseCounter
+                            ? <Link href="/pharmacy/patient-lookup" className="inline-flex h-8 items-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted">Dispense</Link>
+                            : <Button size="sm" variant="outline" onClick={() => setDispensing(m)}>Dispense</Button>}
                         </td>
                       )}
                     </tr>
@@ -168,7 +180,7 @@ export function PharmacyDashboard({
           names only, grouped by class, never a patient identity. This is an
           aggregate a pharmacist can leave open at a counter, unlike the
           stock table above which stays exactly as it was. */}
-      <section className={`${CARD_SURFACE} mt-6 p-5`}>
+      <section id="prescribed" className={`${CARD_SURFACE} mt-6 p-5`}>
         <div className="mb-3 flex items-center justify-between">
           <SectionHeading>Currently Prescribed Across the Practice</SectionHeading>
           {canAddMedication && (

@@ -21,7 +21,7 @@ import { getLatestSignatureForSignable } from './signatures'
  */
 export async function getDischargeSummaryData(
   admissionId: number,
-  { now = new Date(), viewerRole = null }: { now?: Date; viewerRole?: Role | null } = {},
+  { now = new Date(), viewerRole = null, patientCopy = false }: { now?: Date; viewerRole?: Role | null; patientCopy?: boolean } = {}, // Wave J: patientCopy
 ): Promise<DischargeSummaryData | null> {
   const db = getDb()
   const [row] = await db
@@ -93,7 +93,7 @@ export async function getDischargeSummaryData(
   const signature = await getLatestSignatureForSignable('admission_discharge', admissionId)
 
   // Wave F P1-13: the clinical record is read only for a clinical viewer.
-  const record = viewerRole !== null && CLINICAL_ROLES.includes(viewerRole)
+  const record = patientCopy || (viewerRole !== null && CLINICAL_ROLES.includes(viewerRole)) // Wave J: patientCopy
     ? await loadDischargeRecord(admissionId, row.patient.id, row.admission.admittedAt, row.admission.dischargedAt)
     : null
 
@@ -115,7 +115,7 @@ export async function getDischargeSummaryData(
     signature: signature ? { signerTypedName: signature.signerTypedName, signedAt: signature.signedAt } : null,
     record,
   }
-  return buildDischargeSummary(src, now, viewerRole)
+  return buildDischargeSummary(src, now, viewerRole, { patientCopy }) // Wave J
 }
 
 // Lab orders whose result is final enough to print on a discharge summary.

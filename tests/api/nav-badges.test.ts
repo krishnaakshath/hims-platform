@@ -10,6 +10,17 @@ vi.mock('@/lib/queries/doctor-assignments', () => ({
 // Wave B P1-25: unread patient messages and pending booking requests.
 vi.mock('@/lib/queries/messages', () => ({ getUnreadCountForProvider: vi.fn(async () => 5) }))
 vi.mock('@/lib/queries/booking-requests', () => ({ countPendingBookingRequests: vi.fn(async () => 6) }))
+// Wave E P1-25: role work-queue badges (KPI loaders, coding backlog, collector route).
+vi.mock('@/lib/queries/hospital-kpis', () => ({
+  getFollowUpBuckets: vi.fn(async () => ({ due: 1, overdue: 1, upcoming: 0, scheduled: 0, missed: 0, capped: false })),
+  getLabKpis: vi.fn(),
+  getPharmacyKpis: vi.fn(),
+  getBillingQueue: vi.fn(async () => ({ draftInvoices: 3, uninvoicedLines: 0, uninvoicedPaise: 0, pharmacyDraftCharges: 0, pendingApprovalCharges: 8 })),
+  getClaimAgeing: vi.fn(),
+  countResultsToVerifyForProvider: vi.fn(async () => 1),
+}))
+vi.mock('@/lib/queries/coding-worklist', () => ({ listCodingWorklist: vi.fn() }))
+vi.mock('@/lib/queries/home-collections', () => ({ listCollectorRoute: vi.fn() }))
 
 import { GET } from '@/app/api/nav-badges/route'
 import { requireSession } from '@/lib/auth'
@@ -40,7 +51,7 @@ describe('GET /api/nav-badges', () => {
     const res = await GET()
     expect(res.status).toBe(200)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
-    expect(await res.json()).toEqual({ badges: { '/doctor': 4, '/messages': 5, '/booking-requests': 6 }, degraded: false })
+    expect(await res.json()).toEqual({ badges: { '/doctor': 4, '/labs': 1, '/messages': 5, '/booking-requests': 6 }, degraded: false })
     expect(pendingMock).toHaveBeenCalledWith(7)
   })
 
@@ -48,15 +59,15 @@ describe('GET /api/nav-badges', () => {
     sessionMock.mockResolvedValueOnce({ role: 'frontdesk', name: 'Taylor Nguyen', userId: null })
     declinesMock.mockResolvedValue(2)
     const res = await GET()
-    expect(await res.json()).toEqual({ badges: { '/front-desk/assignments': 2, '/booking-requests': 6 }, degraded: false })
+    expect(await res.json()).toEqual({ badges: { '/front-desk/assignments': 2, '/front-desk/follow-ups': 2, '/booking-requests': 6 }, degraded: false })
   })
 
-  it('returns {} for a role with no badge (billing), running no query', async () => {
+  it('returns billing\'s own queues (Wave E), running no clinical query', async () => {
     sessionMock.mockResolvedValueOnce({ role: 'billing', name: 'Bill Ing', userId: null })
     const res = await GET()
     expect(res.status).toBe(200)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
-    expect(await res.json()).toEqual({ badges: {}, degraded: false })
+    expect(await res.json()).toEqual({ badges: { '/billing/charges': 8, '/billing/invoices': 3 }, degraded: false })
     expect(resolveMock).not.toHaveBeenCalled()
     expect(pendingMock).not.toHaveBeenCalled()
     expect(declinesMock).not.toHaveBeenCalled()
@@ -67,7 +78,7 @@ describe('GET /api/nav-badges', () => {
     resolveMock.mockResolvedValue(null)
     const res = await GET()
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ badges: { '/doctor': null, '/messages': 5, '/booking-requests': 6 }, degraded: false })
+    expect(await res.json()).toEqual({ badges: { '/doctor': null, '/labs': null, '/messages': 5, '/booking-requests': 6 }, degraded: false })
     expect(pendingMock).not.toHaveBeenCalled()
   })
 

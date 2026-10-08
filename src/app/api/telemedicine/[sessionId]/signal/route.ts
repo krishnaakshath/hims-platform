@@ -39,6 +39,8 @@ async function resolveOwnedSession(session: Session, sessionId: number): Promise
 export async function POST(request: NextRequest, { params }: { params: Promise<{ sessionId: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
+  // Wave I: role gate before the path id is parsed (ownership is still checked below).
+  if (!['admin', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { sessionId } = await params
   const id = parseId(sessionId)
@@ -59,6 +61,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 export async function GET(request: NextRequest, { params }: { params: Promise<{ sessionId: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
+  // Wave I: role gate before the path id is parsed (ownership is still checked below).
+  if (!['admin', 'pi'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { sessionId } = await params
   const id = parseId(sessionId)

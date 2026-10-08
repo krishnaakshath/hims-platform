@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { PortalFollowUp } from '@/lib/follow-ups/view'
 import { PORTAL_FOLLOW_UP_LABEL } from '@/lib/follow-ups/rules'
 import { formatIsoDate, formatIstDateTime } from './format'
@@ -18,6 +19,12 @@ export function PortalFollowUpCard({ followUp }: { followUp: PortalFollowUp }) {
           : `Please visit between ${formatIsoDate(followUp.windowStart)} and ${formatIsoDate(followUp.windowEnd)}`}
       </p>
       {followUp.status === 'missed' && <p className="mt-1 text-xs text-muted-foreground">Please call the hospital to rebook.</p>}
+      {/* Wave J (P1-20): a due or missed follow-up can be requested from the portal. */}
+      {(followUp.status === 'planned' || followUp.status === 'missed') && (
+        <Link href="/patient-portal/appointments#request-appointment" className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-primary hover:underline">
+          Request this visit
+        </Link>
+      )}
     </section>
   )
 }

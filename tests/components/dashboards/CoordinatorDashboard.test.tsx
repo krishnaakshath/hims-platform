@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { CoordinatorDashboard } from '@/components/dashboards/CoordinatorDashboard'
 import type { DashboardPageProps } from '@/components/dashboards/AdminDashboard'
+import { HOSPITAL_SNAPSHOT } from '../../fixtures/hospital-snapshot'
+import { deadLinks } from '../../pages/dashboard-link-gates'
 
 // jsdom has no ResizeObserver, but recharts' <ResponsiveContainer> (used by
 // PatientsByMonthChart / ScreeningBreakdownChart, both rendered here) requires
@@ -32,6 +34,7 @@ const baseProps: DashboardPageProps = {
   // visit" action (only admin/pi do) -- false here matches how a real
   // CoordinatorDashboard render (crc session) always computes this.
   canStartTelemedicine: false,
+  hospital: { ...HOSPITAL_SNAPSHOT, claims: null },
 }
 
 describe('CoordinatorDashboard', () => {
@@ -80,5 +83,19 @@ describe('CoordinatorDashboard', () => {
   it('does not show the admin-only staff roster or audit log link', () => {
     render(<CoordinatorDashboard {...baseProps} />)
     expect(screen.queryByRole('link', { name: /audit log/i })).not.toBeInTheDocument()
+  })
+
+  it('Wave E P1-07: hospital KPIs for the coordinator, without claim ageing (RCM desk only)', () => {
+    const { container } = render(<CoordinatorDashboard {...baseProps} />)
+    expect(screen.getByText('OPD tokens today')).toBeInTheDocument()
+    expect(screen.getByText('Follow-ups to recall')).toBeInTheDocument()
+    expect(screen.queryByText('Insurer outstanding')).not.toBeInTheDocument()
+    expect(container.querySelector('a[href="/rcm"]')).toBeNull()
+    expect(screen.getByRole('button', { name: /research/i })).toBeInTheDocument()
+  })
+
+  it('every link on the coordinator home opens a page crc may open', () => {
+    const { container } = render(<CoordinatorDashboard {...baseProps} />)
+    expect(deadLinks(container, 'crc')).toEqual([])
   })
 })

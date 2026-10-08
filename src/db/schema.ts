@@ -777,7 +777,20 @@ export const bookingRequests = pgTable('booking_requests', {
   reviewedAt: timestamp('reviewed_at'),
   declineReason: text('decline_reason'),
   resultingAppointmentId: integer('resulting_appointment_id').references(() => appointments.id),
-})
+  // Wave J (P1-20): portal requests (scripts/migrations/2026-10-10-wave-j-portal-appointment-requests.sql).
+  // Public /book rows keep kind 'new' with no patient and no appointment.
+  patientId: text('patient_id').references(() => patients.id),
+  requestKind: text('request_kind', { enum: ['new', 'reschedule', 'cancel'] }).default('new').notNull(),
+  appointmentId: integer('appointment_id').references(() => appointments.id),
+  // end Wave J
+}, (t) => [
+  // Wave J
+  check('booking_requests_request_kind_valid', sql`${t.requestKind} IN ('new', 'reschedule', 'cancel')`),
+  check('booking_requests_kind_shape', sql`(${t.requestKind} = 'new' AND ${t.appointmentId} IS NULL) OR (${t.requestKind} <> 'new' AND ${t.appointmentId} IS NOT NULL AND ${t.patientId} IS NOT NULL)`),
+  index('booking_requests_patient_idx').on(t.patientId),
+  uniqueIndex('booking_requests_one_pending_per_appointment').on(t.appointmentId).where(sql`status = 'pending' AND appointment_id IS NOT NULL`),
+  // end Wave J
+])
 
 export const roomStatusEnum = pgEnum('room_status', ['available', 'occupied', 'dirty', 'blocked'])
 

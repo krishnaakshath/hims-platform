@@ -6,7 +6,7 @@ import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
-import { getBookingRequestById, confirmBookingRequest } from '@/lib/queries/booking-requests'
+import { getBookingRequestById, confirmBookingRequest, confirmCancelRequest } from '@/lib/queries/booking-requests'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
 import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
 
@@ -31,6 +31,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!json.ok) return json.response
   const body: unknown = json.body
 
+  // Wave J (P1-20): a portal cancellation request is confirmed with an empty body -- there is
+  // no time to choose; confirming cancels the patient's appointment.
+  if (body !== null && typeof body === 'object' && !Array.isArray(body) && Object.keys(body).length === 0) {
+    const pending = await getBookingRequestById(requestId)
+    if (!pending) return NextResponse.json({ error: 'Booking request not found' }, { status: 404 })
+    if (pending.requestKind !== 'cancel') return NextResponse.json({ error: 'Invalid confirm payload' }, { status: 400 })
+    const cancelled = await confirmCancelRequest(requestId, session)
+    if (!cancelled.ok) return NextResponse.json({ error: cancelled.error }, { status: 409 })
+    return NextResponse.json({ ok: true, appointmentId: cancelled.appointmentId })
+  }
+  // end Wave J
+
   const parsed = confirmBookingRequestSchema.safeParse(body)
   if (!parsed.success && isTimeFieldError(parsed.error)) return invalidAppointmentTime()
   if (!parsed.success) return NextResponse.json({ error: 'Invalid confirm payload', details: parsed.error.flatten() }, { status: 400 })
@@ -43,6 +55,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const existing = await getBookingRequestById(requestId)
   if (!existing) return NextResponse.json({ error: 'Booking request not found' }, { status: 404 })
+  // Wave J: a portal request is for its own patient only, and a cancellation has no new time.
+  if (existing.requestKind === 'cancel') return NextResponse.json({ error: 'A cancellation request is confirmed without appointment details' }, { status: 400 })
+  if (existing.patientId !== null && existing.patientId !== parsed.data.patientId) {
+    return NextResponse.json({ error: 'This request was made by a different patient' }, { status: 400 })
+  }
+  // end Wave J
 
   // Validate patientId refers to a real patient BEFORE calling
   // confirmBookingRequest -- that function flips the request's status to
@@ -62,9 +80,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     endsAt,
     visitReason: parsed.data.visitReason,
     reviewedByName: session.name,
+    rescheduleFromAppointmentId: existing.requestKind === 'reschedule' ? existing.appointmentId : null, // Wave J
   })
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 })
 
-  await logAudit(session, 'confirmed booking request', parsed.data.patientId)
+  await logAudit(session, existing.requestKind === 'reschedule' ? 'confirmed appointment reschedule request' : 'confirmed booking request', parsed.data.patientId) // Wave J
   return NextResponse.json(result)
 }

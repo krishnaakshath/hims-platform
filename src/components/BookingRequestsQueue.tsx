@@ -5,6 +5,7 @@ import type { BookingRequestRow } from '@/lib/queries/booking-requests'
 import { Button } from '@/components/ui/button'
 import { ConfirmBookingRequestModal } from '@/components/ConfirmBookingRequestModal'
 import { DeclineBookingRequestModal } from '@/components/DeclineBookingRequestModal'
+import { ConfirmCancelRequestButton } from '@/components/ConfirmCancelRequestButton' // Wave J
 
 interface ProviderOption {
   id: number
@@ -30,6 +31,9 @@ function BookingRequestStatusChip({ status }: { status: BookingRequestStatus }) 
     </span>
   )
 }
+
+// Wave J (P1-20): what a portal request asks for. Public /book rows have no patient.
+const KIND_LABEL: Record<BookingRequestRow['requestKind'], string> = { new: 'New visit', reschedule: 'Reschedule', cancel: 'Cancellation' }
 
 function formatDate(value: string | Date) {
   const d = typeof value === 'string' ? new Date(`${value}T00:00:00`) : value
@@ -75,6 +79,11 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
                 <td className="p-3 text-foreground">
                   <div className="font-medium">{r.requesterName}</div>
                   <div className="text-xs text-muted-foreground">DOB {formatDate(r.requesterDob)}</div>
+                  {r.patientId && (
+                    <div className="mt-1 text-xs font-medium text-primary">
+                      Portal · {KIND_LABEL[r.requestKind]}{r.appointmentId ? ` of appointment #${r.appointmentId}` : ''}
+                    </div>
+                  )}
                 </td>
                 <td className="p-3 text-foreground">{providerName(r.preferredProviderId)}</td>
                 <td className="p-3 text-foreground">{formatDate(r.preferredDateRangeStart)} – {formatDate(r.preferredDateRangeEnd)}</td>
@@ -93,7 +102,11 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
                   <td className="p-3">
                     {r.status === 'pending' ? (
                       <div className="flex gap-2">
-                        <Button size="sm" onClick={() => setConfirmTarget(r)}>Confirm</Button>
+                        {r.requestKind === 'cancel' ? (
+                          <ConfirmCancelRequestButton requestId={r.id} appointmentId={r.appointmentId} />
+                        ) : (
+                          <Button size="sm" onClick={() => setConfirmTarget(r)}>Confirm</Button>
+                        )}
                         <Button size="sm" variant="outline" onClick={() => setDeclineTarget(r)}>Decline</Button>
                       </div>
                     ) : null}

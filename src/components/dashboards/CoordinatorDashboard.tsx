@@ -9,6 +9,8 @@ import { ScreeningBreakdownChart } from '@/components/ScreeningBreakdownChart'
 import { PatientAvatar } from '@/components/PatientAvatar'
 import { PortalTileLink } from '@/components/PortalTileLink'
 import { CountUp } from '@/components/CountUp'
+import { HospitalOverview } from '@/components/dashboards/HospitalOverview' // Wave E
+import { Tabs } from '@/components/Tabs' // Wave E
 
 const FORM_STATUS_STYLE: Record<string, string> = {
   sent: 'bg-warning/10 text-warning',
@@ -48,7 +50,7 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</h2>
 }
 
-export function CoordinatorDashboard({ session, data, templates, patients, appointmentsInRange, canStartTelemedicine }: DashboardPageProps) {
+export function CoordinatorDashboard({ session, data, templates, patients, appointmentsInRange, canStartTelemedicine, hospital }: DashboardPageProps) {
   const totalPatients = resolveTotalPatients(data, patients)
   const screenedCount = data.screeningBreakdown.green + data.screeningBreakdown.yellow + data.screeningBreakdown.red
   const unscreenedCount = Math.max(totalPatients - screenedCount, 0)
@@ -56,16 +58,9 @@ export function CoordinatorDashboard({ session, data, templates, patients, appoi
   const now = new Date()
   const currentMonthLabel = data.patientsByMonth[istYearMonthOf(now).month]?.month
 
-  return (
+  // Wave E P1-07: the research queues and trial charts, unchanged, now under a Research tab.
+  const research = (
     <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Hello, {session.name}!</h1>
-          <p className="text-sm text-muted-foreground">Here&apos;s what needs your attention today.</p>
-        </div>
-        <DashboardHomeClient templates={templates} patients={patients} canAddPatient={false} />
-      </div>
-
       {/* Queues first -- a coordinator's job is triage, not analytics. */}
       <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
         <MiniStatTile value={data.pendingFormsTotal} label="Pending Forms" href="/client-forms" icon={FileClock} />
@@ -160,15 +155,7 @@ export function CoordinatorDashboard({ session, data, templates, patients, appoi
         </section>
       </div>
 
-      <section className={`${CARD_SURFACE} my-6 p-5`}>
-        {/* DashboardPageProps (Task 6) widens `status` to `string` so this
-            component doesn't need to import the appointments query's
-            AppointmentStatus union; DashboardAppointmentsTable requires that
-            narrower type. The page.tsx caller always sources this array from
-            listAppointmentsInRange(), whose rows are already real
-            AppointmentStatus values, so this narrowing is safe. */}
-        <DashboardAppointmentsTable appointments={appointmentsInRange as DashboardAppointmentRow[]} canStartTelemedicine={canStartTelemedicine} />
-      </section>
+      <div className="my-6" />
 
       {/* Stats and charts, secondary to the queues above. */}
       <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -211,6 +198,27 @@ export function CoordinatorDashboard({ session, data, templates, patients, appoi
           <ScreeningBreakdownChart breakdown={data.screeningBreakdown} />
         </section>
       </div>
+    </div>
+  )
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Hello, {session.name}!</h1>
+          <p className="text-sm text-muted-foreground">Here&apos;s what needs your attention today.</p>
+        </div>
+        <DashboardHomeClient templates={templates} patients={patients} canAddPatient={false} />
+      </div>
+
+      {/* Wave E P1-07: live hospital KPIs (scoped to crc: no claim ageing). */}
+      <HospitalOverview role={session.role} hospital={hospital} />
+
+      <section className={`${CARD_SURFACE} mb-6 p-5`}>
+        <DashboardAppointmentsTable appointments={appointmentsInRange as DashboardAppointmentRow[]} canStartTelemedicine={canStartTelemedicine} />
+      </section>
+
+      <Tabs tabs={[{ id: 'research', label: 'Research', content: research }]} />
     </div>
   )
 }

@@ -353,6 +353,28 @@ export async function checkBookingRequestRateLimit(ip: string): Promise<{ allowe
   return { allowed: perIp.success && global.success }
 }
 
+// Wave J (P1-20): appointment requests from the patient portal. The caller is already
+// authenticated, so the bucket is keyed on the session's patient id alone (an IP adds
+// nothing an attacker could not rotate). Generous for a real patient -- a handful of
+// requests an hour -- while stopping a script from flooding the staff booking queue.
+let _portalAppointmentRequestLimiter: Ratelimit | null = null
+function getPortalAppointmentRequestLimiter() {
+  if (!_portalAppointmentRequestLimiter) {
+    _portalAppointmentRequestLimiter = new Ratelimit({
+      redis: getRedis(),
+      limiter: Ratelimit.slidingWindow(5, '3600 s'),
+      prefix: 'ratelimit:portal-appointment-request',
+    })
+  }
+  return _portalAppointmentRequestLimiter
+}
+
+export async function checkPortalAppointmentRequestRateLimit(patientId: string): Promise<{ allowed: boolean }> {
+  const { success } = await getPortalAppointmentRequestLimiter().limit(patientId)
+  return { allowed: success }
+}
+// end Wave J
+
 // Test-only escape hatch. Every other bucket in this file is keyed on a
 // per-test-random identity, so exhausting one only ever affects that one
 // test. This global bucket is the one exception -- its key is the literal

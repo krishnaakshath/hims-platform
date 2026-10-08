@@ -7,6 +7,8 @@ import { getUnreadCountForPatient } from '@/lib/queries/messages'
 import { getAadhaarStatus } from '@/lib/queries/patient-profile'
 import { stateName } from '@/lib/india/reference'
 import { publicPatientColumns, patientPortalConfiguredSql } from '@/lib/queries/patient-columns'
+import { parseUhid } from '@/lib/uhid' // Wave J
+import type { PortalOtpIdentifier } from '@/lib/patient-portal-otp' // Wave J
 
 /**
  * The patient's own identity details for the portal's "Your details"
@@ -125,12 +127,13 @@ export async function getPatientPortalData(patientId: string) {
  * getPatientPortalData() fetches for whichever single page is active.
  */
 export async function getPatientPortalIdentity(patientId: string) {
-  const [patient] = await getDb().select({ id: patients.id, name: patients.name, dob: patients.dob }).from(patients).where(eq(patients.id, patientId))
+  const [patient] = await getDb().select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid }).from(patients).where(eq(patients.id, patientId))
   if (!patient) return null
   return {
     id: patient.id,
     name: patient.name,
     dob: patient.dob,
+    uhid: patient.uhid, // Wave J (P1-20): the top bar shows the UHID, not the internal id
   }
 }
 
@@ -160,9 +163,12 @@ export type PortalLoginCandidate = { id: string; portalPasswordHash: string | nu
 export async function findPortalLoginCandidate(identifier: string): Promise<PortalLoginCandidate | null> {
   const trimmed = identifier.trim()
   if (!trimmed) return null
+  // Wave J (P1-20): a valid UHID (any case) is matched against the UHID column.
   const where = trimmed.includes('@')
     ? sql`lower(trim(${patients.email})) = ${trimmed.toLowerCase()}`
-    : eq(patients.id, trimmed)
+    : parseUhid(trimmed.toUpperCase())
+      ? eq(patients.uhid, trimmed.toUpperCase())
+      : eq(patients.id, trimmed)
   const matches = await getDb()
     .select({ id: patients.id, portalPasswordHash: patients.portalPasswordHash })
     .from(patients)
@@ -194,6 +200,25 @@ export function checkPortalLoginPassword(candidate: PortalLoginCandidate | null,
 export async function verifyPatientPortalLogin(identifier: string, password: string): Promise<string | null> {
   return checkPortalLoginPassword(await findPortalLoginCandidate(identifier), password)
 }
+
+// Wave J (P1-20): the patient a UHID / mobile OTP sign-in is for. Only a patient whose portal
+// access staff have provisioned (a portal password is set) and who has a phone on file is a
+// candidate; a mobile number shared by several patients resolves to nobody, never to an
+// arbitrary pick. Returns the id, phone and MFA flag only.
+export async function findPortalOtpCandidate(id: PortalOtpIdentifier): Promise<{ id: string; phone: string; mfaEnabled: boolean } | null> {
+  const where = id.kind === 'uhid'
+    ? eq(patients.uhid, id.uhid)
+    : sql`right(regexp_replace(coalesce(${patients.phone}, ''), '[^0-9]', '', 'g'), 10) = ${id.last10}`
+  const matches = await getDb()
+    .select({ id: patients.id, phone: patients.phone, mfaEnabled: patients.mfaEnabled, provisioned: patientPortalConfiguredSql })
+    .from(patients)
+    .where(where)
+    .limit(2)
+  if (matches.length !== 1) return null
+  const [m] = matches
+  return m.provisioned && m.phone ? { id: m.id, phone: m.phone, mfaEnabled: m.mfaEnabled } : null
+}
+// end Wave J
 
 export async function setPatientPortalPassword(patientId: string, plaintextPassword: string): Promise<void> {
   await getDb().update(patients).set({ portalPasswordHash: hashPassword(plaintextPassword) }).where(eq(patients.id, patientId))

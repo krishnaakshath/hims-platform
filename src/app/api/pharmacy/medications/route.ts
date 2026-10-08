@@ -3,11 +3,14 @@ import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { PHARMACY_STOCK_READ_ROLES } from '@/lib/role-policy'
 import { listMedicationsWithInventory, createMedicationWithInventory } from '@/lib/queries/medications'
 
 export async function GET() {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
+  // Wave I: was any signed-in role; now the /pharmacy page's roles.
+  if (!PHARMACY_STOCK_READ_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   return NextResponse.json(await listMedicationsWithInventory())
 }
 

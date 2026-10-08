@@ -22,6 +22,7 @@ import { CASH_DESK_ROLES, COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy' // SP
 import { ENCOUNTER_REGISTER_ROLES } from '@/lib/role-policy' // Wave F
 import { NotebookTabs } from 'lucide-react' // Wave F
 import { QrCode, Plug } from 'lucide-react' // SP8
+import { REPORTS_ROLES } from '@/lib/role-policy' // Wave I
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -145,7 +146,8 @@ export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon; demo?
 ]
 
 export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[]; demo?: boolean }[] = [
-  { href: '/reports', label: 'Reports', icon: FileBarChart2, roles: ['admin', 'crc'] as Role[] },
+  // Wave I (P1-23): REPORTS_ROLES -- the /reports landing page; ReportsSidebar lists each role only its own reports.
+  { href: '/reports', label: 'Reports', icon: FileBarChart2, roles: [...REPORTS_ROLES] },
   { href: '/documents', label: 'Documents', icon: FolderOpen, roles: ['admin', 'crc', 'pi', 'frontdesk'] as Role[] },
   { href: '/broadcasts', label: 'Broadcasts', icon: Megaphone, roles: ['admin', 'crc'] as Role[], demo: true },
   { href: '/experience-surveys', label: 'Experience Surveys', icon: Star, roles: ['admin', 'crc'] as Role[], demo: true },

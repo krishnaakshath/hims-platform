@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs' // Wave I
+import { join, relative, sep } from 'node:path' // Wave I
 import { NextRequest } from 'next/server'
 import { getDb } from '@/db/client'
 import { reviews } from '@/db/schema'
@@ -558,6 +560,69 @@ import { GET as getEncounterRegisterExport } from '@/app/api/encounters/register
 import { ENCOUNTER_REGISTER_EXPORT_ROLES } from '@/lib/role-policy'
 // end Wave F
 
+// Wave I (P2-14): the rest of the gated routes
+import { PUT as putMfaMethodRoute } from '@/app/api/account/mfa-method/route'
+import { POST as resetOwnMfaRoute } from '@/app/api/account/mfa/reset/route'
+import { POST as startTelemedicine } from '@/app/api/appointments/[id]/telemedicine/route'
+import { GET as getAuditLog } from '@/app/api/audit-log/route'
+import { PATCH as confirmBookingRequest } from '@/app/api/booking-requests/[id]/confirm/route'
+import { PATCH as declineBookingRequest } from '@/app/api/booking-requests/[id]/decline/route'
+import { PATCH as patchCarePlanGoal } from '@/app/api/care-plan-goals/[id]/route'
+import { POST as postChargeRoute } from '@/app/api/charges/route'
+import { PATCH as patchChargeRoute } from '@/app/api/charges/[id]/route'
+import { GET as listConsentDocuments, POST as postConsentDocument } from '@/app/api/consent-documents/route'
+import { GET as getConsentDocument, PUT as putConsentDocument } from '@/app/api/consent-documents/[id]/route'
+import { POST as postDocumentRoute } from '@/app/api/documents/route'
+import { PATCH as patchDocumentRoute, DELETE as deleteDocumentRoute } from '@/app/api/documents/[id]/route'
+import { GET as listFolders, POST as postFolderRoute } from '@/app/api/form-template-folders/route'
+import { PUT as putFolderRoute, DELETE as deleteFolderRoute } from '@/app/api/form-template-folders/[id]/route'
+import { GET as listTemplateConsents, POST as attachTemplateConsent } from '@/app/api/form-templates/[id]/consents/route'
+import { DELETE as detachTemplateConsent } from '@/app/api/form-templates/[id]/consents/[consentDocumentId]/route'
+import { POST as acknowledgeDeclineRoute } from '@/app/api/front-desk/assignments/[id]/acknowledge-decline/route'
+import { POST as declineAssignmentRoute } from '@/app/api/front-desk/assignments/[id]/decline/route'
+import { POST as scheduleAssignmentRoute } from '@/app/api/front-desk/assignments/[id]/schedule/route'
+import { POST as eligibilityCheckRoute } from '@/app/api/front-desk/eligibility-check/route'
+import { GET as frontDeskPatientLookup } from '@/app/api/front-desk/patient-lookup/route'
+import { POST as orderAdmissionMedication } from '@/app/api/inpatient/admissions/[id]/medications/route'
+import { POST as administerAdmissionMedication } from '@/app/api/inpatient/admissions/[id]/medications/[medId]/administer/route'
+import { POST as transferAdmissionRoute } from '@/app/api/inpatient/admissions/[id]/transfer/route'
+import { POST as blockRoomRoute } from '@/app/api/inpatient/rooms/[id]/block/route'
+import { POST as markRoomCleanRoute } from '@/app/api/inpatient/rooms/[id]/mark-clean/route'
+import { POST as unblockRoomRoute } from '@/app/api/inpatient/rooms/[id]/unblock/route'
+import { GET as getLabsPatient } from '@/app/api/labs/patients/[patientId]/route'
+import { GET as getNavBadgesRoute } from '@/app/api/nav-badges/route'
+import { DELETE as deletePatientRoute } from '@/app/api/patients/[anonId]/route'
+import { POST as postCarePlanRoute } from '@/app/api/patients/[anonId]/care-plans/route'
+import { POST as postInsuranceCardRoute } from '@/app/api/patients/[anonId]/insurance-card/route'
+import { POST as issuePortalPassword, DELETE as revokePortalPassword } from '@/app/api/patients/[anonId]/portal-password/route'
+import { POST as postPrescriptionRoute } from '@/app/api/patients/[anonId]/prescriptions/route'
+import { PATCH as patchPrescriptionRoute } from '@/app/api/patients/[anonId]/prescriptions/[id]/route'
+import { POST as resetPatientMfaRoute } from '@/app/api/patients/[anonId]/reset-mfa/route'
+import { POST as confirmScreeningRoute } from '@/app/api/patients/[anonId]/screening/confirm/route'
+import { GET as listPayersRoute } from '@/app/api/payers/route'
+import { POST as dispenseRoute } from '@/app/api/pharmacy/dispense/route'
+import { POST as chargeDispenseRoute } from '@/app/api/pharmacy/dispenses/[dispenseId]/charge/route'
+import { GET as listMedicationsRoute, POST as postMedicationRoute } from '@/app/api/pharmacy/medications/route'
+import { GET as getPharmacyPatient } from '@/app/api/pharmacy/patients/[patientId]/route'
+import { PUT as putAutoClassifyRoute } from '@/app/api/settings/auto-classify/route'
+import { PUT as putPracticeInfoRoute } from '@/app/api/settings/practice-info/route'
+import { PUT as putQueuePinRoute } from '@/app/api/settings/queue-display-pin/route'
+import { POST as postStaffRoute } from '@/app/api/staff/route'
+import { PATCH as patchStaffRoute } from '@/app/api/staff/[id]/route'
+import { POST as postCredentialRoute } from '@/app/api/staff/[id]/credentials/route'
+import { PATCH as patchCredentialRoute } from '@/app/api/staff/[id]/credentials/[credentialId]/route'
+import { POST as endTelemedicineRoute } from '@/app/api/telemedicine/[sessionId]/end/route'
+import { GET as pollSignalRoute, POST as postSignalRoute } from '@/app/api/telemedicine/[sessionId]/signal/route'
+import { GET as listAdverseEvents, POST as postAdverseEventRoute, PATCH as notifyAdverseEventRoute } from '@/app/api/trials/[trialId]/adverse-events/route'
+import { GET as listDrugAccountability, POST as postDrugAccountabilityRoute } from '@/app/api/trials/[trialId]/drug-accountability/route'
+import { GET as listRegulatoryDocuments, POST as postRegulatoryDocumentRoute } from '@/app/api/trials/[trialId]/regulatory-documents/route'
+import { GET as listUsersRoute, POST as postUserRoute } from '@/app/api/users/route'
+import { POST as resetUserMfaRoute } from '@/app/api/users/[id]/reset-mfa/route'
+import { ACCOUNT_ROLES, PAYER_LIST_ROLES, PHARMACY_STOCK_READ_ROLES } from '@/lib/role-policy'
+import { GET as getReportCsv } from '@/app/api/reports/[report]/csv/route'
+import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
+// end Wave I
+
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
 const BOGUS_ID = '2147483000'
@@ -914,6 +979,97 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/rcm/nhcx/exchanges/[id]/review', call: () => settle(() => postNhcxReview(send('POST', `/api/rcm/nhcx/exchanges/${BOGUS_ID}/review`), ctx({ id: BOGUS_ID }))), allowed: [...NHCX_EXCHANGE_ROLES] },
   { name: 'POST /api/settings/integrations/test', call: () => settle(() => postIntegrationTest(send('POST', '/api/settings/integrations/test'))), allowed: [...INTEGRATION_SETTINGS_ROLES] },
   // end SP8
+  // Wave I (P2-14): every remaining staff-gated handler. Write bodies are
+  // unparseable (an allowed role gets a 400 after the gate, nothing is
+  // written); bodyless writes name ids that cannot exist.
+  ...((): ApiGateCase[] => {
+    const ADMIN: Role[] = ['admin']
+    const ADMIN_CRC_PI: Role[] = ['admin', 'crc', 'pi']
+    const PI_ADMIN: Role[] = ['pi', 'admin']
+    const TRIAL = 'probe-no-trial'
+    const w = (method: 'POST' | 'PUT' | 'PATCH', path: string) => send(method, path, NOT_JSON)
+    return [
+      { name: 'PUT /api/account/mfa-method', call: () => settle(() => putMfaMethodRoute(w('PUT', '/api/account/mfa-method'))), allowed: [...ACCOUNT_ROLES] },
+      { name: 'POST /api/account/mfa/reset', call: () => settle(() => resetOwnMfaRoute(w('POST', '/api/account/mfa/reset'))), allowed: [...ACCOUNT_ROLES] },
+      { name: 'POST /api/appointments/[id]/telemedicine', call: () => settle(() => startTelemedicine(w('POST', `/api/appointments/${BOGUS_ID}/telemedicine`), ctx({ id: BOGUS_ID }))), allowed: ['admin', 'pi'] },
+      { name: 'GET /api/audit-log', call: () => settle(() => getAuditLog(get('/api/audit-log'))), allowed: ADMIN },
+      { name: 'PATCH /api/booking-requests/[id]/confirm', call: () => settle(() => confirmBookingRequest(w('PATCH', `/api/booking-requests/${BOGUS_ID}/confirm`), ctx({ id: BOGUS_ID }))), allowed: ['admin', 'crc', 'frontdesk'] },
+      { name: 'PATCH /api/booking-requests/[id]/decline', call: () => settle(() => declineBookingRequest(w('PATCH', `/api/booking-requests/${BOGUS_ID}/decline`), ctx({ id: BOGUS_ID }))), allowed: ['admin', 'crc', 'frontdesk'] },
+      { name: 'PATCH /api/care-plan-goals/[id]', call: () => settle(() => patchCarePlanGoal(w('PATCH', `/api/care-plan-goals/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: PI_ADMIN },
+      { name: 'POST /api/charges', call: () => settle(() => postChargeRoute(w('POST', '/api/charges'))), allowed: [...CHARGES_ROLES] },
+      { name: 'PATCH /api/charges/[id]', call: () => settle(() => patchChargeRoute(w('PATCH', `/api/charges/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...CHARGES_ROLES] },
+      { name: 'GET /api/consent-documents', call: () => settle(() => listConsentDocuments()), allowed: ADMIN_CRC_PI },
+      { name: 'POST /api/consent-documents', call: () => settle(() => postConsentDocument(w('POST', '/api/consent-documents'))), allowed: ADMIN_CRC_PI },
+      { name: 'GET /api/consent-documents/[id]', call: () => settle(() => getConsentDocument(get(`/api/consent-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: ADMIN_CRC_PI },
+      { name: 'PUT /api/consent-documents/[id]', call: () => settle(() => putConsentDocument(w('PUT', `/api/consent-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: ADMIN_CRC_PI },
+      // Multipart upload: a non-multipart body is the 400 an allowed role gets, after the gate.
+      { name: 'POST /api/documents', call: () => settle(() => postDocumentRoute(w('POST', '/api/documents'))), allowed: ['admin', 'crc', 'frontdesk'] },
+      { name: 'PATCH /api/documents/[id]', call: () => settle(() => patchDocumentRoute(w('PATCH', `/api/documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: ['admin', 'crc', 'frontdesk'] },
+      { name: 'DELETE /api/documents/[id]', call: () => settle(() => deleteDocumentRoute(del(`/api/documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: ADMIN },
+      { name: 'GET /api/form-template-folders', call: () => settle(() => listFolders()), allowed: ADMIN_CRC_PI },
+      { name: 'POST /api/form-template-folders', call: () => settle(() => postFolderRoute(w('POST', '/api/form-template-folders'))), allowed: ADMIN_CRC_PI },
+      { name: 'PUT /api/form-template-folders/[id]', call: () => settle(() => putFolderRoute(w('PUT', `/api/form-template-folders/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: ADMIN_CRC_PI },
+      { name: 'DELETE /api/form-template-folders/[id]', call: () => settle(() => deleteFolderRoute(del(`/api/form-template-folders/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: ADMIN_CRC_PI },
+      { name: 'GET /api/form-templates/[id]/consents', call: () => settle(() => listTemplateConsents(get(`/api/form-templates/${BOGUS_ID}/consents`), ctx({ id: BOGUS_ID }))), allowed: ADMIN_CRC_PI },
+      { name: 'POST /api/form-templates/[id]/consents', call: () => settle(() => attachTemplateConsent(w('POST', `/api/form-templates/${BOGUS_ID}/consents`), ctx({ id: BOGUS_ID }))), allowed: ADMIN_CRC_PI },
+      { name: 'DELETE /api/form-templates/[id]/consents/[consentDocumentId]', call: () => settle(() => detachTemplateConsent(del(`/api/form-templates/${BOGUS_ID}/consents/${BOGUS_ID}`), ctx({ id: BOGUS_ID, consentDocumentId: BOGUS_ID }))), allowed: ADMIN_CRC_PI },
+      { name: 'POST /api/front-desk/assignments/[id]/acknowledge-decline', call: () => settle(() => acknowledgeDeclineRoute(send('POST', `/api/front-desk/assignments/${BOGUS_ID}/acknowledge-decline`), ctx({ id: BOGUS_ID }))), allowed: ['frontdesk', 'admin', 'crc'] },
+      { name: 'POST /api/front-desk/assignments/[id]/decline', call: () => settle(() => declineAssignmentRoute(w('POST', `/api/front-desk/assignments/${BOGUS_ID}/decline`), ctx({ id: BOGUS_ID }))), allowed: ['pi'] },
+      { name: 'POST /api/front-desk/assignments/[id]/schedule', call: () => settle(() => scheduleAssignmentRoute(w('POST', `/api/front-desk/assignments/${BOGUS_ID}/schedule`), ctx({ id: BOGUS_ID }))), allowed: ['pi'] },
+      { name: 'POST /api/front-desk/eligibility-check', call: () => settle(() => eligibilityCheckRoute(w('POST', '/api/front-desk/eligibility-check'))), allowed: ['billing', 'admin', 'crc'] },
+      { name: 'GET /api/front-desk/patient-lookup', call: () => settle(() => frontDeskPatientLookup(get('/api/front-desk/patient-lookup?q=zzzz-probe'))), allowed: ['frontdesk', 'admin', 'crc'] },
+      { name: 'POST /api/inpatient/admissions/[id]/medications', call: () => settle(() => orderAdmissionMedication(w('POST', `/api/inpatient/admissions/${BOGUS_ID}/medications`), ctx({ id: BOGUS_ID }))), allowed: PI_ADMIN },
+      { name: 'POST /api/inpatient/admissions/[id]/medications/[medId]/administer', call: () => settle(() => administerAdmissionMedication(w('POST', `/api/inpatient/admissions/${BOGUS_ID}/medications/${BOGUS_ID}/administer`), ctx({ id: BOGUS_ID, medId: BOGUS_ID }))), allowed: PI_ADMIN },
+      { name: 'POST /api/inpatient/admissions/[id]/transfer', call: () => settle(() => transferAdmissionRoute(w('POST', `/api/inpatient/admissions/${BOGUS_ID}/transfer`), ctx({ id: BOGUS_ID }))), allowed: ['frontdesk', 'admin', 'crc', 'pi'] },
+      { name: 'POST /api/inpatient/rooms/[id]/block', call: () => settle(() => blockRoomRoute(w('POST', `/api/inpatient/rooms/${BOGUS_ID}/block`), ctx({ id: BOGUS_ID }))), allowed: ADMIN },
+      { name: 'POST /api/inpatient/rooms/[id]/mark-clean', call: () => settle(() => markRoomCleanRoute(send('POST', `/api/inpatient/rooms/${BOGUS_ID}/mark-clean`), ctx({ id: BOGUS_ID }))), allowed: ['frontdesk', 'admin', 'crc'] },
+      { name: 'POST /api/inpatient/rooms/[id]/unblock', call: () => settle(() => unblockRoomRoute(send('POST', `/api/inpatient/rooms/${BOGUS_ID}/unblock`), ctx({ id: BOGUS_ID }))), allowed: ADMIN },
+      { name: 'GET /api/labs/patients/[patientId]', call: () => settle(() => getLabsPatient(get(`/api/labs/patients/${BOGUS_PATIENT}`), ctx({ patientId: BOGUS_PATIENT }))), allowed: ['admin', 'pi', 'crc', 'labs'] },
+      { name: 'GET /api/nav-badges', call: () => settle(() => getNavBadgesRoute()), allowed: [...ALL_ROLES] },
+      { name: 'DELETE /api/patients/[anonId]', call: () => settle(() => deletePatientRoute(del(`/api/patients/${BOGUS_PATIENT}`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ADMIN },
+      { name: 'POST /api/patients/[anonId]/care-plans', call: () => settle(() => postCarePlanRoute(w('POST', `/api/patients/${BOGUS_PATIENT}/care-plans`), ctx({ anonId: BOGUS_PATIENT }))), allowed: PI_ADMIN },
+      // Multipart upload: a non-multipart body is the 400 an allowed role gets, after the gate.
+      { name: 'POST /api/patients/[anonId]/insurance-card', call: () => settle(() => postInsuranceCardRoute(w('POST', `/api/patients/${BOGUS_PATIENT}/insurance-card`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'crc', 'frontdesk'] },
+      { name: 'POST /api/patients/[anonId]/portal-password', call: () => settle(() => issuePortalPassword(send('POST', `/api/patients/${BOGUS_PATIENT}/portal-password`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ADMIN },
+      { name: 'DELETE /api/patients/[anonId]/portal-password', call: () => settle(() => revokePortalPassword(del(`/api/patients/${BOGUS_PATIENT}/portal-password`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ADMIN },
+      { name: 'POST /api/patients/[anonId]/prescriptions', call: () => settle(() => postPrescriptionRoute(w('POST', `/api/patients/${BOGUS_PATIENT}/prescriptions`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'pi'] },
+      { name: 'PATCH /api/patients/[anonId]/prescriptions/[id]', call: () => settle(() => patchPrescriptionRoute(w('PATCH', `/api/patients/${BOGUS_PATIENT}/prescriptions/${BOGUS_ID}`), ctx({ anonId: BOGUS_PATIENT, id: BOGUS_ID }))), allowed: ['admin', 'pi'] },
+      { name: 'POST /api/patients/[anonId]/reset-mfa', call: () => settle(() => resetPatientMfaRoute(send('POST', `/api/patients/${BOGUS_PATIENT}/reset-mfa`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ADMIN },
+      { name: 'POST /api/patients/[anonId]/screening/confirm', call: () => settle(() => confirmScreeningRoute(send('POST', `/api/patients/${BOGUS_PATIENT}/screening/confirm`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'pi', 'crc'] },
+      // Wave I gate fix: was any signed-in role (labs, collector, coder, pharmacy, rcm included).
+      { name: 'GET /api/payers', call: () => settle(() => listPayersRoute()), allowed: [...PAYER_LIST_ROLES] },
+      { name: 'POST /api/pharmacy/dispense', call: () => settle(() => dispenseRoute(w('POST', '/api/pharmacy/dispense'))), allowed: ['admin', 'pi', 'pharmacy'] },
+      { name: 'POST /api/pharmacy/dispenses/[dispenseId]/charge', call: () => settle(() => chargeDispenseRoute(w('POST', `/api/pharmacy/dispenses/${BOGUS_ID}/charge`), ctx({ dispenseId: BOGUS_ID }))), allowed: ['pharmacy', 'admin'] },
+      // Wave I gate fix: the stock list was any signed-in role; now the /pharmacy page's roles.
+      { name: 'GET /api/pharmacy/medications', call: () => settle(() => listMedicationsRoute()), allowed: [...PHARMACY_STOCK_READ_ROLES] },
+      { name: 'POST /api/pharmacy/medications', call: () => settle(() => postMedicationRoute(w('POST', '/api/pharmacy/medications'))), allowed: ['admin', 'pharmacy'] },
+      { name: 'GET /api/pharmacy/patients/[patientId]', call: () => settle(() => getPharmacyPatient(get(`/api/pharmacy/patients/${BOGUS_PATIENT}`), ctx({ patientId: BOGUS_PATIENT }))), allowed: ['pharmacy', 'admin'] },
+      { name: 'PUT /api/settings/auto-classify', call: () => settle(() => putAutoClassifyRoute(w('PUT', '/api/settings/auto-classify'))), allowed: ADMIN },
+      { name: 'PUT /api/settings/practice-info', call: () => settle(() => putPracticeInfoRoute(w('PUT', '/api/settings/practice-info'))), allowed: ADMIN },
+      { name: 'PUT /api/settings/queue-display-pin', call: () => settle(() => putQueuePinRoute(w('PUT', '/api/settings/queue-display-pin'))), allowed: ADMIN },
+      { name: 'POST /api/staff', call: () => settle(() => postStaffRoute(w('POST', '/api/staff'))), allowed: ADMIN },
+      { name: 'PATCH /api/staff/[id]', call: () => settle(() => patchStaffRoute(w('PATCH', `/api/staff/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: ADMIN },
+      { name: 'POST /api/staff/[id]/credentials', call: () => settle(() => postCredentialRoute(w('POST', `/api/staff/${BOGUS_ID}/credentials`), ctx({ id: BOGUS_ID }))), allowed: ADMIN },
+      { name: 'PATCH /api/staff/[id]/credentials/[credentialId]', call: () => settle(() => patchCredentialRoute(w('PATCH', `/api/staff/${BOGUS_ID}/credentials/${BOGUS_ID}`), ctx({ id: BOGUS_ID, credentialId: BOGUS_ID }))), allowed: ADMIN },
+      { name: 'POST /api/telemedicine/[sessionId]/end', call: () => settle(() => endTelemedicineRoute(send('POST', `/api/telemedicine/${BOGUS_ID}/end`), ctx({ sessionId: BOGUS_ID }))), allowed: ['admin', 'pi'] },
+      { name: 'POST /api/telemedicine/[sessionId]/signal', call: () => settle(() => postSignalRoute(w('POST', `/api/telemedicine/${BOGUS_ID}/signal`), ctx({ sessionId: BOGUS_ID }))), allowed: ['admin', 'pi'] },
+      { name: 'GET /api/telemedicine/[sessionId]/signal', call: () => settle(() => pollSignalRoute(get(`/api/telemedicine/${BOGUS_ID}/signal?for=patient`), ctx({ sessionId: BOGUS_ID }))), allowed: ['admin', 'pi'] },
+      { name: 'GET /api/trials/[trialId]/adverse-events', call: () => settle(() => listAdverseEvents(get(`/api/trials/${TRIAL}/adverse-events`), ctx({ trialId: TRIAL }))), allowed: ADMIN_CRC_PI },
+      { name: 'POST /api/trials/[trialId]/adverse-events', call: () => settle(() => postAdverseEventRoute(w('POST', `/api/trials/${TRIAL}/adverse-events`), ctx({ trialId: TRIAL }))), allowed: ADMIN_CRC_PI },
+      { name: 'PATCH /api/trials/[trialId]/adverse-events', call: () => settle(() => notifyAdverseEventRoute(w('PATCH', `/api/trials/${TRIAL}/adverse-events`), ctx({ trialId: TRIAL }))), allowed: ADMIN_CRC_PI },
+      { name: 'GET /api/trials/[trialId]/drug-accountability', call: () => settle(() => listDrugAccountability(get(`/api/trials/${TRIAL}/drug-accountability`), ctx({ trialId: TRIAL }))), allowed: ADMIN_CRC_PI },
+      { name: 'POST /api/trials/[trialId]/drug-accountability', call: () => settle(() => postDrugAccountabilityRoute(w('POST', `/api/trials/${TRIAL}/drug-accountability`), ctx({ trialId: TRIAL }))), allowed: ADMIN_CRC_PI },
+      { name: 'GET /api/trials/[trialId]/regulatory-documents', call: () => settle(() => listRegulatoryDocuments(get(`/api/trials/${TRIAL}/regulatory-documents`), ctx({ trialId: TRIAL }))), allowed: ADMIN_CRC_PI },
+      { name: 'POST /api/trials/[trialId]/regulatory-documents', call: () => settle(() => postRegulatoryDocumentRoute(w('POST', `/api/trials/${TRIAL}/regulatory-documents`), ctx({ trialId: TRIAL }))), allowed: ADMIN_CRC_PI },
+      { name: 'GET /api/users', call: () => settle(() => listUsersRoute()), allowed: ADMIN },
+      { name: 'POST /api/users', call: () => settle(() => postUserRoute(w('POST', '/api/users'))), allowed: ADMIN },
+      { name: 'POST /api/users/[id]/reset-mfa', call: () => settle(() => resetUserMfaRoute(send('POST', `/api/users/${BOGUS_ID}/reset-mfa`), ctx({ id: BOGUS_ID }))), allowed: ADMIN },
+      // P1-23 hospital report CSV: each report's catalogue roles; no range is a 400 before any query.
+      ...HOSPITAL_REPORTS.map((r): ApiGateCase => ({ name: `GET /api/reports/[report]/csv (${r.key})`, call: () => settle(() => getReportCsv(get(`/api/reports/${r.key}/csv`), ctx({ report: r.key }))), allowed: [...r.roles] })),
+      { name: 'GET /api/reports/[report]/csv (unknown report)', call: () => settle(() => getReportCsv(get('/api/reports/nope/csv'), ctx({ report: 'nope' }))), allowed: [] },
+    ]
+  })(),
+  // end Wave I
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1110,3 +1266,94 @@ describe.each(API_GATES)('$name', (c) => {
     }
   })
 })
+
+// Wave I (P2-14): every exported handler of every src/app/api/**/route.ts is
+// pinned here -- an API_GATES row, a deny-before-parse row, one of the bespoke
+// describe blocks at the top of this file -- or carries a documented exemption
+// (no staff role gate exists to pin: public, pre-login, token, patient-session
+// or shared-secret routes, each pinned by its own test file). A new route
+// without a row fails this test; so does an exemption left behind for a
+// handler that no longer exists.
+const BESPOKE_ROWS = [
+  'GET /api/workbook/full', 'GET /api/workbook/export', 'POST /api/mock-payments',
+  'GET /api/broadcasts', 'POST /api/broadcasts', 'GET /api/broadcasts/[id]', 'GET /api/broadcasts/recipients',
+  'GET /api/reviews', 'POST /api/reviews', 'GET /api/reviews/[id]', 'PUT /api/reviews/[id]',
+]
+const UNGATED_EXEMPT: Record<string, string> = {
+  'GET /api/auth/google/start': 'pre-login SSO redirect (tests/api/auth-google.test.ts)',
+  'GET /api/auth/google/callback': 'pre-login SSO callback; links only an existing account (tests/api/auth-google.test.ts)',
+  'GET /api/health': 'public liveness probe, no data (tests/api/health.test.ts)',
+  'GET /api/health/ready': 'public readiness probe, no data (tests/api/health.test.ts)',
+  'POST /api/login': 'pre-session staff login (tests/api/login.test.ts)',
+  'POST /api/login/mfa': 'pre-session MFA step, pending-login cookie (tests/api/login-mfa.test.ts)',
+  'POST /api/logout': 'clears the caller\'s own cookie',
+  'POST /api/patient-portal/login': 'patient portal pre-session login (tests/api/patient-portal.test.ts)',
+  'POST /api/patient-portal/login/mfa': 'patient portal pre-session MFA (tests/api/patient-portal-login-mfa.test.ts)',
+  'POST /api/patient-portal/appointment-requests': 'patient session only, own record (tests/api/patient-portal-appointment-requests.test.ts)',
+  'POST /api/patient-portal/login/otp': 'patient portal pre-session OTP request (tests/api/patient-portal-login-otp.test.ts)',
+  'POST /api/patient-portal/login/otp/verify': 'patient portal pre-session OTP verify (tests/api/patient-portal-login-otp.test.ts)',
+  'POST /api/patient-portal/logout': 'clears the patient\'s own cookie',
+  'POST /api/patient-portal/account/mfa/enroll': 'patient session only, own account (tests/api/patient-portal-account-mfa.test.ts)',
+  'POST /api/patient-portal/account/mfa/confirm': 'patient session only, own account (tests/api/patient-portal-account-mfa.test.ts)',
+  'POST /api/patient-portal/account/mfa/reset': 'patient session only, own account (tests/api/patient-portal-account-mfa.test.ts)',
+  'GET /api/patient-portal/consent': 'patient session only, own record (tests/api/patient-portal.test.ts)',
+  'POST /api/patient-portal/consent': 'patient session only, own record (tests/api/patient-portal.test.ts)',
+  'GET /api/patient-portal/medications-export': 'patient session only, own record (tests/api/patient-portal.test.ts)',
+  'GET /api/patient-portal/lab-reports/[id]/download': 'patient session only, own reports (tests/api/patient-portal-lab-report-download.test.ts)',
+  'POST /api/patients/[anonId]/form-submissions/[id]/sign': 'patient session only, own submission (tests/api/form-submission-sign.test.ts)',
+  'GET /api/intake/[token]': 'intake token possession (tests/api/intake-portal.test.ts)',
+  'PUT /api/intake/[token]': 'intake token possession (tests/api/intake-portal.test.ts)',
+  'POST /api/intake/[token]/consents/[formSubmissionConsentId]/sign': 'intake token possession (tests/api/intake-consent-sign.test.ts)',
+  'GET /api/telemedicine/join/[token]/signal': 'patient join token possession (tests/api/telemedicine-join-signal.test.ts)',
+  'POST /api/telemedicine/join/[token]/signal': 'patient join token possession (tests/api/telemedicine-join-signal.test.ts)',
+  'POST /api/public/booking-requests': 'public booking form, rate limited (tests/api/public-booking-requests.test.ts)',
+  'GET /api/queue-display': 'lobby display PIN, no session (tests/api/queue-display.test.ts)',
+  'POST /api/webhooks/fhir-labs': 'LIS shared-secret token (tests/api/webhooks-fhir-labs.test.ts)',
+  'GET /api/messages/[patientId]': 'staff-or-patient dual session via getSession, not requireSession; staff roles pinned in tests/api/messages.test.ts',
+  'POST /api/messages/[patientId]': 'staff-or-patient dual session via getSession, not requireSession; staff roles pinned in tests/api/messages.test.ts',
+}
+
+function findRouteFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = join(dir, e.name)
+    if (e.isDirectory()) return findRouteFiles(p)
+    return e.name === 'route.ts' ? [p] : []
+  })
+}
+
+function apiHandlers(): string[] {
+  const appDir = join(process.cwd(), 'src', 'app')
+  return findRouteFiles(join(appDir, 'api')).flatMap((file) => {
+    const route = `/${relative(appDir, file).split(sep).slice(0, -1).join('/')}`
+    const methods = [...readFileSync(file, 'utf8').matchAll(/export (?:async function|const) (GET|POST|PUT|PATCH|DELETE)\b/g)].map((m) => m[1])
+    return methods.map((m) => `${m} ${route}`)
+  })
+}
+
+describe('every API route handler is pinned (Wave I P2-14)', () => {
+  const rowName = (name: string) => name.split(' ').slice(0, 2).join(' ')
+  const pinned = new Set([
+    ...API_GATES.map((r) => rowName(r.name)),
+    ...[...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES].map((r) => rowName(r.name)),
+    ...BESPOKE_ROWS,
+  ])
+  const handlers = apiHandlers()
+
+  it('finds the route files', () => {
+    expect(handlers.length).toBeGreaterThan(200)
+  })
+
+  it('has a gate row or a documented exemption for every handler', () => {
+    expect(handlers.filter((h) => !pinned.has(h) && !(h in UNGATED_EXEMPT)).sort()).toEqual([])
+  })
+
+  it('has no stale or doubled exemptions', () => {
+    expect(Object.keys(UNGATED_EXEMPT).filter((h) => !handlers.includes(h))).toEqual([])
+    expect(Object.keys(UNGATED_EXEMPT).filter((h) => pinned.has(h))).toEqual([])
+  })
+
+  it('has no row for a handler that does not exist', () => {
+    expect([...pinned].filter((h) => !handlers.includes(h))).toEqual([])
+  })
+})
+// end Wave I

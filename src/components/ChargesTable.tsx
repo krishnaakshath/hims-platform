@@ -42,10 +42,11 @@ const COLUMNS: DataGridColumn[] = [
   { key: 'actions', label: 'Actions' },
 ]
 
-export function ChargesTable({ charges, patients }: { charges: Charge[]; patients: { id: string; name: string }[] }) {
+// `initialStatus` (Wave E P1-19): the status filter the table opens with (?status= on the page).
+export function ChargesTable({ charges, patients, initialStatus }: { charges: Charge[]; patients: { id: string; name: string }[]; initialStatus?: ChargeStatus }) {
   const router = useRouter()
   const [search, setSearch] = useState('')
-  const [filters, setFilters] = useState<Record<string, string>>({})
+  const [filters, setFilters] = useState<Record<string, string>>(initialStatus ? { status: initialStatus } : {})
   const [visibleColumns, setVisibleColumns] = useState<string[]>(COLUMNS.map((c) => c.key))
   const [pending, setPending] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
