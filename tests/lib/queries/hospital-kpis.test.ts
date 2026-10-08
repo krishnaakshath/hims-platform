@@ -15,7 +15,7 @@ import { listPharmacyChargeIds } from '@/lib/queries/medication-dispenses'
 import { purgeBillingFixtures } from '../../db/billing-fixtures'
 import {
   loadOpdToday, loadIpdCensus, loadCollectionsToday, loadBillingQueue, loadLabKpis, loadPharmacyKpis,
-  loadFollowUpBuckets, loadDoctorWorkload,
+  loadFollowUpBuckets, loadDoctorWorkload, countResultsToVerifyForProvider,
 } from '@/lib/queries/hospital-kpis'
 
 // Wave E: hospital KPIs. A far-future IST day nobody else writes to isolates
@@ -114,6 +114,8 @@ describe.skipIf(!process.env.DATABASE_URL)('hospital KPIs (DB)', () => {
     // A pharmacy bill still in draft (legacy charge linked to a second dispense).
     const [c] = await db.insert(charges).values({ patientId: P1, providerName: 'TEST_WE', dateOfService: DAY, diagnosisCodes: [], procedureCodes: [], amountCents: 5000, status: 'draft' }).returning({ id: charges.id })
     ids.charges.push(c.id)
+    const [c2] = await db.insert(charges).values({ patientId: P2, providerName: 'TEST_WE', dateOfService: DAY, diagnosisCodes: [], procedureCodes: [], amountCents: 7000, status: 'pending_approval' }).returning({ id: charges.id })
+    ids.charges.push(c2.id)
     const [d2] = await db.insert(medicationDispenses).values({ patientId: P1, medicationId: medId, quantity: 1, dispensedByName: 'TEST_WE', dispensedAt: new Date('2031-04-14T06:00:00Z'), chargeId: c.id }).returning({ id: medicationDispenses.id })
     ids.disp.push(d2.id)
 
@@ -173,6 +175,7 @@ describe.skipIf(!process.env.DATABASE_URL)('hospital KPIs (DB)', () => {
     expect(q.uninvoicedLines - base.billing.uninvoicedLines).toBe(1)
     expect(q.uninvoicedPaise - base.billing.uninvoicedPaise).toBe(20000)
     expect(q.pharmacyDraftCharges - base.billing.pharmacyDraftCharges).toBe(1)
+    expect(q.pendingApprovalCharges - base.billing.pendingApprovalCharges).toBe(1)
     expect(await listPharmacyChargeIds()).toContain(ids.charges[0])
   })
 
@@ -208,6 +211,7 @@ describe.skipIf(!process.env.DATABASE_URL)('hospital KPIs (DB)', () => {
     expect(w.inpatients).toHaveLength(1)
     expect(w.inpatients[0]).toMatchObject({ patientId: P1, ward: WARD, bed: '1-A' })
     expect(w.resultsToVerify.map((r) => [r.patientId, r.flag])).toEqual([[P1, 'critical']])
+    expect(await countResultsToVerifyForProvider(docA)).toBe(w.resultsToVerify.length)
     expect(w.labsAwaitingResult).toBe(3)
     expect(w.followUps.map((f) => [f.patientId, f.bucket])).toEqual([[P2, 'overdue'], [P1, 'due']])
     expect(w.unsignedNotes).toBe(1)

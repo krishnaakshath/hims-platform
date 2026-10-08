@@ -100,17 +100,18 @@ export async function loadCollectionsToday(today: string): Promise<CollectionsTo
   return { date: today, receiptCount: n(p?.n), collectedPaise, refundedPaise, netPaise: collectedPaise - refundedPaise }
 }
 
-export interface BillingQueueKpi { draftInvoices: number; uninvoicedLines: number; uninvoicedPaise: number; pharmacyDraftCharges: number }
+export interface BillingQueueKpi { draftInvoices: number; uninvoicedLines: number; uninvoicedPaise: number; pharmacyDraftCharges: number; pendingApprovalCharges: number }
 
 /** Work waiting for billing: SP4 draft invoices, captured charge lines on no invoice yet (taxable value), and pharmacy bills (legacy charges from a dispense) still in draft. */
 export async function loadBillingQueue(): Promise<BillingQueueKpi> {
   const db = getDb()
-  const [[d], [l], [ph]] = await Promise.all([
+  const [[d], [l], [ph], [pa]] = await Promise.all([
     db.select({ n: count() }).from(invoices).where(eq(invoices.status, 'draft')),
     db.select({ n: count(), paise: sql<string | null>`sum(${chargeLines.taxablePaise})` }).from(chargeLines).where(and(eq(chargeLines.status, 'captured'), isNull(chargeLines.invoiceId))),
     db.select({ n: count() }).from(charges).innerJoin(medicationDispenses, eq(medicationDispenses.chargeId, charges.id)).where(eq(charges.status, 'draft')),
+    db.select({ n: count() }).from(charges).where(eq(charges.status, 'pending_approval')),
   ])
-  return { draftInvoices: n(d?.n), uninvoicedLines: n(l?.n), uninvoicedPaise: n(l?.paise), pharmacyDraftCharges: n(ph?.n) }
+  return { draftInvoices: n(d?.n), uninvoicedLines: n(l?.n), uninvoicedPaise: n(l?.paise), pharmacyDraftCharges: n(ph?.n), pendingApprovalCharges: n(pa?.n) }
 }
 
 // ---------- Labs ----------
@@ -155,6 +156,12 @@ export async function loadLabKpis(today: string): Promise<LabKpi> {
     criticalToday: n(day?.critical),
     medianTatMinutes: day?.median === null || day?.median === undefined ? null : Math.round(Number(day.median)),
   }
+}
+
+/** Results on one doctor's own orders waiting for verification (the doctor home's "Results to verify"). */
+export async function countResultsToVerifyForProvider(providerId: number): Promise<number> {
+  const [r] = await getDb().select({ n: count() }).from(labOrders).where(and(eq(labOrders.orderedByProviderId, providerId), eq(labOrders.status, 'resulted')))
+  return n(r?.n)
 }
 
 // ---------- Pharmacy ----------

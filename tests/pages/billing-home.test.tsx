@@ -16,7 +16,7 @@ vi.mock('@/lib/queries/insurance-eligibility', () => ({ countEligibilityFollowUp
 vi.mock('@/components/ArAgingChart', () => ({ ArAgingChart: () => null }))
 // Wave E P1-19: SP4 queue and the day's takings.
 vi.mock('@/lib/queries/hospital-kpis', () => ({
-  getBillingQueue: vi.fn(async () => ({ draftInvoices: 4, uninvoicedLines: 17, uninvoicedPaise: 2500000, pharmacyDraftCharges: 2 })),
+  getBillingQueue: vi.fn(async () => ({ draftInvoices: 4, uninvoicedLines: 17, uninvoicedPaise: 2500000, pharmacyDraftCharges: 2, pendingApprovalCharges: 3 })),
   getCollectionsToday: vi.fn(async () => ({ date: '2026-10-08', receiptCount: 12, collectedPaise: 12345600, refundedPaise: 0, netPaise: 12345600 })),
 }))
 
