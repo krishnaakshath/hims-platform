@@ -29,7 +29,7 @@ const ctx = (p: { id: string }) => ({ params: Promise.resolve(p) })
 const VALID = { patientId: 'RD-0001', timing: { kind: 'interval', interval: { value: 2, unit: 'weeks' } }, reason: 'BP review' }
 const ORDER = { id: 3, patientId: 'RD-0001', dueDate: '2099-04-15', planNotes: 'RAW-NOTES', cancelReason: null }
 const VIEW = { id: 3, patientId: 'RD-0001', dueDate: '2099-04-15', planNotes: 'view notes', appointment: null }
-const DENIED = ['frontdesk', 'crc', 'billing', 'labs', 'pharmacy', 'coder'] as const
+const DENIED = ['frontdesk', 'crc', 'billing', 'labs', 'pharmacy', 'coder', 'rcm'] as const
 
 beforeEach(() => {
   role = 'pi'

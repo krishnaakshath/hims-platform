@@ -59,7 +59,7 @@ const ctxProc = (id: string | number, procedureId: string | number) => ({ params
 const ctxQ = (queryId: string | number) => ({ params: Promise.resolve({ queryId: String(queryId) }) })
 const as = (r: Role | null) => { sessionRole = r }
 
-const ALL: Role[] = ['admin', 'crc', 'pi', 'frontdesk', 'billing', 'pharmacy', 'labs', 'coder']
+const ALL: Role[] = ['admin', 'crc', 'pi', 'frontdesk', 'billing', 'pharmacy', 'labs', 'coder', 'rcm']
 
 beforeEach(() => {
   as('coder')

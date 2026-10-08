@@ -31,6 +31,11 @@ export default async function DashboardHomePage() {
   // (patient names and appointments are outside the coder's minimum PHI).
   if (session.role === 'coder') redirect('/coding')
   // end SP6
+  // SP7: the RCM desk never falls through to the coordinator dashboard (patient names,
+  // appointments). Its home becomes /rcm when the RCM dashboard lands (plan Task 15);
+  // until then it is the account page.
+  if (session.role === 'rcm') redirect('/account')
+  // end SP7
   // Called and awaited directly (not `<FrontDeskDashboard session={session} />`) so this
   // page resolves to a plain, already-rendered element tree instead of an unresolved async
   // component nested inside another one's return value -- React's client renderer (used by
@@ -54,7 +59,7 @@ export default async function DashboardHomePage() {
   ])
   await logAudit(session, 'viewed home dashboard', null)
 
-  const staffByRole = ['admin', 'pi', 'crc', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder' /* SP6 */].map((role) => ({
+  const staffByRole = ['admin', 'pi', 'crc', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder' /* SP6 */, 'rcm' /* SP7 */].map((role) => ({
     role,
     count: allStaff.filter((u) => u.role === role).length,
   }))

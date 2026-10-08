@@ -28,6 +28,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP4
       'Capture charges and build invoices',
       // end SP4
+      // SP7
+      'Pick an approved pre-authorisation when capturing a charge billed to an insurer',
+      // end SP7
     ],
   },
   pi: {
@@ -92,6 +95,10 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Load licensed code sets (ICD-10, ICD-10-PCS, SNOMED CT, LOINC, HBP packages) and choose the current version',
       'Assign coding work to a coder',
       'Correct a patient\'s name or date of birth after registration (with a recorded reason), and clear a medico-legal (MLC) flag',
+      // SP7
+      'Approve or reject claim write-offs',
+      'Set the hospital ROHINI and HFR identifiers',
+      // end SP7
     ],
   },
   frontdesk: {
@@ -113,6 +120,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Take advances and receipts at the cash desk',
       // end SP4
       'Find a patient by name, UHID, mobile number or chart ID, and print the OPD token slip and the registration slip / UHID card',
+      // SP7
+      'Record a patient\'s insurance policy and card at registration or admission',
+      // end SP7
     ],
   },
   pharmacy: {
@@ -141,6 +151,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Capture charges and build invoices',
       'Override prices, finalise and cancel invoices, issue refunds',
       // end SP4
+      // SP7
+      'Pick an approved pre-authorisation when capturing a charge billed to an insurer',
+      // end SP7
     ],
   },
   labs: {
@@ -169,4 +182,20 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
     ],
   },
   // end SP6
+  // SP7
+  rcm: {
+    label: 'Revenue Cycle (Insurance Desk)',
+    summary: 'Runs cashless insurance: keeps insurer and TPA details, records patient policies, requests pre-authorisations, builds claims from finalised bills, keeps the hospital copy of every submission, and records what the insurer decides and pays. Sees only what claims need.',
+    bullets: [
+      'Maintain insurers and TPAs: empanelment, contacts, submission channel, turnaround times and required documents',
+      'Record patient policies and policy cards',
+      'Request pre-authorisations with an estimate, and record queries, approvals, enhancements and rejections',
+      'Build claims from finalised bills with coded diagnoses and procedures, and check them for missing documents',
+      'Submit a claim: the hospital copy is kept and fingerprinted, and the insurer copy is generated and its dispatch recorded',
+      'Record insurer portal updates: queries, approvals, deductions, rejections, appeals and settlements with TDS',
+      'Reconcile settlements with the bank and request write-offs',
+      'View the RCM dashboard, worklists, ageing and denial reports',
+    ],
+  },
+  // end SP7
 }

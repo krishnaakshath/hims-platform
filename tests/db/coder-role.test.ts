@@ -13,7 +13,7 @@ const MIGRATION = '2026-10-07-sp6-a-coder-role.sql'
 describe('SP6 coder role', () => {
   it('roleEnum equals ALL_ROLES and ends with coder', () => {
     expect(roleEnum.enumValues).toEqual([...ALL_ROLES])
-    expect(ALL_ROLES.at(-1)).toBe('coder')
+    expect(ALL_ROLES).toContain('coder') // SP7: rcm is now last
   })
 
   it('coder-role migration is idempotent and adds the value', () => {
@@ -33,7 +33,7 @@ describe('SP6 coder role', () => {
     expect([...CODING_ENTRY_ROLES]).toEqual(['admin', 'coder', 'pi'])
     expect([...CODE_PROPOSE_ROLES]).toEqual(['pi'])
     expect([...CODING_QUERY_RESPOND_ROLES]).toEqual(['admin', 'pi', 'coder'])
-    expect([...CODE_LOOKUP_ROLES]).toEqual(['admin', 'coder', 'pi', 'crc', 'billing'])
+    expect([...CODE_LOOKUP_ROLES]).toEqual(['admin', 'coder', 'pi', 'crc', 'billing', 'rcm']) // SP7: + rcm
     expect([...CODE_SYSTEM_ADMIN_ROLES]).toEqual(['admin'])
   })
 })

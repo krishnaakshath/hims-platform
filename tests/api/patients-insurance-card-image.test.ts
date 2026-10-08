@@ -4,7 +4,7 @@ import { GET } from '@/app/api/patients/[anonId]/insurance-card/[side]/route'
 import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
 
-let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' = 'frontdesk'
+let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | 'rcm' = 'frontdesk'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Taylor Nguyen', userId: null })) }))
 
 // The blob store is private -- this route streams the bytes itself via
@@ -82,7 +82,7 @@ describe('GET /api/patients/[anonId]/insurance-card/[side]', () => {
 
   it('403s pharmacy and labs before reading the patient row', async () => {
     await getDb().update(patients).set({ primaryCardFrontUrl: 'https://blob.test/insurance-cards/stored-front' }).where(eq(patients.id, TEST_PATIENT_ID))
-    for (const role of ['pharmacy', 'labs', 'coder'] as const) {
+    for (const role of ['pharmacy', 'labs', 'coder', 'rcm'] as const) {
       sessionRole = role
       const res = await GET(imageReq() as never, { params: Promise.resolve({ anonId: TEST_PATIENT_ID, side: 'front' }) })
       expect(res.status, `role ${role}`).toBe(403)

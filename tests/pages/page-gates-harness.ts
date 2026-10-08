@@ -318,9 +318,9 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/coding/service-codes', load: () => import('@/app/(dashboard)/coding/service-codes/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
   // end SP6
   // Wave B P1-05: price lookup -- TARIFF_LOOKUP_ROLES (LeftNav NAV_TRAILING_ITEMS /price-lookup).
-  { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
+  { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), allowed: ['admin', 'billing', 'crc', 'frontdesk', 'rcm'] }, // SP7: + rcm (TARIFF_LOOKUP_ROLES)
   // Wave B P1-01: own account (MFA method, self-reset, capabilities) -- ACCOUNT_ROLES = every staff role.
-  { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] },
+  { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'rcm'] },
   // SP4 billing screens -- NAV_BILLING_ITEMS are gated to exactly BILLING_ROLES (= CHARGE_CAPTURE_ROLES).
   { route: '/billing/capture', load: () => import('@/app/(dashboard)/billing/capture/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
   { route: '/billing/invoices', load: () => import('@/app/(dashboard)/billing/invoices/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
