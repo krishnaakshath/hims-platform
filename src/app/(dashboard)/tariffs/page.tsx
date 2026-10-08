@@ -46,6 +46,7 @@ export default async function TariffsPage({ searchParams }: {
           id: s.id, code: s.code, name: s.name, departmentId: s.departmentId, departmentName: s.departmentName,
           category: s.category, hsnSac: s.hsnSac, gstRateBp: s.gstRateBp, isActive: s.isActive,
           basePaise: s.basePaise, departmentPaise: s.departmentPaise,
+          requiresPreauth: s.requiresPreauth, maxQuantity: s.maxQuantity, // SP4
         }))}
         departments={departments.map((d) => ({ id: d.id, code: d.code, name: d.name }))}
         filters={{ q: q || undefined, departmentId: departmentId ? String(departmentId) : undefined, category, inactive: inactive ? '1' : undefined }}

@@ -25,6 +25,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Record or update a patient\'s Aadhaar with consent, seeing only its last 4 digits',
       'Look up the current price of a service',
       'View follow-ups and the follow-up recall list (read-only)',
+      // SP4
+      'Capture charges and build invoices',
+      // end SP4
     ],
   },
   pi: {
@@ -82,6 +85,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Book, reschedule or cancel follow-up appointments and log patient contact attempts from the follow-up recall list',
       'Manage the department master and the UHID prefix',
       'Manage the service catalogue, tariffs, packages and room categories, including CSV tariff import',
+      // SP4
+      'Configure billing rules and GST settings',
+      // end SP4
       // SP6
       'Load licensed code sets (ICD-10, ICD-10-PCS, SNOMED CT, LOINC, HBP packages) and choose the current version',
       'Assign coding work to a coder',
@@ -103,6 +109,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Look up the current price of a service',
       'View every follow-up and work the follow-up recall list: book, reschedule or cancel the follow-up appointment and log contact attempts (the clinical plan stays with the doctor)',
       'Check a patient in against a booked follow-up appointment, which issues the OPD token',
+      // SP4
+      'Take advances and receipts at the cash desk',
+      // end SP4
       'Find a patient by name, UHID, mobile number or chart ID, and print the OPD token slip and the registration slip / UHID card',
     ],
   },
@@ -128,6 +137,10 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Verify patient insurance eligibility',
       'View Charges and Payments',
       'Manage the service catalogue, tariffs, packages and room categories, including CSV tariff import',
+      // SP4
+      'Capture charges and build invoices',
+      'Override prices, finalise and cancel invoices, issue refunds',
+      // end SP4
     ],
   },
   labs: {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { logAudit } from '@/lib/audit'
 import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
-import { getPatientDetail, deletePatient } from '@/lib/queries/patients'
+import { getPatientDetail, deletePatient, PatientHasFinancialRecordsError } from '@/lib/queries/patients'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 import { toAadhaarView } from '@/lib/patient-identity'
 
@@ -43,6 +43,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   try {
     deleted = await deletePatient(anonId, { session })
   } catch (err) {
+    // SP4: tax records (issued bills, receipts, refunds) must be kept.
+    if (err instanceof PatientHasFinancialRecordsError) return NextResponse.json({ error: err.message }, { status: 409 })
     if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     console.error(`[patients] delete failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
     return NextResponse.json({ error: 'Could not delete the patient record' }, { status: 500 })

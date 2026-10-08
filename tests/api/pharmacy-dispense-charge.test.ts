@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { POST } from '@/app/api/pharmacy/dispenses/[dispenseId]/charge/route'
 import { getDb } from '@/db/client'
-import { medications, medicationInventory, medicationDispenses, diagnoses, charges } from '@/db/schema'
+import { medications, medicationInventory, medicationDispenses, diagnoses, charges, chargeLines } from '@/db/schema'
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' = 'pharmacy'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Pharmacy Tester' })) }))
@@ -16,6 +16,8 @@ afterEach(async () => {
   // Order matters: dispenses (which may point at a charge via chargeId)
   // before charges before inventory before medications, matching the FK
   // dependency chain.
+  // SP4: billing also writes a pharmacy charge line referencing both the dispense and the charge.
+  if (createdDispenseIds.length > 0) await getDb().delete(chargeLines).where(inArray(chargeLines.medicationDispenseId, createdDispenseIds))
   while (createdDispenseIds.length > 0) await getDb().delete(medicationDispenses).where(eq(medicationDispenses.id, createdDispenseIds.pop()!))
   while (createdChargeIds.length > 0) await getDb().delete(charges).where(eq(charges.id, createdChargeIds.pop()!))
   while (createdMedIds.length > 0) {

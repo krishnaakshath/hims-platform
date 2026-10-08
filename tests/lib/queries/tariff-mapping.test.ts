@@ -12,6 +12,7 @@ const rate = (over: Partial<RateRow> = {}): RateRow => ({
 const svc = (over: Partial<ServiceRow> = {}): ServiceRow => ({
   id: 1, code: 'PKG1', name: 'Package', departmentId: 2, category: 'package', hsnSac: '999311', gstRateBp: 0,
   isActive: true, createdAt: new Date(), updatedAt: new Date(), departmentCode: 'GEN', departmentName: 'General',
+  requiresPreauth: false, maxQuantity: null, // SP4
   ...over,
 })
 

@@ -25,6 +25,11 @@ const filesMatching = (re: RegExp) => SRC.filter((f) => re.test(read(f))).sort()
 
 // Export / interop / search / audit-viewing paths: not a single mention.
 const EXPORT_PATHS = [
+  // SP4: invoices, their snapshot and the print views carry only id, name, UHID and postal address.
+  'src/lib/billing',
+  'src/lib/queries/invoices.ts',
+  'src/app/print',
+  'src/app/(dashboard)/billing/invoices',
   'src/lib/fhir',
   'src/lib/excel-export.ts',
   'src/app/api/workbook',

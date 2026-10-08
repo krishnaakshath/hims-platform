@@ -133,7 +133,7 @@ describe('LeftNav', () => {
       expect(screen.getByRole('link', { name: /price lookup/i })).toHaveAttribute('href', '/price-lookup')
       unmount()
     }
-    for (const role of ['pi', 'pharmacy', 'labs'] as const) {
+    for (const role of ['pi', 'pharmacy', 'labs', 'coder'] as const) {
       const { unmount } = render(<LeftNav role={role} />)
       expect(screen.queryByRole('link', { name: /price lookup/i })).not.toBeInTheDocument()
       unmount()
@@ -149,6 +149,29 @@ describe('LeftNav', () => {
   it('shows the decline pill on Assignments for frontdesk', () => {
     render(<LeftNav role="frontdesk" badges={{ '/front-desk/assignments': 2 }} />)
     expect(within(screen.getByRole('link', { name: /assignments/i })).getByText('2')).toBeInTheDocument()
+  })
+
+  // SP4: billing-only nav gets the role-listed entries that name billing explicitly.
+  it('billing-only nav shows Cash Desk and Tariffs but not Home', () => {
+    render(<LeftNav role="billing" />)
+    expect(screen.getByRole('link', { name: /cash desk/i })).toHaveAttribute('href', '/cash-desk')
+    expect(screen.getByRole('link', { name: /tariffs/i })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /^home$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /patients/i })).not.toBeInTheDocument()
+    for (const label of [/charge capture/i, /invoices/i, /rules & settings/i]) expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
+  })
+
+  it('shows Cash Desk to frontdesk and crc, not to pi, pharmacy, labs or coder', () => {
+    for (const role of ['frontdesk', 'crc', 'admin'] as const) {
+      const { unmount } = render(<LeftNav role={role} />)
+      expect(screen.getByRole('link', { name: /cash desk/i })).toBeInTheDocument()
+      unmount()
+    }
+    for (const role of ['pi', 'pharmacy', 'labs', 'coder'] as const) {
+      const { unmount } = render(<LeftNav role={role} />)
+      expect(screen.queryByRole('link', { name: /cash desk/i })).not.toBeInTheDocument()
+      unmount()
+    }
   })
 
   // SP6: Coding (CODING_ROLES) -- the coder sees only Home and Coding, nothing clinical.

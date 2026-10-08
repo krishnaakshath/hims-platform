@@ -1,7 +1,13 @@
 import { getDb } from '@/db/client'
-import { medicationDispenses, medicationInventory, medicationEpisodes, patients, medications, charges } from '@/db/schema'
+import { medicationDispenses, medicationInventory, medicationEpisodes, patients, medications, charges, admissions, chargeLines } from '@/db/schema'
 import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm'
 import { invalidateChargesList } from '@/lib/queries/charges'
+// SP4
+import { MAX_LINE_QUANTITY, lineTaxablePaise } from '@/lib/billing/amounts'
+import { getBillingSettings } from '@/lib/queries/billing-settings'
+import { lockPatientBilling } from '@/lib/queries/charge-capture'
+import { logAudit } from '@/lib/audit'
+import type { Session } from '@/lib/auth'
 
 export interface DispenseInput {
   patientId: string
@@ -91,12 +97,16 @@ export interface DispenseChargeInput {
   diagnosisCode: { code: string; description: string }
   procedureCode: { code: string; description: string; units: number; chargeCents: number }
   amountCents: number
+  // SP4: the IST date of the dispense (istDateOf(dispensedAt)) and who dispensed it, for the charge line.
+  serviceDate: string
+  createdByName: string
 }
 
 export interface DispenseChargeResult {
   ok: boolean
   error?: string
   chargeId?: number
+  lineId?: number
 }
 
 // Same transactional posture as dispenseMedication above: the charge insert
@@ -113,11 +123,18 @@ export interface DispenseChargeResult {
 // medicationDispenses.chargeId is the real backstop; this conditional WHERE
 // is what turns a race into a clean rollback instead of a
 // constraint-violation 500.
-export async function createChargeForDispense(input: DispenseChargeInput): Promise<DispenseChargeResult> {
+// `session` (the route always passes it): the audit row is written on the same transaction.
+export async function createChargeForDispense(input: DispenseChargeInput, session?: Session): Promise<DispenseChargeResult> {
   const db = getDb()
+  // SP4: the bill also becomes one charge line, which caps a line at MAX_LINE_QUANTITY units.
+  if (input.procedureCode.units > MAX_LINE_QUANTITY) {
+    return { ok: false, error: `This dispense is too large to bill as one line (more than ${MAX_LINE_QUANTITY} units)` }
+  }
 
   try {
-    const chargeId = await db.transaction(async (tx) => {
+    const { chargeId, lineId } = await db.transaction(async (tx) => {
+      // SP4: the per-patient billing lock first (same key as charge capture).
+      await lockPatientBilling(tx, input.patientId)
       const [created] = await tx.insert(charges).values({
         patientId: input.patientId,
         providerName: input.providerName,
@@ -134,7 +151,34 @@ export async function createChargeForDispense(input: DispenseChargeInput): Promi
         .returning({ id: medicationDispenses.id })
       if (linked.length === 0) throw new Error('ALREADY_BILLED')
 
-      return created.id
+      // SP4: the same bill as one pharmacy charge line (amount_cents is read as paise), on the
+      // patient's active admission when there is one. legacy_charge_id keeps it from being listed twice.
+      const settings = await getBillingSettings(tx)
+      const [active] = await tx.select({ id: admissions.id }).from(admissions)
+        .where(and(eq(admissions.patientId, input.patientId), eq(admissions.status, 'admitted'))).orderBy(desc(admissions.admittedAt)).limit(1)
+      const quantity = input.procedureCode.units
+      const unitPricePaise = input.procedureCode.chargeCents
+      const [line] = await tx.insert(chargeLines).values({
+        patientId: input.patientId,
+        admissionId: active?.id ?? null,
+        source: 'pharmacy',
+        priceSource: 'pharmacy',
+        serviceId: null,
+        itemCode: input.procedureCode.code,
+        itemName: input.procedureCode.description,
+        serviceDate: input.serviceDate,
+        quantity,
+        unitPricePaise,
+        taxablePaise: lineTaxablePaise(unitPricePaise, quantity),
+        gstRateBp: settings.pharmacyGstRateBp,
+        hsnSac: settings.pharmacyHsn,
+        legacyChargeId: created.id,
+        medicationDispenseId: input.dispenseId,
+        createdByName: input.createdByName,
+      }).returning({ id: chargeLines.id })
+
+      if (session) await logAudit(session, 'logged a bill for a dispensed medication', input.patientId, `charge=${created.id} line=${line.id}`, tx)
+      return { chargeId: created.id, lineId: line.id }
     })
 
     // Deliberately outside the transaction: a cache invalidation for a
@@ -142,7 +186,7 @@ export async function createChargeForDispense(input: DispenseChargeInput): Promi
     // cached for 30s (charges.ts:26, cache.ts:78) so it would otherwise not
     // show the new row.
     await invalidateChargesList()
-    return { ok: true, chargeId }
+    return { ok: true, chargeId, lineId }
   } catch (err) {
     if (err instanceof Error && err.message === 'ALREADY_BILLED') {
       return { ok: false, error: 'This dispense has already been billed' }

@@ -23,6 +23,7 @@ import {
 } from '@/lib/role-policy'
 import { PATIENT_PICKER_ROLES, DEMOGRAPHICS_CORRECTION_ROLES } from '@/lib/role-policy' // Wave C
 import { CHECK_IN_ROLES, DISCHARGE_ROLES, ENCOUNTER_STATUS_ROLES, FOLLOW_UP_BOOKING_ROLES, FOLLOW_UP_PLAN_ROLES } from '@/lib/role-policy' // SP3
+import { BILLING_AUTHORITY_ROLES, BILLING_CONFIG_ROLES, CASH_DESK_ROLES, CHARGE_CAPTURE_ROLES } from '@/lib/role-policy' // SP4
 import { gateIt } from '../pages/page-gates-harness'
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -406,6 +407,21 @@ import { PUT as putFollowUpBooking } from '@/app/api/follow-ups/[id]/booking/rou
 import { POST as unbookFollowUp } from '@/app/api/follow-ups/[id]/unbook/route'
 import { POST as postFollowUpContact } from '@/app/api/follow-ups/[id]/contact-attempts/route'
 import { POST as postDischarge } from '@/app/api/inpatient/admissions/[id]/discharge/route'
+// SP4
+import { PUT as putBillingSettings } from '@/app/api/billing/settings/route'
+import { PUT as putBillingRule } from '@/app/api/billing/rules/[code]/route'
+import { PUT as putPayerFlags } from '@/app/api/billing/payers/[id]/route'
+import { POST as postChargeLine } from '@/app/api/billing/charge-lines/route'
+import { POST as previewChargeLineRoute } from '@/app/api/billing/charge-lines/preview/route'
+import { POST as voidChargeLineRoute } from '@/app/api/billing/charge-lines/[id]/void/route'
+import { POST as postRoomRentRoute } from '@/app/api/billing/admissions/[id]/room-rent/route'
+import { POST as postDraftInvoice } from '@/app/api/billing/invoices/route'
+import { POST as finaliseInvoiceRoute } from '@/app/api/billing/invoices/[id]/finalise/route'
+import { POST as discardInvoiceRoute } from '@/app/api/billing/invoices/[id]/discard/route'
+import { POST as cancelInvoiceRoute } from '@/app/api/billing/invoices/[id]/cancel/route'
+import { POST as postPaymentRoute } from '@/app/api/billing/payments/route'
+import { POST as postRefundRoute } from '@/app/api/billing/refunds/route'
+// end SP4
 // SP6: the clinical-note write routes (the coder must never write or sign a note)
 import { POST as postNote } from '@/app/api/patients/[anonId]/notes/route'
 import { PUT as signNoteRoute } from '@/app/api/patients/[anonId]/notes/[id]/sign/route'
@@ -633,6 +649,25 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => settle(() => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`), ctx({ id: BOGUS_ID }))), allowed: [...FOLLOW_UP_BOOKING_ROLES] },
   // SP3 discharge (DISCHARGE_ROLES): `{}` fails validation before any query.
   { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => settle(() => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`), ctx({ id: BOGUS_ID }))), allowed: [...DISCHARGE_ROLES] },
+  // SP4 billing configuration (BILLING_CONFIG_ROLES): `{}` fails validation before any query.
+  { name: 'PUT /api/billing/settings', call: () => settle(() => putBillingSettings(send('PUT', '/api/billing/settings'))), allowed: [...BILLING_CONFIG_ROLES] },
+  { name: 'PUT /api/billing/rules/[code]', call: () => settle(() => putBillingRule(send('PUT', '/api/billing/rules/duplicate_charge'), ctx({ code: 'duplicate_charge' }))), allowed: [...BILLING_CONFIG_ROLES] },
+  { name: 'PUT /api/billing/payers/[id]', call: () => settle(() => putPayerFlags(send('PUT', `/api/billing/payers/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...BILLING_CONFIG_ROLES] },
+  // SP4 charge lines (CHARGE_CAPTURE_ROLES): `{}` fails validation before any query.
+  { name: 'POST /api/billing/charge-lines', call: () => settle(() => postChargeLine(send('POST', '/api/billing/charge-lines'))), allowed: [...CHARGE_CAPTURE_ROLES] },
+  { name: 'POST /api/billing/charge-lines/preview', call: () => settle(() => previewChargeLineRoute(send('POST', '/api/billing/charge-lines/preview'))), allowed: [...CHARGE_CAPTURE_ROLES] },
+  { name: 'POST /api/billing/charge-lines/[id]/void', call: () => settle(() => voidChargeLineRoute(send('POST', `/api/billing/charge-lines/${BOGUS_ID}/void`), ctx({ id: BOGUS_ID }))), allowed: [...CHARGE_CAPTURE_ROLES] },
+  // SP4 room rent (CHARGE_CAPTURE_ROLES): the bogus admission is a 404 for an allowed role.
+  { name: 'POST /api/billing/admissions/[id]/room-rent', call: () => settle(() => postRoomRentRoute(send('POST', `/api/billing/admissions/${BOGUS_ID}/room-rent`), ctx({ id: BOGUS_ID }))), allowed: [...CHARGE_CAPTURE_ROLES] },
+  // SP4 invoices: drafts and discards for CHARGE_CAPTURE_ROLES, finalise and cancel for BILLING_AUTHORITY_ROLES (bogus ids are 404s).
+  { name: 'POST /api/billing/invoices', call: () => settle(() => postDraftInvoice(send('POST', '/api/billing/invoices'))), allowed: [...CHARGE_CAPTURE_ROLES] },
+  { name: 'POST /api/billing/invoices/[id]/discard', call: () => settle(() => discardInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/discard`), ctx({ id: BOGUS_ID }))), allowed: [...CHARGE_CAPTURE_ROLES] },
+  { name: 'POST /api/billing/invoices/[id]/finalise', call: () => settle(() => finaliseInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/finalise`), ctx({ id: BOGUS_ID }))), allowed: [...BILLING_AUTHORITY_ROLES] },
+  { name: 'POST /api/billing/invoices/[id]/cancel', call: () => settle(() => cancelInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...BILLING_AUTHORITY_ROLES] },
+  // SP4 cash desk: receipts for CASH_DESK_ROLES, refunds for BILLING_AUTHORITY_ROLES (`{}` fails validation).
+  { name: 'POST /api/billing/payments', call: () => settle(() => postPaymentRoute(send('POST', '/api/billing/payments'))), allowed: [...CASH_DESK_ROLES] },
+  { name: 'POST /api/billing/refunds', call: () => settle(() => postRefundRoute(send('POST', '/api/billing/refunds'))), allowed: [...BILLING_AUTHORITY_ROLES] },
+  // end SP4
   // SP6 (ruling 4): clinical notes are written and signed by pi/admin only -- the coder reads
   // signed notes in the coding workspace but is 403'd here. Inline allowlists in both routes.
   { name: 'POST /api/patients/[anonId]/notes', call: () => settle(() => postNote(send('POST', `/api/patients/${BOGUS_PATIENT}/notes`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'pi'] },
@@ -712,6 +747,23 @@ const SP3_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/follow-ups/[id]/contact-attempts', call: () => postFollowUpContact(send('POST', `/api/follow-ups/${BOGUS_ID}/contact-attempts`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: FOLLOW_UP_BOOKING_ROLES },
   { name: 'POST /api/inpatient/admissions/[id]/discharge', call: () => postDischarge(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/discharge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: DISCHARGE_ROLES },
 ]
+// SP4 billing writes: the same deny-before-parse contract.
+const SP4_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'PUT /api/billing/settings', call: () => putBillingSettings(send('PUT', '/api/billing/settings', NOT_JSON)), allowed: BILLING_CONFIG_ROLES },
+  { name: 'PUT /api/billing/rules/[code]', call: () => putBillingRule(send('PUT', '/api/billing/rules/duplicate_charge', NOT_JSON), ctx({ code: 'duplicate_charge' })), allowed: BILLING_CONFIG_ROLES },
+  { name: 'PUT /api/billing/payers/[id]', call: () => putPayerFlags(send('PUT', `/api/billing/payers/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: BILLING_CONFIG_ROLES },
+  { name: 'POST /api/billing/charge-lines', call: () => postChargeLine(send('POST', '/api/billing/charge-lines', NOT_JSON)), allowed: CHARGE_CAPTURE_ROLES },
+  { name: 'POST /api/billing/charge-lines/preview', call: () => previewChargeLineRoute(send('POST', '/api/billing/charge-lines/preview', NOT_JSON)), allowed: CHARGE_CAPTURE_ROLES },
+  { name: 'POST /api/billing/charge-lines/[id]/void', call: () => voidChargeLineRoute(send('POST', `/api/billing/charge-lines/${BOGUS_ID}/void`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CHARGE_CAPTURE_ROLES },
+  { name: 'POST /api/billing/admissions/[id]/room-rent', call: () => postRoomRentRoute(send('POST', `/api/billing/admissions/${BOGUS_ID}/room-rent`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CHARGE_CAPTURE_ROLES },
+  { name: 'POST /api/billing/invoices', call: () => postDraftInvoice(send('POST', '/api/billing/invoices', NOT_JSON)), allowed: CHARGE_CAPTURE_ROLES },
+  { name: 'POST /api/billing/invoices/[id]/discard', call: () => discardInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/discard`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CHARGE_CAPTURE_ROLES },
+  { name: 'POST /api/billing/invoices/[id]/finalise', call: () => finaliseInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/finalise`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: BILLING_AUTHORITY_ROLES },
+  { name: 'POST /api/billing/invoices/[id]/cancel', call: () => cancelInvoiceRoute(send('POST', `/api/billing/invoices/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: BILLING_AUTHORITY_ROLES },
+  { name: 'POST /api/billing/payments', call: () => postPaymentRoute(send('POST', '/api/billing/payments', NOT_JSON)), allowed: CASH_DESK_ROLES },
+  { name: 'POST /api/billing/refunds', call: () => postRefundRoute(send('POST', '/api/billing/refunds', NOT_JSON)), allowed: BILLING_AUTHORITY_ROLES },
+]
+// end SP4
 // SP6 writes: the same deny-before-parse contract.
 const SP6_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // The import route 415s anything but application/json, so this row declares it (as the tariff import row does).
@@ -732,7 +784,7 @@ const SP6_WRITE_GATES: typeof SP1_WRITE_GATES = [
 const WAVE_C_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PATCH /api/patients/[anonId]/demographics', call: () => patchDemographics(send('PATCH', `/api/patients/${BOGUS_PATIENT}/demographics`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: DEMOGRAPHICS_CORRECTION_ROLES },
 ]
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES])('$name (deny before parse)', (c) => {
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role

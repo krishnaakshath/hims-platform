@@ -7,6 +7,8 @@ import {
   adverseEvents, drugAccountabilityEntries, signatures,
   // SP3
   encounters, followUpOrders,
+  // SP4
+  chargeLines, invoices, patientPayments, refunds,
   // SP6
   codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures,
 } from '@/db/schema'
@@ -19,6 +21,7 @@ import type { ChargeStatus } from '@/lib/charge-status'
 import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
 import { publicPatientColumns, patientPortalConfiguredSql, type PublicPatientRow } from '@/lib/queries/patient-columns'
 import { logAudit } from '@/lib/audit'
+import { lockPatientBilling } from './charge-capture' // SP4
 import type { Session } from '@/lib/auth'
 
 export interface CriteriaSummary {
@@ -408,17 +411,25 @@ export async function listPharmacyPatientRoster(): Promise<PharmacyRosterRow[]> 
   return rows
 }
 
-/**
- * Permanently removes a patient and every row that references it -- for
- * correcting a real mistake (a duplicate chart, a wrong entry), not a
- * routine action. None of these FKs cascade at the DB level (see
- * db/seed.ts's clearExistingData, which deletes in this same
- * children-before-parents order for the same reason), so each table is
- * cleared explicitly; Postgres would otherwise reject the final delete on
- * `patients` with a foreign-key violation. Returns false if the patient
- * doesn't exist, true once every row is gone.
- */
 type DeleteTx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
+
+// SP4 (plan ruling 11): issued bills, receipts and refunds are tax records that must be kept,
+// so a patient who has any cannot be deleted. The DELETE route maps this to a 409.
+export class PatientHasFinancialRecordsError extends Error {
+  constructor() {
+    super('This patient has issued bills or receipts, which must be kept; the patient cannot be deleted')
+    this.name = 'PatientHasFinancialRecordsError'
+  }
+}
+
+async function hasFinancialRecords(db: DeleteTx, anonId: string): Promise<boolean> {
+  const result = await db.execute<{ found: boolean }>(sql`
+    select exists (select 1 from invoices where patient_id = ${anonId} and status in ('finalised', 'cancelled'))
+        or exists (select 1 from patient_payments where patient_id = ${anonId})
+        or exists (select 1 from refunds where patient_id = ${anonId}) as found`)
+  return Boolean(result.rows[0]?.found)
+}
+// end SP4
 
 /**
  * Permanently removes a patient and every row that references them, as ONE
@@ -451,8 +462,24 @@ export async function deletePatient(anonId: string, audit?: { session: Session; 
 
 // The body of deletePatient's transaction: `db` here IS the transaction.
 async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session: Session; action?: string } | undefined) {
+  // SP4: the billing lock first (the order every billing write uses), so a concurrent receipt or
+  // capture for this patient either commits before the check below or waits for the delete.
+  await lockPatientBilling(db, anonId)
   const [patient] = await db.select({ id: patients.id }).from(patients).where(eq(patients.id, anonId)).for('update')
   if (!patient) return null
+  // SP4: refuse before anything is deleted (the whole transaction rolls back).
+  if (await hasFinancialRecords(db, anonId)) throw new PatientHasFinancialRecordsError()
+
+  // SP4 billing, children-first. After the check above only captured/void lines and
+  // draft/discarded invoices remain, and they are deleted. The payment/refund deletes are a
+  // backstop: the migration-B immutability trigger refuses an issued row (SQLSTATE 55000), as do
+  // the invoice_lines FK (23503) and the invoice guard trigger. Lines also reference
+  // medication_dispenses, charges, encounters and admissions, so they go before those.
+  await db.delete(refunds).where(eq(refunds.patientId, anonId))
+  await db.delete(patientPayments).where(eq(patientPayments.patientId, anonId))
+  await db.delete(chargeLines).where(eq(chargeLines.patientId, anonId))
+  await db.delete(invoices).where(eq(invoices.patientId, anonId))
+  // end SP4
 
   const screenings = await db.select({ id: patientTrialScreenings.id, trialId: patientTrialScreenings.trialId }).from(patientTrialScreenings).where(eq(patientTrialScreenings.patientId, anonId))
   const screeningIds = screenings.map((s) => s.id)

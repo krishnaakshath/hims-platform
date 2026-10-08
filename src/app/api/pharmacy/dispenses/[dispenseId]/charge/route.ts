@@ -7,14 +7,15 @@ import { liveDiagnosis, withCodeValue } from '@/lib/queries/diagnoses' // SP6
 import { getDb } from '@/db/client'
 import { diagnoses, patients } from '@/db/schema'
 import { requireSession } from '@/lib/auth'
-import { logAudit } from '@/lib/audit'
 import { getDispenseById, createChargeForDispense } from '@/lib/queries/medication-dispenses'
+import { MAX_AMOUNT_PAISE } from '@/lib/tariff/validation'
 
 const dispenseChargeSchema = z.object({
   diagnosisId: z.number().int(),
   procedureCode: z.string().trim().min(1),
   procedureDescription: z.string().trim().min(1),
-  unitChargeCents: z.number().int().positive(),
+  // SP4: also a charge line's unit price (int4 paise, capped like every unit price).
+  unitChargeCents: z.number().int().positive().max(MAX_AMOUNT_PAISE),
 }).strict()
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ dispenseId: string }> }) {
@@ -58,11 +59,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const amountCents = dispense.quantity * parsed.data.unitChargeCents
 
+  const serviceDate = istDateOf(dispense.dispensedAt)
   const result = await createChargeForDispense({
     dispenseId: dispense.id,
     patientId: dispense.patientId,
     providerName,
-    dateOfService: istDateOf(dispense.dispensedAt),
+    dateOfService: serviceDate,
+    serviceDate,
+    createdByName: dispense.dispensedByName,
     diagnosisCode: { code: diagnosis.code, description: diagnosis.description },
     procedureCode: {
       code: parsed.data.procedureCode,
@@ -71,10 +75,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       chargeCents: parsed.data.unitChargeCents,
     },
     amountCents,
-  })
+  }, session)
 
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 })
 
-  await logAudit(session, 'logged a bill for a dispensed medication', dispense.patientId)
+  // The audit row was written on the billing transaction.
   return NextResponse.json({ chargeId: result.chargeId }, { status: 201 })
 }

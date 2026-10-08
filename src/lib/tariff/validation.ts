@@ -80,6 +80,9 @@ const serviceBase = z.object({
   category: z.enum(CATEGORY_CODES),
   hsnSac: z.string().trim(),
   gstRateBp: z.number().refine((v) => (GST_RATES_BP as readonly number[]).includes(v), 'GST rate must be 0, 5, 12, 18, 28 or 40%'),
+  // SP4 billing flags.
+  requiresPreauth: z.boolean().optional(),
+  maxQuantity: z.number().int().min(1).max(1000).nullable().optional(),
 }).strict()
 
 export const serviceCreateSchema = serviceBase.superRefine((v, ctx) => {
