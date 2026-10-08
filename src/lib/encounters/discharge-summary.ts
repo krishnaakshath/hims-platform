@@ -5,6 +5,7 @@
 import { brand } from '@/lib/brand'
 import type { Role } from '@/lib/auth'
 import { formatAbhaNumber } from '@/lib/india/abha'
+import { formatDoctorRegistration } from '@/lib/india/registration'
 import { GENDERS, stateName } from '@/lib/india/reference'
 import { ageOnDate, istDateOf } from '@/lib/india-time'
 import { daysBetweenIso, type FollowUpStatus } from '@/lib/follow-ups/rules'
@@ -52,10 +53,7 @@ const GENDER_LABEL = new Map<string, string>(GENDERS.map((g) => [g.code, g.label
 
 
 function registration(a: DischargeSummarySource['attending']): string | null {
-  if (!a.registrationNumber) return null
-  if (a.registrationCouncil === 'nmc') return `NMC ${a.registrationNumber}`
-  if (a.registrationCouncil === 'smc' && a.registrationStateCode) return `SMC ${a.registrationStateCode} ${a.registrationNumber}`
-  return null
+  return formatDoctorRegistration(a)
 }
 
 function address(p: DischargeSummarySource['patient']): string | null {
