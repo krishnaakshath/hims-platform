@@ -19,7 +19,7 @@ import { getDb } from './client'
 import {
   appointments, admissions, billingSettings, bookingRequests, codeSystems, departments, doctorAssignments, encounterNotes,
   encounters, followUpContactAttempts, followUpOrders, homeCollectionWindows, labServiceAreaPins, labTests,
-  medicationAdministrations, medicationEpisodes, medications, messages, patientAadhaar, patientContacts, patients, payers,
+  medicationAdministrations, medicationEpisodes, medications, messages, patientContacts, patients, payers,
   providers, roomCategories, rooms, serviceCatalog, servicePackageItems, signatures, tariffRates,
 } from './schema'
 import {
@@ -28,8 +28,8 @@ import {
   SERVICE_SEED, SYNTHETIC_AADHAAR_RECORDED_BY, TARIFF_VALID_FROM, addressFor, syntheticAadhaar, syntheticMobile,
 } from './seed-india-data'
 import type { Session } from '../lib/auth'
-import { encryptSensitive } from '../lib/crypto'
-import { aadhaarLast4 } from '../lib/india/aadhaar'
+import { buildAadhaarRow } from '../lib/patient-identity'
+import { upsertPatientAadhaar } from '../lib/queries/patient-profile'
 import { addDaysIso } from '../lib/follow-ups/rules'
 import { todayIsoIn } from '../lib/india-time'
 import { CLI_IMPORT_LIMITS, validateCodeSystemImport } from '../lib/coding/import'
@@ -209,10 +209,11 @@ async function upsertDoctors(db: Db, deptIds: Map<string, number>): Promise<Map<
   return new Map(rows.map((r) => [r.name, r.id]))
 }
 
+// ICD-10 and ICD-10-PCS only: the HBP package set is left for the owner to load (and the SP6
+// service-code tests create their own current HBP version).
 const SAMPLE_CODE_SETS: { kind: CodeSystemKind; file: string; name: string }[] = [
   { kind: 'icd10', file: 'SAMPLE-icd10.csv', name: 'SAMPLE ICD-10 (fictional demo codes)' },
   { kind: 'icd10pcs', file: 'SAMPLE-icd10pcs.csv', name: 'SAMPLE ICD-10-PCS (fictional demo codes)' },
-  { kind: 'hbp', file: 'SAMPLE-hbp.csv', name: 'SAMPLE PM-JAY HBP (fictional demo packages)' },
 ]
 
 /** Loads the repository's fictional SAMPLE code sets for any kind that has no code set yet. */
@@ -261,20 +262,20 @@ export async function seedIndiaReference(actor: Session): Promise<IndiaRefs> {
 // Patient identity extras (fresh seed only): Aadhaar (synthetic, encrypted), NOK contacts
 // ---------------------------------------------------------------------------
 
-/** Synthetic Aadhaar through the encrypted path for the first `count` ids; a recorded decline for the rest of `declines`. */
-export async function seedAadhaar(patientIds: string[], declines: { id: string; reason: 'patient_declined' | 'not_available' }[]): Promise<void> {
-  const db = getDb()
+/**
+ * Synthetic, consented Aadhaar values for `patientIds` and recorded declines for `declines`,
+ * written only through the app's one Aadhaar path (buildAadhaarRow encrypts; the upsert audits
+ * status codes, never the value). The recording name marks every value as synthetic.
+ */
+export async function seedAadhaar(patientIds: string[], declines: { id: string; reason: 'patient_declined' | 'not_available' }[], actor: Session): Promise<void> {
   const now = new Date()
-  const provided = patientIds.map((id, i) => {
-    const value = syntheticAadhaar(i + 1)
-    return {
-      patientId: id, aadhaarEncrypted: encryptSensitive(value), aadhaarLast4: aadhaarLast4(value), consentGiven: true,
-      consentRecordedAt: now, recordedByName: SYNTHETIC_AADHAAR_RECORDED_BY, updatedAt: now,
-    }
-  })
-  const declined = declines.map((d) => ({ patientId: d.id, declineReason: d.reason, recordedByName: 'Demo seed', updatedAt: now }))
-  if (provided.length > 0) await db.insert(patientAadhaar).values(provided).onConflictDoNothing()
-  if (declined.length > 0) await db.insert(patientAadhaar).values(declined).onConflictDoNothing()
+  for (const [i, id] of patientIds.entries()) {
+    const row = buildAadhaarRow(id, { status: 'provided', number: syntheticAadhaar(i + 1), consent: true }, SYNTHETIC_AADHAAR_RECORDED_BY, now)
+    await upsertPatientAadhaar(id, row, actor)
+  }
+  for (const d of declines) {
+    await upsertPatientAadhaar(d.id, buildAadhaarRow(d.id, { status: 'declined', reason: d.reason }, 'Demo seed', now), actor)
+  }
 }
 
 const NOK_NAMES = ['Suma', 'Prakash', 'Revathi', 'Kumar', 'Shanthi', 'Mahadev', 'Asha', 'Naveen', 'Latha', 'Gopal']
@@ -675,7 +676,7 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   const kunamId = doctorId('Dr. Rajiv Kunam')
   await bookAppointment(input.heroIds[1], kunamId, istAt(today, '15:00'), 'PHQ-9 rescreen')
   await bookAppointment(input.heroIds[3], kunamId, istAt(day(1), '10:30'), 'ASRS follow-up')
-  await bookAppointment(input.heroIds[0], kunamId, istAt(day(-7), '09:00'), 'Pre-screening follow-up', 'completed')
+  await bookAppointment(input.heroIds[0], kunamId, istAt(day(-7), '11:15'), 'Pre-screening follow-up', 'completed')
   const teleAppt = await bookAppointment(input.heroIds[4], kunamId, istAt(day(2), '18:00'), 'Video consultation: medication review', 'scheduled', 20)
   must(await createTelemedicineSession(teleAppt), 'telemedicine session')
 

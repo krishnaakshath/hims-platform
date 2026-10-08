@@ -1,9 +1,10 @@
-import { sql, eq, and, inArray } from 'drizzle-orm'
+import { sql, eq, and } from 'drizzle-orm'
 import { getDb } from './client'
 import { encryptSensitive } from '../lib/crypto'
 import { hashPassword } from '../lib/password'
 import type { Session } from '../lib/auth'
 import { nextUhid } from '../lib/queries/uhid'
+import { setPatientPortalPassword } from '../lib/queries/patient-portal'
 import { addDaysIso } from '../lib/follow-ups/rules'
 import { todayIsoIn } from '../lib/india-time'
 import {
@@ -946,6 +947,29 @@ async function clearExistingData() {
   await db.delete(users)
   await db.delete(trials)
   await removeLegacyUsPayers() // Wave D
+  await restartEmptyIdSequences() // Wave D
+}
+
+/**
+ * Wave D: after a reset, every table the clear emptied numbers from 1 again, so a rebuilt demo
+ * has the same ids as a freshly seeded one. Only serial sequences of tables that are now empty
+ * are touched (reference data that survives the clear, and uhid_seq, keep counting).
+ */
+async function restartEmptyIdSequences() {
+  await getDb().execute(sql.raw(`DO $$
+DECLARE r record; is_empty boolean;
+BEGIN
+  FOR r IN
+    SELECT c.relname AS tbl, s.relname AS seq
+    FROM pg_class s
+    JOIN pg_depend d ON d.objid = s.oid AND d.deptype = 'a'
+    JOIN pg_class c ON c.oid = d.refobjid
+    WHERE s.relkind = 'S' AND c.relkind = 'r' AND c.relnamespace = 'public'::regnamespace
+  LOOP
+    EXECUTE format('SELECT NOT EXISTS (SELECT 1 FROM public.%I)', r.tbl) INTO is_empty;
+    IF is_empty THEN EXECUTE format('ALTER SEQUENCE public.%I RESTART WITH 1', r.seq); END IF;
+  END LOOP;
+END $$;`))
 }
 
 async function insertHeroPatient(p: HeroPatient) {
@@ -1055,10 +1079,10 @@ export async function seed(opts: { reset?: boolean } = {}) {
   const fillerIds = FILLER_PROFILES.map((_, i) => `RD-${String(7 + i).padStart(4, '0')}`)
   const heroIds = HERO_PATIENTS.map((p) => p.id)
   // Synthetic Aadhaar (encrypted, consented) for a dozen patients; recorded declines for two.
-  await seedAadhaar([...heroIds, ...fillerIds.slice(0, 8)], [{ id: fillerIds[8], reason: 'patient_declined' }, { id: fillerIds[9], reason: 'not_available' }])
+  await seedAadhaar([...heroIds, ...fillerIds.slice(0, 8)], [{ id: fillerIds[8], reason: 'patient_declined' }, { id: fillerIds[9], reason: 'not_available' }], SEED_ACTOR)
   await seedContacts([...heroIds, ...fillerIds.slice(0, 14)])
   // Patient portal access for two demo patients (same demo password as staff).
-  await db.update(patients).set({ portalPasswordHash: demoHash }).where(inArray(patients.id, ['RD-0001', 'RD-0004']))
+  for (const id of ['RD-0001', 'RD-0004']) await setPatientPortalPassword(id, seedDemoPassword())
 
   await seedStaff()
   await seedBilling()
