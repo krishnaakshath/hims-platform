@@ -219,3 +219,23 @@ export const ENCOUNTER_REGISTER_EXPORT_ROLES: readonly Role[] = ['admin', 'crc']
 // SEES is decided per source in src/lib/notifications/staff-feed.ts.
 export const NOTIFICATION_FEED_ROLES: readonly Role[] = ALL_ROLES
 // end Wave G
+// Wave I (P2-14 gate fixes, P1-23 hospital reports).
+// Payer list (GET /api/payers): the registration form (admin, frontdesk; crc
+// sees it on the coordinator dashboard) and billing's eligibility check. Was
+// open to every signed-in role.
+export const PAYER_LIST_ROLES: readonly Role[] = ['admin', 'crc', 'frontdesk', 'billing']
+// Medication stock list (GET /api/pharmacy/medications): the /pharmacy page's
+// roles. Was open to every signed-in role.
+export const PHARMACY_STOCK_READ_ROLES: readonly Role[] = ['admin', 'crc', 'pi', 'pharmacy']
+// Hospital reports (/reports/hospital/*, GET /api/reports/[report]/csv). Each
+// report's own list lives in src/lib/reports/catalog.ts; these are its parts.
+// Operations = OPD/IPD statistics, bed occupancy, discharge register.
+// Finance = department revenue, collections by mode, tariff price list (the
+// billing section's own roles). Lab TAT and pharmacy stock/dispensing add the
+// department that runs the service. REPORTS_ROLES = who sees /reports at all.
+export const OPERATIONS_REPORT_ROLES: readonly Role[] = ['admin', 'crc']
+export const FINANCE_REPORT_ROLES: readonly Role[] = ['admin', 'crc', 'billing']
+export const LAB_TAT_REPORT_ROLES: readonly Role[] = ['admin', 'crc', 'labs']
+export const PHARMACY_REPORT_ROLES: readonly Role[] = ['admin', 'crc', 'pharmacy']
+export const REPORTS_ROLES: readonly Role[] = ['admin', 'crc', 'billing', 'labs', 'pharmacy']
+// end Wave I

@@ -10,7 +10,7 @@ const toggleSchema = z.object({ enabled: z.boolean() }).strict()
 export async function PUT(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
-  if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
+  if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const json = await readJsonBody(request)
   if (!json.ok) return json.response
