@@ -591,6 +591,8 @@ import { GET as listRegulatoryDocuments, POST as postRegulatoryDocumentRoute } f
 import { GET as listUsersRoute, POST as postUserRoute } from '@/app/api/users/route'
 import { POST as resetUserMfaRoute } from '@/app/api/users/[id]/reset-mfa/route'
 import { ACCOUNT_ROLES, PAYER_LIST_ROLES, PHARMACY_STOCK_READ_ROLES } from '@/lib/role-policy'
+import { GET as getReportCsv } from '@/app/api/reports/[report]/csv/route'
+import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
 // end Wave I
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
@@ -1009,6 +1011,9 @@ export const API_GATES: ApiGateCase[] = [
       { name: 'GET /api/users', call: () => settle(() => listUsersRoute()), allowed: ADMIN },
       { name: 'POST /api/users', call: () => settle(() => postUserRoute(w('POST', '/api/users'))), allowed: ADMIN },
       { name: 'POST /api/users/[id]/reset-mfa', call: () => settle(() => resetUserMfaRoute(send('POST', `/api/users/${BOGUS_ID}/reset-mfa`), ctx({ id: BOGUS_ID }))), allowed: ADMIN },
+      // P1-23 hospital report CSV: each report's catalogue roles; no range is a 400 before any query.
+      ...HOSPITAL_REPORTS.map((r): ApiGateCase => ({ name: `GET /api/reports/[report]/csv (${r.key})`, call: () => settle(() => getReportCsv(get(`/api/reports/${r.key}/csv`), ctx({ report: r.key }))), allowed: [...r.roles] })),
+      { name: 'GET /api/reports/[report]/csv (unknown report)', call: () => settle(() => getReportCsv(get('/api/reports/nope/csv'), ctx({ report: 'nope' }))), allowed: [] },
     ]
   })(),
   // end Wave I
