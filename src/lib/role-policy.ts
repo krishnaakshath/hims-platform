@@ -181,3 +181,15 @@ export function hasSearchScope(role: Role): boolean {
   const s = searchScopesFor(role)
   return s.patients || s.trials || s.formTemplates || s.services
 }
+
+// Wave F: clinical documents & print views.
+// Discharge summary print (/print/discharge/[admissionId]) = the patient
+// directory roles (who see the inpatient tab); the front desk gets the
+// administrative copy (no clinical sections, no ABHA/MLC number -- the
+// builder gates those by CLINICAL_ROLES). OPD register (/encounters) = the
+// directory roles; its CSV export = admin and crc only (audited, no phone,
+// no address, no Aadhaar/ABHA).
+export const DISCHARGE_SUMMARY_PRINT_ROLES: readonly Role[] = PATIENT_DIRECTORY_ROLES
+export const ENCOUNTER_REGISTER_ROLES: readonly Role[] = ['admin', 'crc', 'pi', 'frontdesk']
+export const ENCOUNTER_REGISTER_EXPORT_ROLES: readonly Role[] = ['admin', 'crc']
+// end Wave F

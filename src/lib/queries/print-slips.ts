@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { departments, doctorAssignments, encounters, patients, providers, rooms } from '@/db/schema'
 
@@ -69,4 +69,24 @@ export async function getRegistrationSlip(anonId: string): Promise<RegistrationS
     .from(patients)
     .where(eq(patients.id, anonId))
   return row ? { id: row.id, name: row.name.trim(), uhid: row.uhid, registeredAt: row.registeredAt } : null
+}
+
+// Wave F P1-16: the patient block of A4 clinical documents (prescription
+// slip). Name, UHID, chart id, DOB (for the age) and gender only -- never
+// phone, address, Aadhaar or ABHA. A separate read from
+// getPatientIdentityForPrint, whose result the labs route returns whole.
+export interface PatientDocumentIdentity {
+  id: string
+  name: string
+  uhid: string | null
+  dob: string
+  gender: string | null
+}
+
+export async function getPatientDocumentIdentity(anonId: string): Promise<PatientDocumentIdentity | null> {
+  const [row] = await getDb()
+    .select({ id: patients.id, name: patients.name, uhid: patients.uhid, dob: sql<string>`${patients.dob}::text`, gender: patients.gender })
+    .from(patients)
+    .where(eq(patients.id, anonId))
+  return row ? { id: row.id, name: row.name.trim(), uhid: row.uhid, dob: row.dob, gender: row.gender } : null
 }

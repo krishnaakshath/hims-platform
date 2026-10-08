@@ -2,6 +2,7 @@ import { getDb } from '@/db/client'
 import { medicationEpisodes, providers } from '@/db/schema'
 import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import type { SessionProvider } from '@/lib/provider-identity'
+import { formatDoctorRegistration } from '@/lib/india/registration'
 
 export interface CreatePrescriptionInput {
   patientId: string
@@ -73,6 +74,8 @@ export interface PrintablePrescription {
   prescribedAt: Date
   enteredByName: string | null
   prescriber: SessionProvider
+  /** Wave F P1-16: "NMC 12345" / "SMC IN-MH 12345", or null when not on file. */
+  prescriberRegistration: string | null
 }
 
 /** Null unless EVERY id exists, they all belong to ONE patient, and each has
@@ -116,5 +119,6 @@ export async function getPrintablePrescriptions(ids: number[]): Promise<Printabl
       credentials: r.provider.credentials,
       specialty: r.provider.specialty,
     },
+    prescriberRegistration: formatDoctorRegistration(r.provider),
   }))
 }

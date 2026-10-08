@@ -482,6 +482,10 @@ import { GET as getServiceCodes, PUT as putServiceCodes } from '@/app/api/coding
 import { GET as getFhirProcedure } from '@/app/api/patients/[anonId]/fhir/Procedure/route'
 import { GET as getFhirEncounter } from '@/app/api/patients/[anonId]/fhir/Encounter/route'
 // end SP6
+// Wave F
+import { GET as getEncounterRegisterExport } from '@/app/api/encounters/register/export/route'
+import { ENCOUNTER_REGISTER_EXPORT_ROLES } from '@/lib/role-policy'
+// end Wave F
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -766,6 +770,9 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/patients/lookup', call: () => patientLookup(get('/api/patients/lookup?q=')), allowed: [...PATIENT_PICKER_ROLES] },
   // Wave C P1-11: name/DOB correction -- DEMOGRAPHICS_CORRECTION_ROLES (admin); `{}` fails validation before any query.
   { name: 'PATCH /api/patients/[anonId]/demographics', call: () => settle(() => patchDemographics(send('PATCH', `/api/patients/${BOGUS_PATIENT}/demographics`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...DEMOGRAPHICS_CORRECTION_ROLES] },
+  // Wave F P1-04: OPD register CSV export -- ENCOUNTER_REGISTER_EXPORT_ROLES (admin, crc), narrower than the /encounters page.
+  { name: 'GET /api/encounters/register/export', call: () => settle(() => getEncounterRegisterExport(get('/api/encounters/register/export?from=2031-03-10&to=2031-03-10'))), allowed: [...ENCOUNTER_REGISTER_EXPORT_ROLES] },
+  // end Wave F
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

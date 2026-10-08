@@ -360,4 +360,15 @@ export const PAGE_GATES: PageGateCase[] = [
     props: { params: Promise.resolve({ anonId: 'RD-0001' }) },
     allowed: ['admin', 'frontdesk'],
   },
+  // Wave F P1-13: discharge summary print -- DISCHARGE_SUMMARY_PRINT_ROLES (= PATIENT_DIRECTORY_ROLES;
+  // the front desk gets the administrative copy). Linked from InpatientHistoryPanel, no nav entry.
+  {
+    route: '/print/discharge/[admissionId]',
+    load: () => import('@/app/print/discharge/[admissionId]/page'),
+    props: { params: Promise.resolve({ admissionId: '1' }) },
+    allowed: ['admin', 'crc', 'pi', 'frontdesk'],
+  },
+  // LeftNav.tsx /encounters (OPD Register) -- ENCOUNTER_REGISTER_ROLES.
+  { route: '/encounters', load: () => import('@/app/(dashboard)/encounters/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'pi', 'frontdesk'] },
+  // end Wave F
 ]

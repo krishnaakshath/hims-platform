@@ -18,6 +18,8 @@ import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
 import { ACCOUNT_ROLES, TARIFF_LOOKUP_ROLES } from '@/lib/role-policy' // Wave B
 import { CASH_DESK_ROLES, COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy' // SP4, SP5
+import { ENCOUNTER_REGISTER_ROLES } from '@/lib/role-policy' // Wave F
+import { NotebookTabs } from 'lucide-react' // Wave F
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -67,6 +69,9 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   { href: '/front-desk/assignments', label: 'Assignments', icon: ListChecks, roles: ['frontdesk', 'admin', 'crc'] as Role[] },
   { href: '/front-desk/follow-ups', label: 'Follow-ups', icon: CalendarSync, roles: [...FOLLOW_UP_WORKLIST_ROLES] },
   { href: '/inpatient/beds', label: 'Beds / Wards', icon: BedDouble, roles: ['frontdesk', 'admin', 'crc', 'pi'] as Role[] },
+  // Wave F P1-04: OPD register (SP3 encounters) -- ENCOUNTER_REGISTER_ROLES.
+  { href: '/encounters', label: 'OPD Register', icon: NotebookTabs, roles: [...ENCOUNTER_REGISTER_ROLES] },
+  // end Wave F
 
   // Pharmacy — dedicated section; no full patient record access
   { href: '/pharmacy', label: 'Pharmacy', icon: Pill, roles: ['crc', 'pi', 'admin', 'pharmacy'] as Role[] },

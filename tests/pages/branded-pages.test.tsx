@@ -29,6 +29,8 @@ function mockDeps() {
     }]),
   }))
   vi.doMock('@/lib/queries/patients', () => ({ getPatientIdentityForPrint: vi.fn(async () => ({ id: 'RD-0001', name: 'Test Patient', dob: '1990-01-01' })) }))
+  // Wave F P1-16: the Rx slip's patient block (name, UHID, DOB for the age, gender).
+  vi.doMock('@/lib/queries/print-slips', () => ({ getPatientDocumentIdentity: vi.fn(async () => ({ id: 'RD-0001', name: 'Test Patient', uhid: null, dob: '1990-01-01', gender: null })) }))
   vi.doMock('@/lib/queries/settings', () => ({ getPracticeIdentity: vi.fn(async () => ({ practiceName: null, practiceSite: null })) }))
   vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => []) }))
   vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(async () => []) }))
@@ -91,7 +93,7 @@ describe('branded pages', () => {
 
   it('prints the legal name as the slip header when no practice name is set', async () => {
     const pages = await renderAll({ BRAND_NAME: 'Acme Health', BRAND_LEGAL_NAME: 'Acme Health Pvt Ltd' })
-    expect(pages.print).toContain('<p class="text-lg font-semibold">Acme Health Pvt Ltd</p>')
+    expect(pages.print).toContain('<p class="text-xl font-bold leading-tight">Acme Health Pvt Ltd</p>')
   })
 
   it('escapes HTML in BRAND_NAME on every page', async () => {
