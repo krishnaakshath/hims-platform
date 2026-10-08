@@ -125,13 +125,13 @@ describe('PUT /api/appointments/[id]', () => {
     const providers = await listActiveProviders()
     const createReq = new Request('http://localhost/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId: 'RD-0004', providerId: providers[0].id, startsAt: '2026-10-04T09:00:00+05:30', endsAt: '2026-10-04T09:30:00+05:30', visitReason: 'Test visit' }),
+      body: JSON.stringify({ patientId: 'RD-0004', providerId: providers[0].id, startsAt: '2031-03-04T09:00:00+05:30', endsAt: '2031-03-04T09:30:00+05:30', visitReason: 'Test visit' }),
     })
     const created = await (await POST(createReq as never)).json()
     createdIds.push(created.id)
 
     // Only startsAt is sent -- the existing endsAt (09:30) is now before it.
-    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ startsAt: '2026-10-04T10:00:00+05:30' }) })
+    const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ startsAt: '2031-03-04T10:00:00+05:30' }) })
     const res = await PUT(req as never, { params: Promise.resolve({ id: String(created.id) }) })
     expect(res.status).toBe(400)
   })
