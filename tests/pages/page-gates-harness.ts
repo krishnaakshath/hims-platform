@@ -368,5 +368,7 @@ export const PAGE_GATES: PageGateCase[] = [
     props: { params: Promise.resolve({ admissionId: '1' }) },
     allowed: ['admin', 'crc', 'pi', 'frontdesk'],
   },
+  // LeftNav.tsx /encounters (OPD Register) -- ENCOUNTER_REGISTER_ROLES.
+  { route: '/encounters', load: () => import('@/app/(dashboard)/encounters/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'pi', 'frontdesk'] },
   // end Wave F
 ]
