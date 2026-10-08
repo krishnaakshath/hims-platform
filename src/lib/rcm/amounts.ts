@@ -48,6 +48,7 @@ export interface ClaimMoney {
 }
 
 const NOTHING_PENDING: readonly ClaimStatus[] = ['withdrawn', 'rejected', 'closed']
+const NOTHING_COVERED: readonly ClaimStatus[] = ['draft', 'withdrawn', 'closed']
 
 /**
  * Ruling 5: the part of the bill neither the patient owes nor is yet credited. Before a
@@ -55,7 +56,10 @@ const NOTHING_PENDING: readonly ClaimStatus[] = ['withdrawn', 'rejected', 'close
  * hospital absorbs (not patient-recoverable), less settlements and write-offs.
  */
 export function claimCoveredPendingPaise(c: ClaimMoney): number {
-  if (NOTHING_PENDING.includes(c.status)) return 0
+  // A draft has not been sent, so it covers nothing yet. A rejection keeps covering only the part
+  // the hospital absorbs (not patient-recoverable) until it is written off (rulings 5 and 13).
+  if (NOTHING_COVERED.includes(c.status)) return 0
+  if (c.status === 'rejected') return Math.max(0, c.nonRecoverableDisallowedPaise - c.settledPaise - c.writtenOffPaise)
   const covered = c.approvedPaise === null ? c.claimedPaise : c.approvedPaise + c.nonRecoverableDisallowedPaise
   return Math.max(0, covered - c.settledPaise - c.writtenOffPaise)
 }

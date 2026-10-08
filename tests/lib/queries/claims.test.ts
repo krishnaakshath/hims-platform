@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { and, eq, isNull } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { auditLog, claimDocuments, claimInvoices, claims, invoices, labReports, labRequisitions } from '@/db/schema'
+import { auditLog, claimDocuments, claimInvoices, claims, invoices, labReports, labRequisitions, patientPolicies } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 
 vi.mock('@/lib/blob-store', () => ({ putPrivateBlob: vi.fn(async (path: string) => ({ url: `https://blob.test/${path}` })), streamPrivateBlob: vi.fn() }))
@@ -136,6 +136,24 @@ describe.skipIf(!process.env.DATABASE_URL)('claim drafts (DB)', () => {
     const att = await attachLabReport(r.value.claimId, later, RCM)
     expect(att.ok).toBe(true); if (!att.ok) return
     expect(await getClaimDocumentBlob(att.value.documentId)).toMatchObject({ url: 'https://blob.test/lr2', contentType: 'application/pdf', patientId: w.patientId })
+  })
+
+  // Whole-branch review findings 2 and 9.
+  it('a policy card replaced after attach does not change the claim document; re-attaching a report changes nothing', async () => {
+    const db = getDb()
+    await db.update(patientPolicies).set({ cardFrontBlobUrl: 'https://blob.test/card-v1.png', cardFrontSha256: 'a'.repeat(64) }).where(eq(patientPolicies.id, w.policyId))
+    const inv = await finalisedInvoice(w)
+    const r = await draft(inv)
+    if (!r.ok) throw new Error(r.error)
+    const [card] = await db.select().from(claimDocuments).where(and(eq(claimDocuments.claimId, r.value.claimId), eq(claimDocuments.source, 'policy_card')))
+    await db.update(patientPolicies).set({ cardFrontBlobUrl: 'https://blob.test/card-v2.png', cardFrontSha256: 'b'.repeat(64) }).where(eq(patientPolicies.id, w.policyId))
+    expect(await getClaimDocumentBlob(card.id)).toMatchObject({ url: 'https://blob.test/card-v1.png' })
+    const [report] = await db.select({ id: labReports.id }).from(labReports).where(and(eq(labReports.patientId, w.patientId), isNull(labReports.supersededAt))).limit(1)
+    await attachLabReport(r.value.claimId, report.id, RCM)
+    const [before] = await db.select({ v: claims.rowVersion }).from(claims).where(eq(claims.id, r.value.claimId))
+    expect((await attachLabReport(r.value.claimId, report.id, RCM)).ok).toBe(true)
+    const [after] = await db.select({ v: claims.rowVersion }).from(claims).where(eq(claims.id, r.value.claimId))
+    expect(after.v).toBe(before.v)
   })
 })
 

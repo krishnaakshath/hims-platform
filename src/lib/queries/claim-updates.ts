@@ -86,6 +86,8 @@ export async function applyClaimUpdate(claimId: number, req: ClaimUpdateRequest,
       case 'record_decision': {
         const problem = approvalProblems({ claimedPaise: claim.claimedPaise, approvedPaise: req.approvedPaise, disallowances: req.disallowances })
         if (problem) return rcmFail('amounts_invalid', problem)
+        // An appeal decided after a settlement can never approve less than is already paid.
+        if (req.approvedPaise < claim.settledPaise) return rcmFail('amounts_invalid', `The approved amount cannot be less than the ${formatPaise(claim.settledPaise)} already settled`)
         for (const d of req.disallowances) if (!(await reasonIs(tx, d.reasonCode, 'disallowance'))) return rcmFail('code_not_found')
         const disallowed = claim.claimedPaise - req.approvedPaise
         const nonRecoverable = sumPaise(req.disallowances.filter((d) => !d.patientRecoverable).map((d) => d.amountPaise))

@@ -45,7 +45,7 @@ export default async function ClaimWorkspacePage({ params }: { params: Promise<{
         <ClaimVersionsPanel versions={ws.versions} />
         <InsurerUpdateForms claimId={id} allowedActions={ws.allowedActions.filter((a) => a !== 'submit' && a !== 'respond_query' && a !== 'appeal' && a !== 'record_settlement')} claimedPaise={ws.claim.claimedPaise} reasonCodes={ws.reasonCodes} />
         <SettlementPanel claimId={id} canRecord={ws.allowedActions.includes('record_settlement')} settlements={ws.settlements} approvedPaise={ws.claim.approvedPaise} settledPaise={ws.claim.settledPaise} />
-        <WriteOffPanel claimId={id} writeOffs={ws.writeOffs} ceilingPaise={ws.money.writeOffCeilingPaise} canRequest={open} canDecide={WRITE_OFF_APPROVE_ROLES.includes(session.role) && session.userId !== null} viewerUserId={session.userId} reasonCodes={ws.reasonCodes} />
+        <WriteOffPanel claimId={id} writeOffs={ws.writeOffs} ceilingPaise={ws.money.writeOffCeilingPaise} canRequest={open && status !== 'draft'} canDecide={WRITE_OFF_APPROVE_ROLES.includes(session.role) && session.userId !== null} viewerUserId={session.userId} reasonCodes={ws.reasonCodes} />
       </div>
       {ws.queries.length > 0 && (
         <section className="rounded-lg border border-border bg-card p-4 text-sm">

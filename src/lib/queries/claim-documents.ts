@@ -19,7 +19,7 @@ const EXTENSION: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpe
 const LOCKED_STATUSES: readonly ClaimRow['status'][] = ['closed', 'withdrawn']
 
 /** Runs `fn` under the patient's billing lock with the claim row locked; refuses closed or withdrawn claims. */
-async function withOpenClaim<T>(claimId: number, fn: (tx: Tx, claim: ClaimRow) => Promise<RcmWriteResult<T>>): Promise<RcmWriteResult<T>> {
+async function withOpenClaim<T>(claimId: number, fn: (tx: Tx, claim: ClaimRow) => Promise<RcmWriteResult<T> & { unchanged?: boolean }>): Promise<RcmWriteResult<T>> {
   const [found] = await getDb().select({ patientId: claims.patientId }).from(claims).where(eq(claims.id, claimId)).limit(1)
   if (!found) return rcmFail('claim_not_found')
   return getDb().transaction(async (tx) => {
@@ -29,7 +29,7 @@ async function withOpenClaim<T>(claimId: number, fn: (tx: Tx, claim: ClaimRow) =
     if (LOCKED_STATUSES.includes(claim.status)) return rcmFail('invalid_transition')
     const r = await fn(tx, claim)
     // A document change changes the next snapshot: bump the row version (stale detection, Task 12).
-    if (r.ok) await tx.update(claims).set({ rowVersion: claim.rowVersion + 1, updatedAt: new Date() }).where(eq(claims.id, claimId))
+    if (r.ok && !r.unchanged) await tx.update(claims).set({ rowVersion: claim.rowVersion + 1, updatedAt: new Date() }).where(eq(claims.id, claimId))
     return r
   })
 }
@@ -62,7 +62,7 @@ export async function attachLabReport(claimId: number, labReportId: number, sess
     const [live] = await tx.select({ id: claimDocuments.id }).from(claimDocuments).where(and(
       eq(claimDocuments.claimId, claimId), eq(claimDocuments.source, 'lab_report'), eq(claimDocuments.sourceId, labReportId), isNull(claimDocuments.supersededAt),
     )).limit(1)
-    if (live) return rcmOk({ documentId: live.id })
+    if (live) return { ...rcmOk({ documentId: live.id }), unchanged: true } // already attached: nothing changed
     const [row] = await tx.insert(claimDocuments).values({
       claimId, kind: 'investigation_reports', source: 'lab_report', title: `Lab report ${r.number}`, sourceId: labReportId, sha256: r.sha, contentType: 'application/pdf', uploadedByName: session.name,
     }).returning({ id: claimDocuments.id })
@@ -100,7 +100,8 @@ export async function getClaimDocumentBlob(documentId: number): Promise<{ url: s
     .from(claimDocuments).innerJoin(claims, eq(claims.id, claimDocuments.claimId)).where(eq(claimDocuments.id, documentId)).limit(1)
   if (!d) return null
   const base = { claimId: d.claimId, patientId: d.patientId, title: d.title }
-  if (d.source === 'upload' && d.url) return { ...base, url: d.url, contentType: d.contentType ?? 'application/octet-stream' }
+  // An upload, or a system document that kept its own blob reference (a policy card), streams exactly that file.
+  if (d.url) return { ...base, url: d.url, contentType: d.contentType ?? 'application/octet-stream' }
   if (d.sourceId === null) return null
   if (d.source === 'lab_report') {
     const [r] = await db.select({ url: labReports.blobUrl, patientId: labReports.patientId }).from(labReports).where(eq(labReports.id, d.sourceId)).limit(1)

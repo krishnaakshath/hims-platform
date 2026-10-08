@@ -88,7 +88,7 @@ function pickInvoices(claimable: ClaimableInvoice[], requested: ClaimCreateInput
 
 // ---- system documents -------------------------------------------------------------------------
 
-interface SystemDoc { kind: ClaimDocumentKind; source: DocumentSource; title: string; sourceId: number; sha256: string | null; contentType: string | null }
+interface SystemDoc { kind: ClaimDocumentKind; source: DocumentSource; title: string; sourceId: number; sha256: string | null; contentType: string | null; blobUrl?: string }
 
 const contentTypeOfUrl = (url: string) => (url.toLowerCase().endsWith('.pdf') ? 'application/pdf' : url.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg')
 
@@ -113,7 +113,8 @@ export async function attachSystemDocuments(tx: WriteExecutor, claim: Pick<Claim
     }
   }
   const [policy] = await tx.select({ url: patientPolicies.cardFrontBlobUrl, sha: patientPolicies.cardFrontSha256 }).from(patientPolicies).where(eq(patientPolicies.id, claim.policyId)).limit(1)
-  if (policy?.url) docs.push({ kind: 'policy_card', source: 'policy_card', title: 'Policy card', sourceId: claim.policyId, sha256: policy.sha, contentType: contentTypeOfUrl(policy.url) })
+  // The card image can be replaced later, so the attached document keeps its own copy of the blob reference (ruling 3).
+  if (policy?.url) docs.push({ kind: 'policy_card', source: 'policy_card', title: 'Policy card', sourceId: claim.policyId, sha256: policy.sha, contentType: contentTypeOfUrl(policy.url), blobUrl: policy.url })
 
   if (claim.preauthId !== null) {
     const letters = await tx.select({ id: preauthDocuments.id, title: preauthDocuments.title, sha: preauthDocuments.sha256, contentType: preauthDocuments.contentType })
@@ -135,7 +136,7 @@ export async function attachSystemDocuments(tx: WriteExecutor, claim: Pick<Claim
   const missing = docs.filter((d) => !have.has(key(d)))
   if (missing.length > 0) {
     await tx.insert(claimDocuments).values(missing.map((d) => ({
-      claimId: claim.id, kind: d.kind, source: d.source, title: d.title, sourceId: d.sourceId, sha256: d.sha256, contentType: d.contentType, uploadedByName: byName,
+      claimId: claim.id, kind: d.kind, source: d.source, title: d.title, sourceId: d.sourceId, sha256: d.sha256, contentType: d.contentType, blobUrl: d.blobUrl ?? null, uploadedByName: byName,
     })))
   }
   return missing.length

@@ -49,7 +49,7 @@ export function nextClaimStatus(from: ClaimStatus, action: ClaimAction, ctx: { h
     case 'record_settlement':
       return from === 'approved' || from === 'partially_approved' || from === 'settled' ? 'settled' : null
     case 'close':
-      return from === 'settled' || from === 'rejected' ? 'closed' : null
+      return from === 'settled' || from === 'rejected' || from === 'approved' || from === 'partially_approved' ? 'closed' : null
     case 'reopen':
       return from === 'closed' ? (ctx.hasSettlement ? 'settled' : 'rejected') : null
     case 'withdraw':

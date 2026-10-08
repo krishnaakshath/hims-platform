@@ -27,7 +27,7 @@ describe('RCM money rules', () => {
   const M = { status: 'partially_approved' as const, claimedPaise: 100_000_00, approvedPaise: 80_000_00, nonRecoverableDisallowedPaise: 5_000_00, settledPaise: 0, writtenOffPaise: 0, pendingWriteOffPaise: 0 }
   it('covered pending excludes the patient-recoverable deduction', () => {
     expect(claimCoveredPendingPaise(M)).toBe(85_000_00); expect(claimCoveredPendingPaise({ ...M, approvedPaise: null, status: 'submitted' })).toBe(100_000_00)
-    expect(claimCoveredPendingPaise({ ...M, status: 'rejected' })).toBe(0); expect(splitPatientOutstanding(100_000_00, 85_000_00)).toEqual({ coveredPendingPaise: 85_000_00, patientPayablePaise: 15_000_00 })
+    expect(claimCoveredPendingPaise({ ...M, status: 'rejected' })).toBe(5_000_00); expect(splitPatientOutstanding(100_000_00, 85_000_00)).toEqual({ coveredPendingPaise: 85_000_00, patientPayablePaise: 15_000_00 })
     expect(splitPatientOutstanding(10, 85)).toEqual({ coveredPendingPaise: 85, patientPayablePaise: 0 })
   })
   it('insurer outstanding', () => {
@@ -48,4 +48,15 @@ describe('RCM money rules', () => {
     expect(closeProblems({ ...settled, writtenOffPaise: 5_000_00 })).toBeNull()
   })
   it('sums past 2^31 exactly', () => { expect(claimCoveredPendingPaise({ ...M, claimedPaise: 3_000_000_000, approvedPaise: null, status: 'submitted' })).toBe(3_000_000_000) })
+
+  // Whole-branch review findings 1 and 3.
+  it('a rejection the hospital absorbs stays covered until written off; a draft covers nothing yet', () => {
+    const rejected = { ...M, status: 'rejected' as const, approvedPaise: 0, nonRecoverableDisallowedPaise: 100_000_00 }
+    expect(claimCoveredPendingPaise(rejected)).toBe(100_000_00)
+    expect(claimCoveredPendingPaise({ ...rejected, nonRecoverableDisallowedPaise: 0 })).toBe(0)
+    expect(claimCoveredPendingPaise({ ...rejected, writtenOffPaise: 100_000_00 })).toBe(0)
+    expect(closeProblems({ ...rejected, unreconciledSettlements: 0, openQueries: 0 })).toBe('₹1,00,000.00 is still due from the insurer or must be written off')
+    expect(claimCoveredPendingPaise({ ...M, status: 'draft', approvedPaise: null })).toBe(0)
+  })
 })
+

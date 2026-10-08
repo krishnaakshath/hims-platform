@@ -144,6 +144,17 @@ describe.skipIf(!process.env.DATABASE_URL)('insurer updates, settlements and wri
     expect(one.ledger.summary.outstandingPaise - before.ledger.summary.outstandingPaise).toBe(15_000_00)
   })
 
+  // Whole-branch review finding 4.
+  it('an appeal decision cannot approve less than is already settled', async () => {
+    const id = await submittedClaim()
+    await applyClaimUpdate(id, DECISION, RCM, NOW)
+    await recordSettlement(id, { ...SETTLE, utr: `UTR${RUN}E1` }, RCM, NOW)
+    expect((await applyClaimUpdate(id, { action: 'record_rejection', decidedOn: '2099-06-10', reasonCode: 'PED', patientRecoverable: true }, RCM, NOW)).ok).toBe(false)
+    await getDb().update(claims).set({ status: 'appealed' }).where(eq(claims.id, id))
+    expect(await applyClaimUpdate(id, { action: 'record_decision', approvedPaise: 70_000_00, decidedOn: '2099-06-20', disallowances: [{ reasonCode: 'NME', amountPaise: 30_000_00, patientRecoverable: true }] }, RCM, NOW))
+      .toEqual({ ok: false, error: 'amounts_invalid', message: 'The approved amount cannot be less than the ₹80,000.00 already settled' })
+  })
+
   it('audit details carry no UTR or note', async () => {
     const rows = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, PROBE), like(auditLog.action, 'rcm: %')))
     expect(rows.map((r) => r.action)).toEqual(expect.arrayContaining(['rcm: claim record_partial_approval', 'rcm: recorded settlement', 'rcm: requested write-off', 'rcm: approved write-off', 'rcm: claim close', 'rcm: claim record_rejection']))

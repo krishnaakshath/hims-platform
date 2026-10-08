@@ -51,6 +51,8 @@ describe('claim status machine', () => {
   it('reopen returns to settled or rejected', () => {
     expect(nextClaimStatus('closed', 'reopen', { hasSettlement: true })).toBe('settled'); expect(nextClaimStatus('closed', 'reopen', { hasSettlement: false })).toBe('rejected')
     expect(nextClaimStatus('settled', 'reopen', { hasSettlement: true })).toBeNull()
+    // Review finding 8: an approved claim written off in full can be closed (closeProblems decides).
+    expect(nextClaimStatus('approved', 'close', { hasSettlement: false })).toBe('closed'); expect(nextClaimStatus('partially_approved', 'close', { hasSettlement: false })).toBe('closed')
   })
   it('approval action follows the amounts', () => { expect(approvalActionFor(100, 100)).toBe('record_approval'); expect(approvalActionFor(100, 60)).toBe('record_partial_approval') })
   it('worklists can overlap', () => {

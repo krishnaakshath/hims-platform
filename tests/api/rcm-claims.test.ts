@@ -27,6 +27,7 @@ import { POST as postClaim } from '@/app/api/rcm/claims/route'
 import { POST as postSubmission } from '@/app/api/rcm/claims/[id]/submissions/route'
 import { POST as postDecision } from '@/app/api/rcm/write-offs/[id]/decision/route'
 import { GET as getCopy } from '@/app/api/rcm/submissions/[id]/copy/[copy]/route'
+import { getSubmissionCopy } from '@/lib/queries/claim-submissions'
 import { createClaimDraft, setClaimInvoices } from '@/lib/queries/claims'
 import { submitClaimVersion } from '@/lib/queries/claim-submissions'
 import { logAudit } from '@/lib/audit'
@@ -74,4 +75,11 @@ describe('/api/rcm claim routes', () => {
     const bad = await getCopy(new NextRequest('http://localhost/x'), ctx({ id: '7', copy: 'patient' }))
     expect(bad.status).toBe(400); expect(await bad.json()).toEqual({ error: 'Unknown copy' })
   })
+
+  it('a 40001 while streaming a copy is a 409 with the retry message', async () => {
+    vi.mocked(getSubmissionCopy).mockRejectedValueOnce(Object.assign(new Error('x'), { code: '40001' }))
+    const res = await getCopy(new NextRequest('http://localhost/x'), ctx({ id: '7', copy: 'rcm' }))
+    expect(res.status).toBe(409); expect((await res.json()).error).toMatch(/try again/)
+  })
 })
+

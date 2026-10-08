@@ -252,6 +252,8 @@ export async function uploadPreauthDocument(
   const { url } = await putPrivateBlob(`rcm/preauths/${preauthId}/${randomUUID()}.${ext}`, file.bytes, file.contentType)
   return getDb().transaction(async (tx) => {
     await lockPatientBilling(tx, found.patientId)
+    const [locked] = await tx.select({ id: preauths.id }).from(preauths).where(eq(preauths.id, preauthId)).for('update')
+    if (!locked) return rcmFail('preauth_not_found')
     const [row] = await tx.insert(preauthDocuments).values({
       preauthId, kind: input.kind, title: input.title, blobUrl: url, contentType: file.contentType, byteSize: file.bytes.byteLength, sha256,
       queryResponseId: input.queryResponseId ?? null, uploadedByName: session.name,
