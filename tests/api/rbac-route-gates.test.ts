@@ -384,6 +384,7 @@ import { GET as listDepartmentsRoute, POST as postDepartment } from '@/app/api/d
 import { PATCH as patchDepartment } from '@/app/api/departments/[id]/route'
 import { PUT as putProvider } from '@/app/api/providers/[id]/route'
 import { GET as search } from '@/app/api/search/route'
+import { GET as priceSheet } from '@/app/api/tariff/services/[id]/price-sheet/route' // Wave G
 import { GET as patientLookup } from '@/app/api/patients/lookup/route' // Wave C
 import { PATCH as patchDemographics } from '@/app/api/patients/[anonId]/demographics/route' // Wave C
 import { GET as listTariffServices, POST as postTariffService } from '@/app/api/tariff/services/route'
@@ -664,6 +665,8 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PATCH /api/tariff/rates/[id]', call: () => settle(() => patchTariffRate(send('PATCH', `/api/tariff/rates/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
   { name: 'PUT /api/tariff/packages/[id]/items', call: () => settle(() => putPackageItems(send('PUT', `/api/tariff/packages/${BOGUS_ID}/items`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_MANAGE_ROLES] },
   { name: 'GET /api/tariff/resolve', call: () => settle(() => resolveTariff(get('/api/tariff/resolve'))), allowed: [...TARIFF_LOOKUP_ROLES] },
+  // Wave G P1-05: the price lookup's rate card -- TARIFF_LOOKUP_ROLES, like resolve.
+  { name: 'GET /api/tariff/services/[id]/price-sheet', call: () => settle(() => priceSheet(get(`/api/tariff/services/${BOGUS_ID}/price-sheet`), ctx({ id: BOGUS_ID }))), allowed: [...TARIFF_LOOKUP_ROLES] },
   { name: 'POST /api/tariff/import', call: () => settle(() => postTariffImport(send('POST', '/api/tariff/import'))), allowed: [...TARIFF_MANAGE_ROLES] },
   // SP3: check-in opens an encounter (CHECK_IN_ROLES); the visit status route is
   // ENCOUNTER_STATUS_ROLES (per-transition roles are tested in encounter-status.test.ts).

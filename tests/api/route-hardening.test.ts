@@ -58,6 +58,7 @@ import { POST as collectLabOrderRoute } from '@/app/api/lab-orders/[id]/collect/
 import { POST as verifyLabOrderRoute } from '@/app/api/lab-orders/[id]/verify/route'
 import { POST as releaseLabReportRoute } from '@/app/api/lab-requisitions/[id]/report/route'
 import { GET as downloadLabReportRoute } from '@/app/api/lab-reports/[id]/download/route'
+import { GET as priceSheetRoute } from '@/app/api/tariff/services/[id]/price-sheet/route' // Wave G
 import { POST as cancelHomeVisitRoute } from '@/app/api/home-collections/[id]/cancel/route'
 import { POST as collectHomeVisitRoute } from '@/app/api/home-collections/[id]/collect/route'
 // end SP5
@@ -214,6 +215,9 @@ const ID_CASES: IdCase[] = [
   { name: 'POST /api/home-collections/[id]/cancel', call: (id) => cancelHomeVisitRoute(send('POST', '/x', '{"reason":"patient_request"}'), ctx({ id })) },
   { name: 'POST /api/home-collections/[id]/collect', call: (id) => collectHomeVisitRoute(send('POST', '/x', '{"sampleIds":[]}'), ctx({ id })) },
   // end SP5
+  // Wave G
+  { name: 'GET /api/tariff/services/[id]/price-sheet', call: (id) => priceSheetRoute(send('GET', '/x'), ctx({ id })) },
+  // end Wave G
 ]
 
 describe.each(ID_CASES)('$name (bad path ids)', (c) => {
