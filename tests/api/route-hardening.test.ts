@@ -8,6 +8,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import type { Role } from '@/lib/auth'
 import { ALL_ROLES, CHARGES_ROLES, CLINICAL_ROLES, REGISTRATION_ROLES, SCHEDULING_ROLES } from '@/lib/role-policy'
+import { LAB_ORDER_ROLES, LAB_RESULT_ENTRY_ROLES } from '@/lib/role-policy' // SP5
 import { INVALID_JSON_MESSAGE } from '@/lib/http'
 
 let sessionRole: Role = 'admin'
@@ -52,6 +53,14 @@ import { POST as mockPayment } from '@/app/api/mock-payments/route'
 import { POST as postCarePlan } from '@/app/api/patients/[anonId]/care-plans/route'
 import { POST as postNote } from '@/app/api/patients/[anonId]/notes/route'
 import { POST as postLabOrder } from '@/app/api/patients/[anonId]/lab-orders/route'
+// SP5: lab lifecycle, home collection and lab report id routes
+import { POST as collectLabOrderRoute } from '@/app/api/lab-orders/[id]/collect/route'
+import { POST as verifyLabOrderRoute } from '@/app/api/lab-orders/[id]/verify/route'
+import { POST as releaseLabReportRoute } from '@/app/api/lab-requisitions/[id]/report/route'
+import { GET as downloadLabReportRoute } from '@/app/api/lab-reports/[id]/download/route'
+import { POST as cancelHomeVisitRoute } from '@/app/api/home-collections/[id]/cancel/route'
+import { POST as collectHomeVisitRoute } from '@/app/api/home-collections/[id]/collect/route'
+// end SP5
 import { POST as postPrescription } from '@/app/api/patients/[anonId]/prescriptions/route'
 import { PATCH as stopPrescription } from '@/app/api/patients/[anonId]/prescriptions/[id]/route'
 import { POST as postPatient } from '@/app/api/patients/route'
@@ -117,13 +126,13 @@ const JSON_GATES: JsonCase[] = [
   { name: 'POST /api/inpatient/admissions/[id]/medications', call: () => orderInpatientMed(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PI_ADMIN, allowedStatus: 404 },
   { name: 'POST /api/inpatient/admissions/[id]/transfer', call: () => transferAdmission(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ['frontdesk', 'admin', 'crc', 'pi'] },
   { name: 'POST /api/inpatient/rooms/[id]/block', call: () => blockRoom(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ADMIN },
-  { name: 'POST /api/lab-orders/[id]/cancel', call: () => cancelLabOrder(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ['admin', 'pi'] },
-  { name: 'POST /api/lab-orders/[id]/result', call: () => enterLabResult(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ['admin', 'pi', 'labs'] },
+  { name: 'POST /api/lab-orders/[id]/cancel', call: () => cancelLabOrder(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: [...LAB_ORDER_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/result', call: () => enterLabResult(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: [...LAB_RESULT_ENTRY_ROLES] }, // SP5: pi verifies, labs enter
   { name: 'POST /api/mock-payments', call: () => mockPayment(send('POST', '/x', NOT_JSON)), allowed: ['admin', 'crc', 'billing'] },
   { name: 'POST /api/patients', call: () => postPatient(send('POST', '/x', NOT_JSON)), allowed: REGISTRATION_ROLES },
   { name: 'POST /api/patients/[anonId]/care-plans', call: () => postCarePlan(send('POST', '/x', NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PI_ADMIN },
   { name: 'POST /api/patients/[anonId]/notes', call: () => postNote(send('POST', '/x', NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PI_ADMIN },
-  { name: 'POST /api/patients/[anonId]/lab-orders', call: () => postLabOrder(send('POST', '/x', NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'pi'] },
+  { name: 'POST /api/patients/[anonId]/lab-orders', call: () => postLabOrder(send('POST', '/x', NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: [...LAB_ORDER_ROLES] },
   { name: 'POST /api/patients/[anonId]/prescriptions', call: () => postPrescription(send('POST', '/x', NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'pi'] },
   { name: 'PATCH /api/patients/[anonId]/prescriptions/[id]', call: () => stopPrescription(send('PATCH', '/x', NOT_JSON), ctx({ anonId: BOGUS_PATIENT, id: BOGUS_ID })), allowed: ['admin', 'pi'] },
   { name: 'POST /api/pharmacy/dispense', call: () => dispense(send('POST', '/x', NOT_JSON)), allowed: ['admin', 'pi', 'pharmacy'] },
@@ -197,6 +206,14 @@ const ID_CASES: IdCase[] = [
   { name: 'POST /api/inpatient/rooms/[id]/block', call: (id) => blockRoom(send('POST', '/x', '{}'), ctx({ id })) },
   { name: 'PATCH /api/staff/[id]', call: (id) => patchStaff(send('PATCH', '/x', '{}'), ctx({ id })) },
   { name: 'PATCH /api/patients/[anonId]/prescriptions/[id]', call: (id) => stopPrescription(send('PATCH', '/x'), ctx({ anonId: BOGUS_PATIENT, id })) },
+  // SP5
+  { name: 'POST /api/lab-orders/[id]/collect', call: (id) => collectLabOrderRoute(send('POST', '/x'), ctx({ id })) },
+  { name: 'POST /api/lab-orders/[id]/verify', call: (id) => verifyLabOrderRoute(send('POST', '/x'), ctx({ id })) },
+  { name: 'POST /api/lab-requisitions/[id]/report', call: (id) => releaseLabReportRoute(send('POST', '/x'), ctx({ id })) },
+  { name: 'GET /api/lab-reports/[id]/download', call: (id) => downloadLabReportRoute(send('GET', '/x'), ctx({ id })) },
+  { name: 'POST /api/home-collections/[id]/cancel', call: (id) => cancelHomeVisitRoute(send('POST', '/x', '{"reason":"patient_request"}'), ctx({ id })) },
+  { name: 'POST /api/home-collections/[id]/collect', call: (id) => collectHomeVisitRoute(send('POST', '/x', '{"sampleIds":[]}'), ctx({ id })) },
+  // end SP5
 ]
 
 describe.each(ID_CASES)('$name (bad path ids)', (c) => {

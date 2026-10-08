@@ -11,9 +11,11 @@ import { readMigration, idempotencyProblems } from './migration-sql'
 const MIGRATION = '2026-10-07-sp6-a-coder-role.sql'
 
 describe('SP6 coder role', () => {
-  it('roleEnum equals ALL_ROLES and ends with coder', () => {
+  // SP5 appends 'collector' after 'coder' (its migration is dated after SP6's), so coder is
+  // second to last: the enum order matches the migration apply order.
+  it('roleEnum equals ALL_ROLES with coder right before the SP5 collector', () => {
     expect(roleEnum.enumValues).toEqual([...ALL_ROLES])
-    expect(ALL_ROLES).toContain('coder') // SP7: rcm is now last
+    expect(ALL_ROLES.slice(-3)).toEqual(['coder', 'collector', 'rcm']) // SP5: + collector; SP7: + rcm
   })
 
   it('coder-role migration is idempotent and adds the value', () => {

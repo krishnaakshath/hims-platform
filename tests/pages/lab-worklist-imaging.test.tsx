@@ -21,6 +21,15 @@ function makeOrder(overrides: Partial<WorklistOrder> = {}): WorklistOrder {
     attachments: [],
     orderedByProviderId: 1,
     orderedByProviderName: 'Dr. Test Provider',
+    // SP5 stage fields
+    sampleId: null,
+    requisitionId: null,
+    homeCollectionVisitId: null,
+    visitDate: null,
+    receivedAt: null,
+    verifiedAt: null,
+    patientUhid: null,
+    result: null,
     ...overrides,
   }
 }

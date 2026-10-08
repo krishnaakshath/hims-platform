@@ -41,7 +41,7 @@ region where the provider offers one) for latency and data-localisation.
 | `NEXT_PUBLIC_APP_URL` | yes | Public https URL of the deployment |
 | `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD_HASH` | yes | Always-available admin account. Hash generator: see README, "Admin password hash" |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | yes | Rate limits, MFA replay protection, cache. Rate limiters fail closed without Redis |
-| `BLOB_READ_WRITE_TOKEN` | yes | Insurance cards, imaging, documents |
+| `BLOB_READ_WRITE_TOKEN` | yes | Insurance cards, imaging, documents, lab report PDFs |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | yes for email codes | One-time sign-in codes by email |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | for SMS codes | |
 | `BRAND_NAME`, `BRAND_LEGAL_NAME`, `BRAND_TAGLINE`, `BRAND_SUPPORT_EMAIL`, `BRAND_LOGO_URL`, `BRAND_PRIMARY_COLOR`, `BRAND_COOKIE_PREFIX` | optional | See README, "White-label a client". Read at build time |
@@ -168,6 +168,23 @@ After each deploy, check (replace the host with the client's):
 - [ ] Logging out and back in works; no other client's data is visible.
 - [ ] No `DISABLE_STAFF_MFA`, `SEED_*` or `ALLOW_PRODUCTION_SEED` variable is
       set in the production environment.
+
+## Lab report PDFs
+
+Released lab reports are PDFs generated on the server with `pdf-lib` and stored
+privately in the Blob store (`lab-reports/<requisition>/<report number>-<random>.pdf`).
+Staff download them from the chart and the lab worklist, patients from the
+portal; every download is audited and the stored file's address never reaches
+the browser.
+
+Known limitation: the PDF uses the standard Latin (WinAnsi) fonts only. No font
+with Indian-script glyphs ships with the app, and none is downloaded at runtime,
+so a name or value written in Devanagari, Tamil, Bengali or any other
+non-Latin script prints as `[non-Latin text]`, with a note under the patient
+details pointing to the chart or the patient portal, where the name is shown
+correctly. Latin-1 accents (é, ü) print normally; the rupee sign prints as
+`Rs.`. To lift this, add `@pdf-lib/fontkit` and a font such as Noto Sans
+Devanagari to the repository and embed it in `src/lib/labs/report-pdf.ts`.
 
 ## Rolling back and rotating
 

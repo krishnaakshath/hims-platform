@@ -9,6 +9,7 @@ import {
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
+  House, Route, // SP5
   BookOpenCheck, FileCode2, // SP6
   UserCircle2, Calculator,
   ClipboardPlus, Banknote, SlidersHorizontal, // SP4
@@ -16,7 +17,7 @@ import {
 import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
 import { ACCOUNT_ROLES, TARIFF_LOOKUP_ROLES } from '@/lib/role-policy' // Wave B
-import { CASH_DESK_ROLES } from '@/lib/role-policy' // SP4
+import { CASH_DESK_ROLES, COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy' // SP4, SP5
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -28,7 +29,7 @@ type Icon = React.ComponentType<{ className?: string }>
 // a matching PAGE_GATES row will fail that suite.
 //
 // Per RBAC spec:
-//  frontdesk  — check-in, assignments, beds, booking; NO billing, NO labs, NO messages, NO trials, NO staff
+//  frontdesk  — check-in, assignments, beds, booking, home-collection booking (no lab results); NO billing, NO labs, NO messages, NO trials, NO staff
 //  billing    — billing section only; NO clinical routes whatsoever
 //  pharmacy   — pharmacy routes + Messages (to confirm a dispense with the prescriber); NO patients page, NO labs, NO staff
 //  pi/doctor  — clinical workflow: My Patients, Patients, Calendar, Client Forms, Labs, Staff directory (view-only); NO billing
@@ -79,6 +80,11 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   // NOT frontdesk -- front desk's job is registration/check-in, not lab
   // results; explicit product direction removed their prior worklist access).
   { href: '/labs', label: 'Labs', icon: TestTube2, roles: ['admin', 'crc', 'pi', 'labs'] as Role[] },
+  // SP5: home-collection day board (HOME_COLLECTION_BOOKING_ROLES): booking logistics, no lab results.
+  { href: '/home-collections', label: 'Home Collection', icon: House, roles: ['admin', 'frontdesk', 'labs'] as Role[] },
+  // SP5: the collector's own route for the day (COLLECTOR_ROUTE_ROLES).
+  { href: '/collections', label: 'My Route', icon: Route, roles: [...COLLECTOR_ROUTE_ROLES] },
+  // end SP5
 
   // SP6: clinical coding worklist, workspace and report -- CODING_ROLES. The coder's only nav entry
   // besides Home; nothing clinical (patients, chart, notes) is shown to a coder.

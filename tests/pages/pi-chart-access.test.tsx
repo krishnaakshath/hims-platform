@@ -87,9 +87,15 @@ describe('a pi reaches the whole chart', () => {
     vi.doMock('@/lib/queries/care-plans', () => ({ listCarePlansForPatient: vi.fn(async () => []) }))
     vi.doMock('@/lib/queries/providers', () => ({ listAllProviders: vi.fn(async () => []) }))
     vi.doMock('@/lib/queries/coding-workspace', () => ({ listEncounterCodingForPatient: vi.fn(async () => []) })) // SP6
+    // SP5: released lab reports (LAB_REPORT_READ_ROLES) under Lab Results.
+    const listReportsForPatient = vi.fn(async () => [{ id: 41, reportNumber: 'LR-2099-000007', version: 1, releasedAt: new Date('2099-08-01T05:00:00Z'), testSummary: 'HbA1c', supersededAt: null }])
+    vi.doMock('@/lib/queries/lab-reports', () => ({ listReportsForPatient }))
 
     const { default: MedicalRecordPage } = await import('@/app/(dashboard)/patients/[anonId]/medical-record/page')
-    await MedicalRecordPage({ params: Promise.resolve({ anonId: 'RD-TEST' }) } as never)
+    const jsx = await MedicalRecordPage({ params: Promise.resolve({ anonId: 'RD-TEST' }) } as never)
+    // SP5: the chart lists the patient's released reports with the audited download link.
+    expect(listReportsForPatient).toHaveBeenCalledWith('RD-TEST')
+    expect(JSON.stringify(jsx, (_k, v) => (typeof v === 'function' ? v.name : v))).toContain('"reportNumber":"LR-2099-000007"')
 
     const { listOrdersForPatient } = await import('@/lib/queries/lab-orders')
     const { listLabTests } = await import('@/lib/queries/lab-tests')
@@ -133,6 +139,7 @@ describe('a pi reaches the whole chart', () => {
     vi.doMock('@/lib/queries/providers', () => ({ listAllProviders: vi.fn(async () => []) }))
     const listEncounterCodingForPatient = vi.fn(async () => encounters)
     vi.doMock('@/lib/queries/coding-workspace', () => ({ listEncounterCodingForPatient }))
+    vi.doMock('@/lib/queries/lab-reports', () => ({ listReportsForPatient: vi.fn(async () => []) })) // SP5
     const { default: MedicalRecordPage } = await import('@/app/(dashboard)/patients/[anonId]/medical-record/page')
     const jsx = await MedicalRecordPage({ params: Promise.resolve({ anonId: 'RD-TEST' }) } as never)
     const { render, screen, cleanup } = await import('@testing-library/react')

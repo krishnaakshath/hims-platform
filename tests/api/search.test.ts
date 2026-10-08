@@ -40,7 +40,7 @@ describe('GET /api/search', () => {
     expect(Array.isArray(body.services)).toBe(true)
   })
 
-  for (const role of ['pharmacy', 'labs', 'coder', 'rcm'] as const) {
+  for (const role of ['pharmacy', 'labs', 'coder', 'collector', 'rcm'] as const) {
     it(`403s ${role} without touching the database`, async () => {
       sessionRole = role
       const res = await search('RD-0001')

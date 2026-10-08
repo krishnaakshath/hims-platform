@@ -11,7 +11,7 @@ import { formatIsoDate } from './format'
 const STATUS_LABEL: Record<EncounterStatus, string> = {
   checked_in: 'Checked in', in_consultation: 'In consultation', completed: 'Completed', cancelled: 'Cancelled',
 }
-const TYPE_LABEL: Record<EncounterListRow['encounterType'], string> = { opd: 'Outpatient', ipd: 'Inpatient', lab: 'Lab' }
+const TYPE_LABEL: Record<EncounterListRow['encounterType'], string> = { opd: 'Outpatient', ipd: 'Inpatient', lab: 'Home sample collection' /* SP5 */ }
 const VISIT_LABEL: Record<EncounterListRow['visitType'], string> = { new: 'New', follow_up: 'Follow-up', review: 'Review', emergency: 'Emergency' }
 
 export function EncounterList({

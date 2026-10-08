@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { createHash, timingSafeEqual } from 'crypto'
-import { enterResult } from '@/lib/queries/lab-orders'
-import { logIntegrationEvent } from '@/lib/patient-portal-audit'
+// SP5: results land through the lifecycle query as `resulted` (preliminary, awaiting
+// verification by pi/admin); the integration audit is written inside that transaction.
+import { recordLabResult } from '@/lib/queries/lab-lifecycle'
+import { isAcceptedLisObservationStatus } from '@/lib/labs/status'
+import { RETRY_MESSAGE, isRetryableConflict } from '@/lib/db-errors'
+// end SP5
 // In a real HIPAA-compliant integration, you would verify an API key,
 // mutual TLS (mTLS), or OAuth 2.0 Client Credentials token from your LIS
 // (Lab Information System) like Quest Diagnostics, LabCorp, or an interface engine (Redox).
@@ -71,7 +75,13 @@ export async function POST(request: NextRequest) {
     }
 
     const obs = parsed.data
-    
+    // SP5: only preliminary/final/amended/corrected carry a usable result; anything else
+    // (registered, cancelled, entered-in-error, ...) is refused before any write.
+    if (!isAcceptedLisObservationStatus(obs.status)) {
+      return NextResponse.json({ error: 'Unsupported Observation status' }, { status: 400 })
+    }
+    // end SP5
+
     // Strict order id: ServiceRequest/<positive int32>
     const orderMatch = /^ServiceRequest\/([1-9]\d{0,9})$/.exec(obs.basedOn?.[0]?.reference ?? '')
     const orderId = orderMatch ? Number(orderMatch[1]) : NaN
@@ -96,19 +106,17 @@ export async function POST(request: NextRequest) {
     const unit = obs.valueQuantity?.unit
     const referenceRange = obs.referenceRange?.[0]?.text
 
-    // 2. Automatically enter the result in our database
-    const result = await enterResult(orderId, {
+    // 2. Record the result (SP5 lifecycle). Same transaction as the status change, the result
+    // upsert and the integration audit row: any failure rolls all of them back. An order that
+    // is only `collected` is stamped received by the LIS first; a verified/reported order is
+    // never changed (409).
+    const result = await recordLabResult(orderId, {
       value,
       unit,
       referenceRange,
       flag,
       notes: 'Received electronically via FHIR LIS interface',
-      resultedByName: 'System (LIS API)',
-    }, {
-      expectedPatientId,
-      // Same transaction as the status UPDATE + result INSERT: any failure rolls all three back.
-      afterEntered: (tx, patientId) => logIntegrationEvent(`accepted LIS lab result for order ${orderId}`, patientId, undefined, tx),
-    })
+    }, { kind: 'lis' }, { expectedPatientId })
 
     if (!result.ok) {
       return NextResponse.json({ error: 'Order not found, not awaiting a result, or does not belong to this patient' }, { status: 409 })
@@ -116,6 +124,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, message: 'Electronic lab result processed successfully' })
   } catch (error) {
+    // SP5: a deadlock / serialization failure wrote nothing; the LIS may retry.
+    if (isRetryableConflict(error)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     console.error('LIS webhook failed:', error instanceof Error ? error.message : 'unknown error')
     return NextResponse.json({ error: 'Internal server error processing lab result' }, { status: 500 })
   }

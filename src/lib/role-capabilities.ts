@@ -45,7 +45,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Message patients directly',
       'View the live bed/ward status board',
       'Dispense medications from the Pharmacy dashboard',
-      'Order lab tests and manage the Lab worklist: mark samples collected, attach imaging results, enter results, and cancel orders',
+      // SP5: pi no longer enters results (labs enters, pi verifies).
+      'Order lab tests and manage the Lab worklist: mark samples collected, attach imaging results, and cancel orders',
       'View the Staff Directory and credential expiry status',
       'View the public booking requests queue (read-only -- confirming/declining is a registration-staff action)',
       'Confirm a green trial-eligibility verdict, which automatically notifies the patient',
@@ -56,6 +57,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Transfer an admitted patient between rooms',
       'Discharge an admitted patient and sign the discharge summary',
       'Set and change a patient\'s follow-up plan (due date or interval, window, reason and plan notes), and start or complete a visit',
+      // SP5
+      'Order several lab tests at once and ask for a follow-up visit once the report is released',
+      'Verify lab results before they are reported to the patient',
       // SP6
       'Propose diagnosis and procedure codes for a visit on the chart, and answer coding queries',
     ],
@@ -91,6 +95,12 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP4
       'Configure billing rules and GST settings',
       // end SP4
+      // SP5
+      'Book and dispatch home sample collection visits and assign collectors',
+      'Receive samples by sample ID, enter results and release lab reports',
+      'Order several lab tests at once and ask for a follow-up visit once the report is released',
+      'Verify lab results before they are reported to the patient',
+      'Manage the home-collection service area, collection windows and lab test sample setup',
       // SP6
       'Load licensed code sets (ICD-10, ICD-10-PCS, SNOMED CT, LOINC, HBP packages) and choose the current version',
       'Assign coding work to a coder',
@@ -119,6 +129,8 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP4
       'Take advances and receipts at the cash desk',
       // end SP4
+      // SP5
+      'Book, reschedule or cancel a home sample collection for a patient in the service area',
       'Find a patient by name, UHID, mobile number or chart ID, and print the OPD token slip and the registration slip / UHID card',
       // SP7
       'Record a patient\'s insurance policy and card at registration or admission',
@@ -165,8 +177,21 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Enter results and flag them normal, abnormal, or critical',
       'Attach imaging results to an order',
       'View lab results and imaging for every ordered test from the Lab worklist (no chart access)',
+      // SP5
+      'Book and dispatch home sample collection visits and assign collectors',
+      'Receive samples by sample ID, enter results and release lab reports',
     ],
   },
+  // SP5
+  collector: {
+    label: 'Home Sample Collector',
+    summary: 'Visits patients at home to collect lab samples on the visits assigned to them.',
+    bullets: [
+      "See today's assigned home-collection visits: patient, phone, address and the tubes to collect",
+      'Mark a visit collected by entering each tube\'s sample ID, or record why it could not be collected',
+    ],
+  },
+  // end SP5
   // SP6
   coder: {
     label: 'Clinical Coder',

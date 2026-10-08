@@ -320,7 +320,6 @@ export const PAGE_GATES: PageGateCase[] = [
   // Wave B P1-05: price lookup -- TARIFF_LOOKUP_ROLES (LeftNav NAV_TRAILING_ITEMS /price-lookup).
   { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), allowed: ['admin', 'billing', 'crc', 'frontdesk', 'rcm'] }, // SP7: + rcm (TARIFF_LOOKUP_ROLES)
   // Wave B P1-01: own account (MFA method, self-reset, capabilities) -- ACCOUNT_ROLES = every staff role.
-  { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'rcm'] },
   // SP4 billing screens -- NAV_BILLING_ITEMS are gated to exactly BILLING_ROLES (= CHARGE_CAPTURE_ROLES).
   { route: '/billing/capture', load: () => import('@/app/(dashboard)/billing/capture/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
   { route: '/billing/invoices', load: () => import('@/app/(dashboard)/billing/invoices/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'billing'] },
@@ -331,6 +330,7 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/cash-desk', load: () => import('@/app/(dashboard)/cash-desk/page'), props: { searchParams: Promise.resolve({ patientId: 'RD-0001' }) }, allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
   { route: '/print/receipts/[id]', load: () => import('@/app/print/receipts/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'billing', 'crc', 'frontdesk'] },
   // end SP4
+  { route: '/account', load: () => import('@/app/(dashboard)/account/page'), allowed: ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector', 'rcm'] },
   // Outside (dashboard), so the page-file walk does not require it: the
   // prescription print slip follows the chart's gate (CLINICAL_ROLES).
   {
@@ -339,6 +339,13 @@ export const PAGE_GATES: PageGateCase[] = [
     props: { searchParams: Promise.resolve({ ids: '1' }) },
     allowed: ['admin', 'crc', 'pi'],
   },
+  // SP5: sample label sheet -- LAB_LABEL_ROLES; no nav entry (reached from links).
+  { route: '/lab-labels', load: () => import('@/app/(dashboard)/lab-labels/page'), props: { searchParams: Promise.resolve({ orders: '1' }) }, allowed: ['admin', 'pi', 'labs', 'frontdesk'] },
+  // LeftNav.tsx /home-collections -- HOME_COLLECTION_BOOKING_ROLES
+  { route: '/home-collections', load: () => import('@/app/(dashboard)/home-collections/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'frontdesk', 'labs'] },
+  // LeftNav.tsx /collections -- COLLECTOR_ROUTE_ROLES
+  { route: '/collections', load: () => import('@/app/(dashboard)/collections/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'collector'] },
+  // end SP5
   // Wave C P1-14: OPD token slip -- CHECK_IN_ROLES (whoever may check in prints the token).
   {
     route: '/print/token/[encounterId]',

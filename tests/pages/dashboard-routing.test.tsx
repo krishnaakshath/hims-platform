@@ -45,6 +45,19 @@ describe('dashboard role routing', () => {
     expect(screen.getByText(/rooms available/i)).toBeInTheDocument()
     expect(screen.getByText('Test visit')).toBeInTheDocument()
   })
+  // SP5
+  it('sends collector to /collections', async () => {
+    vi.resetModules()
+    // a real redirect() throws; the stub does too, so nothing after the redirect runs
+    const throwingRedirect = vi.fn((url: string) => { throw new Error(`NEXT_REDIRECT:${url}`) })
+    vi.doMock('next/navigation', () => ({ redirect: throwingRedirect }))
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'collector', name: 'Ravi Kumar', userId: 9 })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    const { default: Page } = await import('@/app/(dashboard)/page')
+    await expect(Page()).rejects.toThrow('NEXT_REDIRECT:/collections')
+    expect(throwingRedirect).toHaveBeenCalledWith('/collections')
+  })
+  // end SP5
 
   // SP6 (ruling 4/5): the coder's home is /coding. Without this redirect the coder
   // would fall through to the coordinator dashboard (patient names, appointments).

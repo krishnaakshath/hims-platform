@@ -36,7 +36,9 @@ const CASES: Case[] = [
   { name: 'AddMedicationModal', ui: () => <AddMedicationModal onClose={vi.fn()} />, submit: /^Add medication$/ },
   { name: 'AttachImagingModal', ui: () => <AttachImagingModal orderId={1} testName="X-ray" onClose={vi.fn()} />,
     before: () => { fireEvent.change(screen.getByLabelText('Imaging file'), { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } }) }, submit: /^Attach image$/ },
-  { name: 'OrderLabTestModal', ui: () => <OrderLabTestModal patientId="RD-1" labTests={[{ id: 3, name: 'CBC', code: 'CBC', category: 'lab' } as never]} onClose={vi.fn()} />, submit: /^Order test$/ },
+  // SP5: a multi-test checklist; ticking the one test enables "Order 1 test".
+  { name: 'OrderLabTestModal', ui: () => <OrderLabTestModal patientId="RD-1" labTests={[{ id: 3, name: 'CBC', code: 'CBC', category: 'lab' } as never]} onClose={vi.fn()} />,
+    before: () => { fireEvent.click(screen.getByRole('checkbox', { name: /CBC/ })) }, submit: /^Order 1 test$/ },
   { name: 'TransferAdmissionModal', ui: () => <TransferAdmissionModal admissionId={1} availableRooms={[{ id: 2, ward: 'A', roomNumber: '1', bedNumber: 'B' }]} onClose={vi.fn()} />, submit: /^Transfer$/ },
   { name: 'DispenseMedicationModal', ui: () => <DispenseMedicationModal medication={med} onClose={vi.fn()} />, before: pickPatient, submit: /^Dispense$/ },
   { name: 'EnterLabResultModal', ui: () => <EnterLabResultModal orderId={1} testName="CBC" defaultUnit="g/dL" defaultReferenceRange="12-16" category="lab" attachments={[]} onClose={vi.fn()} />, submit: /^Save result$/ },
@@ -46,7 +48,8 @@ const CASES: Case[] = [
   { name: 'CarePlanSection', ui: () => <CarePlanSection patientId="RD-1" plans={[]} canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: 'New Care Plan' })) }, submit: /^Save$/ },
   { name: 'BedBoard block', ui: () => <BedBoard rooms={[{ id: 5, ward: 'A', roomNumber: '1', bedNumber: 'B', status: 'available', blockedReason: null, occupantName: null, occupantPatientId: null, attendingProviderName: null, admittedAt: null }]} canManageFacilities canBlock canAdmit={false} />,
     before: () => { fireEvent.click(screen.getByRole('button', { name: /1/ })) }, submit: /^Block room$/ },
-  { name: 'LabWorklist collect', ui: () => <LabWorklist role="labs" labTests={[]} orders={[{ id: 9, status: 'ordered', orderedAt: new Date(), collectedAt: null, patientId: 'RD-1', patientName: 'P', testId: 1, testName: 'CBC', testCode: 'CBC', category: 'lab', attachments: [], orderedByProviderId: 1, orderedByProviderName: 'Dr' }]} />, submit: /^Mark collected$/ },
+  { name: 'LabWorklist collect', ui: () => <LabWorklist role="labs" labTests={[]} orders={[{ id: 9, status: 'ordered', orderedAt: new Date(), collectedAt: null, patientId: 'RD-1', patientName: 'P', testId: 1, testName: 'CBC', testCode: 'CBC', category: 'lab', attachments: [], orderedByProviderId: 1, orderedByProviderName: 'Dr',
+    sampleId: null, requisitionId: 1, homeCollectionVisitId: null, visitDate: null, receivedAt: null, verifiedAt: null, patientUhid: null, result: null }]} />, submit: /^Mark collected$/ },
 ]
 
 describe.each(CASES)('$name', (c) => {

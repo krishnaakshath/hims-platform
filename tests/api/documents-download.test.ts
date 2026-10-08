@@ -134,7 +134,7 @@ describe('GET /api/documents/[id]/download', () => {
     expect(await res.text()).toBe('fake-file-bytes')
   })
 
-  it.each(['pharmacy', 'billing'] as const)('403s %s without touching the blob store', async (role) => {
+  it.each(['pharmacy', 'billing', 'collector'] as const)('403s %s without touching the blob store', async (role) => {
     sessionRole = role
     const doc = await createThrowawayDocument({ fileUrl: 'https://blob.test/documents/some-file.pdf' })
 

@@ -10,7 +10,11 @@ import { labOrders } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { invalidateCache, documentsListCacheKey, patientDetailCacheKey } from '@/lib/cache'
 import { createDocument } from '@/lib/queries/documents'
-import { markCollected } from '@/lib/queries/lab-orders'
+// SP5
+import { LAB_COLLECT_ROLES } from '@/lib/role-policy'
+import { collectLabOrder } from '@/lib/queries/lab-lifecycle'
+import { pgErrorCode } from '@/lib/db-errors'
+// end SP5
 
 // Same allowlist/labels as the generic documents route (POST /api/documents)
 // -- see that route's comment on why these four literal mappings are pinned.
@@ -34,7 +38,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // imaging to an order is a clinical act on the lab lifecycle (it can
   // transition ordered -> collected, same as scanning a specimen), not
   // generic document filing (spec §5).
-  if (!['admin', 'pi', 'labs'].includes(session.role)) {
+  if (!LAB_COLLECT_ROLES.includes(session.role)) { // SP5: named gate
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -102,7 +106,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // Only advance ordered -> collected; a racing transition means someone
   // else already collected the order, which does not invalidate the upload
   // that just succeeded, so the return value is deliberately ignored here.
-  if (order.status === 'ordered') await markCollected(orderId)
+  // SP5: through the lifecycle query (sample ID + audit on its own transaction). A thrown
+  // error after the upload is logged by code only and does not fail the attachment.
+  if (order.status === 'ordered') {
+    try {
+      await collectLabOrder(orderId, session)
+    } catch (err) {
+      console.error(`[labs] imaging collect failed (code ${pgErrorCode(err) ?? 'unknown'})`)
+    }
+  }
+  // end SP5
 
   await invalidateCache(documentsListCacheKey())
   await invalidateCache(patientDetailCacheKey(order.patientId))

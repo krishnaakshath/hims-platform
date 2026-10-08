@@ -1,5 +1,6 @@
 import {
   ClipboardCheck, Receipt, Stethoscope, ClipboardList, Pill, TestTube2, ShieldCheck,
+  Truck, // SP5
   FileCode2, // SP6
   Landmark, // SP7
 } from 'lucide-react'
@@ -15,6 +16,9 @@ export const STAFF_PORTALS: StaffPortal[] = [
   { key: 'crc', label: 'Coordinator', description: 'Screening, forms, and the workbook', icon: ClipboardList, iconBg: 'bg-sky-500/10', iconText: 'text-sky-700' },
   { key: 'pharmacy', label: 'Pharmacy', description: 'Dispensing and medication stock', icon: Pill, iconBg: 'bg-violet-500/10', iconText: 'text-violet-700' },
   { key: 'labs', label: 'Labs', description: 'Collections, results, and imaging', icon: TestTube2, iconBg: 'bg-rose-500/10', iconText: 'text-rose-700' },
+  // SP5
+  { key: 'collector', label: 'Sample Collector', description: 'Home sample collection route', icon: Truck, iconBg: 'bg-orange-500/10', iconText: 'text-orange-700' },
+  // end SP5
   // SP6
   { key: 'coder', label: 'Clinical Coding', description: 'Coding worklist, codes and queries', icon: FileCode2, iconBg: 'bg-teal-500/10', iconText: 'text-teal-700' },
   // SP7

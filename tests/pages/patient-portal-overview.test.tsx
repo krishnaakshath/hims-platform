@@ -8,6 +8,13 @@ vi.mock('@/lib/patient-session', () => ({ requirePatientSessionOrRedirect: vi.fn
 vi.mock('@/lib/patient-portal-audit', () => ({ logPatientPortalAction: vi.fn(async () => undefined) }))
 vi.mock('@/lib/queries/follow-ups', () => ({ getPortalFollowUps: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/broadcasts', () => ({ listBroadcastsForPatient: vi.fn(async () => []) }))
+// SP5: the "Lab reports" tile counts the patient's current reports.
+vi.mock('@/lib/queries/lab-reports', () => ({
+  listPortalLabReports: vi.fn(async () => [
+    { id: 1, reportNumber: 'LR-2099-000001', releasedAt: new Date('2099-08-01T05:00:00Z'), testSummary: 'HbA1c' },
+    { id: 2, reportNumber: 'LR-2099-000002', releasedAt: new Date('2099-08-02T05:00:00Z'), testSummary: 'TSH' },
+  ]),
+}))
 vi.mock('@/lib/queries/patient-portal', () => ({
   getPatientPortalData: vi.fn(async () => ({
     currentProvider: 'Dr. R. Kunam',
@@ -143,5 +150,17 @@ describe('Patient dashboard next-visit time zone', () => {
       if (prev === undefined) delete process.env.TZ
       else process.env.TZ = prev
     }
+  })
+})
+
+// SP5
+describe('Patient dashboard lab reports tile', () => {
+  it('counts the session patient\'s current reports and links to the page', async () => {
+    const { listPortalLabReports } = await import('@/lib/queries/lab-reports')
+    render(await PatientPortalOverviewPage())
+    expect(listPortalLabReports).toHaveBeenCalledWith('RD-0001')
+    const tile = screen.getByRole('link', { name: /lab reports/i })
+    expect(tile).toHaveAttribute('href', '/patient-portal/lab-reports')
+    expect(tile).toHaveTextContent('2')
   })
 })
