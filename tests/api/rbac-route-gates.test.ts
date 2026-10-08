@@ -26,7 +26,11 @@ import { CHECK_IN_ROLES, DISCHARGE_ROLES, ENCOUNTER_STATUS_ROLES, FOLLOW_UP_BOOK
 import { BILLING_AUTHORITY_ROLES, BILLING_CONFIG_ROLES, CASH_DESK_ROLES, CHARGE_CAPTURE_ROLES } from '@/lib/role-policy' // SP4
 import { gateIt } from '../pages/page-gates-harness'
 // SP7
-import { PAYER_MASTER_ROLES, RCM_SETTINGS_ROLES } from '@/lib/role-policy'
+import { PAYER_MASTER_ROLES, RCM_SETTINGS_ROLES, POLICY_READ_ROLES, POLICY_WRITE_ROLES } from '@/lib/role-policy'
+import { POST as postRcmPolicy } from '@/app/api/rcm/policies/route'
+import { PATCH as patchRcmPolicy } from '@/app/api/rcm/policies/[id]/route'
+import { POST as postRcmPolicyCard } from '@/app/api/rcm/policies/[id]/card/route'
+import { GET as getRcmPolicyCard } from '@/app/api/rcm/policies/[id]/card/[side]/route'
 import { POST as postRcmPayer } from '@/app/api/rcm/payers/route'
 import { PUT as putRcmPayer } from '@/app/api/rcm/payers/[id]/route'
 import { PUT as putRcmPayerContacts } from '@/app/api/rcm/payers/[id]/contacts/route'
@@ -720,6 +724,11 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PUT /api/rcm/payers/[id]/networks', call: () => settle(() => putRcmPayerNetworks(send('PUT', `/api/rcm/payers/${BOGUS_ID}/networks`), ctx({ id: BOGUS_ID }))), allowed: [...PAYER_MASTER_ROLES] },
   { name: 'PUT /api/rcm/payers/[id]/requirements', call: () => settle(() => putRcmPayerRequirements(send('PUT', `/api/rcm/payers/${BOGUS_ID}/requirements`), ctx({ id: BOGUS_ID }))), allowed: [...PAYER_MASTER_ROLES] },
   { name: 'PUT /api/rcm/settings', call: () => settle(() => putRcmSettings(send('PUT', '/api/rcm/settings'))), allowed: [...RCM_SETTINGS_ROLES] },
+  // SP7 patient policies (POLICY_WRITE_ROLES) and card images (POLICY_READ_ROLES): `{}` / a non-multipart body fails before any query.
+  { name: 'POST /api/rcm/policies', call: () => settle(() => postRcmPolicy(send('POST', '/api/rcm/policies'))), allowed: [...POLICY_WRITE_ROLES] },
+  { name: 'PATCH /api/rcm/policies/[id]', call: () => settle(() => patchRcmPolicy(send('PATCH', `/api/rcm/policies/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...POLICY_WRITE_ROLES] },
+  { name: 'POST /api/rcm/policies/[id]/card', call: () => settle(() => postRcmPolicyCard(send('POST', `/api/rcm/policies/${BOGUS_ID}/card`), ctx({ id: BOGUS_ID }))), allowed: [...POLICY_WRITE_ROLES] },
+  { name: 'GET /api/rcm/policies/[id]/card/[side]', call: () => settle(() => getRcmPolicyCard(get(`/api/rcm/policies/${BOGUS_ID}/card/front`), ctx({ id: BOGUS_ID, side: 'front' }))), allowed: [...POLICY_READ_ROLES] },
   // end SP7
 ]
 
@@ -809,6 +818,10 @@ const SP7_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PUT /api/rcm/payers/[id]/networks', call: () => putRcmPayerNetworks(send('PUT', `/api/rcm/payers/${BOGUS_ID}/networks`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PAYER_MASTER_ROLES },
   { name: 'PUT /api/rcm/payers/[id]/requirements', call: () => putRcmPayerRequirements(send('PUT', `/api/rcm/payers/${BOGUS_ID}/requirements`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PAYER_MASTER_ROLES },
   { name: 'PUT /api/rcm/settings', call: () => putRcmSettings(send('PUT', '/api/rcm/settings', NOT_JSON)), allowed: RCM_SETTINGS_ROLES },
+  { name: 'POST /api/rcm/policies', call: () => postRcmPolicy(send('POST', '/api/rcm/policies', NOT_JSON)), allowed: POLICY_WRITE_ROLES },
+  { name: 'PATCH /api/rcm/policies/[id]', call: () => patchRcmPolicy(send('PATCH', `/api/rcm/policies/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: POLICY_WRITE_ROLES },
+  // Multipart route: a non-multipart body is the 400 an allowed role gets, after the gate.
+  { name: 'POST /api/rcm/policies/[id]/card', call: () => postRcmPolicyCard(send('POST', `/api/rcm/policies/${BOGUS_ID}/card`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: POLICY_WRITE_ROLES },
 ]
 // end SP7
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...SP7_WRITE_GATES])('$name (deny before parse)', (c) => {
