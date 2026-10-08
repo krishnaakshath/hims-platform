@@ -32,8 +32,9 @@ describe('/lab-labels', () => {
     expect(screen.getByText('L261008-0042-9')).toBeInTheDocument()
     expect(screen.getByText('Glucose, fasting')).toBeInTheDocument()
     expect(screen.getByText('Fluoride (grey cap)')).toBeInTheDocument()
-    expect(screen.getByText(/Asha Rao/)).toBeInTheDocument()
-    expect(screen.getByText(/UH-000042/)).toBeInTheDocument()
+    // Fix wave: a tube label carries initials + UHID only, never the full name.
+    expect(screen.getByText('A.R. · UH-000042')).toBeInTheDocument()
+    expect(screen.queryByText(/Asha Rao/)).toBeNull()
     expect(container.innerHTML).toContain('@media print')
     expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({ role: 'labs' }), 'printed lab sample labels', null, 'orders=1')
   })
@@ -68,5 +69,15 @@ describe('/lab-labels', () => {
     await expect(Page(props('1'))).rejects.toThrow('NEXT_REDIRECT')
     expect(redirect).toHaveBeenCalledWith('/')
     expect(listLabelsForOrders).not.toHaveBeenCalled()
+  })
+})
+
+describe('labelInitials', () => {
+  it('keeps the first letter of each name part, upper-cased, and handles Indian scripts and blanks', async () => {
+    const { labelInitials } = await import('@/components/labs/SampleLabelSheet')
+    expect(labelInitials('Asha Devi Rao')).toBe('A.D.R.')
+    expect(labelInitials('  ravi   kumar ')).toBe('R.K.')
+    expect(labelInitials('राम कुमार')).toBe('र.क.')
+    expect(labelInitials('   ')).toBe('')
   })
 })

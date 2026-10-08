@@ -1,10 +1,16 @@
 // SP5: printable sample labels (server component). The QR encodes the CANONICAL sample ID and is
 // drawn as <svg> <rect>s from the module matrix -- no generated markup string, no innerHTML.
-// A label carries only what the tube needs: sample ID, test, container, patient name and UHID.
+// A label carries only what the tube needs: sample ID, test, container, patient initials and UHID
+// (a tube travels through shared hands, so never the full name).
 import { qrModules } from '@/lib/labs/qr'
 import { displaySampleId } from '@/lib/labs/sample-id'
 import { SAMPLE_CONTAINER_LABEL, type SampleContainer } from '@/lib/labs/catalog'
 import type { SampleLabelRow } from '@/lib/queries/lab-orders'
+
+/** "Asha Devi Rao" -> "A.D.R.": the first character of each name part (any script). */
+export function labelInitials(name: string): string {
+  return name.trim().split(/\s+/).filter(Boolean).map((part) => `${Array.from(part)[0].toUpperCase()}.`).join('')
+}
 
 const QUIET_ZONE = 2
 
@@ -65,7 +71,7 @@ export function SampleLabelSheet({ labels }: { labels: SampleLabelRow[] }) {
                   : <p className="font-semibold">No sample ID yet</p>}
                 <p>{l.testName}</p>
                 {container && <p className="text-xs">{container}</p>}
-                <p className="text-xs">{l.patientName}{l.uhid ? ` · ${l.uhid}` : ''}</p>
+                <p className="text-xs">{[labelInitials(l.patientName), l.uhid].filter(Boolean).join(' · ')}</p>
               </div>
             </div>
           )
