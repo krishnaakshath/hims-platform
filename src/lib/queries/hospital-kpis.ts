@@ -248,6 +248,15 @@ export async function loadDoctorWorkload({ providerId, authorName, today }: { pr
   }
 }
 
+// ---------- Patient labels ----------
+
+/** Name and UHID for a set of patient ids (dashboard lists): never phone, address or identity numbers. */
+export async function listPatientLabels(ids: string[]): Promise<{ id: string; name: string; uhid: string | null }[]> {
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) return []
+  return getDb().select({ id: patients.id, name: patients.name, uhid: patients.uhid }).from(patients).where(inArray(patients.id, unique))
+}
+
 // ---------- Claims (admin view of the RCM desk) ----------
 
 export interface ClaimAgeingKpi { outstandingPaise: number; aging: { label: string; paise: number }[]; preauthsOverdue: number; queried: number }
