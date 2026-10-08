@@ -52,6 +52,12 @@ async function readIdentity(db: Executor, anonId: string, lock: boolean): Promis
   }
 }
 
+// SP8: the identity snapshot read inside a caller's transaction with the patient row locked
+// (applyVerifiedAbha), so its audit diff cannot race a concurrent edit.
+export async function readIdentityForUpdate(tx: Tx, anonId: string): Promise<{ dob: string; snapshot: IdentitySnapshot } | null> {
+  return readIdentity(tx, anonId, true)
+}
+
 export async function getIdentitySnapshot(anonId: string): Promise<{ dob: string; snapshot: IdentitySnapshot } | null> {
   return readIdentity(getDb(), anonId, false)
 }

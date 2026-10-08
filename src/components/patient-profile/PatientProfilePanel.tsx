@@ -6,6 +6,8 @@ import { AadhaarPanel } from './AadhaarPanel'
 import { EditPatientProfileModal } from './EditPatientProfileModal'
 import { NotificationPreferenceToggle } from './NotificationPreferenceToggle' // SP5
 import { formatAbhaNumber } from '@/lib/india/abha'
+import { useRouter } from 'next/navigation' // SP8
+import { AbhaVerifyButton, SANDBOX_MOCK_LABEL } from '@/components/abdm/AbhaVerifyDialog' // SP8
 import {
   stateName, GENDERS, MARITAL_STATUSES, BLOOD_GROUPS, LANGUAGES, ABHA_UNAVAILABLE_REASONS,
 } from '@/lib/india/reference'
@@ -49,6 +51,9 @@ export interface ProfileView {
   mlcNumber: string | null
   contacts: ProfileContact[]
   notificationOptOut?: boolean // SP5
+  // SP8: verified with ABDM (or a Scan & Share); ISO string or null.
+  abhaVerifiedAt?: string | null
+  abhaVerificationSource?: 'abdm' | 'abdm_sandbox_mock' | null
 }
 
 const KIND_LABELS: Record<ProfileContact['kind'], string> = { next_of_kin: 'Next of kin', guardian: 'Guardian', emergency: 'Emergency contact' }
@@ -74,7 +79,7 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar, canUnflagMlc = false, canEditNotifications = false }: {
+export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar, canUnflagMlc = false, canEditNotifications = false, canVerifyAbha = false }: {
   patient: ProfileView
   aadhaar: AadhaarView
   canEdit: boolean
@@ -82,8 +87,10 @@ export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar
   canEditNotifications?: boolean // SP5: NOTIFICATION_PREFERENCE_ROLES
   // Wave C P2-11: MLC_UNFLAG_ROLES -- may clear an MLC flag already on file.
   canUnflagMlc?: boolean
+  canVerifyAbha?: boolean // SP8: ABHA_LINK_ROLES
 }) {
   const [editing, setEditing] = useState(false)
+  const router = useRouter() // SP8
   const abhaNumber = patient.abhaNumber && /^\d{14}$/.test(patient.abhaNumber) ? formatAbhaNumber(patient.abhaNumber) : patient.abhaNumber
   const hasAbha = Boolean(abhaNumber || patient.abhaAddress)
   const state = patient.stateCode ? stateName(patient.stateCode) ?? patient.stateCode : null
@@ -134,6 +141,20 @@ export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar
           <Item label="ABHA address" value={patient.abhaAddress} />
           {!hasAbha && patient.abhaUnavailableReason && <Item label="ABHA" value={`Not available — ${labelOf(ABHA_UNAVAILABLE_REASONS, patient.abhaUnavailableReason)}`} />}
         </dl>
+        {/* SP8: recorded (typed) vs verified with ABDM (ruling 12). */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {patient.abhaVerifiedAt ? (
+            <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">Verified with ABDM</span>
+          ) : hasAbha ? (
+            <span className="text-xs text-muted-foreground">Recorded, not verified with ABDM</span>
+          ) : null}
+          {patient.abhaVerifiedAt && patient.abhaVerificationSource === 'abdm_sandbox_mock' && (
+            <span className="text-xs font-semibold text-amber-800">{SANDBOX_MOCK_LABEL}</span>
+          )}
+          {canVerifyAbha && !patient.abhaVerifiedAt && (
+            <AbhaVerifyButton patientId={patient.id} mode="profile" label="Verify with ABDM" onVerified={() => router.refresh()} />
+          )}
+        </div>
         <AadhaarPanel anonId={patient.id} view={aadhaar} canWrite={canWriteAadhaar} />
       </Group>
 

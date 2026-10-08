@@ -77,3 +77,6 @@ export const ABDM_ERROR_COPY = {
   abha_conflict: 'This ABHA is already linked to another patient',
   account_choice_required: 'Choose which ABHA to link',
 } as const
+
+/** The hospital's own consent for verifying an existing ABHA (not an NHA consent code). */
+export const VERIFICATION_CONSENT = { code: 'hospital-abha-verification', version: '1' } as const

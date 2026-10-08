@@ -64,6 +64,17 @@ import { PUT as putRcmPayerNetworks } from '@/app/api/rcm/payers/[id]/networks/r
 import { PUT as putRcmPayerRequirements } from '@/app/api/rcm/payers/[id]/requirements/route'
 import { PUT as putRcmSettings } from '@/app/api/rcm/settings/route'
 // end SP7
+// SP8
+import { ABHA_LINK_ROLES } from '@/lib/role-policy'
+import { GET as getAbhaConsent, POST as postAbhaConsent } from '@/app/api/abdm/abha/consent/route'
+import { POST as postAbhaEnrolOtp } from '@/app/api/abdm/abha/enrol/otp/route'
+import { POST as postAbhaEnrolVerify } from '@/app/api/abdm/abha/enrol/verify/route'
+import { GET as getAbhaEnrolAddress, POST as postAbhaEnrolAddress } from '@/app/api/abdm/abha/enrol/address/route'
+import { POST as postAbhaLoginOtp } from '@/app/api/abdm/abha/login/otp/route'
+import { POST as postAbhaLoginVerify } from '@/app/api/abdm/abha/login/verify/route'
+import { POST as postAbhaLoginAccount } from '@/app/api/abdm/abha/login/account/route'
+import { POST as postAbhaLink } from '@/app/api/patients/[anonId]/abha/link/route'
+// end SP8
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
 // + importActual pattern from tests/api/patients.test.ts:27-29, except the
@@ -83,6 +94,11 @@ vi.mock('@/lib/auth', async () => {
 // No audit rows from this harness: audit_log is an append-only compliance
 // record on the shared DB, and these are synthetic probe calls.
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+// SP8: the ABHA routes rate-limit (Redis) right after the gate; this harness only probes the gate.
+vi.mock('@/lib/rate-limit', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/rate-limit')>('@/lib/rate-limit')
+  return { ...actual, checkAbhaRateLimit: vi.fn(async () => ({ allowed: true })) }
+})
 
 export { ALL_ROLES }
 // Named for the allowlist it's computed against, not just "denied" -- Tasks
@@ -861,6 +877,18 @@ export const API_GATES: ApiGateCase[] = [
   // SP7 claim register CSV (RCM_ROLES): no range is a 400 before any query.
   { name: 'GET /api/rcm/reports/claims-csv', call: () => settle(() => getRcmClaimRegister(get('/api/rcm/reports/claims-csv'))), allowed: [...RCM_ROLES] },
   // end SP7
+  // SP8 ABHA create/verify/link (ABHA_LINK_ROLES): `{}` fails validation (400) and an unconfigured ABDM is a 503, both after the gate.
+  { name: 'GET /api/abdm/abha/consent', call: () => settle(() => getAbhaConsent()), allowed: [...ABHA_LINK_ROLES] },
+  { name: 'POST /api/abdm/abha/consent', call: () => settle(() => postAbhaConsent(send('POST', '/api/abdm/abha/consent'))), allowed: [...ABHA_LINK_ROLES] },
+  { name: 'POST /api/abdm/abha/enrol/otp', call: () => settle(() => postAbhaEnrolOtp(send('POST', '/api/abdm/abha/enrol/otp'))), allowed: [...ABHA_LINK_ROLES] },
+  { name: 'POST /api/abdm/abha/enrol/verify', call: () => settle(() => postAbhaEnrolVerify(send('POST', '/api/abdm/abha/enrol/verify'))), allowed: [...ABHA_LINK_ROLES] },
+  { name: 'GET /api/abdm/abha/enrol/address', call: () => settle(() => getAbhaEnrolAddress(get('/api/abdm/abha/enrol/address'))), allowed: [...ABHA_LINK_ROLES] },
+  { name: 'POST /api/abdm/abha/enrol/address', call: () => settle(() => postAbhaEnrolAddress(send('POST', '/api/abdm/abha/enrol/address'))), allowed: [...ABHA_LINK_ROLES] },
+  { name: 'POST /api/abdm/abha/login/otp', call: () => settle(() => postAbhaLoginOtp(send('POST', '/api/abdm/abha/login/otp'))), allowed: [...ABHA_LINK_ROLES] },
+  { name: 'POST /api/abdm/abha/login/verify', call: () => settle(() => postAbhaLoginVerify(send('POST', '/api/abdm/abha/login/verify'))), allowed: [...ABHA_LINK_ROLES] },
+  { name: 'POST /api/abdm/abha/login/account', call: () => settle(() => postAbhaLoginAccount(send('POST', '/api/abdm/abha/login/account'))), allowed: [...ABHA_LINK_ROLES] },
+  { name: 'POST /api/patients/[anonId]/abha/link', call: () => settle(() => postAbhaLink(send('POST', `/api/patients/${BOGUS_PATIENT}/abha/link`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...ABHA_LINK_ROLES] },
+  // end SP8
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -996,7 +1024,19 @@ const SP7_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/rcm/write-offs/[id]/decision', call: () => postRcmWriteOffDecision(send('POST', `/api/rcm/write-offs/${BOGUS_ID}/decision`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: WRITE_OFF_APPROVE_ROLES },
 ]
 // end SP7
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES])('$name (deny before parse)', (c) => {
+// SP8 writes: the same deny-before-parse contract.
+const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'POST /api/abdm/abha/consent', call: () => postAbhaConsent(send('POST', '/api/abdm/abha/consent', NOT_JSON)), allowed: ABHA_LINK_ROLES },
+  { name: 'POST /api/abdm/abha/enrol/otp', call: () => postAbhaEnrolOtp(send('POST', '/api/abdm/abha/enrol/otp', NOT_JSON)), allowed: ABHA_LINK_ROLES },
+  { name: 'POST /api/abdm/abha/enrol/verify', call: () => postAbhaEnrolVerify(send('POST', '/api/abdm/abha/enrol/verify', NOT_JSON)), allowed: ABHA_LINK_ROLES },
+  { name: 'POST /api/abdm/abha/enrol/address', call: () => postAbhaEnrolAddress(send('POST', '/api/abdm/abha/enrol/address', NOT_JSON)), allowed: ABHA_LINK_ROLES },
+  { name: 'POST /api/abdm/abha/login/otp', call: () => postAbhaLoginOtp(send('POST', '/api/abdm/abha/login/otp', NOT_JSON)), allowed: ABHA_LINK_ROLES },
+  { name: 'POST /api/abdm/abha/login/verify', call: () => postAbhaLoginVerify(send('POST', '/api/abdm/abha/login/verify', NOT_JSON)), allowed: ABHA_LINK_ROLES },
+  { name: 'POST /api/abdm/abha/login/account', call: () => postAbhaLoginAccount(send('POST', '/api/abdm/abha/login/account', NOT_JSON)), allowed: ABHA_LINK_ROLES },
+  { name: 'POST /api/patients/[anonId]/abha/link', call: () => postAbhaLink(send('POST', `/api/patients/${BOGUS_PATIENT}/abha/link`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: ABHA_LINK_ROLES },
+]
+// end SP8
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role

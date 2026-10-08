@@ -369,3 +369,26 @@ export async function __resetBookingRequestGlobalBucketForTests(): Promise<void>
   }
   await getBookingRequestGlobalLimiter().resetUsedTokens('global')
 }
+
+// SP8: ABHA create/verify calls go to ABDM and send OTPs to patients, so each
+// staff member gets 10 calls a minute and the whole hospital 60 per ten
+// minutes (both buckets must allow). Fails closed like every limiter here: no
+// Redis means getRedis() throws ServiceNotConfiguredError.
+let _abhaStaffLimiter: Ratelimit | null = null
+let _abhaGlobalLimiter: Ratelimit | null = null
+function getAbhaLimiters(): [Ratelimit, Ratelimit] {
+  if (!_abhaStaffLimiter) {
+    _abhaStaffLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(10, '60 s'), prefix: 'ratelimit:abha-staff' })
+  }
+  if (!_abhaGlobalLimiter) {
+    _abhaGlobalLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(60, '600 s'), prefix: 'ratelimit:abha-global' })
+  }
+  return [_abhaStaffLimiter, _abhaGlobalLimiter]
+}
+
+export async function checkAbhaRateLimit(staffName: string): Promise<{ allowed: boolean }> {
+  const [staff, global] = getAbhaLimiters()
+  const [a, b] = await Promise.all([staff.limit(staffName.toLowerCase()), global.limit('all')])
+  return { allowed: a.success && b.success }
+}
+// end SP8

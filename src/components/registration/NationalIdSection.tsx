@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { Field, INPUT_CLASS, SectionHeading } from './Field'
 import { pickError, type SectionProps } from './registration-form-state'
+import { AbhaVerifyButton } from '@/components/abdm/AbhaVerifyDialog' // SP8
 import {
   KYC_DOC_TYPES, KYC_DOC_LABELS, AADHAAR_DECLINE_REASONS, ABHA_UNAVAILABLE_REASONS,
 } from '@/lib/india/reference'
@@ -90,11 +91,20 @@ export function NationalIdSection({ form, update, errors }: SectionProps) {
       {!unavailable ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="ABHA number" hint={ABDM_HINT} error={pickError(errors, 'abha.abhaNumber', 'abha')}>
-            {(p) => <input {...p} inputMode="numeric" autoComplete="off" placeholder="14-digit ABHA number" value={form.abhaNumber} onChange={(e) => update('abhaNumber', e.target.value.replace(/[^\d\s-]/g, '').slice(0, 17))} className={INPUT_CLASS} />}
+            {(p) => <input {...p} inputMode="numeric" autoComplete="off" placeholder="14-digit ABHA number" value={form.abhaNumber} onChange={(e) => { update('abhaNumber', e.target.value.replace(/[^\d\s-]/g, '').slice(0, 17)); if (form.abhaFlowId) update('abhaFlowId', '') }} className={INPUT_CLASS} />}
           </Field>
           <Field label="ABHA address" hint={ABDM_HINT} error={errors['abha.abhaAddress']}>
             {(p) => <input {...p} autoComplete="off" autoCapitalize="none" placeholder="name@abdm" value={form.abhaAddress} onChange={(e) => update('abhaAddress', e.target.value)} className={INPUT_CLASS} />}
           </Field>
+          {/* SP8: create or verify through ABDM; fills the fields and remembers the flow. */}
+          <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+            <AbhaVerifyButton patientId={null} mode="register" label="Create or verify with ABDM" onVerified={(v) => {
+              update('abhaNumber', v.abhaNumber)
+              update('abhaAddress', v.abhaAddress ?? '')
+              update('abhaFlowId', v.flowId)
+            }} />
+            {form.abhaFlowId && <span className="text-xs font-semibold text-emerald-800">Verified with ABDM</span>}
+          </div>
         </div>
       ) : (
         <>

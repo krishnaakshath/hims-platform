@@ -42,6 +42,8 @@ export interface RegistrationFormState {
   abhaAddress: string
   abhaUnavailableReason: string
   abhaUnavailableNote: string
+  // SP8: the ABDM flow that verified abhaNumber ('' when typed by hand)
+  abhaFlowId: string
   kycDocType: string
   kycDocNumber: string
   isMlc: boolean
@@ -62,7 +64,7 @@ export const EMPTY_REGISTRATION_FORM: RegistrationFormState = {
   religion: '', preferredLanguage: '', email: '', phone: '',
   addressLine1: '', addressLine2: '', city: '', district: '', stateCode: '', pinCode: '',
   aadhaarMode: 'provided', aadhaarNumber: '', aadhaarConsent: false, aadhaarDeclineReason: '', aadhaarDeclineNote: '',
-  abhaMode: 'provided', abhaNumber: '', abhaAddress: '', abhaUnavailableReason: '', abhaUnavailableNote: '',
+  abhaMode: 'provided', abhaNumber: '', abhaAddress: '', abhaUnavailableReason: '', abhaUnavailableNote: '', abhaFlowId: '',
   kycDocType: '', kycDocNumber: '', isMlc: false, mlcNumber: '', contacts: [],
   currentProvider: '', primaryPayerId: '', primaryMemberId: '', primaryGroupNumber: '', primaryPlanType: '',
   primarySubscriberName: '', primarySubscriberRelationship: '',
@@ -85,7 +87,7 @@ export function toRegistrationPayload(form: RegistrationFormState): unknown {
     ? { status: 'provided', number: form.aadhaarNumber, consent: form.aadhaarConsent }
     : withoutUndefined({ status: 'declined', reason: form.aadhaarDeclineReason, note: opt(form.aadhaarDeclineNote) })
   const abha = form.abhaMode === 'provided'
-    ? withoutUndefined({ status: 'provided', abhaNumber: opt(form.abhaNumber), abhaAddress: opt(form.abhaAddress) })
+    ? withoutUndefined({ status: 'provided', abhaNumber: opt(form.abhaNumber), abhaAddress: opt(form.abhaAddress), flowId: opt(form.abhaFlowId) })
     : withoutUndefined({ status: 'unavailable', reason: form.abhaUnavailableReason, note: opt(form.abhaUnavailableNote) })
   const hasKyc = form.kycDocType !== '' || form.kycDocNumber.trim() !== ''
   const hasPayer = form.primaryPayerId !== ''
