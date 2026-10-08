@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { patientToFhir } from '@/lib/fhir/patient'
-import { uhidSystem, ABHA_NUMBER_SYSTEM, ABHA_ADDRESS_SYSTEM } from '@/lib/fhir/identifier-systems'
+import { uhidSystem, ABHA_NUMBER_SYSTEM } from '@/lib/fhir/identifier-systems'
 import { makePatientRow } from '../../fixtures/patient-row'
 
 describe('patientToFhir', () => {
@@ -21,7 +21,8 @@ describe('patientToFhir', () => {
     expect(f.identifier.map((i) => i.type?.text)).toEqual([undefined, 'UHID', 'ABHA Number', 'ABHA Address'])
     expect(f.identifier[1]).toEqual({ system: uhidSystem(), type: { text: 'UHID' }, value: 'UH000000427' })
     expect(f.identifier[2]).toEqual({ system: ABHA_NUMBER_SYSTEM, type: { text: 'ABHA Number' }, value: '12-3456-7890-1234' })
-    expect(f.identifier[3]).toEqual({ system: ABHA_ADDRESS_SYSTEM, type: { text: 'ABHA Address' }, value: 'ravi.kumar@abdm' })
+    expect(ABHA_NUMBER_SYSTEM).toBe('https://healthid.ndhm.gov.in')
+    expect(f.identifier[3]).toEqual({ type: { text: 'ABHA Address' }, value: 'ravi.kumar@abdm' })
   })
 
   it('emits only the identifiers that are present', () => {
