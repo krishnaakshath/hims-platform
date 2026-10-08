@@ -39,7 +39,8 @@ export function SubmitClaimDialog({ claimId, mode, ready, queryId, nhcxLabel }: 
         {mode === 'respond_query' && <Field label="Responded on"><input type="date" className={inputClass} value={respondedOn} onChange={(e) => setRespondedOn(e.target.value)} /></Field>}
         <div className="sm:col-span-2"><Field label={mode === 'submit' ? 'Cover note (optional)' : mode === 'respond_query' ? 'Reply' : 'Grounds'}><textarea className={inputClass} rows={3} value={text} onChange={(e) => setText(e.target.value)} /></Field></div>
         <div className="sm:col-span-2"><button type="submit" className={buttonClass} disabled={action.busy || !ready}>{action.busy ? 'Preparing copies…' : 'Submit version'}</button>
-          {!ready && <span className="ml-2 text-xs text-muted-foreground">Clear the blocking items first.</span>}</div>
+          {!ready && <span className="ml-2 text-xs text-muted-foreground">Clear the blocking items first.</span>}
+          <a href={`/api/rcm/claims/${claimId}/preview`} target="_blank" rel="noreferrer" className="ml-3 text-xs text-primary hover:underline">Preview the copy</a></div>
       </form>
       <FormError error={action.error} items={action.items} />
     </Panel>
