@@ -50,6 +50,8 @@ export async function purgeRcmFixtures(patientIds: string[], payerIds: number[])
       await tx.delete(payerContacts).where(inArray(payerContacts.payerId, payerIds))
       await tx.delete(payerNetworks).where(sql`${inArray(payerNetworks.insurerPayerId, payerIds)} OR ${inArray(payerNetworks.tpaPayerId, payerIds)}`)
       await tx.delete(payerProfiles).where(inArray(payerProfiles.payerId, payerIds))
+      // Policies mirror their billing payer into patients.primary_payer_id (ruling 6).
+      await tx.update(patients).set({ primaryPayerId: null }).where(inArray(patients.primaryPayerId, payerIds))
       await tx.delete(payers).where(inArray(payers.id, payerIds))
     }
   })
