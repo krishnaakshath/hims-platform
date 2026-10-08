@@ -410,10 +410,9 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     await db.update(encounters).set({ status, statusChangedAt: at, statusChangedByName: byName, ...(status === 'completed' ? { completedAt: at } : {}) }).where(eq(encounters.id, encounterId))
   }
 
-  async function capture(ctx: { encounterId: number } | { admissionId: number }, serviceCode: string, serviceDate: string, at: Date, opts: { billTo?: 'patient' | 'payer'; quantity?: number; preAuth?: string } = {}) {
+  async function capture(ctx: { encounterId: number } | { admissionId: number }, serviceCode: string, serviceDate: string, at: Date, opts: { billTo?: 'patient' | 'payer'; quantity?: number } = {}) {
     const r = must(await captureChargeLine({
       context: ctx, serviceId: svc(serviceCode), quantity: opts.quantity ?? 1, serviceDate, billTo: opts.billTo ?? 'patient',
-      ...(opts.preAuth ? { preAuthReference: opts.preAuth } : {}),
     }, sessions.billing, at), `capture ${serviceCode}`)
     return r.line.id
   }
@@ -455,11 +454,12 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     // Charges: consultation (to the payer when the patient has one), plus an investigation for some.
     const hasPayer = v.patientId in payerFor
     const billTo = hasPayer ? 'payer' as const : 'patient' as const
-    const preAuth = hasPayer ? `PA-DEMO-${String(encounterId).padStart(5, '0')}` : undefined
+    // No pre-auth reference: none of these services needs one, and a reference that does not
+    // match a real pre-authorisation is blocked at capture (preauth_invalid).
     const billAt = plusMinutes(start, 40)
-    const lines = [await capture({ encounterId }, CONSULT_BY_DEPT[v.doctor.departmentCode], date, billAt, { billTo, preAuth })]
-    if (v.i % 3 === 0) lines.push(await capture({ encounterId }, 'LAB_CBC', date, billAt, { billTo, preAuth }))
-    if (v.doctor.departmentCode === 'CARDIO') lines.push(await capture({ encounterId }, 'PROC_ECG', date, billAt, { billTo, preAuth }))
+    const lines = [await capture({ encounterId }, CONSULT_BY_DEPT[v.doctor.departmentCode], date, billAt, { billTo })]
+    if (v.i % 3 === 0) lines.push(await capture({ encounterId }, 'LAB_CBC', date, billAt, { billTo }))
+    if (v.doctor.departmentCode === 'CARDIO') lines.push(await capture({ encounterId }, 'PROC_ECG', date, billAt, { billTo }))
     if (v.i % 7 === 3) lines.push(await capture({ encounterId }, 'MED_CERT', date, billAt, { billTo }))
 
     // Billing state by visit: unbilled, draft, finalised & paid, finalised & unpaid, cancelled.
@@ -568,12 +568,11 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
       must(await recordPayment({ patientId: s.patientId, kind: 'advance', admissionId, mode: 'cash', amountPaise: 15_000_00 }, sessions.billing, plusMinutes(at, 15)), 'advance')
     }
     const billTo = s.payer ? 'payer' as const : 'patient' as const
-    const preAuth = s.payer ? `PA-DEMO-IPD-${admissionId}` : undefined
     const consult = CONSULT_BY_DEPT[DOCTOR_ROSTER.find((d) => d.name === s.doctor)!.departmentCode]
-    await capture({ admissionId }, consult, day(s.offset), plusMinutes(at, 30), { billTo, preAuth })
-    await capture({ admissionId }, 'LAB_CBC', day(s.offset), plusMinutes(at, 31), { billTo, preAuth })
+    await capture({ admissionId }, consult, day(s.offset), plusMinutes(at, 30), { billTo })
+    await capture({ admissionId }, 'LAB_CBC', day(s.offset), plusMinutes(at, 31), { billTo })
     if (s.patientId === pid(12)) await capture({ admissionId }, 'CONSUM_IV_SET', day(s.offset), plusMinutes(at, 32), { quantity: 2 })
-    if (s.patientId === pid(15)) await capture({ admissionId }, 'IMG_ECHO', day(s.offset), plusMinutes(at, 33), { billTo, preAuth })
+    if (s.patientId === pid(15)) await capture({ admissionId }, 'IMG_ECHO', day(s.offset), plusMinutes(at, 33), { billTo })
     if (s.patientId === pid(49)) await capture({ admissionId }, 'PROC_PLASTER', day(s.offset), plusMinutes(at, 34))
   }
 
