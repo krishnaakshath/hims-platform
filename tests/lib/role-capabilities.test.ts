@@ -4,7 +4,7 @@ import type { Role } from '@/lib/auth'
 
 describe('ROLE_CAPABILITIES', () => {
   it('has an entry for exactly the real roles, no more, no less', () => {
-    const expectedRoles: Role[] = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder']
+    const expectedRoles: Role[] = ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] // SP5: + collector
     expect(new Set(Object.keys(ROLE_CAPABILITIES))).toEqual(new Set(expectedRoles))
   })
 
@@ -126,4 +126,22 @@ describe('SP6 coding capabilities', () => {
     expect(ROLE_CAPABILITIES.coder.label).toBe('Clinical Coder')
   })
 })
+
+// SP5
+describe('SP5 lab and home-collection capabilities', () => {
+  const has = (role: Role, re: RegExp) => ROLE_CAPABILITIES[role].bullets.some((b) => re.test(b))
+  it('states the SP5 capabilities the server grants', () => {
+    expect(has('collector', /sample ID/i)).toBe(true); expect(has('labs', /release lab reports/i)).toBe(true)
+    expect(has('pi', /verify lab results/i)).toBe(true); expect(has('frontdesk', /home sample collection/i)).toBe(true)
+    expect(has('labs', /assign collectors/i)).toBe(true); expect(has('pi', /follow-up visit once the report is released/i)).toBe(true)
+    for (const re of [/assign collectors/i, /release lab reports/i, /order several lab tests/i, /verify lab results/i, /service area, collection windows/i]) {
+      expect(has('admin', re)).toBe(true)
+    }
+    expect(ROLE_CAPABILITIES.collector.label).toBe('Home Sample Collector')
+    expect(has('collector', /assigned home-collection visits/i)).toBe(true)
+    // the collector sees no results, charts or prices
+    expect(has('collector', /result|chart|price|tariff/i)).toBe(false)
+  })
+})
+// end SP5
 // end SP6

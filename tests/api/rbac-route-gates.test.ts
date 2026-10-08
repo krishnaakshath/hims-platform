@@ -422,6 +422,37 @@ import { POST as cancelInvoiceRoute } from '@/app/api/billing/invoices/[id]/canc
 import { POST as postPaymentRoute } from '@/app/api/billing/payments/route'
 import { POST as postRefundRoute } from '@/app/api/billing/refunds/route'
 // end SP4
+// SP5
+import { LAB_SETUP_ROLES, NOTIFICATION_PREFERENCE_ROLES } from '@/lib/role-policy'
+import { LAB_ORDER_ROLES } from '@/lib/role-policy'
+import { POST as postLabRequisition } from '@/app/api/patients/[anonId]/lab-orders/route'
+import { POST as postLabServiceArea } from '@/app/api/settings/lab-service-area/route'
+import { PATCH as patchLabServiceArea } from '@/app/api/settings/lab-service-area/[id]/route'
+import { POST as postCollectionWindow } from '@/app/api/settings/home-collection-windows/route'
+import { PATCH as patchCollectionWindow } from '@/app/api/settings/home-collection-windows/[id]/route'
+import { PATCH as patchLabTestSetup } from '@/app/api/lab-tests/[id]/route'
+import { PUT as putNotificationPreference } from '@/app/api/patients/[anonId]/notification-preference/route'
+import { LAB_COLLECT_ROLES, LAB_RECEIVE_ROLES, LAB_RESULT_ENTRY_ROLES, LAB_VERIFY_ROLES, LAB_WORKLIST_ROLES } from '@/lib/role-policy'
+import { GET as listLabWorklist } from '@/app/api/lab-orders/route'
+import { POST as postLabCollect } from '@/app/api/lab-orders/[id]/collect/route'
+import { POST as postLabReceive } from '@/app/api/lab-orders/receive/route'
+import { POST as postLabResult } from '@/app/api/lab-orders/[id]/result/route'
+import { POST as postLabVerify } from '@/app/api/lab-orders/[id]/verify/route'
+import { POST as postLabCancel } from '@/app/api/lab-orders/[id]/cancel/route'
+import { POST as postLabImaging } from '@/app/api/lab-orders/[id]/imaging/route'
+import { HOME_COLLECTION_BOOKING_ROLES, HOME_COLLECTION_CANCEL_ROLES, HOME_COLLECTION_DISPATCH_ROLES } from '@/lib/role-policy'
+import { POST as postHomeCollection } from '@/app/api/home-collections/route'
+import { GET as getHomeCollectionContextRoute } from '@/app/api/home-collections/context/route'
+import { GET as getHomeCollectionAvailability } from '@/app/api/home-collections/availability/route'
+import { PATCH as patchHomeCollection } from '@/app/api/home-collections/[id]/route'
+import { POST as cancelHomeCollectionRoute } from '@/app/api/home-collections/[id]/cancel/route'
+import { PUT as putHomeCollectionCollector } from '@/app/api/home-collections/[id]/collector/route'
+import { COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy'
+import { POST as collectHomeCollectionRoute } from '@/app/api/home-collections/[id]/collect/route'
+import { LAB_REPORT_READ_ROLES, LAB_REPORT_RELEASE_ROLES } from '@/lib/role-policy'
+import { POST as releaseLabReportRoute } from '@/app/api/lab-requisitions/[id]/report/route'
+import { GET as downloadLabReport } from '@/app/api/lab-reports/[id]/download/route'
+// end SP5
 // SP6: the clinical-note write routes (the coder must never write or sign a note)
 import { POST as postNote } from '@/app/api/patients/[anonId]/notes/route'
 import { PUT as signNoteRoute } from '@/app/api/patients/[anonId]/notes/[id]/sign/route'
@@ -668,6 +699,37 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/billing/payments', call: () => settle(() => postPaymentRoute(send('POST', '/api/billing/payments'))), allowed: [...CASH_DESK_ROLES] },
   { name: 'POST /api/billing/refunds', call: () => settle(() => postRefundRoute(send('POST', '/api/billing/refunds'))), allowed: [...BILLING_AUTHORITY_ROLES] },
   // end SP4
+  // SP5 lab setup (LAB_SETUP_ROLES): an allowed role's `{}` body fails validation before any query.
+  { name: 'POST /api/settings/lab-service-area', call: () => settle(() => postLabServiceArea(send('POST', '/api/settings/lab-service-area'))), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'PATCH /api/settings/lab-service-area/[id]', call: () => settle(() => patchLabServiceArea(send('PATCH', `/api/settings/lab-service-area/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'POST /api/settings/home-collection-windows', call: () => settle(() => postCollectionWindow(send('POST', '/api/settings/home-collection-windows'))), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'PATCH /api/settings/home-collection-windows/[id]', call: () => settle(() => patchCollectionWindow(send('PATCH', `/api/settings/home-collection-windows/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'PATCH /api/lab-tests/[id]', call: () => settle(() => patchLabTestSetup(send('PATCH', `/api/lab-tests/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_SETUP_ROLES] },
+  // SP5 notification opt-out (NOTIFICATION_PREFERENCE_ROLES): `{}` fails validation before any query.
+  { name: 'PUT /api/patients/[anonId]/notification-preference', call: () => settle(() => putNotificationPreference(send('PUT', `/api/patients/${BOGUS_PATIENT}/notification-preference`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...NOTIFICATION_PREFERENCE_ROLES] },
+  // SP5 doctor's order (LAB_ORDER_ROLES): `{}` fails validation before any query.
+  { name: 'POST /api/patients/[anonId]/lab-orders', call: () => settle(() => postLabRequisition(send('POST', `/api/patients/${BOGUS_PATIENT}/lab-orders`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...LAB_ORDER_ROLES] },
+  // SP5 lab lifecycle (Task 8): the bogus id is not found / `{}` fails validation for an allowed role.
+  { name: 'GET /api/lab-orders', call: () => settle(() => listLabWorklist()), allowed: [...LAB_WORKLIST_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/collect', call: () => settle(() => postLabCollect(send('POST', `/api/lab-orders/${BOGUS_ID}/collect`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_COLLECT_ROLES] },
+  { name: 'POST /api/lab-orders/receive', call: () => settle(() => postLabReceive(send('POST', '/api/lab-orders/receive'))), allowed: [...LAB_RECEIVE_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/result', call: () => settle(() => postLabResult(send('POST', `/api/lab-orders/${BOGUS_ID}/result`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_RESULT_ENTRY_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/verify', call: () => settle(() => postLabVerify(send('POST', `/api/lab-orders/${BOGUS_ID}/verify`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_VERIFY_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/cancel', call: () => settle(() => postLabCancel(send('POST', `/api/lab-orders/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_ORDER_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/imaging', call: () => settle(() => postLabImaging(send('POST', `/api/lab-orders/${BOGUS_ID}/imaging`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_COLLECT_ROLES] },
+  // SP5 home collection (Task 11): no ?patient / ?date and `{}` bodies fail validation before any query.
+  { name: 'GET /api/home-collections/context', call: () => settle(() => getHomeCollectionContextRoute(get('/api/home-collections/context'))), allowed: [...HOME_COLLECTION_BOOKING_ROLES] },
+  { name: 'GET /api/home-collections/availability', call: () => settle(() => getHomeCollectionAvailability(get('/api/home-collections/availability'))), allowed: [...HOME_COLLECTION_BOOKING_ROLES] },
+  { name: 'POST /api/home-collections', call: () => settle(() => postHomeCollection(send('POST', '/api/home-collections'))), allowed: [...HOME_COLLECTION_BOOKING_ROLES] },
+  { name: 'PATCH /api/home-collections/[id]', call: () => settle(() => patchHomeCollection(send('PATCH', `/api/home-collections/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...HOME_COLLECTION_BOOKING_ROLES] },
+  { name: 'POST /api/home-collections/[id]/cancel', call: () => settle(() => cancelHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...HOME_COLLECTION_CANCEL_ROLES] },
+  { name: 'PUT /api/home-collections/[id]/collector', call: () => settle(() => putHomeCollectionCollector(send('PUT', `/api/home-collections/${BOGUS_ID}/collector`), ctx({ id: BOGUS_ID }))), allowed: [...HOME_COLLECTION_DISPATCH_ROLES] },
+  // SP5 collector route (Task 12): `{}` fails validation before any query.
+  { name: 'POST /api/home-collections/[id]/collect', call: () => settle(() => collectHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/collect`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
+  // SP5 lab reports (Task 14): release has no body (the bogus requisition is not found); download 404s the bogus id.
+  { name: 'POST /api/lab-requisitions/[id]/report', call: () => settle(() => releaseLabReportRoute(send('POST', `/api/lab-requisitions/${BOGUS_ID}/report`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_REPORT_RELEASE_ROLES] },
+  { name: 'GET /api/lab-reports/[id]/download', call: () => settle(() => downloadLabReport(get(`/api/lab-reports/${BOGUS_ID}/download`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_REPORT_READ_ROLES] },
+  // end SP5
   // SP6 (ruling 4): clinical notes are written and signed by pi/admin only -- the coder reads
   // signed notes in the coding workspace but is 403'd here. Inline allowlists in both routes.
   { name: 'POST /api/patients/[anonId]/notes', call: () => settle(() => postNote(send('POST', `/api/patients/${BOGUS_PATIENT}/notes`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'pi'] },
@@ -764,6 +826,25 @@ const SP4_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/billing/refunds', call: () => postRefundRoute(send('POST', '/api/billing/refunds', NOT_JSON)), allowed: BILLING_AUTHORITY_ROLES },
 ]
 // end SP4
+// SP5 writes: the same deny-before-parse contract.
+const SP5_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'POST /api/settings/lab-service-area', call: () => postLabServiceArea(send('POST', '/api/settings/lab-service-area', NOT_JSON)), allowed: LAB_SETUP_ROLES },
+  { name: 'PATCH /api/settings/lab-service-area/[id]', call: () => patchLabServiceArea(send('PATCH', `/api/settings/lab-service-area/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SETUP_ROLES },
+  { name: 'POST /api/settings/home-collection-windows', call: () => postCollectionWindow(send('POST', '/api/settings/home-collection-windows', NOT_JSON)), allowed: LAB_SETUP_ROLES },
+  { name: 'PATCH /api/settings/home-collection-windows/[id]', call: () => patchCollectionWindow(send('PATCH', `/api/settings/home-collection-windows/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SETUP_ROLES },
+  { name: 'PATCH /api/lab-tests/[id]', call: () => patchLabTestSetup(send('PATCH', `/api/lab-tests/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SETUP_ROLES },
+  { name: 'PUT /api/patients/[anonId]/notification-preference', call: () => putNotificationPreference(send('PUT', `/api/patients/${BOGUS_PATIENT}/notification-preference`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: NOTIFICATION_PREFERENCE_ROLES },
+  { name: 'POST /api/patients/[anonId]/lab-orders', call: () => postLabRequisition(send('POST', `/api/patients/${BOGUS_PATIENT}/lab-orders`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: LAB_ORDER_ROLES },
+  { name: 'POST /api/lab-orders/receive', call: () => postLabReceive(send('POST', '/api/lab-orders/receive', NOT_JSON)), allowed: LAB_RECEIVE_ROLES },
+  { name: 'POST /api/lab-orders/[id]/result', call: () => postLabResult(send('POST', `/api/lab-orders/${BOGUS_ID}/result`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_RESULT_ENTRY_ROLES },
+  { name: 'POST /api/lab-orders/[id]/cancel', call: () => postLabCancel(send('POST', `/api/lab-orders/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_ORDER_ROLES },
+  { name: 'POST /api/home-collections', call: () => postHomeCollection(send('POST', '/api/home-collections', NOT_JSON)), allowed: HOME_COLLECTION_BOOKING_ROLES },
+  { name: 'PATCH /api/home-collections/[id]', call: () => patchHomeCollection(send('PATCH', `/api/home-collections/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: HOME_COLLECTION_BOOKING_ROLES },
+  { name: 'POST /api/home-collections/[id]/cancel', call: () => cancelHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: HOME_COLLECTION_CANCEL_ROLES },
+  { name: 'PUT /api/home-collections/[id]/collector', call: () => putHomeCollectionCollector(send('PUT', `/api/home-collections/${BOGUS_ID}/collector`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: HOME_COLLECTION_DISPATCH_ROLES },
+  { name: 'POST /api/home-collections/[id]/collect', call: () => collectHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/collect`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: COLLECTOR_ROUTE_ROLES },
+]
+// end SP5
 // SP6 writes: the same deny-before-parse contract.
 const SP6_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // The import route 415s anything but application/json, so this row declares it (as the tariff import row does).
@@ -784,7 +865,7 @@ const SP6_WRITE_GATES: typeof SP1_WRITE_GATES = [
 const WAVE_C_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PATCH /api/patients/[anonId]/demographics', call: () => patchDemographics(send('PATCH', `/api/patients/${BOGUS_PATIENT}/demographics`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: DEMOGRAPHICS_CORRECTION_ROLES },
 ]
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES])('$name (deny before parse)', (c) => {
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role

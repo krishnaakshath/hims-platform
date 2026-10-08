@@ -22,6 +22,7 @@ import { PatientQuickActions, RegisteredBanner } from '@/components/patient-prof
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { FollowUpPanel } from '@/components/follow-ups/FollowUpPanel'
 import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
+import { NOTIFICATION_PREFERENCE_ROLES } from '@/lib/role-policy' // SP5
 import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
 import { formatIstDate, todayIsoIn } from '@/lib/india-time'
 import { toAadhaarView } from '@/lib/patient-identity'
@@ -98,11 +99,13 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         abhaNumber: patient.abhaNumber, abhaAddress: patient.abhaAddress, abhaUnavailableReason: patient.abhaUnavailableReason,
         abhaUnavailableNote: patient.abhaUnavailableNote ?? null, // Wave C P2-11
         isMlc: patient.isMlc, mlcNumber: patient.mlcNumber,
+        notificationOptOut: patient.notificationOptOut, // SP5
         contacts: patient.contacts.map((c) => ({ kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, addressText: c.addressText, isPrimary: c.isPrimary })),
       }}
       aadhaar={aadhaarView}
       canEdit={PATIENT_PROFILE_EDIT_ROLES.includes(session.role)}
       canWriteAadhaar={AADHAAR_WRITE_ROLES.includes(session.role)}
+      canEditNotifications={NOTIFICATION_PREFERENCE_ROLES.includes(session.role)} // SP5
       canUnflagMlc={MLC_UNFLAG_ROLES.includes(session.role)}
     />
   )

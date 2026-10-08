@@ -49,7 +49,7 @@ export async function deriveOnExecutor(ex: WriteExecutor, order: FollowUpOrder, 
 
 export interface CreateFollowUpOrderInput {
   patientId: string
-  source: 'encounter' | 'discharge' | 'manual'
+  source: 'encounter' | 'discharge' | 'manual' | 'lab_report' // SP5: + lab_report (released lab report)
   prescribedByProviderId: number
   departmentId: number | null
   timing: FollowUpTiming
@@ -60,6 +60,7 @@ export interface CreateFollowUpOrderInput {
   originatingEncounterId: number | null
   originatingAdmissionId: number | null
   appointmentId?: number | null
+  originatingLabOrderId?: number | null // SP5: the last reported order of a lab requisition
 }
 
 export type CreateFollowUpResult =
@@ -122,6 +123,7 @@ export async function createFollowUpOrder(
       planNotes: normalizeNotes(input.planNotes),
       originatingEncounterId: input.originatingEncounterId,
       originatingAdmissionId: input.originatingAdmissionId,
+      originatingLabOrderId: input.originatingLabOrderId ?? null, // SP5
       appointmentId: booked ? input.appointmentId : null,
       createdByName: session.name,
       createdByUserId: session.userId,

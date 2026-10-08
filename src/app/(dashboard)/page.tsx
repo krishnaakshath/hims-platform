@@ -27,6 +27,8 @@ export default async function DashboardHomePage() {
   if (session.role === 'billing') redirect('/billing')
   // Labs has its own dedicated route (the worklist doubles as its home dashboard).
   if (session.role === 'labs') redirect('/labs')
+  // SP5: the collector's home is today's route (the only page it may open).
+  if (session.role === 'collector') redirect('/collections')
   // SP6: the coder's home is the coding worklist; never the coordinator dashboard
   // (patient names and appointments are outside the coder's minimum PHI).
   if (session.role === 'coder') redirect('/coding')
@@ -54,7 +56,7 @@ export default async function DashboardHomePage() {
   ])
   await logAudit(session, 'viewed home dashboard', null)
 
-  const staffByRole = ['admin', 'pi', 'crc', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder' /* SP6 */].map((role) => ({
+  const staffByRole = ['admin', 'pi', 'crc', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder' /* SP6 */, 'collector' /* SP5 */].map((role) => ({
     role,
     count: allStaff.filter((u) => u.role === role).length,
   }))

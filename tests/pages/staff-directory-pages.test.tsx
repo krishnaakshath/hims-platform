@@ -85,7 +85,7 @@ describe('/staff list', () => {
     else expect(add).not.toBeInTheDocument()
   })
 
-  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] as const)('%s redirects to / before any query', async (role) => {
+  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const)('%s redirects to / before any query', async (role) => {
     const spies = mockCommon(role)
     const { default: Page } = await import('@/app/(dashboard)/staff/page')
     await expect(Page()).rejects.toThrow('NEXT_REDIRECT:/')
@@ -112,7 +112,7 @@ describe('/staff/[id] detail', () => {
     expect(admin.screen.getAllByRole('button', { name: 'Edit' }).length).toBeGreaterThan(0)
   })
 
-  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'coder'] as const)('%s redirects to / before params or any query', async (role) => {
+  it.each(['frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const)('%s redirects to / before params or any query', async (role) => {
     const spies = mockCommon(role)
     const { default: Page } = await import('@/app/(dashboard)/staff/[id]/page')
     const params = new Proxy({}, { get() { throw new Error('PARAMS_TOUCHED') } }) as Promise<{ id: string }>

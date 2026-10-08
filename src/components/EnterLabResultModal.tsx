@@ -15,6 +15,7 @@ export function EnterLabResultModal({
   defaultReferenceRange,
   category,
   attachments,
+  initial = null,
   onClose,
 }: {
   orderId: number
@@ -23,14 +24,16 @@ export function EnterLabResultModal({
   defaultReferenceRange: string | null
   category: 'lab' | 'imaging'
   attachments: AttachmentView[]
+  /** The current result when amending: every field starts from it. */
+  initial?: { value: string; unit: string | null; referenceRange?: string | null; notes?: string | null; flag: Flag } | null
   onClose: () => void
 }) {
   const router = useRouter()
-  const [value, setValue] = useState('')
-  const [unit, setUnit] = useState(defaultUnit ?? '')
-  const [referenceRange, setReferenceRange] = useState(defaultReferenceRange ?? '')
-  const [flag, setFlag] = useState<Flag>('normal')
-  const [notes, setNotes] = useState('')
+  const [value, setValue] = useState(initial?.value ?? '')
+  const [unit, setUnit] = useState((initial ? initial.unit : defaultUnit) ?? '')
+  const [referenceRange, setReferenceRange] = useState((initial ? initial.referenceRange : defaultReferenceRange) ?? '')
+  const [flag, setFlag] = useState<Flag>(initial?.flag ?? 'normal')
+  const [notes, setNotes] = useState(initial?.notes ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -55,7 +58,7 @@ export function EnterLabResultModal({
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Enter Result — {testName}</DialogTitle>
+          <DialogTitle>{initial ? 'Amend result' : 'Enter Result'} — {testName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           {category === 'imaging' && <ImagingAttachmentStrip attachments={attachments} />}

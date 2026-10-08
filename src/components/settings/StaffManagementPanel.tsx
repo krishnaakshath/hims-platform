@@ -8,11 +8,11 @@ export interface StaffRow {
   id: number
   name: string
   email: string
-  role: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' // SP6: + coder
+  role: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' /* SP6: + coder */ | 'collector' // SP5: + collector
   mfaEnabled: boolean
 }
 
-const ROLE_LABEL: Record<StaffRow['role'], string> = { admin: 'Administrator', pi: 'Principal Investigator', crc: 'Coordinator', frontdesk: 'Front Desk', pharmacy: 'Pharmacy', billing: 'Billing', labs: 'Labs', coder: 'Clinical Coder' /* SP6 */ }
+const ROLE_LABEL: Record<StaffRow['role'], string> = { admin: 'Administrator', pi: 'Principal Investigator', crc: 'Coordinator', frontdesk: 'Front Desk', pharmacy: 'Pharmacy', billing: 'Billing', labs: 'Labs', coder: 'Clinical Coder' /* SP6 */, collector: 'Sample Collector' /* SP5 */ }
 const ROLE_BADGE: Record<StaffRow['role'], string> = {
   admin: 'bg-accent/10 text-accent',
   pi: 'bg-primary/10 text-primary',
@@ -21,6 +21,7 @@ const ROLE_BADGE: Record<StaffRow['role'], string> = {
   pharmacy: 'bg-violet-500/10 text-violet-700',
   billing: 'bg-amber-500/10 text-amber-700',
   labs: 'bg-rose-500/10 text-rose-700',
+  collector: 'bg-orange-500/10 text-orange-700', // SP5
   coder: 'bg-teal-500/10 text-teal-700', // SP6
 }
 
@@ -83,6 +84,7 @@ function AddStaffForm({ onCreated }: { onCreated: (row: StaffRow, password: stri
             <option value="pharmacy">Pharmacy</option>
             <option value="billing">Billing</option>
             <option value="labs">Labs</option>
+            <option value="collector">Sample Collector</option>{/* SP5 */}
             {/* SP6 */}
             <option value="coder">Clinical Coder</option>
           </select>

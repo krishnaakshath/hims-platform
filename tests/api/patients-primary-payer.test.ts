@@ -64,7 +64,7 @@ describe('GET /api/patients/[anonId]/primary-payer', () => {
   })
 
   it('403s frontdesk, pi, pharmacy and labs with no data in the body', async () => {
-    for (const role of ['frontdesk', 'pi', 'pharmacy', 'labs', 'coder'] as const) {
+    for (const role of ['frontdesk', 'pi', 'pharmacy', 'labs', 'coder', 'collector'] as const) {
       sessionRole = role
       const res = await call(TEST_PATIENT_ID)
       expect(res.status, `role ${role}`).toBe(403)

@@ -51,6 +51,15 @@ import {
   encounters,
   followUpOrders,
   followUpContactAttempts,
+  // SP5
+  labOrders,
+  labResults,
+  labRequisitions,
+  homeCollectionVisits,
+  homeCollectionWindows,
+  labServiceAreaPins,
+  labReports,
+  notificationDeliveries,
   appointments,
   rooms,
   documents,
@@ -914,6 +923,20 @@ async function seedRooms() {
   await db.insert(rooms).values(ROOM_ROSTER.map((r) => ({ ...r, status: 'available' as const })))
 }
 
+// SP5: default home-collection windows ('HH:MM' IST). No service-area PINs are seeded:
+// they are deployment-specific and set in Settings -> Lab setup. The seed creates no lab
+// orders, so there are no seeded orders needing a requisition.
+const HOME_COLLECTION_WINDOWS_SEED = [
+  { label: 'Early morning', startTime: '07:00', endTime: '09:00', capacity: 10, sortOrder: 1 },
+  { label: 'Morning', startTime: '09:00', endTime: '11:00', capacity: 10, sortOrder: 2 },
+  { label: 'Late morning', startTime: '11:00', endTime: '13:00', capacity: 8, sortOrder: 3 },
+]
+
+async function seedHomeCollectionWindows() {
+  await getDb().insert(homeCollectionWindows).values(HOME_COLLECTION_WINDOWS_SEED)
+}
+// end SP5
+
 async function clearExistingData() {
   const db = getDb()
   // Delete in FK-safe order (children before parents) so seed() is safely re-runnable
@@ -968,6 +991,17 @@ async function clearExistingData() {
   // form_templates.folder_id references form_template_folders.
   await db.delete(formTemplateFolders)
   await db.delete(consentDocuments)
+  // SP5: mirrors deletePatient's order -- deliveries and reports, then results -> orders, then
+  // visits -> requisitions, then the reference windows/PINs -- all before patients/users.
+  await db.delete(notificationDeliveries)
+  await db.delete(labReports)
+  await db.delete(labResults)
+  await db.delete(labOrders)
+  await db.delete(homeCollectionVisits)
+  await db.delete(labRequisitions)
+  await db.delete(homeCollectionWindows)
+  await db.delete(labServiceAreaPins)
+  // end SP5
   // SP3: contact attempts -> follow-up orders -> encounters, all before appointments/patients.
   await db.delete(followUpContactAttempts)
   await db.delete(followUpOrders)
@@ -992,6 +1026,8 @@ async function clearExistingData() {
   // SP2: service_catalog references departments; room_categories is
   // referenced by rooms, which were already deleted at the top.
   // tariff_rates and service_package_items reference service_catalog.
+  // SP5: lab_tests survive the clear (seedLabTests tops them up) but may point at a service.
+  await db.update(labTests).set({ serviceId: null })
   await db.delete(serviceProcedureCodes) // SP6: references service_catalog
   await db.delete(tariffRates)
   await db.delete(servicePackageItems)
@@ -1094,6 +1130,7 @@ export async function seed() {
   await clearExistingData()
 
   await db.insert(trials).values([MDD_TRIAL, ADHD_TRIAL])
+  await seedHomeCollectionWindows() // SP5
 
   const demoHash = hashPassword(seedDemoPassword())
   await db.insert(users).values([
@@ -1109,6 +1146,7 @@ export async function seed() {
     { name: 'Robin Shah', email: seedEmail('pharmacy'), role: 'pharmacy', passwordHash: demoHash },
     { name: 'Alex Billing', email: seedEmail('billing'), role: 'billing', passwordHash: demoHash },
     { name: 'Morgan Lee', email: seedEmail('labs'), role: 'labs', passwordHash: demoHash },
+    { name: 'Ravi Kumar', email: seedEmail('collector'), role: 'collector', passwordHash: demoHash }, // SP5
     // SP6
     { name: 'Asha Menon', email: seedEmail('coder'), role: 'coder', passwordHash: demoHash },
   ])

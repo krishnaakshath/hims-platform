@@ -1,12 +1,13 @@
 import type { PatientLabOrderRow } from '@/lib/queries/lab-orders'
 import { normalizeCode, type CodeBinding } from '@/lib/coding/code-systems' // SP6
 import type { FhirCodeableConcept, FhirReference } from './types'
+import { fhirObservationStatusFor } from '@/lib/labs/status' // SP5
 import { codingFor } from './condition' // SP6
 
 export interface FhirObservation {
   resourceType: 'Observation'
   id: string
-  status: 'final'
+  status: 'preliminary' | 'final' // SP5: resulted = preliminary; verified/reported = final
   subject: FhirReference
   code: FhirCodeableConcept
   valueQuantity?: { value: number; unit?: string }
@@ -25,6 +26,9 @@ const INTERPRETATION_CODE: Record<'normal' | 'abnormal' | 'critical', string> = 
 // `system: 'http://loinc.org'` and that version -- through the shared `codingFor`.
 export function observationToFhir(patientId: string, order: PatientLabOrderRow, loinc: CodeBinding | null = null): FhirObservation | null {
   if (!order.result) return null
+  // SP5: only resulted (preliminary) and verified/reported (final) orders carry an Observation.
+  const status = fhirObservationStatusFor(order.status)
+  if (status === null) return null
   const { result } = order
   const numeric = Number(result.value)
   const isNumeric = result.value.trim() !== '' && Number.isFinite(numeric)
@@ -32,7 +36,7 @@ export function observationToFhir(patientId: string, order: PatientLabOrderRow, 
   return {
     resourceType: 'Observation',
     id: `observation-${order.id}`,
-    status: 'final',
+    status,
     subject: { reference: `Patient/${patientId}` },
     code: { text: order.testName, coding: codingFor(order.testCode, order.testName, loinc && loinc.kind === 'loinc' ? loinc : null) },
     ...(isNumeric ? { valueQuantity: { value: numeric, ...(result.unit ? { unit: result.unit } : {}) } } : { valueString: result.value }),

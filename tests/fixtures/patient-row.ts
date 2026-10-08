@@ -70,6 +70,9 @@ export function makePatientRow(overrides: Partial<PatientRow> = {}): PatientRow 
     abhaUnavailableNote: null,
     isMlc: false,
     mlcNumber: null,
+    // SP5
+    notificationOptOut: false,
+    notificationOptOutAt: null,
     ...overrides,
   }
 }

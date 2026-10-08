@@ -1,11 +1,13 @@
-import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
 
 export const verdictEnum = pgEnum('verdict', ['green', 'yellow', 'red'])
-export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder']) // SP6: + coder (scripts/migrations/2026-10-07-sp6-a-coder-role.sql)
+// SP6: + coder (scripts/migrations/2026-10-07-sp6-a-coder-role.sql)
+// SP5: + 'collector' (last; added by scripts/migrations/2026-10-08-sp5-lab-enum-values.sql)
+export const roleEnum = pgEnum('role', ['crc', 'pi', 'admin', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'])
 export const mfaMethodEnum = pgEnum('mfa_method', ['totp', 'sms', 'email'])
 export const payerTypeEnum = pgEnum('payer_type', ['commercial', 'medicare', 'medicaid', 'tricare', 'other'])
 export const insuranceRelationshipEnum = pgEnum('insurance_relationship', ['self', 'spouse', 'child', 'other'])
@@ -131,6 +133,9 @@ export const patients = pgTable('patients', {
   abhaUnavailableNote: text('abha_unavailable_note'),
   isMlc: boolean('is_mlc').default(false).notNull(),
   mlcNumber: text('mlc_number'),
+  // SP5: per-patient notification opt-out (scripts/migrations/2026-10-08-sp5-lab-home-collection.sql).
+  notificationOptOut: boolean('notification_opt_out').default(false).notNull(),
+  notificationOptOutAt: timestamp('notification_opt_out_at'),
 })
 
 // SP6 clinical coding enums (scripts/migrations/2026-10-07-sp6-b-clinical-coding.sql). Declared
@@ -1593,9 +1598,19 @@ export const messages = pgTable('messages', {
   internal: boolean('internal').default(false).notNull(),
 })
 
-export const labOrderStatusEnum = pgEnum('lab_order_status', ['ordered', 'collected', 'resulted', 'cancelled'])
+// SP5: values and order equal LAB_ORDER_STATUSES (src/lib/labs/status.ts). The four new values
+// are added by scripts/migrations/2026-10-08-sp5-lab-enum-values.sql, each placed BEFORE/AFTER a
+// pre-SP5 value so a migrated DB and a fresh db:push agree on this order.
+export const labOrderStatusEnum = pgEnum('lab_order_status', ['ordered', 'scheduled', 'collected', 'received', 'resulted', 'verified', 'reported', 'cancelled'])
 export const labResultFlagEnum = pgEnum('lab_result_flag', ['normal', 'abnormal', 'critical'])
 export const labTestCategoryEnum = pgEnum('lab_test_category', ['lab', 'imaging'])
+// SP5: values equal SAMPLE_TYPES / SAMPLE_CONTAINERS (src/lib/labs/catalog.ts); declared here
+// because lab_tests uses them.
+export const labSampleTypeEnum = pgEnum('lab_sample_type', ['blood', 'serum', 'plasma', 'urine', 'stool', 'sputum', 'swab', 'csf', 'other'])
+export const labSampleContainerEnum = pgEnum('lab_sample_container', [
+  'edta_lavender', 'plain_red', 'sst_gold', 'fluoride_grey', 'citrate_blue', 'heparin_green', 'urine_container', 'stool_container',
+  'swab_tube', 'other',
+])
 
 export const labTests = pgTable('lab_tests', {
   id: serial('id').primaryKey(),
@@ -1606,6 +1621,10 @@ export const labTests = pgTable('lab_tests', {
   category: labTestCategoryEnum('category').default('lab').notNull(),
   defaultUnit: text('default_unit'),
   referenceRange: text('reference_range'),
+  // SP5: sample/tube setup and the tariff service used to quote the test (all optional).
+  sampleType: labSampleTypeEnum('sample_type'),
+  container: labSampleContainerEnum('container'),
+  serviceId: integer('service_id').references(() => serviceCatalog.id),
 })
 
 export const labOrders = pgTable('lab_orders', {
@@ -1616,7 +1635,42 @@ export const labOrders = pgTable('lab_orders', {
   status: labOrderStatusEnum('status').default('ordered').notNull(),
   orderedAt: timestamp('ordered_at').defaultNow().notNull(),
   collectedAt: timestamp('collected_at'),
-})
+  // SP5: requisition, home-collection visit, sample ID and lifecycle stamps, quoted price.
+  // requisition_id stays nullable at DB level (Ruling 7): other branches' raw inserts keep
+  // working; SP5 app code always sets it and the migration backfills legacy rows.
+  // Explicit AnyPgColumn: lab_orders -> lab_requisitions -> follow_up_orders -> lab_orders is a
+  // reference cycle TypeScript cannot infer through.
+  requisitionId: integer('requisition_id').references((): AnyPgColumn => labRequisitions.id),
+  homeCollectionVisitId: integer('home_collection_visit_id'),
+  sampleId: text('sample_id').unique(),
+  sampleDate: date('sample_date'),
+  sampleSeq: integer('sample_seq'),
+  collectedByName: text('collected_by_name'),
+  receivedAt: timestamp('received_at'),
+  receivedByName: text('received_by_name'),
+  verifiedAt: timestamp('verified_at'),
+  verifiedByName: text('verified_by_name'),
+  verifiedByUserId: integer('verified_by_user_id').references(() => users.id),
+  reportedAt: timestamp('reported_at'),
+  cancelledAt: timestamp('cancelled_at'),
+  cancelledByName: text('cancelled_by_name'),
+  cancelReason: text('cancel_reason'),
+  quotedPricePaise: integer('quoted_price_paise'),
+  quotedTariffRateId: integer('quoted_tariff_rate_id').references(() => tariffRates.id),
+  quotedOn: date('quoted_on'),
+  quoteStatus: text('quote_status', { enum: ['quoted', 'unmapped', 'no_rate', 'service_inactive', 'service_not_found'] }).default('unmapped').notNull(),
+  statusChangedAt: timestamp('status_changed_at'),
+}, (t) => [
+  // SP5. Explicit FK name: drizzle's default would be 64 characters, over Postgres's 63-character limit.
+  foreignKey({ name: 'lab_orders_visit_id_fk', columns: [t.homeCollectionVisitId], foreignColumns: [homeCollectionVisits.id] }).onDelete('set null'),
+  uniqueIndex('lab_orders_sample_date_seq_unique').on(t.sampleDate, t.sampleSeq),
+  index('lab_orders_requisition_idx').on(t.requisitionId),
+  index('lab_orders_visit_idx').on(t.homeCollectionVisitId),
+  index('lab_orders_status_idx').on(t.status),
+  check('lab_orders_quoted_price_range', sql`${t.quotedPricePaise} IS NULL OR ${t.quotedPricePaise} BETWEEN 0 AND 1000000000`),
+  check('lab_orders_sample_pair', sql`(${t.sampleId} IS NULL) = (${t.sampleDate} IS NULL) AND (${t.sampleId} IS NULL) = (${t.sampleSeq} IS NULL)`),
+  check('lab_orders_scheduled_has_visit', sql`${t.status} <> 'scheduled' OR ${t.homeCollectionVisitId} IS NOT NULL`),
+])
 
 export const labResults = pgTable('lab_results', {
   id: serial('id').primaryKey(),
@@ -1628,7 +1682,168 @@ export const labResults = pgTable('lab_results', {
   resultedByName: text('resulted_by_name').notNull(),
   resultedAt: timestamp('resulted_at').defaultNow().notNull(),
   notes: text('notes'),
+  // SP5: who entered the result (verifier separation) and when it was last amended.
+  resultedByUserId: integer('resulted_by_user_id').references(() => users.id),
+  amendedAt: timestamp('amended_at'),
 })
+
+// SP5 lab LIS & home collection (scripts/migrations/2026-10-08-sp5-lab-enum-values.sql, then
+// scripts/migrations/2026-10-08-sp5-lab-home-collection.sql). Everything here is expressible in
+// drizzle, so a fresh `db:push` creates the same objects.
+export const homeCollectionStatusEnum = pgEnum('home_collection_status', ['booked', 'collected', 'cancelled'])
+export const notificationChannelEnum = pgEnum('notification_channel', ['log', 'sms', 'whatsapp', 'email'])
+export const notificationDeliveryStatusEnum = pgEnum('notification_delivery_status', ['logged', 'sent', 'failed', 'suppressed_opt_out', 'skipped_no_contact'])
+export const labReportSeq = pgSequence('lab_report_seq', { startWith: 1, increment: 1 })
+
+// Admin-managed list of PIN codes the lab collects from ("local patient", Ruling 3).
+export const labServiceAreaPins = pgTable('lab_service_area_pins', {
+  id: serial('id').primaryKey(),
+  pinCode: text('pin_code').notNull().unique(),
+  areaLabel: text('area_label'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  check('lab_service_area_pins_pin_format', sql`${t.pinCode} ~ '^[1-9][0-9]{5}$'`),
+])
+
+// Collection windows: 'HH:MM' IST strings with a per-(date, window) capacity.
+export const homeCollectionWindows = pgTable('home_collection_windows', {
+  id: serial('id').primaryKey(),
+  label: text('label').notNull(),
+  startTime: text('start_time').notNull(),
+  endTime: text('end_time').notNull(),
+  capacity: integer('capacity').notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  check('home_collection_windows_time_format', sql`${t.startTime} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' AND ${t.endTime} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'`),
+  check('home_collection_windows_time_order', sql`${t.startTime} < ${t.endTime}`),
+  check('home_collection_windows_capacity_range', sql`${t.capacity} BETWEEN 1 AND 50`),
+])
+
+// A doctor's order of one or more tests: the unit for the patient notice, the report and the
+// follow-up request (Ruling 7). legacy_lab_order_id is the backfill key only (no FK).
+export const labRequisitions = pgTable('lab_requisitions', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  orderedByProviderId: integer('ordered_by_provider_id').notNull().references(() => providers.id),
+  originatingEncounterId: integer('originating_encounter_id').references(() => encounters.id, { onDelete: 'set null' }),
+  followUpRequested: boolean('follow_up_requested').default(false).notNull(),
+  followUpIntervalValue: integer('follow_up_interval_value'),
+  followUpIntervalUnit: followUpIntervalUnitEnum('follow_up_interval_unit'),
+  followUpReason: text('follow_up_reason'),
+  followUpOrderId: integer('follow_up_order_id').references(() => followUpOrders.id, { onDelete: 'set null' }),
+  followUpResolvedAt: timestamp('follow_up_resolved_at'),
+  followUpOutcome: text('follow_up_outcome', { enum: ['created', 'linked', 'failed'] }),
+  legacyLabOrderId: integer('legacy_lab_order_id').unique(),
+  createdByName: text('created_by_name').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  check('lab_requisitions_follow_up_fields', sql`(NOT ${t.followUpRequested} AND ${t.followUpIntervalValue} IS NULL AND ${t.followUpIntervalUnit} IS NULL) OR (${t.followUpRequested} AND ${t.followUpIntervalValue} BETWEEN 1 AND 365 AND ${t.followUpIntervalUnit} IS NOT NULL)`),
+  index('lab_requisitions_patient_idx').on(t.patientId),
+])
+
+// One home sample-collection trip: a slot (IST date + window snapshot), an address snapshot
+// and an optional collector. At most one booked visit per patient per slot.
+export const homeCollectionVisits = pgTable('home_collection_visits', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  visitDate: date('visit_date').notNull(),
+  windowId: integer('window_id').notNull().references(() => homeCollectionWindows.id),
+  windowLabel: text('window_label').notNull(),
+  windowStart: text('window_start').notNull(),
+  windowEnd: text('window_end').notNull(),
+  status: homeCollectionStatusEnum('status').default('booked').notNull(),
+  addressLine1: text('address_line1').notNull(),
+  addressLine2: text('address_line2'),
+  city: text('city').notNull(),
+  district: text('district'),
+  stateCode: text('state_code').notNull(),
+  pinCode: text('pin_code').notNull(),
+  landmark: text('landmark'),
+  contactPhone: text('contact_phone').notNull(),
+  notes: text('notes'),
+  collectorUserId: integer('collector_user_id').references(() => users.id),
+  collectorAssignedAt: timestamp('collector_assigned_at'),
+  collectorAssignedByName: text('collector_assigned_by_name'),
+  bookedByName: text('booked_by_name').notNull(),
+  bookedByUserId: integer('booked_by_user_id').references(() => users.id),
+  bookedAt: timestamp('booked_at').defaultNow().notNull(),
+  rescheduleCount: integer('reschedule_count').default(0).notNull(),
+  lastRescheduleReason: text('last_reschedule_reason'),
+  lastRescheduleNote: text('last_reschedule_note'),
+  cancelledAt: timestamp('cancelled_at'),
+  cancelledByName: text('cancelled_by_name'),
+  cancelReason: text('cancel_reason'),
+  cancelNote: text('cancel_note'),
+  collectedAt: timestamp('collected_at'),
+  collectedByName: text('collected_by_name'),
+  encounterId: integer('encounter_id').references(() => encounters.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('home_collection_visits_patient_slot_unique').on(t.patientId, t.visitDate, t.windowId).where(sql`status = 'booked'`),
+  index('home_collection_visits_date_window_idx').on(t.visitDate, t.windowId),
+  index('home_collection_visits_collector_date_idx').on(t.collectorUserId, t.visitDate),
+  check('home_collection_visits_pin_format', sql`${t.pinCode} ~ '^[1-9][0-9]{5}$'`),
+  check('home_collection_visits_cancel_reason', sql`${t.status} <> 'cancelled' OR ${t.cancelReason} IS NOT NULL`),
+  check('home_collection_visits_collected_at', sql`${t.status} <> 'collected' OR ${t.collectedAt} IS NOT NULL`),
+])
+
+// A released PDF lab report (one version per release; a re-release supersedes the previous one).
+// blob_url is server-side only (Ruling 6).
+export const labReports = pgTable('lab_reports', {
+  id: serial('id').primaryKey(),
+  reportNumber: text('report_number').notNull().unique(),
+  requisitionId: integer('requisition_id').notNull().references(() => labRequisitions.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  version: integer('version').notNull(),
+  orderIds: jsonb('order_ids').$type<number[]>().notNull(),
+  testSummary: text('test_summary').notNull(),
+  blobUrl: text('blob_url').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  sha256: text('sha256').notNull(),
+  releasedByName: text('released_by_name').notNull(),
+  releasedByUserId: integer('released_by_user_id').references(() => users.id),
+  releasedAt: timestamp('released_at').defaultNow().notNull(),
+  supersededAt: timestamp('superseded_at'),
+}, (t) => [
+  uniqueIndex('lab_reports_requisition_version_unique').on(t.requisitionId, t.version),
+  index('lab_reports_patient_idx').on(t.patientId),
+  check('lab_reports_version_positive', sql`${t.version} > 0`),
+])
+
+// Delivery log of every patient notice attempt (sent, logged, suppressed or skipped).
+export const notificationDeliveries = pgTable('notification_deliveries', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  templateKey: text('template_key').notNull(),
+  channel: notificationChannelEnum('channel').notNull(),
+  status: notificationDeliveryStatusEnum('status').notNull(),
+  destinationMasked: text('destination_masked'),
+  relatedType: text('related_type'),
+  relatedId: integer('related_id'),
+  dedupeKey: text('dedupe_key').unique(),
+  errorCode: text('error_code'),
+  createdByName: text('created_by_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('notification_deliveries_patient_idx').on(t.patientId),
+  index('notification_deliveries_related_idx').on(t.relatedType, t.relatedId),
+])
+
+export type LabOrderRow = typeof labOrders.$inferSelect
+export type LabRequisitionRow = typeof labRequisitions.$inferSelect
+export type HomeCollectionVisitRow = typeof homeCollectionVisits.$inferSelect
+export type HomeCollectionWindowRow = typeof homeCollectionWindows.$inferSelect
+export type ServiceAreaPinRow = typeof labServiceAreaPins.$inferSelect
+export type LabReportRow = typeof labReports.$inferSelect
+export type NotificationDeliveryRow = typeof notificationDeliveries.$inferSelect
+// end SP5 lab LIS & home collection
 
 export const employmentStatusEnum = pgEnum('employment_status', ['active', 'on_leave', 'terminated'])
 

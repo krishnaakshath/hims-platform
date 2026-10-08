@@ -6,7 +6,7 @@ import { charges } from '@/db/schema'
 import { inArray, eq } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
 
-let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' = 'crc'
+let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' | 'labs' | 'coder' | 'collector' = 'crc'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Jamie Ruiz' })) }))
 
 // getDb is wrapped (still the real one) so the 403 tests can prove a denied
@@ -54,7 +54,7 @@ describe('GET /api/charges audit logging', () => {
 })
 
 describe('GET charge reads role gating', () => {
-  const denied = ['pi', 'frontdesk', 'pharmacy', 'labs', 'coder'] as const
+  const denied = ['pi', 'frontdesk', 'pharmacy', 'labs', 'coder', 'collector'] as const
   const allowed = ['admin', 'crc', 'billing'] as const
 
   it.each(denied)('403s %s on GET /api/charges with no DB read', async (role) => {

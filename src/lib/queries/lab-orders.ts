@@ -1,119 +1,19 @@
 import { getDb } from '@/db/client'
-import { labOrders, labResults, labTests, patients, providers } from '@/db/schema'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { homeCollectionVisits, labOrders, labResults, labTests, patients, providers } from '@/db/schema'
+import { asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import type { LabQuoteStatus } from '@/lib/labs/catalog' // SP5
 import { listImagingForOrders, type ImagingAttachment } from '@/lib/queries/documents'
+import { PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status' // SP5
 
-export interface CreateLabOrderInput {
-  patientId: string
-  labTestId: number
-  orderedByProviderId: number
-}
+// SP5: orders are created only as part of a requisition (createLabRequisition in
+// src/lib/queries/lab-requisitions.ts); the single-order createLabOrder was removed.
 
-export async function createLabOrder(input: CreateLabOrderInput) {
-  const [created] = await getDb().insert(labOrders).values({
-    patientId: input.patientId,
-    labTestId: input.labTestId,
-    orderedByProviderId: input.orderedByProviderId,
-  }).returning()
-  return created
-}
-
-type LifecycleResult = { ok: true; patientId: string } | { ok: false; error: string }
-
-/**
- * Single conditional UPDATE keyed on current status (`ordered` only) — an
- * affected-row-count of 0 means the order either doesn't exist or is
- * already past `ordered`, both of which are "not collectible right now"
- * from the caller's point of view (Review Focus #2: a second call on an
- * already-`collected` order must not re-stamp `collectedAt`).
- */
-export async function markCollected(orderId: number): Promise<LifecycleResult> {
-  const updated = await getDb().update(labOrders)
-    .set({ status: 'collected', collectedAt: new Date() })
-    .where(and(eq(labOrders.id, orderId), eq(labOrders.status, 'ordered')))
-    .returning({ id: labOrders.id, patientId: labOrders.patientId })
-  if (updated.length === 0) return { ok: false, error: 'Order is not in ordered status' }
-  return { ok: true, patientId: updated[0].patientId }
-}
-
-export interface EnterResultInput {
-  value: string
-  unit?: string
-  referenceRange?: string
-  flag: 'normal' | 'abnormal' | 'critical'
-  notes?: string
-  resultedByName: string
-}
-
-/**
- * Guards the `collected -> resulted` transition in the UPDATE's WHERE
- * clause and only inserts the `labResults` row once that UPDATE has
- * actually affected a row (Review Focus #1: a result can never be entered
- * against an order that hasn't been collected — the row simply won't be
- * there to attach a result to).
- */
-export interface EnterResultOptions {
-  /** Webhook only: the order must belong to this patient (checked atomically in the UPDATE's WHERE). */
-  expectedPatientId?: string
-  /** Runs inside the same transaction after the result is stored; if it throws, everything rolls back. */
-  afterEntered?: (tx: DbTx, patientId: string) => Promise<void>
-}
-export type DbTx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
-
-export async function enterResult(orderId: number, input: EnterResultInput, opts: EnterResultOptions = {}): Promise<LifecycleResult> {
-  return getDb().transaction(async (tx) => {
-    const conditions = [eq(labOrders.id, orderId), eq(labOrders.status, 'collected')]
-    if (opts.expectedPatientId !== undefined) conditions.push(eq(labOrders.patientId, opts.expectedPatientId))
-    const updated = await tx.update(labOrders)
-      .set({ status: 'resulted' })
-      .where(and(...conditions))
-      .returning({ id: labOrders.id, patientId: labOrders.patientId })
-    if (updated.length === 0) {
-      return { ok: false, error: opts.expectedPatientId !== undefined ? 'Order is not in collected status for this patient' : 'Order is not in collected status' } as const
-    }
-
-    await tx.insert(labResults).values({
-      labOrderId: orderId,
-      value: input.value,
-      unit: input.unit ?? null,
-      referenceRange: input.referenceRange ?? null,
-      flag: input.flag,
-      resultedByName: input.resultedByName,
-      notes: input.notes ?? null,
-    })
-
-    if (opts.afterEntered) await opts.afterEntered(tx, updated[0].patientId)
-    return { ok: true, patientId: updated[0].patientId } as const
-  })
-}
-
-/**
- * `cancelOrder` guards `status IN ('ordered', 'collected')` — both
- * non-terminal states — in its WHERE, rejecting `resulted` and
- * `cancelled` alike (Review Focus #3: cancelling a terminal-state order,
- * whether already resulted or already cancelled, must fail).
- *
- * `reason` isn't stored on `labOrders` (no such column on this schema —
- * Task 1's approved shape has no cancel-reason field), so it's validated
- * here for defense in depth and left for the calling route to fold into
- * `logAudit`'s free-text action, the same place other unstored-but-required
- * context (e.g. discharge/transfer notes) ends up in this codebase when
- * there's no dedicated column for it.
- */
-export async function cancelOrder(orderId: number, reason: string): Promise<LifecycleResult> {
-  if (!reason || !reason.trim()) return { ok: false, error: 'A reason is required to cancel an order' }
-
-  const updated = await getDb().update(labOrders)
-    .set({ status: 'cancelled' })
-    .where(and(eq(labOrders.id, orderId), inArray(labOrders.status, ['ordered', 'collected'])))
-    .returning({ id: labOrders.id, patientId: labOrders.patientId })
-  if (updated.length === 0) return { ok: false, error: 'Order is not in a cancellable status' }
-  return { ok: true, patientId: updated[0].patientId }
-}
+// SP5: the old markCollected / enterResult / cancelOrder were replaced by the lifecycle
+// transitions in src/lib/queries/lab-lifecycle.ts (collect, receive, result, verify, cancel).
 
 export interface PatientLabOrderRow {
   id: number
-  status: 'ordered' | 'collected' | 'resulted' | 'cancelled'
+  status: LabOrderStatus // SP5: widened to every lab_order_status value
   orderedAt: Date
   collectedAt: Date | null
   testId: number
@@ -132,6 +32,14 @@ export interface PatientLabOrderRow {
     resultedAt: Date
     notes: string | null
   } | null
+  // SP5
+  sampleId: string | null
+  requisitionId: number | null
+  quotedPricePaise: number | null
+  quoteStatus: LabQuoteStatus
+  verifiedByName: string | null
+  verifiedAt: Date | null
+  // end SP5
 }
 
 function mapPatientOrderRow(r: {
@@ -159,6 +67,14 @@ function mapPatientOrderRow(r: {
       resultedAt: r.result.resultedAt,
       notes: r.result.notes,
     } : null,
+    // SP5
+    sampleId: r.order.sampleId,
+    requisitionId: r.order.requisitionId,
+    quotedPricePaise: r.order.quotedPricePaise,
+    quoteStatus: r.order.quoteStatus,
+    verifiedByName: r.order.verifiedByName,
+    verifiedAt: r.order.verifiedAt,
+    // end SP5
   }
 }
 
@@ -179,7 +95,7 @@ export async function listOrdersForPatient(patientId: string): Promise<PatientLa
 
 export interface WorklistRow {
   id: number
-  status: 'ordered' | 'collected' | 'resulted' | 'cancelled'
+  status: LabOrderStatus // SP5: widened to every lab_order_status value
   orderedAt: Date
   collectedAt: Date | null
   patientId: string
@@ -191,13 +107,26 @@ export interface WorklistRow {
   attachments: ImagingAttachment[]
   orderedByProviderId: number
   orderedByProviderName: string
+  // SP5: stage data for the worklist
+  sampleId: string | null
+  requisitionId: number | null
+  homeCollectionVisitId: number | null
+  visitDate: string | null
+  receivedAt: Date | null
+  verifiedAt: Date | null
+  patientUhid: string | null
+  result: { value: string; unit: string | null; referenceRange: string | null; notes: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
+  // end SP5
 }
 
 function mapWorklistRow(r: {
   order: typeof labOrders.$inferSelect
   test: typeof labTests.$inferSelect
   patientName: string
+  patientUhid: string | null
   provider: typeof providers.$inferSelect
+  visitDate: string | null
+  result: typeof labResults.$inferSelect | null
 }): Omit<WorklistRow, 'attachments'> {
   return {
     id: r.order.id,
@@ -212,6 +141,18 @@ function mapWorklistRow(r: {
     category: r.test.category,
     orderedByProviderId: r.order.orderedByProviderId,
     orderedByProviderName: r.provider.name,
+    // SP5
+    sampleId: r.order.sampleId,
+    requisitionId: r.order.requisitionId,
+    homeCollectionVisitId: r.order.homeCollectionVisitId,
+    visitDate: r.visitDate,
+    receivedAt: r.order.receivedAt,
+    verifiedAt: r.order.verifiedAt,
+    patientUhid: r.patientUhid,
+    result: r.result
+      ? { value: r.result.value, unit: r.result.unit, referenceRange: r.result.referenceRange, notes: r.result.notes, flag: r.result.flag, resultedByName: r.result.resultedByName, amendedAt: r.result.amendedAt }
+      : null,
+    // end SP5
   }
 }
 
@@ -232,12 +173,17 @@ export async function listWorklist(): Promise<WorklistRow[]> {
       // every column schema.ts declares and 42703s against the real DB.
       // See src/lib/queries/documents.ts:26-40 for the same pattern.
       patientName: sql<string>`patients.name`,
+      patientUhid: patients.uhid, // SP5 (named column)
       provider: providers,
+      visitDate: homeCollectionVisits.visitDate, // SP5
+      result: labResults, // SP5
     })
     .from(labOrders)
     .innerJoin(labTests, eq(labOrders.labTestId, labTests.id))
     .innerJoin(patients, eq(labOrders.patientId, patients.id))
     .innerJoin(providers, eq(labOrders.orderedByProviderId, providers.id))
+    .leftJoin(homeCollectionVisits, eq(homeCollectionVisits.id, labOrders.homeCollectionVisitId)) // SP5
+    .leftJoin(labResults, eq(labResults.labOrderId, labOrders.id)) // SP5
     .orderBy(desc(labOrders.orderedAt))
 
   const mapped = rows.map(mapWorklistRow)
@@ -258,6 +204,9 @@ export interface LabPatientRosterRow {
  * cards (listOrdersForPatient already has everything a card needs: result
  * value/flag, reference range, and any imaging attachments).
  */
+// SP5: statuses in which the order carries a result.
+const RESULTED_STATUSES: readonly LabOrderStatus[] = ['resulted', 'verified', 'reported']
+
 export async function listPatientsWithLabOrders(): Promise<LabPatientRosterRow[]> {
   const rows = await getDb()
     .select({
@@ -271,9 +220,39 @@ export async function listPatientsWithLabOrders(): Promise<LabPatientRosterRow[]
   const byPatient = new Map<string, LabPatientRosterRow>()
   for (const r of rows) {
     const existing = byPatient.get(r.patientId) ?? { id: r.patientId, name: r.patientName, resultedCount: 0, pendingCount: 0 }
-    if (r.status === 'resulted') existing.resultedCount += 1
-    else if (r.status === 'ordered' || r.status === 'collected') existing.pendingCount += 1
+    // SP5: a result exists from `resulted` on; everything before it is pending.
+    if (RESULTED_STATUSES.includes(r.status)) existing.resultedCount += 1
+    else if ((PRE_RESULT_STATUSES as readonly LabOrderStatus[]).includes(r.status)) existing.pendingCount += 1
     byPatient.set(r.patientId, existing)
   }
   return [...byPatient.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
+
+// SP5: one printable label per order (sample ID, test, container, patient name + UHID only).
+export interface SampleLabelRow {
+  orderId: number
+  sampleId: string | null
+  testName: string
+  container: string | null
+  patientName: string
+  uhid: string | null
+}
+
+export async function listLabelsForOrders(ids: number[]): Promise<SampleLabelRow[]> {
+  if (ids.length === 0) return []
+  return getDb()
+    .select({
+      orderId: labOrders.id,
+      sampleId: labOrders.sampleId,
+      testName: labTests.name,
+      container: labTests.container,
+      patientName: sql<string>`patients.name`,
+      uhid: patients.uhid,
+    })
+    .from(labOrders)
+    .innerJoin(labTests, eq(labOrders.labTestId, labTests.id))
+    .innerJoin(patients, eq(labOrders.patientId, patients.id))
+    .where(inArray(labOrders.id, ids))
+    .orderBy(asc(labOrders.id))
+}
+// end SP5

@@ -9,15 +9,17 @@
 // though it's a genuine File -- see tests/api/documents-receive.test.ts and
 // tests/api/patients-insurance-card.test.ts for the same class of
 // jsdom/Node realm mismatch.
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { POST as attachImaging } from '@/app/api/lab-orders/[id]/imaging/route'
 import { getDb } from '@/db/client'
-import { documents, labOrders, labResults, labTests, patients, providers } from '@/db/schema'
+import { auditLog, documents, labOrders, labResults, labTests, patients, providers } from '@/db/schema'
 
 type Role = 'admin' | 'pi' | 'crc' | 'frontdesk'
 let sessionRole: Role = 'admin'
-let sessionName = 'Test User'
+// SP5: a probe name, so the audit rows (the route's and collectLabOrder's) are deleted by name.
+const PROBE = `TEST_SP5_IMG-${Date.now()}`
+let sessionName = PROBE
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: sessionName })) }))
 vi.mock('@vercel/blob', () => ({
   put: vi.fn(async (path: string) => ({ url: `https://blob.test/${path}` })),
@@ -30,7 +32,7 @@ const createdDocumentIds: number[] = []
 
 afterEach(async () => {
   sessionRole = 'admin'
-  sessionName = 'Test User'
+  sessionName = PROBE
   vi.mocked(mockedPut).mockClear()
   const db = getDb()
   while (createdDocumentIds.length > 0) {
@@ -42,6 +44,10 @@ afterEach(async () => {
     await db.delete(labResults).where(eq(labResults.labOrderId, id))
     await db.delete(labOrders).where(eq(labOrders.id, id))
   }
+})
+
+afterAll(async () => {
+  await getDb().delete(auditLog).where(eq(auditLog.userName, PROBE))
 })
 
 async function seedOrder(status: 'ordered' | 'collected' | 'resulted' | 'cancelled') {

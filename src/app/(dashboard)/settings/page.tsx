@@ -1,4 +1,4 @@
-import { Building, Building2, SlidersHorizontal, UserCircle2, Users, IdCard, Monitor } from 'lucide-react'
+import { Building, Building2, SlidersHorizontal, UserCircle2, Users, IdCard, Monitor, FlaskConical } from 'lucide-react'
 import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { getSettingsSummary } from '@/lib/queries/settings'
@@ -15,6 +15,14 @@ import { ProviderProfilesPanel } from '@/components/settings/ProviderProfilesPan
 import { DepartmentsPanel } from '@/components/settings/DepartmentsPanel'
 import { StaffManagementPanel } from '@/components/settings/StaffManagementPanel'
 import { Tabs } from '@/components/Tabs'
+// SP5 lab setup
+import { listCollectionWindows, listLabTestsWithSetup, listServiceAreaPins } from '@/lib/queries/lab-setup'
+import { listServices } from '@/lib/queries/tariff'
+import { LAB_SETUP_ROLES } from '@/lib/role-policy'
+import { LabServiceAreaPanel } from '@/components/settings/LabServiceAreaPanel'
+import { HomeCollectionWindowsPanel } from '@/components/settings/HomeCollectionWindowsPanel'
+import { LabTestSetupPanel } from '@/components/settings/LabTestSetupPanel'
+// end SP5
 
 const SECTION = 'rounded-md border border-border bg-card p-5 shadow-none'
 
@@ -30,6 +38,17 @@ export default async function SettingsPage() {
   const staff = await listAllUsers()
   const departments = await listDepartments()
   const isAdmin = session.role === 'admin'
+  // SP5 lab setup: everyone on this page reads it; only LAB_SETUP_ROLES (admin) edit.
+  const [servicePins, collectionWindows, labTestSetup, labServices, imagingServices] = await Promise.all([
+    listServiceAreaPins(),
+    listCollectionWindows(),
+    listLabTestsWithSetup(),
+    listServices({ category: 'investigation_lab', limit: 500 }),
+    listServices({ category: 'investigation_imaging', limit: 500 }),
+  ])
+  const canEditLabSetup = LAB_SETUP_ROLES.includes(session.role)
+  const investigationServices = [...labServices, ...imagingServices].map((s) => ({ id: s.id, code: s.code, name: s.name }))
+  // end SP5
   // Own account resolved from the session (users.id, or app settings for the
   // env admin) -- shared with /account (Wave B P1-01 / P2-10).
   const account = await getOwnAccount(session)
@@ -76,6 +95,25 @@ export default async function SettingsPage() {
     </section>
   )
 
+  // SP5
+  const labSetupTab = (
+    <div className="space-y-4">
+      <section className={SECTION}>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Home collection service area</h2>
+        <LabServiceAreaPanel pins={servicePins} isAdmin={canEditLabSetup} />
+      </section>
+      <section className={SECTION}>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Collection windows</h2>
+        <HomeCollectionWindowsPanel windows={collectionWindows} isAdmin={canEditLabSetup} />
+      </section>
+      <section className={SECTION}>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Lab tests: sample and tariff</h2>
+        <LabTestSetupPanel tests={labTestSetup} services={investigationServices} isAdmin={canEditLabSetup} />
+      </section>
+    </div>
+  )
+  // end SP5
+
   const accountTab = <AccountPanel name={session.name} role={session.role} account={account} />
 
   return (
@@ -88,6 +126,7 @@ export default async function SettingsPage() {
         { id: 'providers', label: <><Users className="h-4 w-4" aria-hidden="true" />Providers</>, content: providersTab },
         { id: 'departments', label: <><Building className="h-4 w-4" aria-hidden="true" />Departments</>, content: departmentsTab },
         { id: 'staff', label: <><IdCard className="h-4 w-4" aria-hidden="true" />Staff</>, content: staffTab },
+        { id: 'lab-setup', label: <><FlaskConical className="h-4 w-4" aria-hidden="true" />Lab setup</>, content: labSetupTab }, // SP5
         { id: 'account', label: <><UserCircle2 className="h-4 w-4" aria-hidden="true" />Account</>, content: accountTab },
       ]} />
     </div>
