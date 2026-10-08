@@ -230,8 +230,14 @@ describe.skipIf(!process.env.DATABASE_URL)('charge lines (DB)', () => {
     expect(pgConstraint(await errorOf(db.update(serviceCatalog).set({ maxQuantity: 0 }).where(eq(serviceCatalog.id, fx.serviceId)))))
       .toBe('service_catalog_max_quantity_range')
     await db.update(serviceCatalog).set({ maxQuantity: 1000 }).where(eq(serviceCatalog.id, fx.serviceId))
-    const [p] = await db.select({ r: payers.requiresPreauth, g: payers.gstin, s: payers.stateCode }).from(payers).limit(1)
-    expect(p).toEqual({ r: false, g: null, s: null })
+    // A payer inserted without the billing flags gets the defaults (seeded payers may carry flags).
+    const [created] = await db.insert(payers).values({ name: `TEST_SP4 flags ${Date.now()}`, payerId: 'TESTFLAGS' }).returning({ id: payers.id })
+    try {
+      const [p] = await db.select({ r: payers.requiresPreauth, g: payers.gstin, s: payers.stateCode }).from(payers).where(eq(payers.id, created.id))
+      expect(p).toEqual({ r: false, g: null, s: null })
+    } finally {
+      await db.delete(payers).where(eq(payers.id, created.id))
+    }
   })
 
   it('the live column types and constraint names match schema.ts', async () => {

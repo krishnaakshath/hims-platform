@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
+import { eq } from 'drizzle-orm'
+import { getDb } from '@/db/client'
+import { patients } from '@/db/schema'
 import { searchAll } from '@/lib/queries/search'
 import * as trialsQ from '@/lib/queries/trials'
 import * as formsQ from '@/lib/queries/form-templates'
@@ -20,8 +23,11 @@ describe('searchAll', () => {
   })
 
   it('finds a seeded patient by name, case-insensitively', async () => {
-    const results = await searchAll('maria', ALL)
-    expect(results.patients.some((p) => p.label.toLowerCase().includes('maria'))).toBe(true)
+    // The seeded RD-0001's surname, typed in lower case (not hard-coded: it changed with the India demo).
+    const [p] = await getDb().select({ name: patients.name }).from(patients).where(eq(patients.id, 'RD-0001'))
+    const term = p.name.split(' ').pop()!.toLowerCase()
+    const results = await searchAll(term, ALL)
+    expect(results.patients.some((r) => r.label.toLowerCase().includes(term))).toBe(true)
   })
 
   it('finds a seeded trial by condition', async () => {
