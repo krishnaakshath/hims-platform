@@ -249,3 +249,18 @@ Devanagari to the repository and embed it in `src/lib/labs/report-pdf.ts`.
   `IDENTITY_ENCRYPTION_KEY` requires re-encrypting stored values first;
   do not change it on a live database without that plan. Backups, restore
   drills and key custody: [OPERATIONS.md](OPERATIONS.md).
+
+
+## Local development with Docker
+
+`docker-compose.yml` starts Postgres 15 (port 55432) and Redis with an Upstash-compatible REST endpoint (port 8079):
+
+```
+docker compose up -d
+export DATABASE_URL=postgres://postgres:hims_local_dev@127.0.0.1:55432/hims
+export KV_REST_API_URL=http://127.0.0.1:8079 KV_REST_API_TOKEN=hims_local_redis_token
+npm run db:migrate
+SEED_DEMO_PASSWORD='choose-a-password' npm run db:seed
+```
+
+Production uses Neon (Postgres) and Upstash (Redis) from the Vercel Marketplace; the Docker stack is for local development and tests only. `tests/lib/rate-limit.test.ts` needs a real Upstash database (its rate-limit script uses a flag only Upstash's Redis accepts).
