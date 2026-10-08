@@ -158,3 +158,15 @@ describe('SP7 rcm capabilities', () => {
   })
 })
 // end SP7
+
+// Wave I (P1-23): every role that opens a hospital report says so, and no other role does.
+describe('ROLE_CAPABILITIES hospital reports', () => {
+  it('states the hospital reports for exactly REPORTS_ROLES', async () => {
+    const { REPORTS_ROLES } = await import('@/lib/role-policy')
+    for (const role of Object.keys(ROLE_CAPABILITIES) as Role[]) {
+      const states = ROLE_CAPABILITIES[role].bullets.some((b) => /report.*and export (it|them) as CSV/i.test(b))
+      expect(states, role).toBe(REPORTS_ROLES.includes(role))
+    }
+  })
+})
+// end Wave I
