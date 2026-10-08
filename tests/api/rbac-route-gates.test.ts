@@ -38,6 +38,24 @@ import { POST as postRcmPreauthAction } from '@/app/api/rcm/preauths/[id]/action
 import { POST as postRcmPreauthDocument } from '@/app/api/rcm/preauths/[id]/documents/route'
 import { GET as getRcmPreauthDocument } from '@/app/api/rcm/preauth-documents/[id]/route'
 import { GET as getRcmApprovedPreauths } from '@/app/api/rcm/patients/[anonId]/approved-preauths/route'
+import { WRITE_OFF_APPROVE_ROLES } from '@/lib/role-policy'
+import { POST as postRcmClaim } from '@/app/api/rcm/claims/route'
+import { PUT as putRcmClaimInvoices } from '@/app/api/rcm/claims/[id]/invoices/route'
+import { POST as postRcmClaimDocument } from '@/app/api/rcm/claims/[id]/documents/route'
+import { POST as postRcmClaimAttach } from '@/app/api/rcm/claims/[id]/documents/attach/route'
+import { POST as postRcmClaimWaive } from '@/app/api/rcm/claims/[id]/documents/waive/route'
+import { DELETE as deleteRcmClaimDocument } from '@/app/api/rcm/claims/[id]/documents/[docId]/route'
+import { GET as getRcmClaimPreview } from '@/app/api/rcm/claims/[id]/preview/route'
+import { POST as postRcmClaimSubmission } from '@/app/api/rcm/claims/[id]/submissions/route'
+import { POST as postRcmClaimAction } from '@/app/api/rcm/claims/[id]/actions/route'
+import { POST as postRcmClaimSettlement } from '@/app/api/rcm/claims/[id]/settlements/route'
+import { POST as postRcmClaimWriteOff } from '@/app/api/rcm/claims/[id]/write-offs/route'
+import { GET as getRcmClaimDocument } from '@/app/api/rcm/claim-documents/[id]/route'
+import { POST as postRcmAcknowledge } from '@/app/api/rcm/dispatches/[id]/acknowledge/route'
+import { GET as getRcmCopy } from '@/app/api/rcm/submissions/[id]/copy/[copy]/route'
+import { GET as getRcmVerify } from '@/app/api/rcm/submissions/[id]/verify/route'
+import { POST as postRcmReconcile } from '@/app/api/rcm/settlements/[id]/reconcile/route'
+import { POST as postRcmWriteOffDecision } from '@/app/api/rcm/write-offs/[id]/decision/route'
 import { POST as postRcmPayer } from '@/app/api/rcm/payers/route'
 import { PUT as putRcmPayer } from '@/app/api/rcm/payers/[id]/route'
 import { PUT as putRcmPayerContacts } from '@/app/api/rcm/payers/[id]/contacts/route'
@@ -805,6 +823,24 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/rcm/preauths/[id]/documents', call: () => settle(() => postRcmPreauthDocument(send('POST', `/api/rcm/preauths/${BOGUS_ID}/documents`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
   { name: 'GET /api/rcm/preauth-documents/[id]', call: () => settle(() => getRcmPreauthDocument(get(`/api/rcm/preauth-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
   { name: 'GET /api/rcm/patients/[anonId]/approved-preauths', call: () => settle(() => getRcmApprovedPreauths(get(`/api/rcm/patients/${BOGUS_PATIENT}/approved-preauths?onDate=2026-10-01`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...PREAUTH_LOOKUP_ROLES] },
+  // SP7 claims, documents, submissions, insurer updates, settlements and write-offs (RCM_ROLES; the write-off decision is WRITE_OFF_APPROVE_ROLES).
+  { name: 'POST /api/rcm/claims', call: () => settle(() => postRcmClaim(send('POST', `/api/rcm/claims`))), allowed: [...RCM_ROLES] },
+  { name: 'PUT /api/rcm/claims/[id]/invoices', call: () => settle(() => putRcmClaimInvoices(send('PUT', `/api/rcm/claims/${BOGUS_ID}/invoices`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/claims/[id]/documents', call: () => settle(() => postRcmClaimDocument(send('POST', `/api/rcm/claims/${BOGUS_ID}/documents`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/claims/[id]/documents/attach', call: () => settle(() => postRcmClaimAttach(send('POST', `/api/rcm/claims/${BOGUS_ID}/documents/attach`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/claims/[id]/documents/waive', call: () => settle(() => postRcmClaimWaive(send('POST', `/api/rcm/claims/${BOGUS_ID}/documents/waive`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'DELETE /api/rcm/claims/[id]/documents/[docId]', call: () => settle(() => deleteRcmClaimDocument(del(`/api/rcm/claims/${BOGUS_ID}/documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID, docId: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'GET /api/rcm/claims/[id]/preview', call: () => settle(() => getRcmClaimPreview(get(`/api/rcm/claims/${BOGUS_ID}/preview`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/claims/[id]/submissions', call: () => settle(() => postRcmClaimSubmission(send('POST', `/api/rcm/claims/${BOGUS_ID}/submissions`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/claims/[id]/actions', call: () => settle(() => postRcmClaimAction(send('POST', `/api/rcm/claims/${BOGUS_ID}/actions`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/claims/[id]/settlements', call: () => settle(() => postRcmClaimSettlement(send('POST', `/api/rcm/claims/${BOGUS_ID}/settlements`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/claims/[id]/write-offs', call: () => settle(() => postRcmClaimWriteOff(send('POST', `/api/rcm/claims/${BOGUS_ID}/write-offs`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'GET /api/rcm/claim-documents/[id]', call: () => settle(() => getRcmClaimDocument(get(`/api/rcm/claim-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/dispatches/[id]/acknowledge', call: () => settle(() => postRcmAcknowledge(send('POST', `/api/rcm/dispatches/${BOGUS_ID}/acknowledge`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'GET /api/rcm/submissions/[id]/copy/[copy]', call: () => settle(() => getRcmCopy(get(`/api/rcm/submissions/${BOGUS_ID}/copy/rcm`), ctx({ id: BOGUS_ID, copy: 'rcm' }))), allowed: [...RCM_ROLES] },
+  { name: 'GET /api/rcm/submissions/[id]/verify', call: () => settle(() => getRcmVerify(get(`/api/rcm/submissions/${BOGUS_ID}/verify`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/settlements/[id]/reconcile', call: () => settle(() => postRcmReconcile(send('POST', `/api/rcm/settlements/${BOGUS_ID}/reconcile`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/write-offs/[id]/decision', call: () => settle(() => postRcmWriteOffDecision(send('POST', `/api/rcm/write-offs/${BOGUS_ID}/decision`), ctx({ id: BOGUS_ID }))), allowed: [...WRITE_OFF_APPROVE_ROLES] },
   // end SP7
 ]
 
@@ -921,6 +957,20 @@ const SP7_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/rcm/preauths/estimate', call: () => postRcmPreauthEstimate(send('POST', '/api/rcm/preauths/estimate', NOT_JSON)), allowed: RCM_ROLES },
   { name: 'POST /api/rcm/preauths/[id]/actions', call: () => postRcmPreauthAction(send('POST', `/api/rcm/preauths/${BOGUS_ID}/actions`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
   { name: 'POST /api/rcm/preauths/[id]/documents', call: () => postRcmPreauthDocument(send('POST', `/api/rcm/preauths/${BOGUS_ID}/documents`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/claims', call: () => postRcmClaim(send('POST', `/api/rcm/claims`, NOT_JSON)), allowed: RCM_ROLES },
+  { name: 'PUT /api/rcm/claims/[id]/invoices', call: () => putRcmClaimInvoices(send('PUT', `/api/rcm/claims/${BOGUS_ID}/invoices`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/claims/[id]/documents', call: () => postRcmClaimDocument(send('POST', `/api/rcm/claims/${BOGUS_ID}/documents`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/claims/[id]/documents/attach', call: () => postRcmClaimAttach(send('POST', `/api/rcm/claims/${BOGUS_ID}/documents/attach`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/claims/[id]/documents/waive', call: () => postRcmClaimWaive(send('POST', `/api/rcm/claims/${BOGUS_ID}/documents/waive`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  // DELETE has no body: a non-numeric id is the 400 an allowed role gets, after the gate.
+  { name: 'DELETE /api/rcm/claims/[id]/documents/[docId]', call: () => deleteRcmClaimDocument(del('/api/rcm/claims/x/documents/x'), ctx({ id: 'x', docId: 'x' })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/claims/[id]/submissions', call: () => postRcmClaimSubmission(send('POST', `/api/rcm/claims/${BOGUS_ID}/submissions`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/claims/[id]/actions', call: () => postRcmClaimAction(send('POST', `/api/rcm/claims/${BOGUS_ID}/actions`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/claims/[id]/settlements', call: () => postRcmClaimSettlement(send('POST', `/api/rcm/claims/${BOGUS_ID}/settlements`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/claims/[id]/write-offs', call: () => postRcmClaimWriteOff(send('POST', `/api/rcm/claims/${BOGUS_ID}/write-offs`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/dispatches/[id]/acknowledge', call: () => postRcmAcknowledge(send('POST', `/api/rcm/dispatches/${BOGUS_ID}/acknowledge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/settlements/[id]/reconcile', call: () => postRcmReconcile(send('POST', `/api/rcm/settlements/${BOGUS_ID}/reconcile`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/write-offs/[id]/decision', call: () => postRcmWriteOffDecision(send('POST', `/api/rcm/write-offs/${BOGUS_ID}/decision`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: WRITE_OFF_APPROVE_ROLES },
 ]
 // end SP7
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...SP5_WRITE_GATES, ...SP7_WRITE_GATES])('$name (deny before parse)', (c) => {
