@@ -391,4 +391,14 @@ export async function checkAbhaRateLimit(staffName: string): Promise<{ allowed: 
   const [a, b] = await Promise.all([staff.limit(staffName.toLowerCase()), global.limit('all')])
   return { allowed: a.success && b.success }
 }
+
+// Session-less ABDM callbacks (Scan & Share): 60 a minute per source IP.
+let _abdmCallbackLimiter: Ratelimit | null = null
+export async function checkAbdmCallbackRateLimit(ip: string): Promise<{ allowed: boolean }> {
+  if (!_abdmCallbackLimiter) {
+    _abdmCallbackLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(60, '60 s'), prefix: 'ratelimit:abdm-callback' })
+  }
+  const { success } = await _abdmCallbackLimiter.limit(ip)
+  return { allowed: success }
+}
 // end SP8

@@ -45,25 +45,39 @@ async function stampConsent(tx: WriteExecutor, consentId: number | null, patient
   await tx.update(abdmConsents).set({ patientId }).where(and(eq(abdmConsents.id, consentId), isNull(abdmConsents.patientId)))
 }
 
+type Tx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
+export type VerifiedAbha = NonNullable<AbhaFlow['verified']>
+
+/**
+ * The link itself, inside the caller's transaction: locks the patient, sets
+ * number, address and the verification columns, stamps the consent, writes
+ * the SP1 identity audit rows plus 'abdm: verified ABHA'. A unique violation
+ * (ABHA on another patient) propagates for the caller to map.
+ */
+export async function applyVerifiedAbhaTx(tx: Tx, patientId: string, v: VerifiedAbha, consentId: number | null, session: Session): Promise<'ok' | 'not_found'> {
+  const before = await readIdentityForUpdate(tx, patientId)
+  if (!before) return 'not_found'
+  const abhaNumber = normalizeAbhaNumber(v.abhaNumber)
+  const abhaAddress = v.abhaAddress ? normalizeAbhaAddress(v.abhaAddress) : before.snapshot.abhaAddress
+  await tx.update(patients).set({
+    abhaNumber, abhaAddress, abhaUnavailableReason: null, abhaUnavailableNote: null,
+    abhaVerifiedAt: new Date(), abhaVerificationSource: v.source, abhaVerifiedVia: v.via,
+  }).where(eq(patients.id, patientId))
+  await stampConsent(tx, consentId, patientId)
+  const entries = identityAuditEntries(before.snapshot, { ...before.snapshot, abhaNumber, abhaAddress, abhaUnavailableReason: null }, false)
+  for (const e of entries) await logAudit(session, e.action, patientId, e.details, tx)
+  await logAudit(session, 'abdm: verified ABHA', patientId, `patient=${patientId} via=${v.via} source=${v.source}`, tx)
+  return 'ok'
+}
+
 /** Links a verified flow's ABHA to an existing patient: number, address and the verification columns, in one transaction. */
 export async function applyVerifiedAbha(patientId: string, flow: AbhaFlow, session: Session): Promise<ApplyAbhaResult> {
   const v = flow.verified
   if (!v) return { ok: false, error: 'flow_not_verified' }
   try {
     return await getDb().transaction(async (tx): Promise<ApplyAbhaResult> => {
-      const before = await readIdentityForUpdate(tx, patientId)
-      if (!before) return { ok: false, error: 'not_found' }
-      const abhaNumber = normalizeAbhaNumber(v.abhaNumber)
-      const abhaAddress = v.abhaAddress ? normalizeAbhaAddress(v.abhaAddress) : before.snapshot.abhaAddress
-      await tx.update(patients).set({
-        abhaNumber, abhaAddress, abhaUnavailableReason: null, abhaUnavailableNote: null,
-        abhaVerifiedAt: new Date(), abhaVerificationSource: v.source, abhaVerifiedVia: v.via,
-      }).where(eq(patients.id, patientId))
-      await stampConsent(tx, flow.consentId, patientId)
-      const entries = identityAuditEntries(before.snapshot, { ...before.snapshot, abhaNumber, abhaAddress, abhaUnavailableReason: null }, false)
-      for (const e of entries) await logAudit(session, e.action, patientId, e.details, tx)
-      await logAudit(session, 'abdm: verified ABHA', patientId, `patient=${patientId} via=${v.via} source=${v.source}`, tx)
-      return { ok: true }
+      const r = await applyVerifiedAbhaTx(tx, patientId, v, flow.consentId, session)
+      return r === 'ok' ? { ok: true } : { ok: false, error: 'not_found' }
     })
   } catch (e) {
     if (isUniqueViolation(e)) return { ok: false, error: 'abha_conflict' }

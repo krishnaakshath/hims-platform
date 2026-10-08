@@ -21,6 +21,7 @@ import { ACCOUNT_ROLES, TARIFF_LOOKUP_ROLES } from '@/lib/role-policy' // Wave B
 import { CASH_DESK_ROLES, COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy' // SP4, SP5
 import { ENCOUNTER_REGISTER_ROLES } from '@/lib/role-policy' // Wave F
 import { NotebookTabs } from 'lucide-react' // Wave F
+import { QrCode } from 'lucide-react' // SP8
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -69,6 +70,9 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   { href: '/front-desk/check-in', label: 'Check-In', icon: ClipboardCheck, roles: ['frontdesk', 'admin', 'crc'] as Role[] },
   { href: '/front-desk/assignments', label: 'Assignments', icon: ListChecks, roles: ['frontdesk', 'admin', 'crc'] as Role[] },
   { href: '/front-desk/follow-ups', label: 'Follow-ups', icon: CalendarSync, roles: [...FOLLOW_UP_WORKLIST_ROLES] },
+  // SP8: ABHA Scan & Share registration queue -- ABDM_SHARE_QUEUE_ROLES.
+  { href: '/front-desk/abdm-shares', label: 'ABHA Scan & Share', icon: QrCode, roles: ['admin', 'frontdesk'] as Role[] },
+  // end SP8
   { href: '/inpatient/beds', label: 'Beds / Wards', icon: BedDouble, roles: ['frontdesk', 'admin', 'crc', 'pi'] as Role[] },
   // Wave F P1-04: OPD register (SP3 encounters) -- ENCOUNTER_REGISTER_ROLES.
   { href: '/encounters', label: 'OPD Register', icon: NotebookTabs, roles: [...ENCOUNTER_REGISTER_ROLES] },
