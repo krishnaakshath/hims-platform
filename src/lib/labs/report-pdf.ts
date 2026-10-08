@@ -5,12 +5,13 @@
 //   same data always gives the same bytes. Only the 14 standard fonts are used (Helvetica,
 //   Helvetica-Bold); their metrics ship inside pdf-lib, nothing is fetched or read at runtime.
 // - Every string goes through toPdfSafeText. KNOWN LIMITATION: standard fonts are WinAnsi only,
-//   so Indian-script names print as '?' (see toPdfSafeText). No external font is embedded.
+//   and no Indian-script font is available offline, so such text prints as a '[non-Latin text]'
+//   placeholder with a note under the patient block (see toPdfSafeText, docs/DEPLOYING.md).
 // - Times are shown in IST through formatDateTimeIn.
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
 import { formatDateTimeIn } from '@/lib/india-time'
 import { displaySampleId } from '@/lib/labs/sample-id'
-import { flagLabel, toPdfSafeText, type LabReportData } from '@/lib/labs/report-data'
+import { flagLabel, hasNonLatinText, toPdfSafeText, type LabReportData } from '@/lib/labs/report-data'
 
 const A4: [number, number] = [595.28, 841.89]
 const MARGIN = 50
@@ -150,9 +151,18 @@ function drawPatientBlock(l: Layout, data: LabReportData, fonts: Fonts) {
   const yLeft = drawColumn(left, MARGIN)
   const yRight = drawColumn(right, MARGIN + CONTENT_WIDTH / 2 + 8)
   l.y = Math.min(yLeft, yRight) - 4
+  if (hasNonLatinText(data.patient.name)) {
+    for (const line of wrap(SCRIPT_NOTE, regular, BODY, CONTENT_WIDTH)) {
+      text(l.page, line, MARGIN, l.y - BODY, regular, BODY)
+      l.y -= LINE
+    }
+    l.y -= 2
+  }
   rule(l.page, l.y)
   l.y -= 10
 }
+
+const SCRIPT_NOTE = 'The name is in a script this PDF cannot print; see the chart or the patient portal.'
 
 function drawTableHeader(l: Layout, fonts: Fonts) {
   let x = MARGIN

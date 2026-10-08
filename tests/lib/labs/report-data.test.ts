@@ -1,6 +1,6 @@
 // SP5 Task 13: the lab report data shape (pure builder) and the PDF-safe text helper.
 import { describe, it, expect } from 'vitest'
-import { buildLabReportData, flagLabel, hospitalFromBrand, toPdfSafeText, type LabReportSource } from '@/lib/labs/report-data'
+import { NON_LATIN_PLACEHOLDER, buildLabReportData, flagLabel, hasNonLatinText, hospitalFromBrand, toPdfSafeText, type LabReportSource } from '@/lib/labs/report-data'
 import { SRC } from './report-fixtures'
 
 const NOW = new Date('2099-03-04T06:00:00Z')
@@ -70,14 +70,19 @@ describe('flagLabel', () => {
 
 describe('toPdfSafeText', () => {
   it('toPdfSafeText replaces non-WinAnsi characters', () => {
-    expect(toPdfSafeText('राम  Kumar\t')).toBe('??? Kumar')
+    // Fix wave: a run of Indian-script text becomes one clear placeholder, not a row of '?'.
+    expect(toPdfSafeText('राम  Kumar\t')).toBe('[non-Latin text] Kumar')
+    expect(toPdfSafeText('राम कुमार')).toBe(NON_LATIN_PLACEHOLDER)
+    expect(toPdfSafeText('Kumar (குமார்)')).toBe('Kumar ([non-Latin text])')
+    expect(hasNonLatinText('राम Kumar')).toBe(true)
+    expect(hasNonLatinText('José Müller')).toBe(false)
   })
 
   it('keeps Latin-1, maps typographic punctuation to ASCII and collapses whitespace', () => {
     expect(toPdfSafeText('José Müller · 5 µmol/L ±2')).toBe('José Müller · 5 µmol/L ±2')
     expect(toPdfSafeText('‘a’ “b” – c — d … •')).toBe(`'a' "b" - c - d ... *`)
     expect(toPdfSafeText('10:30 am\nline two')).toBe('10:30 am line two')
-    expect(toPdfSafeText('😀 ok ₹')).toBe('? ok ?')
+    expect(toPdfSafeText('😀 ok ₹ 500')).toBe('? ok Rs. 500')
     expect(toPdfSafeText('')).toBe('')
     expect(toPdfSafeText('\u0000ctl\u0007')).toBe('?ctl?')
   })

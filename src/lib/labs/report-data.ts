@@ -118,26 +118,48 @@ export function flagLabel(flag: LabResultFlag): '' | 'ABNORMAL' | 'CRITICAL' {
 // mapped to plain ASCII first so a pasted name or range stays readable.
 const ASCII_PUNCTUATION: Record<string, string> = {
   '‘': "'", '’': "'", '‚': "'", '“': '"', '”': '"', '„': '"',
-  '–': '-', '—': '-', '−': '-', '…': '...', '•': '*',
+  '–': '-', '—': '-', '−': '-', '…': '...', '•': '*', '₹': 'Rs.',
+}
+
+/** What the PDF prints in place of a run of text in a script its fonts cannot draw. */
+export const NON_LATIN_PLACEHOLDER = '[non-Latin text]'
+
+const isWinAnsi = (code: number) => (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff)
+/** A letter, mark or digit outside WinAnsi: Devanagari, Tamil, Bengali, Gurmukhi and every other script. */
+const isForeignWordChar = (ch: string) => !isWinAnsi(ch.codePointAt(0)!) && /[\p{L}\p{M}\p{N}]/u.test(ch)
+
+/** True when the text has letters the PDF cannot draw (it will show NON_LATIN_PLACEHOLDER). */
+export function hasNonLatinText(s: string): boolean {
+  return Array.from(s).some(isForeignWordChar)
 }
 
 /**
  * Text the PDF's standard fonts (Helvetica, WinAnsi encoding) can draw. Whitespace runs (incl.
  * no-break and narrow no-break spaces from Intl output) collapse to one space and are trimmed;
- * typographic quotes/dashes become ASCII; every other character outside printable WinAnsi
- * (`\x20-\x7E`, `\xA0-\xFF`) becomes '?', one per code point.
+ * typographic quotes/dashes become ASCII and the rupee sign "Rs."; a run of words in another
+ * script (with the spaces between them) becomes one NON_LATIN_PLACEHOLDER; any other character
+ * outside printable WinAnsi (`\x20-\x7E`, `\xA0-\xFF`: emoji, control characters) becomes '?'.
  *
- * KNOWN LIMITATION: Indian-script text (Devanagari, Tamil, ...) prints as '?'. Embedding a
- * Unicode font is a later improvement (plan Ruling 2: dependency-light, no font files read at
- * runtime). The chart and the portal show names correctly.
+ * KNOWN LIMITATION (docs/DEPLOYING.md, "Lab report PDFs"): no font with Indian-script glyphs is
+ * available offline (and pdf-lib needs @pdf-lib/fontkit to embed one), so Indian-script names
+ * print as the placeholder. The chart and the portal show names correctly.
  */
 export function toPdfSafeText(s: string): string {
+  const chars = Array.from(s.replace(/\s+/g, ' ').trim())
   let out = ''
-  for (const ch of Array.from(s.replace(/\s+/g, ' ').trim())) {
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]
+    if (isForeignWordChar(ch)) {
+      // Swallow the whole run, including single spaces between foreign words.
+      let j = i + 1
+      while (j < chars.length && (isForeignWordChar(chars[j]) || (chars[j] === ' ' && j + 1 < chars.length && isForeignWordChar(chars[j + 1])))) j++
+      out += NON_LATIN_PLACEHOLDER
+      i = j - 1
+      continue
+    }
     const mapped = ASCII_PUNCTUATION[ch]
     if (mapped !== undefined) { out += mapped; continue }
-    const code = ch.codePointAt(0)!
-    out += (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff) ? ch : '?'
+    out += isWinAnsi(ch.codePointAt(0)!) ? ch : '?'
   }
   return out
 }

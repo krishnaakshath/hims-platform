@@ -92,11 +92,18 @@ describe('renderLabReportPdf', () => {
     expect(texts[n - 1]).toContain('Authorised signatory: ______________________')
   })
 
-  it('does not throw on a Devanagari name', async () => {
-    const bytes = await renderLabReportPdf({ ...DATA3, patient: { ...DATA3.patient, name: 'राम' } })
+  it('prints a clear placeholder and a note for a Devanagari name (no Indian-script font)', async () => {
+    const bytes = await renderLabReportPdf({ ...DATA3, patient: { ...DATA3.patient, name: 'राम Kumar' } })
     expect(bytes).toBeInstanceOf(Uint8Array)
     const [text] = await pageTexts(bytes)
-    expect(text).toContain('???')
+    expect(text).toContain('[non-Latin text] Kumar')
+    expect(text).not.toContain('???')
+    expect(text).toContain('The name is in a script this PDF cannot print; see the chart or the patient portal.')
+  })
+
+  it('adds no script note for a Latin name', async () => {
+    const [text] = await pageTexts(await renderLabReportPdf(DATA3))
+    expect(text).not.toContain('cannot print')
   })
 
   it('does not throw on a very long name, an unbreakable value, many results or no results', async () => {
