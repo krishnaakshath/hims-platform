@@ -31,6 +31,13 @@ import { POST as postRcmPolicy } from '@/app/api/rcm/policies/route'
 import { PATCH as patchRcmPolicy } from '@/app/api/rcm/policies/[id]/route'
 import { POST as postRcmPolicyCard } from '@/app/api/rcm/policies/[id]/card/route'
 import { GET as getRcmPolicyCard } from '@/app/api/rcm/policies/[id]/card/[side]/route'
+import { RCM_ROLES, PREAUTH_LOOKUP_ROLES } from '@/lib/role-policy'
+import { POST as postRcmPreauth } from '@/app/api/rcm/preauths/route'
+import { POST as postRcmPreauthEstimate } from '@/app/api/rcm/preauths/estimate/route'
+import { POST as postRcmPreauthAction } from '@/app/api/rcm/preauths/[id]/actions/route'
+import { POST as postRcmPreauthDocument } from '@/app/api/rcm/preauths/[id]/documents/route'
+import { GET as getRcmPreauthDocument } from '@/app/api/rcm/preauth-documents/[id]/route'
+import { GET as getRcmApprovedPreauths } from '@/app/api/rcm/patients/[anonId]/approved-preauths/route'
 import { POST as postRcmPayer } from '@/app/api/rcm/payers/route'
 import { PUT as putRcmPayer } from '@/app/api/rcm/payers/[id]/route'
 import { PUT as putRcmPayerContacts } from '@/app/api/rcm/payers/[id]/contacts/route'
@@ -791,6 +798,13 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PATCH /api/rcm/policies/[id]', call: () => settle(() => patchRcmPolicy(send('PATCH', `/api/rcm/policies/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...POLICY_WRITE_ROLES] },
   { name: 'POST /api/rcm/policies/[id]/card', call: () => settle(() => postRcmPolicyCard(send('POST', `/api/rcm/policies/${BOGUS_ID}/card`), ctx({ id: BOGUS_ID }))), allowed: [...POLICY_WRITE_ROLES] },
   { name: 'GET /api/rcm/policies/[id]/card/[side]', call: () => settle(() => getRcmPolicyCard(get(`/api/rcm/policies/${BOGUS_ID}/card/front`), ctx({ id: BOGUS_ID, side: 'front' }))), allowed: [...POLICY_READ_ROLES] },
+  // SP7 pre-auths (RCM_ROLES) and the charge-capture picker (PREAUTH_LOOKUP_ROLES).
+  { name: 'POST /api/rcm/preauths', call: () => settle(() => postRcmPreauth(send('POST', '/api/rcm/preauths'))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/preauths/estimate', call: () => settle(() => postRcmPreauthEstimate(send('POST', '/api/rcm/preauths/estimate'))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/preauths/[id]/actions', call: () => settle(() => postRcmPreauthAction(send('POST', `/api/rcm/preauths/${BOGUS_ID}/actions`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'POST /api/rcm/preauths/[id]/documents', call: () => settle(() => postRcmPreauthDocument(send('POST', `/api/rcm/preauths/${BOGUS_ID}/documents`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'GET /api/rcm/preauth-documents/[id]', call: () => settle(() => getRcmPreauthDocument(get(`/api/rcm/preauth-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...RCM_ROLES] },
+  { name: 'GET /api/rcm/patients/[anonId]/approved-preauths', call: () => settle(() => getRcmApprovedPreauths(get(`/api/rcm/patients/${BOGUS_PATIENT}/approved-preauths?onDate=2026-10-01`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...PREAUTH_LOOKUP_ROLES] },
   // end SP7
 ]
 
@@ -903,6 +917,10 @@ const SP7_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PATCH /api/rcm/policies/[id]', call: () => patchRcmPolicy(send('PATCH', `/api/rcm/policies/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: POLICY_WRITE_ROLES },
   // Multipart route: a non-multipart body is the 400 an allowed role gets, after the gate.
   { name: 'POST /api/rcm/policies/[id]/card', call: () => postRcmPolicyCard(send('POST', `/api/rcm/policies/${BOGUS_ID}/card`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: POLICY_WRITE_ROLES },
+  { name: 'POST /api/rcm/preauths', call: () => postRcmPreauth(send('POST', '/api/rcm/preauths', NOT_JSON)), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/preauths/estimate', call: () => postRcmPreauthEstimate(send('POST', '/api/rcm/preauths/estimate', NOT_JSON)), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/preauths/[id]/actions', call: () => postRcmPreauthAction(send('POST', `/api/rcm/preauths/${BOGUS_ID}/actions`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
+  { name: 'POST /api/rcm/preauths/[id]/documents', call: () => postRcmPreauthDocument(send('POST', `/api/rcm/preauths/${BOGUS_ID}/documents`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: RCM_ROLES },
 ]
 // end SP7
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...SP5_WRITE_GATES, ...SP7_WRITE_GATES])('$name (deny before parse)', (c) => {

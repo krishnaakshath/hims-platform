@@ -357,3 +357,10 @@ export async function listPreauths(opts: { status?: PreauthStatus; q?: string; p
     total: count[0]?.n ?? 0,
   }
 }
+
+/** The pre-auth estimate for a policy (priced with its billing payer's tariff). Not audited; writes nothing. */
+export async function estimateForPolicy(input: { policyId: number; plannedAdmissionDate: string; roomCategoryCode?: string; estimate: { serviceId: number; quantity: number }[] }): Promise<RcmWriteResult<{ lines: EstimateLine[]; totalPaise: number }>> {
+  const ctx = await loadPolicyContext(getDb(), input.policyId)
+  if (!ctx || ctx.row.status !== 'active') return rcmFail('policy_not_found')
+  return estimatePreauth({ payerId: ctx.billingPayerId, onDate: input.plannedAdmissionDate, roomCategoryCode: input.roomCategoryCode ?? null, items: input.estimate })
+}
