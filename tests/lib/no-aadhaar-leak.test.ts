@@ -25,6 +25,10 @@ const filesMatching = (re: RegExp) => SRC.filter((f) => re.test(read(f))).sort()
 
 // Export / interop / search / audit-viewing paths: not a single mention.
 const EXPORT_PATHS = [
+  // SP7: claim snapshots, both claim copies and the submission writer (ruling 9).
+  'src/lib/rcm/snapshot.ts',
+  'src/lib/rcm/claim-pdf.ts',
+  'src/lib/queries/claim-submissions.ts',
   // SP4: invoices, their snapshot and the print views carry only id, name, UHID and postal address.
   'src/lib/billing',
   'src/lib/queries/invoices.ts',
