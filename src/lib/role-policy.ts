@@ -173,7 +173,8 @@ export function searchScopesFor(role: Role): SearchScopes {
     patients: PATIENT_DIRECTORY_ROLES.includes(role),
     trials: clinical,
     formTemplates: clinical,
-    services: TARIFF_MANAGE_ROLES.includes(role),
+    // Wave G: every price-lookup role finds services (managers open the tariff, lookup roles the price lookup).
+    services: TARIFF_LOOKUP_ROLES.includes(role),
   }
 }
 
@@ -193,3 +194,8 @@ export const DISCHARGE_SUMMARY_PRINT_ROLES: readonly Role[] = PATIENT_DIRECTORY_
 export const ENCOUNTER_REGISTER_ROLES: readonly Role[] = ['admin', 'crc', 'pi', 'frontdesk']
 export const ENCOUNTER_REGISTER_EXPORT_ROLES: readonly Role[] = ['admin', 'crc']
 // end Wave F
+// Wave G (P2-01): the staff notification feed (GET /api/notifications, POST
+// /api/notifications/read, the TopBanner bell): every staff role. What each role
+// SEES is decided per source in src/lib/notifications/staff-feed.ts.
+export const NOTIFICATION_FEED_ROLES: readonly Role[] = ALL_ROLES
+// end Wave G

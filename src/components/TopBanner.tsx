@@ -11,8 +11,8 @@ import type { Role } from '@/lib/auth'
 
 // Wave B P1-24: name only what this role can actually find.
 function searchPlaceholder(s: SearchScopes): string {
-  if (s.patients && s.trials) return 'Search patients (name, UHID, mobile), trials, forms…'
-  if (s.patients) return 'Search patients by name, UHID or mobile…'
+  if (s.patients && s.trials) return s.services ? 'Search patients, services, trials, forms…' : 'Search patients (name, UHID, mobile), trials, forms…'
+  if (s.patients) return s.services ? 'Search patients by name, UHID or mobile, or a service…' : 'Search patients by name, UHID or mobile…'
   if (s.services) return 'Search services (name or code)…'
   return 'Search…'
 }
@@ -33,7 +33,7 @@ export function TopBanner({ userName, role }: { userName: string; role: Role }) 
       <div className="flex items-center justify-between px-6 py-3">
         {hasSearchScope(role) ? <GlobalSearch placeholder={searchPlaceholder(searchScopesFor(role))} /> : <div />}
         <div className="flex items-center gap-4">
-          <NotificationPanel role={role} triggerClassName="text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
+          <NotificationPanel triggerClassName="text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
           <div className="flex items-center gap-2">
             <PatientAvatar name={userName} size="sm" />
             <span className="text-sm font-medium text-sidebar-foreground">{userName}</span>

@@ -1976,3 +1976,17 @@ export const regulatoryDocuments = pgTable('regulatory_documents', {
   uploadedByName: text('uploaded_by_name').notNull(),
   uploadedAt: timestamp('uploaded_at').defaultNow().notNull(),
 })
+
+// Wave G (P2-01): per-user read state for the staff notification feed
+// (scripts/migrations/2026-10-09-wave-g-staff-notification-reads.sql). The feed is
+// computed from live events; this only records which items a user has read.
+// user_key = 'u:<users.id>', or 'n:<role>:<name>' for a session with no users row.
+export const staffNotificationReads = pgTable('staff_notification_reads', {
+  userKey: text('user_key').notNull(),
+  itemKey: text('item_key').notNull(),
+  readAt: timestamp('read_at').defaultNow().notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.userKey, t.itemKey] }),
+  index('staff_notification_reads_read_at_idx').on(t.readAt),
+])
+// end Wave G

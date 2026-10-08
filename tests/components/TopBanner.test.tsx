@@ -1,10 +1,13 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { TopBanner } from '@/components/TopBanner'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }))
+
+beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [], unreadCount: 0 }), { status: 200 }))) })
+afterEach(() => { vi.unstubAllGlobals() })
 
 describe('TopBanner', () => {
   // The logo/product name moved into LeftNav so the whole app shell reads
@@ -16,14 +19,10 @@ describe('TopBanner', () => {
     expect(screen.getByText('Jamie Ruiz')).toBeInTheDocument()
   })
 
-  it('hides the notification bell for a non-admin role', () => {
-    render(<TopBanner userName="Jamie Ruiz" role="crc" />)
-    expect(screen.queryByLabelText('Notifications')).not.toBeInTheDocument()
-  })
-
-  it('shows the notification bell for an admin role', () => {
-    render(<TopBanner userName="Test Admin" role="admin" />)
-    expect(screen.getByLabelText('Notifications')).toBeInTheDocument()
+  // Wave G P2-01: the bell is every role's own feed (no longer the admin audit log).
+  it.each(['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'coder', 'collector'] as const)('shows the notification bell for %s', (role) => {
+    render(<TopBanner userName="Test User" role={role} />)
+    expect(screen.getByRole('button', { name: /^notifications/i })).toBeInTheDocument()
   })
 
   it.each(['pharmacy', 'labs', 'coder', 'collector'] as const)('hides the search box for %s', (role) => {
