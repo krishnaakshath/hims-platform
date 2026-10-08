@@ -329,7 +329,7 @@ Every client gets its own of each of these. Never share one across clients.
 8. **Admin account**: `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD_HASH`.
 9. **Branding**: the `BRAND_*` values above.
 
-Then run the migration, create the first admin, and smoke-test. The full
+Then run `npm run db:migrate` against the new database, create the first admin, and smoke-test. The full
 procedure, env var table and smoke-test list are in
 [`docs/DEPLOYING.md`](docs/DEPLOYING.md). `.env.example` lists every variable
 the app reads.
@@ -342,8 +342,13 @@ cp .env.example .env.local   # then fill in values (never commit it)
 npm run dev                  # http://localhost:3000, redirects to /login
 npm test                     # full Vitest suite (loads .env.local via dotenv-cli; needs a database and Redis)
 npm run build                # production build + typecheck
+npm run db:migrate           # create/upgrade the schema of DATABASE_URL
 npm run db:seed              # demo data; see below
 ```
+
+`GET /api/health` reports `database`, `redis`, `migrations` and `secrets`
+as fixed words (`ok`, `fail`, `not_configured`, `pending`, ...); it is the
+first thing to check when sign-in fails on a new deployment.
 
 **Demo seed.** `npm run db:seed` writes fictional patients and one demo
 account per staff role at `<role>@<SEED_EMAIL_DOMAIN>` (default
@@ -365,14 +370,32 @@ node -e "const{randomBytes,scryptSync}=require('crypto');const s=randomBytes(16)
 
 ### Database changes: read before touching the schema
 
-Where a database is shared between branches or worktrees, **never run
-`npm run db:generate` or `npm run db:push` against it**: `drizzle-kit push`
-diffs your whole local `schema.ts` against the whole live database and drops
-tables your branch does not declare. Change the schema by hand: edit
-`src/db/schema.ts`, then apply the matching `CREATE TABLE IF NOT EXISTS` /
-`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` with a one-off script (see
-`scripts/apply-sql.mjs`). Creating the schema in a brand-new, empty
-per-client database is the safe use of `db:push`; see `docs/DEPLOYING.md`.
+Every database (production, staging, a developer's local one) is built and
+upgraded by one command, `npm run db:migrate`
+([`scripts/db/migrate.ts`](scripts/db/migrate.ts)). On an empty database it
+applies the frozen baseline (`scripts/db/baseline.sql`) and then every file in
+`scripts/migrations/` in name order; afterwards it applies only the files not
+yet recorded in the `schema_migrations` ledger. `npm run db:migrate:status`
+shows what is applied and pending. Details: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
+To change the schema:
+
+1. Edit `src/db/schema.ts`.
+2. Add `scripts/migrations/YYYY-MM-DD-<topic>.sql` with the same change,
+   written to be re-runnable (`CREATE TABLE IF NOT EXISTS`,
+   `ADD COLUMN IF NOT EXISTS`, guarded `DO $$ ... $$` blocks) and wrapped in
+   `BEGIN; ... COMMIT;`. `ALTER TYPE ... ADD VALUE` goes in its own earlier
+   file, because a new enum value cannot be used in the transaction that adds it.
+3. `npm run db:migrate`, then `npm run db:schema-diff -- <your db> <a db built from empty>`
+   to confirm both routes reach the same schema.
+
+Never edit a migration file (or the baseline) once it has run anywhere:
+`db:migrate` records each file's checksum and refuses to run when one changes.
+**Never run `npm run db:push` or `db:generate` against a shared or real
+database**: `drizzle-kit push` diffs the whole `schema.ts` against the whole
+database and offers to drop what it does not know (the exclusion constraint,
+the trigram index, other branches' tables). It is only for a throwaway local
+database.
 
 ## Stack
 
@@ -395,4 +418,6 @@ Testing Library.
 - `src/connectors/*.mock.ts`: mock connectors for the external intake/forms
   and EHR systems
 - `docs/DEPLOYING.md`: deployment guide
+- `docs/OPERATIONS.md`: migrations, backups and restore drills, key custody, data-safety review
+- `scripts/db/`: `db:migrate` runner and frozen baseline, backup, restore drill, schema diff
 - `docs/superpowers/`: historical design specs and implementation plans
