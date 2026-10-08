@@ -1,6 +1,8 @@
 'use client'
 import { formatIstDate, formatIstDateTime } from '@/lib/india-time'
 import { useState } from 'react'
+import Link from 'next/link'
+import { Printer } from 'lucide-react'
 import { TransferAdmissionModal } from '@/components/TransferAdmissionModal'
 import { DischargeAdmissionModal } from '@/components/DischargeAdmissionModal'
 import { MedicationAdministrationPanel } from '@/components/MedicationAdministrationPanel'
@@ -46,6 +48,16 @@ export function InpatientHistoryPanel({ admissions, availableRooms, canTransfer,
               {canManageMedications && <Button size="sm" variant="outline" onClick={() => setMedicationsFor(a.id)}>Medications</Button>}
               {canDischarge && <Button size="sm" onClick={() => setDischargeFor(a.id)}>Discharge</Button>}
             </div>
+          )}
+
+          {/* Wave F P1-13: the printable A4 discharge summary (same roles as this panel; the front desk gets the administrative copy). */}
+          {a.status === 'discharged' && (
+            <p className="mb-2">
+              <Link href={`/print/discharge/${a.id}`} className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
+                <Printer className="h-3.5 w-3.5" aria-hidden="true" />
+                Print discharge summary
+              </Link>
+            </p>
           )}
 
           {a.status === 'discharged' && (
