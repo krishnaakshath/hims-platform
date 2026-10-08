@@ -9,7 +9,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Role } from '@/lib/auth'
 import type { CodingIssue } from '@/lib/coding/rules'
-import { CODING_ACTION_ROLES, nextCodingStatus, type CodingAction, type EncounterCodingStatus } from '@/lib/coding/status'
+import { codingActionAvailable, type CodingAction, type EncounterCodingStatus } from '@/lib/coding/status'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { postCodingAction } from './codingApi'
@@ -22,11 +22,6 @@ const SIMPLE_ACTIONS: { action: SimpleAction; label: string }[] = [
   { action: 'mark_coded', label: 'Mark coded' },
   { action: 'finalise', label: 'Finalise' },
 ]
-
-/** Whether `role` may take `action` from `status` (the status machine and the per-action roles). */
-export function codingActionAvailable(status: EncounterCodingStatus, action: CodingAction, role: Role): boolean {
-  return nextCodingStatus(status, action) !== null && CODING_ACTION_ROLES[action].includes(role)
-}
 
 export function CodingActions({ encounterId, status, role, assignedToUserId, holdsClaim, hasAccount, isCompleted, coders }: {
   encounterId: number
