@@ -67,8 +67,11 @@ export default async function CashDeskPage({ searchParams }: { searchParams: Pro
               <p className="text-lg font-semibold">{ledger.patient.name}</p>
               <p className="text-sm text-muted-foreground">UHID {ledger.patient.uhid ?? '—'} · {ledger.activeAdmissionId !== null ? `Admitted (admission ${ledger.activeAdmissionId})` : 'Not admitted'}</p>
             </div>
-            <dl className="grid grid-cols-3 gap-6 text-right">
+            <dl className="grid grid-cols-2 gap-6 text-right sm:grid-cols-5">
               <div><dt className="text-xs text-muted-foreground">Outstanding</dt><dd className="text-lg font-semibold tabular-nums">{formatPaise(ledger.ledger.summary.outstandingPaise)}</dd></div>
+              {/* SP7 (ruling 5): the part an open insurance claim still covers, and what the patient pays now. */}
+              <div><dt className="text-xs text-muted-foreground">Awaiting insurer</dt><dd className="text-lg font-semibold tabular-nums">{formatPaise(ledger.coveredPendingPaise)}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Patient payable</dt><dd className="text-lg font-semibold tabular-nums">{formatPaise(ledger.patientPayablePaise)}</dd></div>
               <div><dt className="text-xs text-muted-foreground">Credit</dt><dd className="text-lg font-semibold tabular-nums">{formatPaise(ledger.ledger.summary.creditBalancePaise)}</dd></div>
               <div><dt className="text-xs text-muted-foreground">Not yet billed (estimate)</dt><dd className="text-lg font-semibold tabular-nums">{formatPaise(ledger.unbilledPaise)}</dd></div>
             </dl>

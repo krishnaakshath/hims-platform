@@ -2,14 +2,16 @@
 import { sumPaise } from './amounts'
 
 export type LedgerEntryKind = 'invoice' | 'credit_note' | 'advance' | 'receipt' | 'refund'
+  | 'insurer_settlement' | 'write_off' // SP7 (ruling 5): insurer money and approved write-offs credit the patient
 export interface LedgerEntry { kind: LedgerEntryKind; id: number; number: string; at: Date; amountPaise: number; admissionId: number | null }
 export interface LedgerSummary {
   invoicedPaise: number; creditedPaise: number; receivedPaise: number; refundedPaise: number
   balancePaise: number; outstandingPaise: number; creditBalancePaise: number
+  insurerSettledPaise: number; writtenOffPaise: number // SP7
 }
 
-const KIND_ORDER: Record<LedgerEntryKind, number> = { invoice: 0, credit_note: 1, advance: 2, receipt: 3, refund: 4 }
-const SIGN: Record<LedgerEntryKind, 1 | -1> = { invoice: 1, refund: 1, credit_note: -1, advance: -1, receipt: -1 }
+const KIND_ORDER: Record<LedgerEntryKind, number> = { invoice: 0, credit_note: 1, advance: 2, receipt: 3, refund: 4, insurer_settlement: 5, write_off: 6 /* SP7 */ }
+const SIGN: Record<LedgerEntryKind, 1 | -1> = { invoice: 1, refund: 1, credit_note: -1, advance: -1, receipt: -1, insurer_settlement: -1, write_off: -1 /* SP7 */ }
 
 export function computeLedger(entries: LedgerEntry[]): { rows: (LedgerEntry & { balancePaise: number })[]; summary: LedgerSummary } {
   const sorted = [...entries].sort((a, b) => a.at.getTime() - b.at.getTime() || KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.id - b.id)
@@ -23,10 +25,15 @@ export function computeLedger(entries: LedgerEntry[]): { rows: (LedgerEntry & { 
   const creditedPaise = of('credit_note')
   const receivedPaise = of('advance', 'receipt')
   const refundedPaise = of('refund')
-  const balancePaise = sumPaise([invoicedPaise, refundedPaise, -creditedPaise, -receivedPaise])
+  const insurerSettledPaise = of('insurer_settlement') // SP7
+  const writtenOffPaise = of('write_off') // SP7
+  const balancePaise = sumPaise([invoicedPaise, refundedPaise, -creditedPaise, -receivedPaise, -insurerSettledPaise, -writtenOffPaise])
   return {
     rows,
-    summary: { invoicedPaise, creditedPaise, receivedPaise, refundedPaise, balancePaise, outstandingPaise: Math.max(0, balancePaise), creditBalancePaise: Math.max(0, -balancePaise) },
+    summary: {
+      invoicedPaise, creditedPaise, receivedPaise, refundedPaise, balancePaise, outstandingPaise: Math.max(0, balancePaise), creditBalancePaise: Math.max(0, -balancePaise),
+      insurerSettledPaise, writtenOffPaise, // SP7
+    },
   }
 }
 

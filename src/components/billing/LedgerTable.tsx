@@ -5,6 +5,7 @@ import type { LedgerEntry } from '@/lib/billing/ledger'
 
 const KIND_LABEL: Record<LedgerEntry['kind'], string> = {
   invoice: 'Invoice', credit_note: 'Credit note', advance: 'Advance', receipt: 'Payment', refund: 'Refund',
+  insurer_settlement: 'Insurer settlement', write_off: 'Write-off', // SP7
 }
 const DEBIT = new Set<LedgerEntry['kind']>(['invoice', 'refund'])
 

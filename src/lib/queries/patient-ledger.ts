@@ -5,11 +5,13 @@ import { and, asc, desc, eq, ilike, inArray, notExists, or, sql } from 'drizzle-
 import { getDb } from '@/db/client'
 import {
   admissions, chargeLines, charges, creditNotes, invoices, patientPayments, patients, refunds, type PatientPaymentRow,
+  claims, claimSettlements, claimWriteOffs, // SP7
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import type { ChargeStatus } from '@/lib/charge-status'
-import { paiseFromDb } from '@/lib/billing/amounts'
+import { paiseFromDb, sumPaise } from '@/lib/billing/amounts'
+import { claimCoveredPendingPaise, splitPatientOutstanding } from '@/lib/rcm/amounts' // SP7
 import { computeLedger, type LedgerEntry } from '@/lib/billing/ledger'
 import { financialYearOf } from '@/lib/billing/numbering'
 import type { PaymentInput, RefundInput } from '@/lib/billing/validation'
@@ -38,8 +40,32 @@ export async function loadLedgerEntries(executor: WriteExecutor, patientId: stri
     ...cn.map((r) => ({ kind: 'credit_note' as const, id: r.id, number: r.number, at: r.at, amountPaise: r.amount, admissionId: r.admissionId })),
     ...pay.map((r) => ({ kind: r.kind, id: r.id, number: r.number, at: r.at, amountPaise: r.amount, admissionId: r.admissionId })),
     ...ref.map((r) => ({ kind: 'refund' as const, id: r.id, number: r.number, at: r.at, amountPaise: r.amount, admissionId: r.admissionId })),
+    ...(await loadClaimCredits(executor, patientId)), // SP7
   ]
 }
+
+// SP7 (ruling 5): one credit per insurer settlement row and per approved write-off of the
+// patient's claims. Insurer money never enters patient_payments, so it is counted exactly once.
+async function loadClaimCredits(executor: WriteExecutor, patientId: string): Promise<LedgerEntry[]> {
+  const st = await executor.select({ id: claimSettlements.id, claimNumber: claims.claimNumber, at: claimSettlements.recordedAt, amount: claimSettlements.settledPaise, admissionId: claims.admissionId })
+    .from(claimSettlements).innerJoin(claims, eq(claims.id, claimSettlements.claimId)).where(eq(claims.patientId, patientId))
+  const wo = await executor.select({ id: claimWriteOffs.id, claimNumber: claims.claimNumber, at: claimWriteOffs.decidedAt, amount: claimWriteOffs.amountPaise, admissionId: claims.admissionId })
+    .from(claimWriteOffs).innerJoin(claims, eq(claims.id, claimWriteOffs.claimId)).where(and(eq(claims.patientId, patientId), eq(claimWriteOffs.status, 'approved')))
+  return [
+    ...st.map((r) => ({ kind: 'insurer_settlement' as const, id: r.id, number: `${r.claimNumber}/S${r.id}`, at: r.at, amountPaise: r.amount, admissionId: r.admissionId })),
+    ...wo.map((r) => ({ kind: 'write_off' as const, id: r.id, number: `${r.claimNumber}/W${r.id}`, at: r.at ?? new Date(0), amountPaise: r.amount, admissionId: r.admissionId })),
+  ]
+}
+
+/** SP7: what the patient's open claims still cover (ruling 5), summed over the patient's claims. */
+export async function patientCoveredPendingPaise(executor: WriteExecutor, patientId: string): Promise<number> {
+  const rows = await executor.select({
+    status: claims.status, claimedPaise: claims.claimedPaise, approvedPaise: claims.approvedPaise, nonRecoverableDisallowedPaise: claims.nonRecoverableDisallowedPaise,
+    settledPaise: claims.settledPaise, writtenOffPaise: claims.writtenOffPaise,
+  }).from(claims).where(eq(claims.patientId, patientId))
+  return sumPaise(rows.map((r) => claimCoveredPendingPaise({ ...r, pendingWriteOffPaise: 0 })))
+}
+// end SP7
 
 export interface LegacyChargeRow { id: number; dateOfService: string; amountPaise: number; status: ChargeStatus; legacy: true }
 
@@ -49,6 +75,8 @@ export async function getPatientLedger(patientId: string): Promise<{
   ledger: ReturnType<typeof computeLedger>
   unbilledPaise: number
   legacyCharges: LegacyChargeRow[]
+  coveredPendingPaise: number // SP7: awaiting the insurer
+  patientPayablePaise: number // SP7: outstanding less what the insurer still covers
 } | null> {
   const db = getDb()
   const [patient] = await db.select({ id: patients.id, name: patients.name, uhid: patients.uhid }).from(patients).where(eq(patients.id, patientId)).limit(1)
@@ -70,6 +98,11 @@ export async function getPatientLedger(patientId: string): Promise<{
     ledger,
     unbilledPaise: paiseFromDb(unbilled?.total ?? null),
     legacyCharges: legacy.map((c) => ({ ...c, legacy: true as const })),
+    ...(await (async () => { // SP7
+      const covered = await patientCoveredPendingPaise(db, patientId)
+      const split = splitPatientOutstanding(ledger.summary.outstandingPaise, covered)
+      return { coveredPendingPaise: split.coveredPendingPaise, patientPayablePaise: split.patientPayablePaise }
+    })()),
   }
 }
 
