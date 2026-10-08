@@ -78,6 +78,7 @@ import { ABDM_SHARE_QUEUE_ROLES } from '@/lib/role-policy'
 import { GET as getAbdmShare, POST as postAbdmShare } from '@/app/api/abdm/shares/[id]/route'
 import { NHCX_EXCHANGE_ROLES } from '@/lib/role-policy'
 import { POST as postPreauthNhcx } from '@/app/api/rcm/preauths/[id]/nhcx/route'
+import { POST as postNhcxStatus } from '@/app/api/rcm/nhcx/exchanges/[id]/status/route'
 // end SP8
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -897,6 +898,7 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/abdm/shares/[id]', call: () => settle(() => postAbdmShare(send('POST', `/api/abdm/shares/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...ABDM_SHARE_QUEUE_ROLES] },
   // SP8 NHCX pre-auth send (NHCX_EXCHANGE_ROLES): unconfigured NHCX is a 503 after the gate.
   { name: 'POST /api/rcm/preauths/[id]/nhcx', call: () => settle(() => postPreauthNhcx(send('POST', `/api/rcm/preauths/${BOGUS_ID}/nhcx`), ctx({ id: BOGUS_ID }))), allowed: [...NHCX_EXCHANGE_ROLES] },
+  { name: 'POST /api/rcm/nhcx/exchanges/[id]/status', call: () => settle(() => postNhcxStatus(send('POST', `/api/rcm/nhcx/exchanges/${BOGUS_ID}/status`), ctx({ id: BOGUS_ID }))), allowed: [...NHCX_EXCHANGE_ROLES] },
   // end SP8
 ]
 
@@ -1045,6 +1047,7 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/patients/[anonId]/abha/link', call: () => postAbhaLink(send('POST', `/api/patients/${BOGUS_PATIENT}/abha/link`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: ABHA_LINK_ROLES },
   { name: 'POST /api/abdm/shares/[id]', call: () => postAbdmShare(send('POST', `/api/abdm/shares/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ABDM_SHARE_QUEUE_ROLES },
   { name: 'POST /api/rcm/preauths/[id]/nhcx', call: () => postPreauthNhcx(send('POST', `/api/rcm/preauths/${BOGUS_ID}/nhcx`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: NHCX_EXCHANGE_ROLES },
+  { name: 'POST /api/rcm/nhcx/exchanges/[id]/status', call: () => postNhcxStatus(send('POST', `/api/rcm/nhcx/exchanges/${BOGUS_ID}/status`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: NHCX_EXCHANGE_ROLES },
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

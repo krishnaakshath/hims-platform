@@ -60,6 +60,7 @@ This is owner and legal work (spec section 7). The steps:
 | `NHCX_MAX_ATTACHMENT_BYTES` | NHCX | Total attachment bytes per message; default 10000000 |
 | `INTEGRATION_PAYLOAD_KEY` | ABHA flows, NHCX | 32 random bytes, base64. The at-rest key for flow state and payloads. It is separate from `IDENTITY_ENCRYPTION_KEY` |
 | `CRON_SECRET` | NHCX sweep | Bearer secret for `/api/cron/nhcx-sweep` |
+| `NHCX_STATUS_POLLING` | optional | `1` enables status requests (`/v1/status`); off by default because the payload is UNVERIFIED (U9) |
 
 NHCX also needs the ABDM gateway variables, because it authenticates with the ABDM gateway session (UNVERIFIED U3).
 

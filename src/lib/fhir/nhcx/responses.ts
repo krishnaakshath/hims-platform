@@ -152,3 +152,15 @@ export function buildPaymentAckTaskBundle(i: { created: Date; hospital: Snapshot
   }
   return taskBundle(task, [entry(nhcxHospital(i.hospital, ids.hospital)), entry(nhcxPayer(i.payer, ids.payer))], created)
 }
+
+/** A status request (HCX /v1/status; payload shape UNVERIFIED U9): a Task asking for the status of a correlation. */
+export function buildStatusTaskBundle(i: { created: Date; sender: string; recipient: string; correlationId: string }): FhirBundle {
+  const created = istIsoWithOffset(i.created)
+  const task: FhirResource = {
+    resourceType: 'Task', id: newId(), meta: { profile: [PROFILE.Task] }, status: 'requested', intent: 'order',
+    code: { coding: [{ system: FINANCIAL_TASK_CODE, code: 'status' }] }, authoredOn: created,
+    focus: { identifier: { value: i.correlationId } },
+    requester: { identifier: { value: i.sender } }, owner: { identifier: { value: i.recipient } },
+  }
+  return taskBundle(task, [], created)
+}

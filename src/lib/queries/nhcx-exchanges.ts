@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm'
 import { after } from 'next/server'
 import { getDb } from '@/db/client'
-import { claimDocuments, claimEvents, claims, claimSubmissions, nhcxExchanges, preauthEvents, preauths, providers, type NhcxExchangeRow } from '@/db/schema'
+import { claimDocuments, claimEvents, claims, claimSubmissions, nhcxExchanges, nhcxInboundCalls, preauthEvents, preauths, providers, type NhcxExchangeRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { isUniqueViolation } from '@/lib/db-errors'
@@ -16,7 +16,7 @@ import type { SubmissionKind } from '@/lib/rcm/constants'
 import type { ClaimSnapshot, PayerRef, PreauthSnapshot } from '@/lib/rcm/snapshot'
 import { buildClaimBundle, buildPreauthBundle, claimBundleProblems, type ClaimBundleContext } from '@/lib/fhir/nhcx/claim'
 import { NHCX_BUILD_ERROR_COPY, type NhcxBuildErrorCode } from '@/lib/fhir/nhcx/resources'
-import { buildCommunicationResponseTaskBundle, parseCommunicationRequestTaskBundle } from '@/lib/fhir/nhcx/responses'
+import { buildCommunicationResponseTaskBundle, buildStatusTaskBundle, parseCommunicationRequestTaskBundle } from '@/lib/fhir/nhcx/responses'
 import { validateNhcxBundle, type BundleProfile } from '@/lib/fhir/nhcx/validate'
 import type { FhirBundle } from '@/lib/fhir/nhcx/types'
 import { recipientCodeFor } from '@/lib/nhcx/claim-gateway'
@@ -27,6 +27,7 @@ import { sealHcxPayload } from '@/lib/nhcx/jwe'
 import { CERT_REFRESH_ERROR_CODES, getRecipientCert, invalidateRecipientCert, type CertResult } from '@/lib/nhcx/participants'
 import { mockTransport, type MockTransport } from '@/lib/nhcx/mock-transport'
 import { lockPatientBilling } from './charge-capture'
+import { expireShares } from './abdm-profile-shares'
 import { registrationOf } from './claim-submissions'
 import type { WriteExecutor } from './executor'
 
@@ -396,4 +397,98 @@ export async function listExchangesFor(subject: { claimId?: number; preauthId?: 
   return rows.map(({ correlationId, createdAt, respondedAt, ...r }) => ({
     ...r, correlationPrefix: correlationId.slice(0, 8), createdAt: createdAt.toISOString(), respondedAt: respondedAt ? respondedAt.toISOString() : null,
   }))
+}
+
+// ---- status polling and the sweep (Task 13) ---------------------------------------------------
+
+export const MANUAL_POLL_INTERVAL_MS = 15 * 60 * 1000
+export const SWEEP_POLL_INTERVAL_MS = 6 * 60 * 60 * 1000
+const POLLABLE = ['sent', 'queued', 'dispatched'] as const
+export type PollResult = 'sent' | 'too_soon' | 'not_pollable' | 'failed' | 'disabled'
+
+/** Status polling sends unverified traffic (U9), so it is off unless NHCX_STATUS_POLLING=1. */
+export const statusPollingEnabled = (env: Record<string, string | undefined> = process.env) => env.NHCX_STATUS_POLLING === '1'
+
+/** Asks NHCX for the status of an exchange: a new api_call_id on the original correlation; the answer arrives on on_status. */
+export async function pollExchangeStatus(exchangeId: number, partial: Partial<DispatchDeps> & { mode?: 'manual' | 'sweep'; enabled?: boolean } = {}): Promise<PollResult> {
+  const deps = { ...defaultDispatchDeps(), ...partial }
+  if (!(partial.enabled ?? statusPollingEnabled())) return 'disabled'
+  const now = deps.now()
+  const interval = partial.mode === 'sweep' ? SWEEP_POLL_INTERVAL_MS : MANUAL_POLL_INTERVAL_MS
+  const { nhcx, abdm } = deps.config()
+  if (nhcx.state !== 'configured' || abdm.state !== 'configured') return 'not_pollable'
+  const claimed = await getDb().transaction(async (tx) => {
+    const [row] = await tx.select().from(nhcxExchanges).where(eq(nhcxExchanges.id, exchangeId)).for('update', { skipLocked: true })
+    if (!row || row.direction !== 'outbound' || !(POLLABLE as readonly string[]).includes(row.state) || row.isMock) return 'not_pollable' as const
+    if (row.lastPolledAt && now.getTime() - row.lastPolledAt.getTime() < interval) return 'too_soon' as const
+    await tx.update(nhcxExchanges).set({ lastPolledAt: now, updatedAt: now }).where(eq(nhcxExchanges.id, exchangeId))
+    return row
+  })
+  if (typeof claimed === 'string') return claimed
+  const cert = await deps.certs(nhcx.config, abdm.config, claimed.recipientCode)
+  if (!cert.ok) return 'failed'
+  const headers = buildRequestHeaders({ sender: nhcx.config.participantCode, recipient: claimed.recipientCode, correlationId: claimed.correlationId, now })
+  const jwe = await sealHcxPayload(buildStatusTaskBundle({ created: now, sender: nhcx.config.participantCode, recipient: claimed.recipientCode, correlationId: claimed.correlationId }), headers, cert.certPem)
+  const outcome = await deps.client(nhcx.config, abdm.config, 'status', jwe)
+  safeLog('nhcx', { action: 'status', exchangeId, outcome: outcome.kind })
+  return outcome.kind === 'accepted' ? 'sent' : 'failed'
+}
+
+export const NO_RESPONSE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+export const INBOUND_CALL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const SWEEP_BATCH = 25
+
+export interface SweepDeps { dispatch: (id: number) => Promise<DispatchResult>; poll: (id: number) => Promise<PollResult>; pollingEnabled: boolean }
+
+/** The cron safety net (ruling 5): due sends, optional polling, 7-day silence, share expiry, inbound-call purge. */
+export async function runNhcxSweep(now: Date, partial: Partial<SweepDeps> = {}): Promise<{ dispatched: number; failed: number; polled: number; noResponse: number; sharesExpired: number; inboundPurged: number }> {
+  const deps: SweepDeps = {
+    dispatch: (id) => dispatchExchange(id, { now: () => now }),
+    poll: (id) => pollExchangeStatus(id, { now: () => now, mode: 'sweep' }),
+    pollingEnabled: statusPollingEnabled(),
+    ...partial,
+  }
+  const db = getDb()
+  const counts = { dispatched: 0, failed: 0, polled: 0, noResponse: 0, sharesExpired: 0, inboundPurged: 0 }
+
+  const due = await db.select({ id: nhcxExchanges.id }).from(nhcxExchanges)
+    .where(and(eq(nhcxExchanges.direction, 'outbound'), eq(nhcxExchanges.state, 'pending_send'), or(isNull(nhcxExchanges.nextAttemptAt), lte(nhcxExchanges.nextAttemptAt, now))))
+    .orderBy(asc(nhcxExchanges.nextAttemptAt)).limit(SWEEP_BATCH)
+  for (const { id } of due) {
+    const r = await deps.dispatch(id)
+    if (r === 'sent') counts.dispatched++
+    if (r === 'failed') counts.failed++
+  }
+
+  if (deps.pollingEnabled) {
+    const silent = await db.select({ id: nhcxExchanges.id }).from(nhcxExchanges)
+      .where(and(eq(nhcxExchanges.direction, 'outbound'), inArray(nhcxExchanges.state, [...POLLABLE]), lt(nhcxExchanges.createdAt, new Date(now.getTime() - 2 * 60 * 60 * 1000))))
+      .orderBy(asc(nhcxExchanges.lastPolledAt)).limit(SWEEP_BATCH)
+    for (const { id } of silent) if ((await deps.poll(id)) === 'sent') counts.polled++
+  }
+
+  const stale = await db.select({ id: nhcxExchanges.id, claimId: nhcxExchanges.claimId, patientId: nhcxExchanges.patientId }).from(nhcxExchanges)
+    .where(and(eq(nhcxExchanges.direction, 'outbound'), inArray(nhcxExchanges.state, [...POLLABLE]), lt(nhcxExchanges.createdAt, new Date(now.getTime() - NO_RESPONSE_AFTER_MS))))
+    .limit(100)
+  for (const s of stale) {
+    await db.transaction(async (tx) => {
+      const [updated] = await tx.update(nhcxExchanges).set({ state: 'no_response', updatedAt: now })
+        .where(and(eq(nhcxExchanges.id, s.id), inArray(nhcxExchanges.state, [...POLLABLE]))).returning({ id: nhcxExchanges.id })
+      if (!updated) return
+      if (s.claimId) await addGatewayClaimNote(tx, s.claimId, 'No NHCX response after 7 days; check the insurer portal', now)
+      await logGatewayEvent('NHCX gateway', 'nhcx: no response', s.patientId, `exchange=${s.id}`, tx)
+      counts.noResponse++
+    })
+  }
+
+  counts.sharesExpired = await expireShares(now)
+
+  counts.inboundPurged = await db.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+    const rows = await tx.delete(nhcxInboundCalls).where(lt(nhcxInboundCalls.receivedAt, new Date(now.getTime() - INBOUND_CALL_RETENTION_MS))).returning({ id: nhcxInboundCalls.apiCallId })
+    return rows.length
+  })
+
+  safeLog('nhcx-sweep', { count: counts.dispatched, outcome: `failed:${counts.failed}`, state: `noResponse:${counts.noResponse}` })
+  return counts
 }
