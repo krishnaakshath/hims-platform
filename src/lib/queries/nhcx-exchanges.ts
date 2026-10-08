@@ -250,13 +250,12 @@ async function buildOutbound(row: NhcxExchangeRow, cfg: NhcxConfig | null, deps:
     if (problems.length > 0) return { ok: false, code: problems[0] }
     return { ok: true, fhir: buildPreauthBundle(snap, ctx), profile: 'ClaimBundle', abhaId: snap.patient.abhaNumber }
   }
-  const extra = outboundBuilders[row.action as NhcxAction]
-  if (extra) return extra(row, now)
+  // Loaded lazily: these modules import this one.
+  if (row.action === 'coverageeligibility/check') return (await import('./nhcx-eligibility')).buildEligibilityOutbound(row, now)
+  if (row.action === 'paymentnotice/on_request') return (await import('./nhcx-review')).buildPaymentAckOutbound(row, now)
   return { ok: false, code: 'snapshot_missing' }
 }
 
-/** Builders for further outbound actions (eligibility, payment acknowledgement), registered by their modules. */
-export const outboundBuilders: Partial<Record<NhcxAction, (row: NhcxExchangeRow, now: Date) => Promise<Built>>> = {}
 export type { Built as OutboundBuild }
 
 async function lease(exchangeId: number, now: Date): Promise<NhcxExchangeRow | null> {

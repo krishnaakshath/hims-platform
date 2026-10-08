@@ -15,7 +15,7 @@ const TABLES = [abdmConsents, abdmProfileShares, nhcxExchanges, nhcxInboundCalls
 describe('SP8 migration (static)', () => {
   it('migration is idempotent and declares every column', () => {
     const s = readMigration(M); expect(idempotencyProblems(s)).toEqual([])
-    for (const t of TABLES) expect(missingColumns(t, s)).toEqual([])
+    for (const t of TABLES) expect(missingColumns(t, s + readMigration('2026-10-11-sp8-eligibility-provider.sql'))).toEqual([])
     for (const c of ['abha_verified_at', 'abha_verification_source', 'abha_verified_via', 'patients_abha_verification_complete', 'nhcx_exchanges_submission_unique', 'nhcx_exchanges_payload_direction', 'abdm_profile_shares_expired_scrubbed', 'nhcx_inbound_calls_append_only', 'abdm_consents_append_only']) expect(s).toContain(c)
     expect(s).not.toMatch(/\bUPDATE\s+patients\b/i); expect(s).not.toMatch(/aadhaar/i)
     expect(s).not.toMatch(/\bUPDATE\s+\w+\s+SET\b/i)
@@ -30,11 +30,16 @@ describe('SP8 migration (static)', () => {
       ]
       for (const n of names) {
         expect(n.length, n).toBeLessThanOrEqual(63)
-        if (t !== patients || n.startsWith('patients_abha_verification')) expect(s, n).toContain(n)
+        if (t !== patients || n.startsWith('patients_abha_verification')) expect(s + readMigration('2026-10-11-sp8-eligibility-provider.sql'), n).toContain(n)
       }
       for (const fk of c.foreignKeys) if (t !== patients) expect(fk.onDelete ?? 'no action', fk.getName()).toBe('no action')
     }
     expect(s.replace(/--[^\n]*/g, '')).not.toMatch(/ON DELETE/)
+  })
+  it('the eligibility provider migration is idempotent and names its FK', () => {
+    const s = readMigration('2026-10-11-sp8-eligibility-provider.sql')
+    expect(idempotencyProblems(s)).toEqual([])
+    expect(s).toContain('nhcx_eligibility_checks_provider_fk'); expect(s).toContain('provider_id')
   })
   it('both triggers are created inside a DO block that tests pg_trigger, and the purge setting is honoured', () => {
     const s = readMigration(M)

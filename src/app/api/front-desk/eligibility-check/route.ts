@@ -1,44 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { readJsonBody } from '@/lib/http'
-import { demoFeaturesEnabled, DEMO_NOT_CONFIGURED_BODY, DEMO_NOT_CONFIGURED_STATUS } from '@/lib/demo-features'
-import { z } from 'zod'
+import { NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
-import { logAudit } from '@/lib/audit'
-import { simulateEligibilityCheck, recordEligibilityCheck } from '@/lib/queries/insurance-eligibility'
-import { getPayerById } from '@/lib/queries/payers'
 
-const eligibilitySchema = z.object({
-  patientId: z.string().min(1),
-  payerId: z.number().int(),
-}).strict()
+// SP8: the hash-based simulated eligibility check is retired (spec §3, no fake
+// data). Coverage is checked through NHCX on the patient's policy
+// (POST /api/nhcx/eligibility). Kept as a fixed 410 after the original role
+// gate so an old client gets a clear answer.
+const RETIRED_MESSAGE = 'Simulated eligibility checks are retired; use the NHCX eligibility check on the patient\'s policy'
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: Request) {
+  void _request
   const session = await requireSession()
   if (session instanceof NextResponse) return session
-  // Insurance verification moved fully to billing -- front desk previously
-  // ran eligibility checks at check-in, removed per explicit product
-  // direction: billing now owns insurance end-to-end.
   if (!['billing', 'admin', 'crc'].includes(session.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  // Wave B P1-22: hash-based simulated eligibility (SP8 replaces it with NHCX) --
-  // 503 unless DEMO_FEATURES is on (after the role gate, before parsing).
-  if (!demoFeaturesEnabled()) return NextResponse.json(DEMO_NOT_CONFIGURED_BODY, { status: DEMO_NOT_CONFIGURED_STATUS })
-
-  const json = await readJsonBody(request)
-  if (!json.ok) return json.response
-  const parsed = eligibilitySchema.safeParse(json.body)
-  if (!parsed.success) return NextResponse.json({ error: 'Invalid eligibility-check payload', details: parsed.error.flatten() }, { status: 400 })
-
-  const { patientId, payerId } = parsed.data
-  const payer = await getPayerById(payerId)
-  if (!payer) return NextResponse.json({ error: 'Unknown payer' }, { status: 400 })
-
-  // No patient row is otherwise fetched on this path, so planType is
-  // resolved as null here rather than adding a lookup solely for this field.
-  const { status, copayCents, deductibleRemainingCents, planType, coverageStartDate } = simulateEligibilityCheck(patientId, payer.name, null)
-  const created = await recordEligibilityCheck({ patientId, payerName: payer.name, payerId: payer.id, status, copayCents, deductibleRemainingCents, planType, coverageStartDate, checkedByName: session.name })
-
-  await logAudit(session, `verified insurance eligibility (${status})`, patientId)
-  return NextResponse.json(created, { status: 201 })
+  return NextResponse.json({ error: RETIRED_MESSAGE }, { status: 410 })
 }

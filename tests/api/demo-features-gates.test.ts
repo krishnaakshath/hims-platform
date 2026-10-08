@@ -16,7 +16,6 @@ import { POST as postMockPayment } from '@/app/api/mock-payments/route'
 import { POST as postBroadcast } from '@/app/api/broadcasts/route'
 import { POST as postReview } from '@/app/api/reviews/route'
 import { PUT as putReview } from '@/app/api/reviews/[id]/route'
-import { POST as postEligibility } from '@/app/api/front-desk/eligibility-check/route'
 
 const NOT_JSON = '{not json'
 const req = (method: string, path: string) => new NextRequest(`http://localhost${path}`, { method, body: NOT_JSON })
@@ -27,7 +26,7 @@ const CASES: { name: string; call: () => Promise<Response>; allowed: Role; denie
   { name: 'POST /api/broadcasts', call: () => postBroadcast(req('POST', '/api/broadcasts')), allowed: 'crc', denied: 'pi' },
   { name: 'POST /api/reviews', call: () => postReview(req('POST', '/api/reviews')), allowed: 'crc', denied: 'pi' },
   { name: 'PUT /api/reviews/[id]', call: () => putReview(req('PUT', '/api/reviews/2147483000'), ctx), allowed: 'admin', denied: 'labs' },
-  { name: 'POST /api/front-desk/eligibility-check', call: () => postEligibility(req('POST', '/api/front-desk/eligibility-check')), allowed: 'billing', denied: 'frontdesk' },
+  // SP8: the simulated eligibility check is retired (410 regardless of DEMO_FEATURES).
 ]
 
 const saved = process.env.DEMO_FEATURES

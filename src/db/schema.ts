@@ -1978,7 +1978,10 @@ export const nhcxEligibilityChecks = pgTable('nhcx_eligibility_checks', {
   requestedAt: timestamp('requested_at').defaultNow().notNull(),
   respondedAt: timestamp('responded_at'),
   isMock: boolean('is_mock').default(false).notNull(),
+  // scripts/migrations/2026-10-11-sp8-eligibility-provider.sql
+  providerId: integer('provider_id'),
 }, (t) => [
+  foreignKey({ name: 'nhcx_eligibility_checks_provider_fk', columns: [t.providerId], foreignColumns: [providers.id] }),
   foreignKey({ name: 'nhcx_eligibility_checks_patient_fk', columns: [t.patientId], foreignColumns: [patients.id] }),
   foreignKey({ name: 'nhcx_eligibility_checks_policy_fk', columns: [t.policyId], foreignColumns: [patientPolicies.id] }),
   foreignKey({ name: 'nhcx_eligibility_checks_payer_fk', columns: [t.payerId], foreignColumns: [payers.id] }),

@@ -3,7 +3,6 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { IndianRupee, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags } from 'lucide-react'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
-import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getArDashboardData } from '@/lib/queries/ar-dashboard'
@@ -11,7 +10,6 @@ import { listCharges } from '@/lib/queries/charges'
 import { listPatientCollections } from '@/lib/queries/patient-collections'
 import { countEligibilityFollowUps } from '@/lib/queries/insurance-eligibility'
 import { ArAgingChart } from '@/components/ArAgingChart'
-import { EligibilityCheckButton } from '@/components/EligibilityCheckButton'
 import { formatPaise } from '@/lib/format'
 import type { ChargeStatus } from '@/lib/charge-status'
 
@@ -59,10 +57,7 @@ export default async function BillingHomePage() {
           <h1 className="text-xl font-bold text-foreground">Billing Dashboard</h1>
           <p className="text-sm text-muted-foreground">Revenue cycle — from registration to discharge</p>
         </div>
-        {/* Insurance verification lives entirely in billing now -- front
-            desk previously ran eligibility checks at check-in. */}
-        {/* Wave B P1-22: simulated eligibility -- only with DEMO_FEATURES on. */}
-        {demoFeaturesEnabled() && <EligibilityCheckButton />}
+        {/* SP8: the simulated eligibility check is retired; coverage is checked through NHCX on the patient's policy. */}
       </div>
 
       {/* KPI Row — Mobbin-inspired: compact, data-dense tiles */}

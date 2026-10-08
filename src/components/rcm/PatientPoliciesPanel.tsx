@@ -1,4 +1,5 @@
 'use client'
+import { EligibilityCheckPanel } from '@/components/nhcx/EligibilityCheckPanel' // SP8
 import { useState } from 'react'
 import { formatPaise } from '@/lib/format'
 import { formatIsoDate } from '@/lib/india-time'
@@ -10,8 +11,15 @@ import { secondaryButtonClass } from './ui'
 
 export const LEGACY_PREFILL_NOTICE = 'Older insurance details are on file. Use them to start a policy?'
 
-export function PatientPoliciesPanel({ patientId, policies, payers, canEdit, legacyPrefill, todayIso }: {
+// SP8: NHCX eligibility per active, in-date policy (NHCX_ELIGIBILITY_ROLES; the page passes it only for them).
+export type PolicyEligibilityProps = {
+  nhcxConfigured: boolean; providers: { id: number; name: string }[]; defaultProviderId: number | null
+  payerOnNhcx: Record<number, boolean>; context: 'registration' | 'manual'
+}
+
+export function PatientPoliciesPanel({ patientId, policies, payers, canEdit, legacyPrefill, todayIso, eligibility }: {
   patientId: string; policies: PolicyView[]; payers: PayerOption[]; canEdit: boolean; legacyPrefill: Partial<PolicyInput> | null; todayIso: string
+  eligibility?: PolicyEligibilityProps
 }) {
   const [adding, setAdding] = useState<Partial<PolicyInput> | null>(null)
   const [editing, setEditing] = useState<number | null>(null)
@@ -36,6 +44,12 @@ export function PatientPoliciesPanel({ patientId, policies, payers, canEdit, leg
                 <p className="text-xs text-muted-foreground">Policy {p.policyNumber} · member {p.memberId}{p.planName ? ` · ${p.planName}` : ''} · {formatIsoDate(p.validFrom)}–{formatIsoDate(p.validTo)}{p.sumInsuredPaise !== null ? ` · sum insured ${formatPaise(p.sumInsuredPaise)}` : ''}</p>
               </div>
               {canEdit && editing !== p.id && <button type="button" className={secondaryButtonClass} onClick={() => setEditing(p.id)}>Edit</button>}
+              {eligibility && p.status === 'active' && p.validFrom <= todayIso && p.validTo >= todayIso && (
+                <div className="w-full">
+                  <EligibilityCheckPanel policyId={p.id} context={eligibility.context} providers={eligibility.providers} defaultProviderId={eligibility.defaultProviderId}
+                    nhcxConfigured={eligibility.nhcxConfigured} payerOnNhcx={eligibility.payerOnNhcx[p.id] ?? false} />
+                </div>
+              )}
             </div>
             <div className="mt-2 flex gap-2">
               {/* eslint-disable-next-line @next/next/no-img-element -- streamed from an authenticated route, not a static asset */}
