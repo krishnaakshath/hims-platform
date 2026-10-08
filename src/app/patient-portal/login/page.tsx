@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { BrandLogo } from '@/components/BrandLogo'
 import { MfaCodeStep } from '@/components/mfa/MfaCodeStep'
+import { PortalOtpSignIn } from '@/components/portal/PortalOtpSignIn' // Wave J
 
 export default function PatientPortalLoginPage() {
   const router = useRouter()
@@ -12,6 +13,7 @@ export default function PatientPortalLoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [needsMfa, setNeedsMfa] = useState(false)
+  const [otpMode, setOtpMode] = useState(false) // Wave J (P1-20)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -57,6 +59,8 @@ export default function PatientPortalLoginPage() {
               onSubmit={submitMfaCode}
               onBack={() => setNeedsMfa(false)}
             />
+          ) : otpMode ? (
+            <PortalOtpSignIn onMfaRequired={() => setNeedsMfa(true)} onSignedIn={() => router.push('/patient-portal')} onUsePassword={() => setOtpMode(false)} />
           ) : (
             <>
               <div className="mb-8 text-center">
@@ -81,7 +85,7 @@ export default function PatientPortalLoginPage() {
                     className="flex h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
                   />
                   <p id="patientId-hint" className="text-xs text-muted-foreground">
-                    Use the email address the clinic has on file, or the patient ID from your paperwork.
+                    Use the email address the clinic has on file, or the UHID or patient ID from your paperwork.
                   </p>
                 </div>
                 <div className="space-y-1.5">
@@ -119,6 +123,9 @@ export default function PatientPortalLoginPage() {
                   )}
                 </button>
               </form>
+              <button type="button" onClick={() => { setError(null); setOtpMode(true) }} className="mt-4 inline-flex min-h-11 w-full items-center justify-center text-sm font-medium text-primary hover:underline">
+                Sign in with a code sent to your mobile
+              </button>
             </>
           )}
         </div>
