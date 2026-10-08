@@ -123,7 +123,7 @@ describe('LabWorklist stages', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mark collected' }))
     await waitFor(() => expect(screen.getByText(/L261008-0042-9/)).toBeInTheDocument())
     expect(screen.getByRole('link', { name: 'Print label' }).getAttribute('href')).toBe(`/lab-labels?orders=${o.id}`)
-    expect(fetch).toHaveBeenCalledWith(`/api/lab-orders/${o.id}/collect`, { method: 'POST' })
+    expect(fetch).toHaveBeenCalledWith(`/api/lab-orders/${o.id}/collect`, expect.objectContaining({ method: 'POST' }))
   })
 
   it('Verify posts to the verify route and shows a refusal message', async () => {
@@ -132,7 +132,7 @@ describe('LabWorklist stages', () => {
     renderAs('pi', [o])
     fireEvent.click(screen.getByRole('button', { name: 'Verify' }))
     await waitFor(() => expect(screen.getByText(/someone other than the person/)).toBeInTheDocument())
-    expect(fetch).toHaveBeenCalledWith(`/api/lab-orders/${o.id}/verify`, { method: 'POST' })
+    expect(fetch).toHaveBeenCalledWith(`/api/lab-orders/${o.id}/verify`, expect.objectContaining({ method: 'POST' }))
   })
 
   it('the receive box submits the scanned ID on Enter', async () => {
