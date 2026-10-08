@@ -988,8 +988,8 @@ async function clearExistingData() {
 
 /**
  * Wave D: after a reset, every table the clear emptied numbers from 1 again, so a rebuilt demo
- * has the same ids as a freshly seeded one. Only serial sequences of tables that are now empty
- * are touched (reference data that survives the clear, and uhid_seq, keep counting).
+ * has the same ids and document numbers as a freshly seeded one. Only sequences of tables that
+ * are now empty are touched (reference data that survives the clear, and uhid_seq, keep counting).
  */
 async function restartEmptyIdSequences() {
   await getDb().execute(sql.raw(`DO $$
@@ -1001,6 +1001,12 @@ BEGIN
     JOIN pg_depend d ON d.objid = s.oid AND d.deptype = 'a'
     JOIN pg_class c ON c.oid = d.refobjid
     WHERE s.relkind = 'S' AND c.relkind = 'r' AND c.relnamespace = 'public'::regnamespace
+  LOOP
+    EXECUTE format('SELECT NOT EXISTS (SELECT 1 FROM public.%I)', r.tbl) INTO is_empty;
+    IF is_empty THEN EXECUTE format('ALTER SEQUENCE public.%I RESTART WITH 1', r.seq); END IF;
+  END LOOP;
+  -- Document-number sequences that no column owns: lab report, pre-auth and claim numbers.
+  FOR r IN SELECT * FROM (VALUES ('lab_reports', 'lab_report_seq'), ('preauths', 'preauth_number_seq'), ('claims', 'claim_number_seq')) AS v(tbl, seq)
   LOOP
     EXECUTE format('SELECT NOT EXISTS (SELECT 1 FROM public.%I)', r.tbl) INTO is_empty;
     IF is_empty THEN EXECUTE format('ALTER SEQUENCE public.%I RESTART WITH 1', r.seq); END IF;
@@ -1428,10 +1434,11 @@ export async function seed(opts: { reset?: boolean } = {}) {
     sessions: {
       admin: sessionFor('admin'), frontdesk: sessionFor('frontdesk'), billing: sessionFor('billing'), labs: sessionFor('labs'),
       pathologist: sessionFor('pathologist'), collector: sessionFor('collector'), coder: sessionFor('coder'), pharmacy: sessionFor('pharmacy'),
-      crc: sessionFor('crc'), pi: sessionFor('pi'),
+      crc: sessionFor('crc'), pi: sessionFor('pi'), rcm: sessionFor('rcm'),
     },
   })
   console.log(`Seeded the hospital day: ${summary.encounters} visits, ${summary.admissions} admissions, ${summary.labOrders} lab orders, ${summary.invoices} invoices.`)
+  console.log(`Seeded the insurance desk: ${summary.policies} policies, ${summary.preauths} pre-authorisations, ${summary.claims} claims.`)
   // end Wave D
 }
 

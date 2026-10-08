@@ -174,10 +174,14 @@ SEED_DEMO_PASSWORD='<12+ chars>' npm run db:seed
 - The seed throws if `NODE_ENV` or `VERCEL_ENV` is `production` unless
   `ALLOW_PRODUCTION_SEED=1`. A client's live database must never be seeded.
 - The demo is an Indian multispeciality hospital: departments, doctors with
-  NMC/SMC numbers, Indian insurers/TPAs/schemes, wards with room-category
+  NMC/SMC numbers, Indian insurers/TPAs/schemes with RCM payer profiles and
+  TPA networks, wards with room-category
   tariffs, a service master, and a working day relative to today (IST): OPD
   queue, inpatients, lab orders in every status with home collection, coding
-  on the fictional SAMPLE code sets, charges, invoices, receipts and advances.
+  on the fictional SAMPLE code sets, charges, invoices, receipts and advances,
+  and an insurance desk: patient policies, an approved and a queried
+  pre-authorisation, a settled claim (both copies recorded; the demo copies are
+  not uploaded to the blob store) and a draft claim.
   Every identifier is synthetic (Aadhaar test values start `9999 0000` and are
   stored only encrypted; ABHA numbers start `99-9999-0000`; mobiles `+91 90000`).
 - On a database that already has patients the seed only tops up reference

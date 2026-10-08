@@ -3,8 +3,10 @@ import {
   syntheticAadhaar, syntheticAbhaNumber, syntheticMobile, gstinWithCheck, DEMO_HOSPITAL, DEPARTMENT_SEED, DOCTOR_ROSTER,
   PAYERS_SEED, ROOM_CATEGORY_SEED, ROOM_SEED, SERVICE_SEED, PACKAGE_ITEMS_SEED, DEPARTMENT_TARIFFS, PAYER_TARIFFS,
   INDIA_LAB_TESTS, EXISTING_LAB_TEST_SERVICE_MAP, PLACES, SERVICE_AREA_PINS, HERO_IDENTITIES, FILLER_PROFILES, addressFor,
-  demoEmail, DEMO_USERS, SYNTHETIC_AADHAAR_PREFIX,
+  demoEmail, DEMO_USERS, SYNTHETIC_AADHAAR_PREFIX, PAYER_PROFILE_SEED, PAYER_NETWORK_SEED,
 } from '@/db/seed-india-data'
+import { payerProfileSchema } from '@/lib/rcm/validation'
+import { INSURER_SIDE_KINDS } from '@/lib/rcm/constants'
 import { isValidAadhaar } from '@/lib/india/aadhaar'
 import { isValidAbhaNumber, isValidAbhaAddress } from '@/lib/india/abha'
 import { normalizePhone } from '@/lib/india/phone'
@@ -76,6 +78,25 @@ describe('hospital masters', () => {
     for (const p of PAYERS_SEED) {
       if (p.stateCode) expect(isIndianStateCode(p.stateCode)).toBe(true)
       if (p.gstin) expect(stateCodeOfGstin(p.gstin)).toBe(p.stateCode)
+    }
+  })
+
+  it('every seeded payer has an RCM profile the payer form would accept', () => {
+    expect(Object.keys(PAYER_PROFILE_SEED).sort()).toEqual(PAYERS_SEED.map((p) => p.name).sort())
+    for (const p of PAYERS_SEED) {
+      const parsed = payerProfileSchema.safeParse({ ...PAYER_PROFILE_SEED[p.name], gstin: p.gstin, stateCode: p.stateCode })
+      expect(parsed.success, p.name).toBe(true)
+    }
+    expect(PAYER_PROFILE_SEED['Medi Assist TPA'].kind).toBe('tpa')
+    expect(PAYER_PROFILE_SEED['Ayushman Bharat PM-JAY'].kind).toBe('government_scheme')
+    expect(PAYER_PROFILE_SEED['Star Health and Allied Insurance'].kind).toBe('insurer')
+  })
+
+  it('TPA networks link insurer-side payers to TPAs', () => {
+    expect(PAYER_NETWORK_SEED.length).toBeGreaterThan(0)
+    for (const n of PAYER_NETWORK_SEED) {
+      expect(INSURER_SIDE_KINDS).toContain(PAYER_PROFILE_SEED[n.insurer].kind)
+      for (const t of n.tpas) expect(PAYER_PROFILE_SEED[t].kind, t).toBe('tpa')
     }
   })
 
