@@ -97,4 +97,36 @@ describe('buildDischargeSummary', () => {
     const d = buildDischargeSummary({ ...SRC, followUp: { ...SRC.followUp!, status: 'planned', appointment: null } }, NOW, 'pi')
     expect(d.followUp?.appointmentStartsAt).toBeNull()
   })
+
+  // Wave F P1-13: coded diagnoses (SP6), medicines given during the stay (MAR)
+  // and verified lab results for the printed summary -- clinical roles only.
+  const RECORD: NonNullable<DischargeSummarySource['record']> = {
+    diagnoses: [
+      { code: 'J18.9', system: 'icd10', description: 'Pneumonia, unspecified organism', type: 'primary', codingStatus: 'coded' },
+      { code: null, system: null, description: 'Type 2 diabetes (free text)', type: 'secondary', codingStatus: 'uncoded' },
+    ],
+    medications: [{ name: 'Ceftriaxone', dose: '1 g IV', given: 6, firstGivenAt: new Date('2026-10-02T03:00:00Z'), lastGivenAt: new Date('2026-10-04T15:00:00Z') }],
+    labs: [{ testName: 'Haemoglobin', testCode: '718-7', value: '10.2', unit: 'g/dL', referenceRange: '12-15', flag: 'abnormal', resultedAt: new Date('2026-10-02T06:00:00Z') }],
+    labsNotFinal: 2,
+  }
+
+  it('carries the coded diagnoses, stay medicines and verified labs for a clinical role, with ISO instants', () => {
+    const d = buildDischargeSummary({ ...SRC, record: RECORD }, NOW, 'pi')
+    expect(d.record).toEqual({
+      diagnoses: RECORD.diagnoses,
+      medications: [{ name: 'Ceftriaxone', dose: '1 g IV', given: 6, firstGivenAt: '2026-10-02T03:00:00.000Z', lastGivenAt: '2026-10-04T15:00:00.000Z' }],
+      labs: [{ testName: 'Haemoglobin', testCode: '718-7', value: '10.2', unit: 'g/dL', referenceRange: '12-15', flag: 'abnormal', resultedAt: '2026-10-02T06:00:00.000Z' }],
+      labsNotFinal: 2,
+    })
+  })
+
+  it('never gives the record to the front desk or the default viewer, and is null when not loaded', () => {
+    for (const d of [buildDischargeSummary({ ...SRC, record: RECORD }, NOW, 'frontdesk'), buildDischargeSummary({ ...SRC, record: RECORD }, NOW)]) {
+      expect(d.record).toBeNull()
+      const json = JSON.stringify(d)
+      for (const text of ['J18.9', 'Ceftriaxone', 'Haemoglobin']) expect(json).not.toContain(text)
+    }
+    expect(buildDischargeSummary(SRC, NOW, 'pi').record).toBeNull()
+  })
 })
+

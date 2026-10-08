@@ -22,6 +22,28 @@ export interface DischargeSummaryData {
   clinical: { diagnosis: string; drugs: string; devices: string; diet: string; notes: string } | null
   followUp: { dueDate: string; windowStart: string; windowEnd: string; reason: string; status: FollowUpStatus; appointmentStartsAt: string | null } | null
   signature: { signerTypedName: string; signedAt: string } | null
+  /** Wave F P1-13: coded diagnoses, stay medicines and verified labs. Null for roles outside CLINICAL_ROLES, or when not loaded. */
+  record: DischargeRecord<string> | null
+}
+
+// Wave F P1-13: the clinical record printed on the discharge summary.
+// `T` is the instant type: Date in the source, ISO string in the output.
+export interface DischargeDiagnosis {
+  /** The code value (e.g. ICD-10 "J18.9"), or null for an uncoded diagnosis. */
+  code: string | null
+  system: 'icd10' | 'icd10pcs' | 'snomed' | 'loinc' | 'hbp' | null
+  description: string
+  type: 'primary' | 'secondary' | 'provisional' | null
+  codingStatus: 'uncoded' | 'proposed' | 'coded'
+}
+export interface DischargeRecord<T> {
+  diagnoses: DischargeDiagnosis[]
+  /** Medicines on the MAR for this admission, one row per name + dose, with the doses given. */
+  medications: { name: string; dose: string; given: number; firstGivenAt: T | null; lastGivenAt: T | null }[]
+  /** Verified (or reported) results of tests ordered during the stay. */
+  labs: { testName: string; testCode: string; value: string; unit: string | null; referenceRange: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedAt: T }[]
+  /** Tests ordered during the stay that are not cancelled and have no verified result yet. */
+  labsNotFinal: number
 }
 
 /** The raw inputs, each already reduced to named columns by the loader. */
@@ -47,6 +69,8 @@ export interface DischargeSummarySource {
   /** The newest `discharge` follow-up of this admission, as the derived view. */
   followUp: { dueDate: string; windowStart: string; windowEnd: string; reason: string; status: FollowUpStatus; appointment: { startsAt: Date } | null } | null
   signature: { signerTypedName: string; signedAt: Date } | null
+  /** Wave F: loaded only for clinical viewers; the builder still gates it by role. */
+  record?: DischargeRecord<Date> | null
 }
 
 const GENDER_LABEL = new Map<string, string>(GENDERS.map((g) => [g.code, g.label]))
@@ -121,5 +145,19 @@ export function buildDischargeSummary(src: DischargeSummarySource, now: Date, vi
         }
       : null,
     signature: s ? { signerTypedName: s.signerTypedName, signedAt: s.signedAt.toISOString() } : null,
+    record: clinicalViewer && src.record ? recordToIso(src.record) : null,
+  }
+}
+
+function recordToIso(r: DischargeRecord<Date>): DischargeRecord<string> {
+  return {
+    diagnoses: r.diagnoses.map((d) => ({ code: d.code, system: d.system, description: d.description, type: d.type, codingStatus: d.codingStatus })),
+    medications: r.medications.map((m) => ({
+      name: m.name, dose: m.dose, given: m.given,
+      firstGivenAt: m.firstGivenAt ? m.firstGivenAt.toISOString() : null,
+      lastGivenAt: m.lastGivenAt ? m.lastGivenAt.toISOString() : null,
+    })),
+    labs: r.labs.map((l) => ({ testName: l.testName, testCode: l.testCode, value: l.value, unit: l.unit, referenceRange: l.referenceRange, flag: l.flag, resultedAt: l.resultedAt.toISOString() })),
+    labsNotFinal: r.labsNotFinal,
   }
 }
