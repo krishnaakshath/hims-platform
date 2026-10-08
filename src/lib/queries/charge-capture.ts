@@ -22,6 +22,7 @@ import { addDaysIso } from '@/lib/follow-ups/rules'
 import { DEFAULT_TIMEZONE, formatIsoDate, istDateOf, todayIsoIn } from '@/lib/india-time'
 import { resolvePrice, type PriceResolution, type ServiceForPricing, type TariffRateCandidate } from '@/lib/tariff/resolve'
 import { loadPricingContext } from './tariff'
+import { validatePreauthReference } from './preauth-reference' // SP7
 import { getBillingSettings, getRuleConfig } from './billing-settings'
 import { loadMappedProcedureCodes } from './service-code-lookup'
 import type { WriteExecutor } from './executor'
@@ -159,6 +160,7 @@ interface Evaluation {
   payerId: number | null
   procedureCodes: ProcedureCodeRef[]
   violations: ChargeViolation[]
+  preauthId: number | null // SP7: the validated pre-auth (ruling 7)
 }
 
 const canOverride = (session: Session) => BILLING_AUTHORITY_ROLES.includes(session.role)
@@ -236,6 +238,13 @@ async function evaluate(
   }
 
   const requested = input.procedureCodes ?? []
+  // SP7 (ruling 7): a reference typed on a payer line is checked against the patient's pre-auths,
+  // on the same executor (inside capture's transaction, after the patient lock).
+  const reference = input.preAuthReference?.trim() ?? ''
+  const preauth = billToPayer && reference !== ''
+    ? await validatePreauthReference(executor, { patientId: context.patientId, payerId, reference, serviceDate: input.serviceDate })
+    : null
+  // end SP7
   const ruleInput: ChargeRuleInput = {
     service: svc ? { id: svc.id, departmentId: svc.departmentId, category: svc.category, isActive: svc.isActive, requiresPreauth: svc.requiresPreauth, maxQuantity: svc.maxQuantity } : null,
     quantity: input.quantity,
@@ -250,6 +259,7 @@ async function evaluate(
     sameDayDuplicates: dup?.n ?? 0,
     mappedProcedureCodes: mapped,
     requestedProcedureCodes: requested,
+    preAuthCheck: preauth?.status ?? null, // SP7
   }
   const violations = evaluateChargeRules(ruleInput, {
     consultationWindowDays: settings.consultationWindowDays, ipdDepositThresholdPaise: settings.ipdDepositThresholdPaise,
@@ -264,6 +274,7 @@ async function evaluate(
       // With mapped codes and none requested, the line carries the primary mapped code.
       procedureCodes: requested.length === 0 && mapped.length > 0 ? [mapped[0]] : requested,
       violations,
+      preauthId: preauth?.status === 'valid' ? preauth.preauthId : null, // SP7
     },
   }
 }
@@ -334,6 +345,7 @@ export async function captureChargeLine(
       hsnSac: ev.service.hsnSac,
       payerId: ev.payerId,
       preAuthReference: input.preAuthReference ?? null,
+      preauthId: ev.preauthId, // SP7
       procedureCodes: ev.procedureCodes,
       violations: stored,
       ruleOverrides: applied,

@@ -6,10 +6,13 @@ import { formatPaise } from '@/lib/money'
 import type { ServiceCategory } from '@/lib/tariff/validation'
 import { chargeProcedureCodeProblems } from '@/lib/coding/service-codes'
 import type { CodeSystemKind } from '@/lib/coding/code-systems'
+import type { PreauthReferenceStatus } from '@/lib/rcm/preauth-status' // SP7
 
 export const CHARGE_RULE_CODES = ['service_not_found', 'service_inactive', 'price_unresolved', 'date_outside_encounter',
   'department_mismatch', 'consultation_required', 'deposit_below_threshold', 'duplicate_charge', 'preauth_required',
-  'quantity_limit', 'procedure_code_not_mapped'] as const
+  'quantity_limit', 'procedure_code_not_mapped',
+  'preauth_invalid', // SP7 (ruling 7): last, so existing rule ids and configs keep their order
+] as const
 export type ChargeRuleCode = (typeof CHARGE_RULE_CODES)[number]
 export type RuleSeverity = 'block' | 'warn'
 export type ViolationField = 'serviceId' | 'quantity' | 'serviceDate' | 'unitPrice' | 'preAuthReference' | 'procedureCodes' | 'context'
@@ -31,6 +34,8 @@ export const CHARGE_RULES: readonly ChargeRuleDefinition[] = [
   { code: 'preauth_required', label: 'Pre-authorisation reference for payers that need it', defaultSeverity: 'block', configurable: true, overridable: false, field: 'preAuthReference' },
   { code: 'quantity_limit', label: 'Quantity within the service limit', defaultSeverity: 'block', configurable: true, overridable: true, field: 'quantity' },
   { code: 'procedure_code_not_mapped', label: 'Procedure codes are mapped to the service', defaultSeverity: 'block', configurable: true, overridable: false, field: 'procedureCodes' },
+  // SP7
+  { code: 'preauth_invalid', label: 'Pre-authorisation reference is valid', defaultSeverity: 'block', configurable: true, overridable: false, field: 'preAuthReference' },
 ]
 
 export interface RuleConfigEntry { enabled: boolean; severity: RuleSeverity | null }
@@ -52,6 +57,8 @@ export interface ChargeRuleInput {
   sameDayDuplicates: number                                    // non-void lines: same patient, service, context, date
   mappedProcedureCodes: ProcedureCodeRef[]
   requestedProcedureCodes: ProcedureCodeRef[]
+  // SP7: the typed reference checked against the patient's pre-auths (null = not checked: self-pay or no reference)
+  preAuthCheck: PreauthReferenceStatus | null
 }
 
 type Service = NonNullable<ChargeRuleInput['service']>
@@ -94,6 +101,19 @@ const PREDICATES: Record<Exclude<ChargeRuleCode, 'service_not_found' | 'service_
   quantity_limit: (i, s) => (s.maxQuantity !== null && i.quantity > s.maxQuantity ? [`Quantity cannot exceed ${s.maxQuantity} for this service`] : []),
   // SP6 owns the comparison (unmapped service = unconstrained; kind + normalised code).
   procedure_code_not_mapped: (i) => chargeProcedureCodeProblems(asCodeRefs(i.mappedProcedureCodes), asCodeRefs(i.requestedProcedureCodes)),
+  // SP7 (ruling 7)
+  preauth_invalid: (i) => {
+    if (i.payer === null || !i.preAuthReference?.trim() || i.preAuthCheck === null || i.preAuthCheck === 'valid') return []
+    return [PREAUTH_INVALID_MESSAGE[i.preAuthCheck]]
+  },
+}
+
+// SP7
+const PREAUTH_INVALID_MESSAGE: Record<Exclude<PreauthReferenceStatus, 'valid'>, string> = {
+  not_found: 'No pre-authorisation with this reference exists for this patient',
+  not_approved: 'This pre-authorisation is not approved',
+  expired: 'This pre-authorisation expired before the service date',
+  payer_mismatch: 'This pre-authorisation is for a different payer',
 }
 
 const DEFINITION = new Map(CHARGE_RULES.map((r) => [r.code, r]))

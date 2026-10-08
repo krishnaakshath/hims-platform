@@ -8,7 +8,7 @@ const base: ChargeRuleInput = { service: { id: 1, departmentId: 10, category: 'p
   quantity: 1, serviceDate: '2026-10-20', today: '2026-10-20',
   context: { departmentId: 10, startDate: '2026-10-20', endDate: null, isInpatient: false, isEmergencyAdmission: false },
   payer: null, preAuthReference: null, priceResolved: true, consultationDates: ['2026-10-20'], admissionDepositPaise: null,
-  sameDayDuplicates: 0, mappedProcedureCodes: [], requestedProcedureCodes: [] }
+  sameDayDuplicates: 0, mappedProcedureCodes: [], requestedProcedureCodes: [], preAuthCheck: null }
 const S = { consultationWindowDays: 30, ipdDepositThresholdPaise: 0 }
 const codes = (v: ChargeViolation[]) => v.map((x) => x.code)
 const svc = (over: Partial<NonNullable<ChargeRuleInput['service']>>) => ({ ...base.service!, ...over })
@@ -160,3 +160,17 @@ describe('charge rule engine', () => {
     expect(CHARGE_RULES.filter((r) => !r.configurable).map((r) => r.code)).toEqual(['service_not_found', 'service_inactive', 'price_unresolved', 'date_outside_encounter'])
   })
 })
+
+// SP7 (ruling 7)
+describe('SP7 preauth_invalid rule', () => {
+  it('a typed reference that is not an approved pre-auth blocks; a valid one passes', () => {
+    const v = { ...base, payer: { id: 7, requiresPreauth: true }, service: { ...base.service!, requiresPreauth: true }, preAuthReference: 'PA-1' }
+    expect(evaluateChargeRules({ ...v, preAuthCheck: 'expired' }, S, {})[0]).toMatchObject({ code: 'preauth_invalid', message: 'This pre-authorisation expired before the service date', overridable: false })
+    expect(evaluateChargeRules({ ...v, preAuthCheck: 'valid' }, S, {})).toEqual([])
+    expect(evaluateChargeRules({ ...v, preAuthCheck: 'not_found' }, S, {})[0].message).toBe('No pre-authorisation with this reference exists for this patient')
+    expect(evaluateChargeRules({ ...v, preAuthCheck: 'payer_mismatch' }, S, { preauth_invalid: { enabled: false, severity: null } })).toEqual([])
+    expect(evaluateChargeRules({ ...v, payer: null, preAuthCheck: 'not_found' }, S, {})).toEqual([])
+  })
+  it('CHARGE_RULES still has one row per code in order', () => { expect(CHARGE_RULES.map((r) => r.code)).toEqual([...CHARGE_RULE_CODES]); expect(CHARGE_RULE_CODES.at(-1)).toBe('preauth_invalid') })
+})
+// end SP7
