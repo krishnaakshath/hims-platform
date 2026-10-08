@@ -202,8 +202,9 @@ describe.skipIf(!process.env.DATABASE_URL)('hospital KPIs (DB)', () => {
     expect(w.labsAwaitingResult).toBe(3)
     expect(w.followUps.map((f) => [f.patientId, f.bucket])).toEqual([[P2, 'overdue'], [P1, 'due']])
     expect(w.unsignedNotes).toBe(1)
+    expect(w.draftNotes.map((d) => [d.patientId, d.patientName])).toEqual([[P1, 'TEST_WE Kpi One']])
     expect(JSON.stringify(w)).not.toMatch(/98765000/)
-    expect(await loadDoctorWorkload({ providerId: docB, authorName: 'nobody', today: DAY })).toMatchObject({ inpatients: [], resultsToVerify: [], unsignedNotes: 0 })
+    expect(await loadDoctorWorkload({ providerId: docB, authorName: 'nobody', today: DAY })).toMatchObject({ inpatients: [], resultsToVerify: [], unsignedNotes: 0, draftNotes: [] })
   })
 
   it('every loader returns a JSON-safe value (a cache hit equals a miss)', async () => {

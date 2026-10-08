@@ -191,6 +191,7 @@ export interface DoctorEncounterRow { encounterId: number; patientId: string; pa
 export interface DoctorInpatientRow { admissionId: number; patientId: string; patientName: string; uhid: string | null; ward: string | null; bed: string | null; admittedAt: string }
 export interface DoctorLabRow { orderId: number; patientId: string; patientName: string; uhid: string | null; testName: string; flag: 'normal' | 'abnormal' | 'critical'; resultedAt: string }
 export interface DoctorFollowUpRow { id: number; patientId: string; patientName: string; uhid: string | null; bucket: 'due' | 'overdue'; dueDate: string; reason: string }
+export interface DoctorNoteRow { noteId: number; patientId: string; patientName: string; uhid: string | null; createdAt: string }
 export interface DoctorWorkload {
   encountersToday: DoctorEncounterRow[]
   inpatients: DoctorInpatientRow[]
@@ -198,6 +199,7 @@ export interface DoctorWorkload {
   labsAwaitingResult: number
   followUps: DoctorFollowUpRow[]
   unsignedNotes: number
+  draftNotes: DoctorNoteRow[]
 }
 
 const FLAG_ORDER = { critical: 0, abnormal: 1, normal: 2 } as const
@@ -211,7 +213,8 @@ const DOCTOR_LIST_LIMIT = 50
  */
 export async function loadDoctorWorkload({ providerId, authorName, today }: { providerId: number; authorName: string; today: string }): Promise<DoctorWorkload> {
   const db = getDb()
-  const [encRows, inRows, labRows, [pending], [notes], fu] = await Promise.all([
+  const noteScope = and(eq(encounterNotes.authorName, authorName), eq(encounterNotes.status, 'draft'))
+  const [encRows, inRows, labRows, [pending], [notes], noteRows, fu] = await Promise.all([
     db.select({ encounterId: encounters.id, patientId: encounters.patientId, patientName: patients.name, uhid: patients.uhid, opdToken: encounters.opdToken, status: encounters.status })
       .from(encounters).innerJoin(patients, eq(patients.id, encounters.patientId))
       .where(and(eq(encounters.providerId, providerId), eq(encounters.encounterType, 'opd'), eq(encounters.encounterDate, today), inArray(encounters.status, ['checked_in', 'in_consultation'])))
@@ -225,7 +228,10 @@ export async function loadDoctorWorkload({ providerId, authorName, today }: { pr
       .where(and(eq(labOrders.orderedByProviderId, providerId), eq(labOrders.status, 'resulted')))
       .orderBy(desc(labResults.resultedAt)).limit(DOCTOR_LIST_LIMIT),
     db.select({ n: count() }).from(labOrders).where(and(eq(labOrders.orderedByProviderId, providerId), inArray(labOrders.status, ['ordered', 'scheduled', 'collected', 'received']))),
-    db.select({ n: count() }).from(encounterNotes).where(and(eq(encounterNotes.authorName, authorName), eq(encounterNotes.status, 'draft'))),
+    db.select({ n: count() }).from(encounterNotes).where(noteScope),
+    db.select({ noteId: encounterNotes.id, patientId: encounterNotes.patientId, patientName: patients.name, uhid: patients.uhid, createdAt: encounterNotes.createdAt })
+      .from(encounterNotes).innerJoin(patients, eq(patients.id, encounterNotes.patientId))
+      .where(noteScope).orderBy(asc(encounterNotes.createdAt)).limit(DOCTOR_LIST_LIMIT),
     listFollowUpWorklist(today, { providerId }),
   ])
   const followUps = fu.rows
@@ -245,6 +251,7 @@ export async function loadDoctorWorkload({ providerId, authorName, today }: { pr
     labsAwaitingResult: n(pending?.n),
     followUps,
     unsignedNotes: n(notes?.n),
+    draftNotes: noteRows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
   }
 }
 

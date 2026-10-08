@@ -1,7 +1,7 @@
 import { formatIstDate, formatIstDateTime, istDayBounds } from '@/lib/india-time'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Clock, AlertCircle, Activity } from 'lucide-react'
+import { Clock, AlertCircle, Activity, BedDouble, CalendarSync, FileSignature, Stethoscope } from 'lucide-react'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { matchProviderByName } from '@/lib/provider-match'
@@ -10,17 +10,49 @@ import { logAudit } from '@/lib/audit'
 import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { listPendingAssignmentsForProvider } from '@/lib/queries/doctor-assignments'
 import { listAppointmentsInRange } from '@/lib/queries/appointments'
-import { listWorklist } from '@/lib/queries/lab-orders'
 import { AssignmentUrgencyChip } from '@/components/AssignmentUrgencyChip'
 import { AssignmentScheduleModalTrigger } from '@/components/AssignmentScheduleModal'
 import { DashboardAppointmentsTable, type DashboardAppointmentRow } from '@/components/DashboardAppointmentsTable'
 import { PatientsTable } from '@/components/PatientsTable'
 import { DoctorScheduleTimeline } from '@/components/DoctorScheduleTimeline'
-import { formatDateTimeIn } from '@/lib/india-time' // SP5
 // SP6
 import { listOpenCodingQueriesForProvider } from '@/lib/queries/coding-queries'
 import { DoctorCodingQueries } from '@/components/coding/DoctorCodingQueries'
 // end SP6
+// Wave E P1-02/P1-03: the doctor's own workload (orders they placed, their OPD, inpatients, recalls, notes).
+import { getDoctorWorkload, type DoctorWorkload } from '@/lib/queries/hospital-kpis'
+import { ENCOUNTER_STATUS_LABEL } from '@/lib/encounters/register'
+import type { EncounterStatus } from '@/lib/encounters/status'
+import { formatIsoDate } from '@/lib/india-time'
+// end Wave E
+
+// Wave E: a compact titled list card for the doctor's own work queues.
+function DoctorList({ title, icon: Icon, count, empty, href, linkLabel, children }: {
+  title: string; icon: React.ComponentType<{ className?: string }>; count: number; empty: string; href?: string; linkLabel?: string; children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-primary" />
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">{count}</span>
+        </div>
+        {href && <Link href={href} className="text-xs font-medium text-primary hover:underline">{linkLabel ?? 'Open'}</Link>}
+      </div>
+      {count === 0 ? <div className="p-6 text-center text-sm text-muted-foreground">{empty}</div> : <ul className="max-h-80 divide-y divide-border overflow-y-auto">{children}</ul>}
+    </div>
+  )
+}
+
+function PatientCell({ name, uhid, href }: { patientId: string; name: string; uhid: string | null; href: string }) {
+  return (
+    <div className="min-w-0">
+      <Link href={href} className="block truncate text-sm font-medium text-foreground hover:underline">{name}</Link>
+      {uhid && <p className="text-xs text-muted-foreground">{uhid}</p>}
+    </div>
+  )
+}
 
 // Enterprise EMR dense layout
 export default async function DoctorPortalPage() {
@@ -54,16 +86,15 @@ export default async function DoctorPortalPage() {
     return d >= todayStart && d < todayEnd
   })
 
-  // Lab reports pending review
-  const labWorklist = await listWorklist()
-  const myPatientIds = new Set(myPatients.map((p) => p.id))
-  const pendingLabs = labWorklist.filter((l) => myPatientIds.has(l.patientId) && l.status === 'ordered')
-  // SP5: my patients' results entered by the lab and waiting for a pi/admin to verify them.
-  const resultsToVerify = labWorklist.filter((l) => myPatientIds.has(l.patientId) && l.status === 'resulted')
+  // Wave E P1-02: lab work comes from the orders this doctor placed (orderedByProviderId),
+  // never from the free-text panel match, and "pending" is no longer merely-ordered tests.
+  const workload: DoctorWorkload | null = providerMatch ? await getDoctorWorkload(providerMatch.id, session.name) : null
+  const resultsToVerify = workload?.resultsToVerify ?? []
+  const criticalToVerify = resultsToVerify.filter((r) => r.flag === 'critical').length
 
   await logAudit(session, 'viewed My Patients (doctor portal)', null)
 
-  const highAcuityCount = pendingLabs.length + pendingAssignments.filter(a => a.urgency === 'urgent' || a.urgency === 'emergency').length
+  const highAcuityCount = criticalToVerify + pendingAssignments.filter(a => a.urgency === 'urgent' || a.urgency === 'emergency').length
   const initials = session.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
 
   return (
@@ -150,47 +181,11 @@ export default async function DoctorPortalPage() {
           {/* SP6: coding queries for this doctor; hidden when none are open */}
           <DoctorCodingQueries queries={codingQueries} />
 
-          {/* Pending Lab Results */}
+          {/* SP5 + Wave E P1-02: results on my own orders waiting for verification, critical first. */}
           <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
             <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-3">
               <div className="flex items-center gap-2">
-                <Activity className="h-4 w-4 text-destructive" />
-                <h3 className="text-sm font-semibold text-foreground">Lab Reports for Review</h3>
-              </div>
-              <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-bold text-destructive">{pendingLabs.length}</span>
-            </div>
-            <div className="p-0">
-              {pendingLabs.length === 0 ? (
-                <div className="p-6 text-center text-sm text-muted-foreground">No pending labs.</div>
-              ) : (
-                <ul className="divide-y divide-border">
-                  {pendingLabs.slice(0, 5).map((l) => (
-                    <li key={l.id} className="flex flex-col gap-1.5 p-4 transition-colors hover:bg-muted/20">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-foreground">{l.patientName || l.patientId}</span>
-                        <span className="text-[10px] font-bold uppercase text-muted-foreground">{formatIstDate(l.orderedAt)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-muted-foreground">{l.testName}</span>
-                        <Link href="/labs" className="rounded bg-primary/10 px-2 py-1 text-[10px] font-bold uppercase text-primary hover:bg-primary/20">Review</Link>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {pendingLabs.length > 5 && (
-                <div className="border-t border-border px-4 py-3 text-center">
-                  <Link href="/labs" className="text-xs font-medium text-primary hover:underline">View all {pendingLabs.length} pending labs</Link>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* SP5: Results to verify */}
-          <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-            <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Activity className="h-4 w-4 text-warning" />
+                <Activity className={`h-4 w-4 ${criticalToVerify > 0 ? 'text-destructive' : 'text-warning'}`} />
                 <h3 className="text-sm font-semibold text-foreground">Results to verify</h3>
               </div>
               <span className="rounded-full bg-warning/20 px-2 py-0.5 text-xs font-bold text-warning-foreground">{resultsToVerify.length}</span>
@@ -199,23 +194,38 @@ export default async function DoctorPortalPage() {
               <div className="p-6 text-center text-sm text-muted-foreground">No results awaiting verification.</div>
             ) : (
               <ul className="divide-y divide-border">
-                {resultsToVerify.slice(0, 5).map((l) => (
-                  <li key={l.id} className="flex items-center justify-between gap-2 p-4">
+                {resultsToVerify.slice(0, 8).map((l) => (
+                  <li key={l.orderId} className="flex items-center justify-between gap-2 p-4">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">{l.patientName || l.patientId}</p>
-                      <p className="text-xs text-muted-foreground">{l.testName}{l.collectedAt ? ` · Collected ${formatDateTimeIn(l.collectedAt)}` : ''}</p>
+                      <p className="text-sm font-medium text-foreground">
+                        <Link href={`/patients/${l.patientId}/medical-record`} className="hover:underline">{l.patientName}</Link>
+                        {l.flag === 'critical' && <span className="ml-2 rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-destructive">Critical</span>}
+                        {l.flag === 'abnormal' && <span className="ml-2 rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-warning">Abnormal</span>}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{l.testName} · Resulted {formatIstDateTime(l.resultedAt)}</p>
                     </div>
-                    <Link href="/labs" className="rounded bg-primary/10 px-2 py-1 text-[10px] font-bold uppercase text-primary hover:bg-primary/20">Verify</Link>
+                    <Link href="/labs?stage=to-verify" className="rounded bg-primary/10 px-2 py-1 text-[10px] font-bold uppercase text-primary hover:bg-primary/20">Verify</Link>
                   </li>
                 ))}
               </ul>
             )}
-            {resultsToVerify.length > 5 && (
-              <div className="border-t border-border px-4 py-3 text-center">
-                <Link href="/labs" className="text-xs font-medium text-primary hover:underline">View all {resultsToVerify.length} results to verify</Link>
-              </div>
-            )}
+            <div className="border-t border-border px-4 py-2.5 text-center text-xs text-muted-foreground">
+              {workload ? `${workload.labsAwaitingResult} orders awaiting results` : 'No provider record matched'}
+              {' · '}<Link href="/labs?stage=to-verify" className="font-medium text-primary hover:underline">Open lab worklist</Link>
+            </div>
           </div>
+
+          {/* Wave E P1-03: my draft (unsigned) notes. */}
+          {workload && (
+            <DoctorList title="Unsigned notes" icon={FileSignature} count={workload.unsignedNotes} empty="No unsigned notes.">
+              {workload.draftNotes.map((n) => (
+                <li key={n.noteId} className="flex items-center justify-between gap-2 px-4 py-3">
+                  <PatientCell patientId={n.patientId} name={n.patientName} uhid={n.uhid} href={`/patients/${n.patientId}/medical-record`} />
+                  <span className="shrink-0 text-xs text-muted-foreground">Draft · {formatIstDate(n.createdAt)}</span>
+                </li>
+              ))}
+            </DoctorList>
+          )}
           {/* end SP5 */}
 
         </div>
@@ -223,6 +233,42 @@ export default async function DoctorPortalPage() {
         {/* MIDDLE & RIGHT COLUMNS: Schedule & Patient Panel */}
         <div className="col-span-1 flex flex-col gap-6 lg:col-span-8">
           
+          {/* Wave E P1-03: today's OPD (open tokens), my inpatients, my due/overdue recalls. */}
+          {workload && (
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+              <DoctorList title="Today's OPD" icon={Stethoscope} count={workload.encountersToday.length} empty="No patients waiting." href={`/encounters?doctor=${providerMatch!.id}`} linkLabel="OPD register">
+                {workload.encountersToday.map((e) => (
+                  <li key={e.encounterId} className="flex items-center justify-between gap-2 px-4 py-3">
+                    <PatientCell patientId={e.patientId} name={e.patientName} uhid={e.uhid} href={`/patients/${e.patientId}`} />
+                    <span className="shrink-0 text-right text-xs text-muted-foreground">
+                      <span className="block font-semibold tabular-nums text-foreground">{e.opdToken !== null ? `#${e.opdToken}` : '—'}</span>
+                      {ENCOUNTER_STATUS_LABEL[e.status as EncounterStatus] ?? e.status}
+                    </span>
+                  </li>
+                ))}
+              </DoctorList>
+              <DoctorList title="My inpatients" icon={BedDouble} count={workload.inpatients.length} empty="No inpatients under your care." href="/inpatient/beds" linkLabel="Bed board">
+                {workload.inpatients.map((a) => (
+                  <li key={a.admissionId} className="flex items-center justify-between gap-2 px-4 py-3">
+                    <PatientCell patientId={a.patientId} name={a.patientName} uhid={a.uhid} href={`/patients/${a.patientId}`} />
+                    <span className="shrink-0 text-right text-xs text-muted-foreground">{a.ward ?? 'No bed'}{a.bed ? ` · ${a.bed}` : ''}</span>
+                  </li>
+                ))}
+              </DoctorList>
+              <DoctorList title="Follow-ups due" icon={CalendarSync} count={workload.followUps.length} empty="No follow-ups due.">
+                {workload.followUps.map((f) => (
+                  <li key={f.id} className="flex items-center justify-between gap-2 px-4 py-3">
+                    <PatientCell patientId={f.patientId} name={f.patientName} uhid={f.uhid} href={`/patients/${f.patientId}`} />
+                    <span className="shrink-0 text-right text-xs">
+                      <span className={`block font-semibold ${f.bucket === 'overdue' ? 'text-destructive' : 'text-warning'}`}>{f.bucket === 'overdue' ? 'Overdue' : 'Due'}</span>
+                      <span className="text-muted-foreground">{formatIsoDate(f.dueDate)}</span>
+                    </span>
+                  </li>
+                ))}
+              </DoctorList>
+            </div>
+          )}
+
           {/* Today's Schedule - Timeline View */}
           <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
