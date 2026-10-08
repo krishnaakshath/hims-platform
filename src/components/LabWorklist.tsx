@@ -14,7 +14,7 @@ import Link from 'next/link'
 import { ReceiveSampleForm } from '@/components/labs/ReceiveSampleForm'
 import { displaySampleId } from '@/lib/labs/sample-id'
 import { formatDateTimeIn, formatIsoDate } from '@/lib/india-time'
-import { LAB_COLLECT_ROLES, LAB_ORDER_ROLES, LAB_RECEIVE_ROLES, LAB_REPORT_READ_ROLES, LAB_REPORT_RELEASE_ROLES, LAB_RESULT_ENTRY_ROLES, LAB_VERIFY_ROLES } from '@/lib/role-policy'
+import { LAB_COLLECT_ROLES, LAB_LABEL_ROLES, LAB_ORDER_ROLES, LAB_RECEIVE_ROLES, LAB_REPORT_READ_ROLES, LAB_REPORT_RELEASE_ROLES, LAB_RESULT_ENTRY_ROLES, LAB_VERIFY_ROLES } from '@/lib/role-policy'
 import { ReleaseReportButton, type ReleasedReport } from '@/components/labs/ReleaseReportButton'
 // end SP5
 
@@ -95,6 +95,8 @@ const isPreResult = (s: LabOrderStatus) => (PRE_RESULT_STATUSES as readonly LabO
 
 interface Caps {
   canCollect: boolean
+  /** /lab-labels admits LAB_LABEL_ROLES only (crc sees the worklist but not the label sheet). */
+  canPrintLabel: boolean
   canResult: boolean
   canVerify: boolean
   canCancel: boolean
@@ -177,7 +179,7 @@ function LabRow({
           {o.status === 'resulted' && caps.canVerify && (
             <Button size="xs" onClick={() => onVerify(o.id)} disabled={busy}>Verify</Button>
           )}
-          {o.sampleId && (o.status === 'collected' || o.status === 'scheduled') && (
+          {o.sampleId && caps.canPrintLabel && (o.status === 'collected' || o.status === 'scheduled') && (
             <Link href={`/lab-labels?orders=${o.id}`} className="text-xs font-medium text-primary hover:underline">Print label</Link>
           )}
           {isPreResult(o.status) && caps.canCancel && (
@@ -242,6 +244,7 @@ export function LabWorklist({ orders, labTests, role, stage = null }: { orders: 
   // ordering clinicians cancel; frontdesk and collector have no worklist actions.
   const caps: Caps = {
     canCollect: LAB_COLLECT_ROLES.includes(role),
+    canPrintLabel: LAB_LABEL_ROLES.includes(role),
     canResult: LAB_RESULT_ENTRY_ROLES.includes(role),
     canVerify: LAB_VERIFY_ROLES.includes(role),
     canCancel: LAB_ORDER_ROLES.includes(role),
@@ -322,7 +325,7 @@ export function LabWorklist({ orders, labTests, role, stage = null }: { orders: 
       {collectedNotice && (
         <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm">
           <span>Sample <span className="font-mono font-semibold">{displaySampleId(collectedNotice.sampleId)}</span> collected.</span>
-          <Link href={`/lab-labels?orders=${collectedNotice.id}`} className="font-medium text-primary hover:underline">Print label</Link>
+          {caps.canPrintLabel && <Link href={`/lab-labels?orders=${collectedNotice.id}`} className="font-medium text-primary hover:underline">Print label</Link>}
           <button type="button" onClick={() => setCollectedNotice(null)} className="ml-auto text-xs text-muted-foreground hover:underline">Dismiss</button>
         </div>
       )}
