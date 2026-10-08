@@ -2,9 +2,9 @@
 // approval with amount and validity -> enhancement -> rejection/cancellation). Every write runs
 // in one transaction: the SP4 per-patient billing lock first, then the pre-auth row FOR UPDATE,
 // then the event and the audit row. Audit details carry ids, numbers, statuses and paise only.
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, ne, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { admissions, encounters, preauths, providers } from '@/db/schema'
+import { admissions, encounters, preauthEvents, preauths, providers, rcmQueries, rcmQueryResponses, rcmReasonCodes, type PreauthRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { lineTaxablePaise, sumPaise } from '@/lib/billing/amounts'
@@ -13,13 +13,18 @@ import { DIAGNOSIS_CODE_KINDS, PROCEDURE_CODE_KINDS, type CodeSystemKind } from 
 import { istDateOf } from '@/lib/india-time'
 import { formatRcmNumber } from '@/lib/rcm/constants'
 import { rcmFail, rcmOk, type RcmWriteResult } from '@/lib/rcm/errors'
+import { isUniqueViolation } from '@/lib/db-errors'
+import { formatPaise } from '@/lib/format'
+import { snapshotSha256 } from '@/lib/rcm/hash'
+import { nextPreauthStatus, type PreauthStatus } from '@/lib/rcm/preauth-status'
+import { buildPreauthSnapshot, type PreauthSnapshot } from '@/lib/rcm/snapshot'
 import type { CodedEntry, EstimateLine } from '@/lib/rcm/snapshot'
-import type { PreauthCreateInput } from '@/lib/rcm/validation'
+import type { PreauthActionRequest, PreauthCreateInput } from '@/lib/rcm/validation'
 import { resolvePrice } from '@/lib/tariff/resolve'
 import { lockPatientBilling } from './billing-lock'
 import { getCodesByIds } from './code-systems'
 import type { WriteExecutor } from './executor'
-import { loadPolicyContext } from './rcm-context'
+import { loadPolicyContext, loadRcmPatient, loadSnapshotHospital } from './rcm-context'
 import { loadPricingContext } from './tariff'
 
 /** Prices each service as SP4 charge capture does (payer tariff first), with GST (intra-state). */
@@ -100,4 +105,123 @@ export async function createPreauth(input: PreauthCreateInput, session: Session,
 export async function preauthOnLiveClaim(executor: WriteExecutor, preauthId: number): Promise<boolean> {
   const r = await executor.execute<{ found: boolean }>(sql`select exists (select 1 from claims where preauth_id = ${preauthId} and status not in ('draft', 'withdrawn')) as found`)
   return Boolean(r.rows[0]?.found)
+}
+
+async function buildRequestSnapshot(executor: WriteExecutor, p: PreauthRow, kind: 'initial' | 'enhancement', requestedPaise: number, now: Date): Promise<PreauthSnapshot> {
+  const [hospital, ctx, patient, doctor] = await Promise.all([
+    loadSnapshotHospital(executor),
+    loadPolicyContext(executor, p.policyId),
+    loadRcmPatient(executor, p.patientId),
+    executor.select({ name: providers.name }).from(providers).where(eq(providers.id, p.treatingProviderId)).limit(1),
+  ])
+  if (!ctx || !patient) throw new Error('pre-auth context missing')
+  return buildPreauthSnapshot({
+    preauthNumber: p.preauthNumber, kind, preparedAt: now.toISOString(), hospital,
+    patient: patient.patient, includeAbha: ctx.billingProfile?.requiresAbha ?? false, patientAbhaNumber: patient.abhaNumber,
+    policy: ctx.policy, claimType: p.claimType, plannedAdmissionDate: p.plannedAdmissionDate, expectedLengthOfStayDays: p.expectedLengthOfStayDays,
+    treatingDoctorName: doctor[0]?.name ?? '', diagnoses: p.diagnoses, procedures: p.procedures, provisionalDiagnosisText: p.provisionalDiagnosisText,
+    estimate: p.estimateLines, estimatedPaise: p.estimatedPaise, requestedPaise,
+  })
+}
+
+/**
+ * One lifecycle step. Lock order: the patient's billing lock, then the pre-auth row FOR UPDATE.
+ * The event row is append-only; the audit carries ids, statuses and approved paise only.
+ */
+export async function applyPreauthAction(preauthId: number, req: PreauthActionRequest, session: Session, now: Date = new Date()): Promise<RcmWriteResult<{ status: PreauthStatus }>> {
+  const [found] = await getDb().select({ patientId: preauths.patientId }).from(preauths).where(eq(preauths.id, preauthId)).limit(1)
+  if (!found) return rcmFail('preauth_not_found')
+  try {
+    return await getDb().transaction(async (tx) => {
+      await lockPatientBilling(tx, found.patientId)
+      const [p] = await tx.select().from(preauths).where(eq(preauths.id, preauthId)).for('update')
+      if (!p) return rcmFail('preauth_not_found')
+      const [enh] = await tx.select({ id: preauthEvents.id }).from(preauthEvents)
+        .where(and(eq(preauthEvents.preauthId, preauthId), eq(preauthEvents.action, 'approve_enhancement'))).limit(1)
+      const to = nextPreauthStatus(p.status, req.action, { enhancedBefore: Boolean(enh) })
+      if (to === null) return rcmFail('invalid_transition')
+
+      const set: Partial<PreauthRow> = { status: to, updatedAt: now }
+      const event: typeof preauthEvents.$inferInsert = { preauthId, action: req.action, fromStatus: p.status, toStatus: to, byName: session.name, byUserId: session.userId, at: now }
+      let auditAmount: number | null = null
+
+      switch (req.action) {
+        case 'request': {
+          const snapshot = await buildRequestSnapshot(tx, p, 'initial', p.requestedPaise, now)
+          Object.assign(event, { snapshot, snapshotSha256: snapshotSha256(snapshot) })
+          Object.assign(set, { firstRequestedAt: p.firstRequestedAt ?? now, lastRequestedAt: now })
+          break
+        }
+        case 'request_enhancement': {
+          if (p.approvedPaise === null || req.requestedPaise <= p.approvedPaise) {
+            return rcmFail('amounts_invalid', `The enhancement must be more than the approved ${formatPaise(p.approvedPaise ?? 0)}`)
+          }
+          const snapshot = await buildRequestSnapshot(tx, p, 'enhancement', req.requestedPaise, now)
+          Object.assign(event, { snapshot, snapshotSha256: snapshotSha256(snapshot), amountPaise: req.requestedPaise, note: req.note })
+          Object.assign(set, { requestedPaise: req.requestedPaise, firstRequestedAt: p.firstRequestedAt ?? now, lastRequestedAt: now })
+          break
+        }
+        case 'record_query':
+          await tx.insert(rcmQueries).values({ preauthId, question: req.question, raisedOn: req.raisedOn, dueOn: req.dueOn, createdByName: session.name, createdAt: now })
+          break
+        case 'respond_query': {
+          const [q] = await tx.select().from(rcmQueries).where(eq(rcmQueries.id, req.queryId)).for('update')
+          if (!q || q.preauthId !== preauthId) return rcmFail('query_not_found')
+          if (q.status !== 'open') return rcmFail('query_closed')
+          await tx.insert(rcmQueryResponses).values({ queryId: q.id, body: req.body, respondedOn: req.respondedOn, byName: session.name, at: now })
+          await tx.update(rcmQueries).set({ status: 'answered', answeredAt: now }).where(eq(rcmQueries.id, q.id))
+          Object.assign(set, { lastRequestedAt: now })
+          break
+        }
+        case 'approve': {
+          const [dup] = await tx.select({ id: preauths.id }).from(preauths).where(and(
+            eq(preauths.insurerPayerId, p.insurerPayerId), ne(preauths.id, preauthId), sql`lower(${preauths.approvalReference}) = lower(${req.approvalReference})`,
+          )).limit(1)
+          if (dup) return rcmFail('duplicate_reference')
+          Object.assign(set, { approvedPaise: req.approvedPaise, approvalReference: req.approvalReference, validUntil: req.validUntil, decidedAt: now })
+          event.amountPaise = req.approvedPaise
+          auditAmount = req.approvedPaise
+          break
+        }
+        case 'approve_enhancement': {
+          if (p.approvedPaise === null || req.approvedPaise <= p.approvedPaise) {
+            return rcmFail('amounts_invalid', `The enhanced approval must be more than the approved ${formatPaise(p.approvedPaise ?? 0)}`)
+          }
+          if (req.approvalReference !== undefined) {
+            const [dup] = await tx.select({ id: preauths.id }).from(preauths).where(and(
+              eq(preauths.insurerPayerId, p.insurerPayerId), ne(preauths.id, preauthId), sql`lower(${preauths.approvalReference}) = lower(${req.approvalReference})`,
+            )).limit(1)
+            if (dup) return rcmFail('duplicate_reference')
+            set.approvalReference = req.approvalReference
+          }
+          Object.assign(set, { approvedPaise: req.approvedPaise, validUntil: req.validUntil, decidedAt: now })
+          event.amountPaise = req.approvedPaise
+          auditAmount = req.approvedPaise
+          break
+        }
+        case 'reject':
+        case 'reject_enhancement': {
+          const [code] = await tx.select({ category: rcmReasonCodes.category }).from(rcmReasonCodes)
+            .where(and(eq(rcmReasonCodes.code, req.reasonCode), eq(rcmReasonCodes.active, true))).limit(1)
+          if (!code || code.category !== 'rejection') return rcmFail('code_not_found')
+          Object.assign(event, { reasonCode: req.reasonCode, note: req.note ?? null })
+          set.decidedAt = now
+          break
+        }
+        case 'cancel':
+          if (await preauthOnLiveClaim(tx, preauthId)) return rcmFail('preauth_in_use')
+          event.note = req.note
+          break
+      }
+
+      await tx.update(preauths).set(set).where(eq(preauths.id, preauthId))
+      await tx.insert(preauthEvents).values(event)
+      const amount = auditAmount === null ? '' : ` amount=${auditAmount}`
+      await logAudit(session, `rcm: pre-authorisation ${req.action}`, p.patientId, `preauth=${preauthId} from=${p.status} to=${to}${amount}`, tx)
+      return rcmOk({ status: to })
+    })
+  } catch (err) {
+    if (isUniqueViolation(err, 'preauths_insurer_reference_unique')) return rcmFail('duplicate_reference')
+    throw err
+  }
 }
