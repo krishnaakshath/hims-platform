@@ -9,8 +9,9 @@ afterAll(() => { vi.unstubAllEnvs() })
 import { getDb } from '@/db/client'
 import {
   admissions, encounterNotes, encounters, followUpOrders, labOrders, labResults, labTests, medicationDispenses,
-  medicationInventory, medications, patientPayments, patients, providers, refunds, rooms, invoices, chargeLines,
+  medicationInventory, medications, patientPayments, patients, providers, refunds, rooms, invoices, chargeLines, charges,
 } from '@/db/schema'
+import { listPharmacyChargeIds } from '@/lib/queries/medication-dispenses'
 import { purgeBillingFixtures } from '../../db/billing-fixtures'
 import {
   loadOpdToday, loadIpdCensus, loadCollectionsToday, loadBillingQueue, loadLabKpis, loadPharmacyKpis,
@@ -29,7 +30,7 @@ let docA = 0
 let docB = 0
 let testId = 0
 let medId = 0
-const ids = { enc: [] as number[], rooms: [] as number[], adm: [] as number[], orders: [] as number[], fu: [] as number[], notes: [] as number[], disp: [] as number[] }
+const ids = { charges: [] as number[], enc: [] as number[], rooms: [] as number[], adm: [] as number[], orders: [] as number[], fu: [] as number[], notes: [] as number[], disp: [] as number[] }
 
 // Baselines for global counts, taken before any fixture exists.
 let base: {
@@ -110,6 +111,11 @@ describe.skipIf(!process.env.DATABASE_URL)('hospital KPIs (DB)', () => {
     await db.insert(medicationInventory).values({ medicationId: medId, quantityOnHand: 0, reorderThreshold: 5 })
     const [d] = await db.insert(medicationDispenses).values({ patientId: P1, medicationId: medId, quantity: 1, dispensedByName: 'TEST_WE', dispensedAt: at('11:00') }).returning({ id: medicationDispenses.id })
     ids.disp.push(d.id)
+    // A pharmacy bill still in draft (legacy charge linked to a second dispense).
+    const [c] = await db.insert(charges).values({ patientId: P1, providerName: 'TEST_WE', dateOfService: DAY, diagnosisCodes: [], procedureCodes: [], amountCents: 5000, status: 'draft' }).returning({ id: charges.id })
+    ids.charges.push(c.id)
+    const [d2] = await db.insert(medicationDispenses).values({ patientId: P1, medicationId: medId, quantity: 1, dispensedByName: 'TEST_WE', dispensedAt: new Date('2031-04-14T06:00:00Z'), chargeId: c.id }).returning({ id: medicationDispenses.id })
+    ids.disp.push(d2.id)
 
     // Follow-ups prescribed by docA: one due on DAY, one long overdue.
     const fu = await db.insert(followUpOrders).values([
@@ -132,6 +138,7 @@ describe.skipIf(!process.env.DATABASE_URL)('hospital KPIs (DB)', () => {
     if (ids.notes.length) await db.delete(encounterNotes).where(inArray(encounterNotes.id, ids.notes))
     if (ids.fu.length) await db.delete(followUpOrders).where(inArray(followUpOrders.id, ids.fu))
     if (ids.disp.length) await db.delete(medicationDispenses).where(inArray(medicationDispenses.id, ids.disp))
+    if (ids.charges.length) await db.delete(charges).where(inArray(charges.id, ids.charges))
     if (medId) { await db.delete(medicationInventory).where(inArray(medicationInventory.medicationId, [medId])); await db.delete(medications).where(inArray(medications.id, [medId])) }
     if (ids.orders.length) { await db.delete(labResults).where(inArray(labResults.labOrderId, ids.orders)); await db.delete(labOrders).where(inArray(labOrders.id, ids.orders)) }
     if (testId) await db.delete(labTests).where(inArray(labTests.id, [testId]))
@@ -165,6 +172,8 @@ describe.skipIf(!process.env.DATABASE_URL)('hospital KPIs (DB)', () => {
     expect(q.draftInvoices - base.billing.draftInvoices).toBe(1)
     expect(q.uninvoicedLines - base.billing.uninvoicedLines).toBe(1)
     expect(q.uninvoicedPaise - base.billing.uninvoicedPaise).toBe(20000)
+    expect(q.pharmacyDraftCharges - base.billing.pharmacyDraftCharges).toBe(1)
+    expect(await listPharmacyChargeIds()).toContain(ids.charges[0])
   })
 
   it('labs: one count per bench stage, results and criticals on the day, median collection-to-result TAT', async () => {

@@ -9,7 +9,7 @@
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
-  admissions, chargeLines, encounterNotes, encounters, invoices, labOrders, labResults, labTests, medicationDispenses,
+  admissions, chargeLines, charges, encounterNotes, encounters, invoices, labOrders, labResults, labTests, medicationDispenses,
   medicationInventory, patientPayments, patients, refunds, rooms,
 } from '@/db/schema'
 import { getOrSetCache } from '@/lib/cache'
@@ -100,16 +100,17 @@ export async function loadCollectionsToday(today: string): Promise<CollectionsTo
   return { date: today, receiptCount: n(p?.n), collectedPaise, refundedPaise, netPaise: collectedPaise - refundedPaise }
 }
 
-export interface BillingQueueKpi { draftInvoices: number; uninvoicedLines: number; uninvoicedPaise: number }
+export interface BillingQueueKpi { draftInvoices: number; uninvoicedLines: number; uninvoicedPaise: number; pharmacyDraftCharges: number }
 
-/** SP4 work waiting for billing: draft invoices, and captured charge lines on no invoice yet (taxable value). */
+/** Work waiting for billing: SP4 draft invoices, captured charge lines on no invoice yet (taxable value), and pharmacy bills (legacy charges from a dispense) still in draft. */
 export async function loadBillingQueue(): Promise<BillingQueueKpi> {
   const db = getDb()
-  const [[d], [l]] = await Promise.all([
+  const [[d], [l], [ph]] = await Promise.all([
     db.select({ n: count() }).from(invoices).where(eq(invoices.status, 'draft')),
     db.select({ n: count(), paise: sql<string | null>`sum(${chargeLines.taxablePaise})` }).from(chargeLines).where(and(eq(chargeLines.status, 'captured'), isNull(chargeLines.invoiceId))),
+    db.select({ n: count() }).from(charges).innerJoin(medicationDispenses, eq(medicationDispenses.chargeId, charges.id)).where(eq(charges.status, 'draft')),
   ])
-  return { draftInvoices: n(d?.n), uninvoicedLines: n(l?.n), uninvoicedPaise: n(l?.paise) }
+  return { draftInvoices: n(d?.n), uninvoicedLines: n(l?.n), uninvoicedPaise: n(l?.paise), pharmacyDraftCharges: n(ph?.n) }
 }
 
 // ---------- Labs ----------
