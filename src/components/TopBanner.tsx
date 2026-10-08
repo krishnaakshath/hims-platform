@@ -33,7 +33,7 @@ export function TopBanner({ userName, role }: { userName: string; role: Role }) 
       <div className="flex items-center justify-between px-6 py-3">
         {hasSearchScope(role) ? <GlobalSearch placeholder={searchPlaceholder(searchScopesFor(role))} /> : <div />}
         <div className="flex items-center gap-4">
-          <NotificationPanel role={role} triggerClassName="text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
+          <NotificationPanel triggerClassName="text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
           <div className="flex items-center gap-2">
             <PatientAvatar name={userName} size="sm" />
             <span className="text-sm font-medium text-sidebar-foreground">{userName}</span>

@@ -81,7 +81,7 @@ describe.each(CASES)('$name', (c) => {
 describe('NotificationPanel', () => {
   it('shows a failed load instead of an empty list', async () => {
     mockFetch(500, { error: LEAK })
-    render(<NotificationPanel role="admin" />)
+    render(<NotificationPanel />)
     fireEvent.click(screen.getByRole('button', { name: 'Notifications' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
     expect(screen.queryByText('No records found.')).toBeNull()
