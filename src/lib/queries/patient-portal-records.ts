@@ -12,6 +12,8 @@ import { getInvoice, type InvoiceDetail } from './invoices'
 import { getDischargeSummaryData } from './discharge-summary'
 import { getLatestSignatureForSignable } from './signatures'
 import type { DischargeSummaryData } from '@/lib/encounters/discharge-summary'
+import { logPatientPortalAction } from '@/lib/patient-portal-audit'
+import { isUniqueViolation } from '@/lib/db-errors'
 
 // ---------- bills and receipts ----------
 
@@ -266,4 +268,43 @@ export async function listPortalBookableProviders(): Promise<{ id: number; name:
     .from(providers)
     .where(eq(providers.isActive, true))
     .orderBy(asc(providers.name))
+}
+
+export type PortalAppointmentRequestInput =
+  | { kind: 'new'; preferredProviderId: number | null; preferredDateRangeStart: string; preferredDateRangeEnd: string; reason: string }
+  | { kind: 'reschedule'; appointmentId: number; preferredDateRangeStart: string; preferredDateRangeEnd: string; reason: string }
+  | { kind: 'cancel'; appointmentId: number; preferredDateRangeStart: string; preferredDateRangeEnd: string; reason: string }
+
+/**
+ * Files a portal request into the staff booking-requests queue, named to the patient (the
+ * requester fields come from the patient master, never from the request body), with its
+ * audit row on the same transaction. A second pending request for one appointment is
+ * refused by the partial unique index and comes back as `duplicate`.
+ */
+export async function createPortalAppointmentRequest(patientId: string, input: PortalAppointmentRequestInput): Promise<{ ok: true; id: number } | { ok: false; error: 'not_found' | 'duplicate' }> {
+  try {
+    return await getDb().transaction(async (tx) => {
+      const [p] = await tx.select({ name: patients.name, dob: patients.dob, email: patients.email, phone: patients.phone }).from(patients).where(eq(patients.id, patientId))
+      if (!p) return { ok: false as const, error: 'not_found' as const }
+      const [row] = await tx.insert(bookingRequests).values({
+        requesterName: p.name,
+        requesterDob: p.dob,
+        requesterEmail: p.email,
+        requesterPhone: p.phone,
+        preferredProviderId: input.kind === 'new' ? input.preferredProviderId : null,
+        preferredDateRangeStart: input.preferredDateRangeStart,
+        preferredDateRangeEnd: input.preferredDateRangeEnd,
+        reason: input.reason,
+        patientId,
+        requestKind: input.kind,
+        appointmentId: input.kind === 'new' ? null : input.appointmentId,
+      }).returning({ id: bookingRequests.id })
+      const target = input.kind === 'new' ? '' : ` appointment=${input.appointmentId}`
+      await logPatientPortalAction(`requested appointment ${input.kind === 'new' ? 'booking' : input.kind} via patient portal`, patientId, `request=${row.id}${target}`, tx)
+      return { ok: true as const, id: row.id }
+    })
+  } catch (err) {
+    if (isUniqueViolation(err, 'booking_requests_one_pending_per_appointment')) return { ok: false, error: 'duplicate' }
+    throw err
+  }
 }
