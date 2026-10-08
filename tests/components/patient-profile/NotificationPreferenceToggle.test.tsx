@@ -17,7 +17,7 @@ const aadhaar = { status: 'not_recorded' as const, masked: null, declineReason: 
 
 describe('NotificationPreferenceToggle', () => {
   it('turns notices off and shows the new state', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ optOut: true }) }))
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ optOut: true }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     render(<NotificationPreferenceToggle anonId="RD-0001" initialOptOut={false} />)
     const toggle = screen.getByRole('switch', { name: /send lab and home-collection notices/i })
@@ -28,11 +28,11 @@ describe('NotificationPreferenceToggle', () => {
   })
 
   it('keeps the old state and announces a failure', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({}), { status: 500 })))
     render(<NotificationPreferenceToggle anonId="RD-0001" initialOptOut />)
     const toggle = screen.getByRole('switch')
     fireEvent.click(toggle)
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not/i))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Something went wrong on our side. Please try again.'))
     expect(toggle).toHaveAttribute('aria-checked', 'false')
   })
 })

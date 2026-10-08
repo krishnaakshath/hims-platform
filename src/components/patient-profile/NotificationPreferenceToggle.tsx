@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { sendJson } from '@/lib/client-fetch'
 import { useRouter } from 'next/navigation'
 
 // SP5: staff (NOTIFICATION_PREFERENCE_ROLES) switch a patient's lab and home-collection
@@ -14,20 +15,11 @@ export function NotificationPreferenceToggle({ anonId, initialOptOut }: { anonId
     const next = !optOut
     setBusy(true)
     setError(null)
-    try {
-      const res = await fetch(`/api/patients/${encodeURIComponent(anonId)}/notification-preference`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ optOut: next }),
-      })
-      if (!res.ok) { setError('Could not save the notification preference.'); return }
-      setOptOut(next)
-      router.refresh()
-    } catch {
-      setError('Could not save the notification preference.')
-    } finally {
-      setBusy(false)
-    }
+    const res = await sendJson(`/api/patients/${encodeURIComponent(anonId)}/notification-preference`, 'PUT', { optOut: next })
+    setBusy(false)
+    if (!res.ok) { setError(res.error); return }
+    setOptOut(next)
+    router.refresh()
   }
 
   const on = !optOut

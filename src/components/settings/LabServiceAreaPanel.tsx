@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { sendJson } from '@/lib/client-fetch'
 import { useRouter } from 'next/navigation'
 import type { ServiceAreaPinRow } from '@/db/schema'
 
@@ -21,36 +22,27 @@ export function LabServiceAreaPanel({ pins, isAdmin }: { pins: PinView[]; isAdmi
     setBusy(true)
     setError(null)
     setStatus(null)
-    try {
-      const res = await fetch('/api/settings/lab-service-area', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pins: text, ...(areaLabel.trim() ? { areaLabel: areaLabel.trim() } : {}) }),
-      })
-      const body = (await res.json().catch(() => ({}))) as { error?: string; invalid?: string[]; added?: number; reactivated?: number; unchanged?: number }
-      if (!res.ok) {
-        const base = body.error ?? 'Could not save the PIN codes.'
-        setError(body.invalid?.length ? `${base}: ${body.invalid.join(', ')}` : base)
-        return
-      }
-      setStatus(`Added ${body.added ?? 0}, reactivated ${body.reactivated ?? 0}, already listed ${body.unchanged ?? 0}.`)
-      setText('')
-      setAreaLabel('')
-      router.refresh()
-    } finally {
-      setBusy(false)
+    type Saved = { added?: number; reactivated?: number; unchanged?: number }
+    const res = await sendJson<Saved | null>('/api/settings/lab-service-area', 'POST', { pins: text, ...(areaLabel.trim() ? { areaLabel: areaLabel.trim() } : {}) })
+    setBusy(false)
+    if (!res.ok) {
+      // The route lists the rejected PIN codes (the admin's own input, echoed to the admin only).
+      const invalid = (res.body as { invalid?: unknown } | undefined)?.invalid
+      setError(res.status === 400 && Array.isArray(invalid) && invalid.length ? `${res.error}: ${invalid.join(', ')}` : res.error)
+      return
     }
+    const body = res.data ?? {}
+    setStatus(`Added ${body.added ?? 0}, reactivated ${body.reactivated ?? 0}, already listed ${body.unchanged ?? 0}.`)
+    setText('')
+    setAreaLabel('')
+    router.refresh()
   }
 
   async function toggle(p: PinView) {
     setError(null)
     setStatus(null)
-    const res = await fetch(`/api/settings/lab-service-area/${p.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: !p.isActive }),
-    })
-    if (!res.ok) { setError('Could not update the PIN code.'); return }
+    const res = await sendJson(`/api/settings/lab-service-area/${p.id}`, 'PATCH', { isActive: !p.isActive })
+    if (!res.ok) { setError(res.error); return }
     router.refresh()
   }
 

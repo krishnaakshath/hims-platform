@@ -1,16 +1,12 @@
 'use client'
 import { useState } from 'react'
+import { sendJson } from '@/lib/client-fetch'
 import { useRouter } from 'next/navigation'
 import type { HomeCollectionWindowRow } from '@/db/schema'
 
 const INPUT = 'rounded-md border border-border px-3 py-2 text-sm'
 
 type WindowView = Pick<HomeCollectionWindowRow, 'id' | 'label' | 'startTime' | 'endTime' | 'capacity' | 'isActive' | 'sortOrder'>
-
-async function errorText(res: Response, fallback: string): Promise<string> {
-  const body = (await res.json().catch(() => ({}))) as { error?: string }
-  return res.status === 400 || res.status === 409 ? (body.error ?? fallback) : fallback
-}
 
 // SP5 Settings → Lab setup: home-collection windows (IST 'HH:MM', with a per-day capacity).
 // Windows are never deleted, only deactivated; booked visits keep their own snapshot.
@@ -27,28 +23,17 @@ export function HomeCollectionWindowsPanel({ windows, isAdmin }: { windows: Wind
   async function add() {
     setBusy(true)
     setError(null)
-    try {
-      const res = await fetch('/api/settings/home-collection-windows', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: label.trim(), startTime, endTime, capacity }),
-      })
-      if (!res.ok) { setError(await errorText(res, 'Could not add the window.')); return }
-      setLabel('')
-      router.refresh()
-    } finally {
-      setBusy(false)
-    }
+    const res = await sendJson('/api/settings/home-collection-windows', 'POST', { label: label.trim(), startTime, endTime, capacity })
+    setBusy(false)
+    if (!res.ok) { setError(res.error); return }
+    setLabel('')
+    router.refresh()
   }
 
   async function patch(w: WindowView, body: Record<string, unknown>) {
     setError(null)
-    const res = await fetch(`/api/settings/home-collection-windows/${w.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) { setError(await errorText(res, 'Could not update the window.')); return }
+    const res = await sendJson(`/api/settings/home-collection-windows/${w.id}`, 'PATCH', body)
+    if (!res.ok) { setError(res.error); return }
     setCapacityEdits((m) => { const next = { ...m }; delete next[w.id]; return next })
     router.refresh()
   }

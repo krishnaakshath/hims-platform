@@ -2,6 +2,7 @@
 // SP5: lab-bench receipt by scanned or typed sample ID. A barcode/QR scanner types the ID and
 // presses Enter, so the form submits on Enter; the server validates the check digit.
 import { useState } from 'react'
+import { sendJson } from '@/lib/client-fetch'
 import { useRouter } from 'next/navigation'
 import { displaySampleId, parseSampleId } from '@/lib/labs/sample-id'
 
@@ -17,25 +18,15 @@ export function ReceiveSampleForm() {
     if (!typed || busy) return
     setBusy(true)
     setMessage(null)
-    try {
-      const res = await fetch('/api/lab-orders/receive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sampleId: typed }),
-      })
-      const body = await res.json().catch(() => null)
-      if (res.ok) {
-        const id = typeof body?.sampleId === 'string' ? body.sampleId : parseSampleId(typed)?.canonical ?? typed
-        setMessage({ kind: 'ok', text: `Received ${displaySampleId(id)}` })
-        setValue('')
-        router.refresh()
-      } else {
-        setMessage({ kind: 'error', text: body?.error ?? 'Could not receive this sample.' })
-      }
-    } catch {
-      setMessage({ kind: 'error', text: 'Could not receive this sample.' })
-    } finally {
-      setBusy(false)
+    const res = await sendJson<{ sampleId?: unknown } | null>('/api/lab-orders/receive', 'POST', { sampleId: typed })
+    setBusy(false)
+    if (res.ok) {
+      const id = typeof res.data?.sampleId === 'string' ? res.data.sampleId : parseSampleId(typed)?.canonical ?? typed
+      setMessage({ kind: 'ok', text: `Received ${displaySampleId(id)}` })
+      setValue('')
+      router.refresh()
+    } else {
+      setMessage({ kind: 'error', text: res.error })
     }
   }
 

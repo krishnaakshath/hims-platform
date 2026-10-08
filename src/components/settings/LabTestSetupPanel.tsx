@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { sendJson } from '@/lib/client-fetch'
 import { useRouter } from 'next/navigation'
 import { SAMPLE_CONTAINERS, SAMPLE_CONTAINER_LABEL, SAMPLE_TYPES, SAMPLE_TYPE_LABEL } from '@/lib/labs/catalog'
 import type { LabTestSetupRow } from '@/lib/queries/lab-setup'
@@ -21,21 +22,10 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
     setError(null)
     setSavingId(t.id)
     const value = raw === '' ? null : field === 'serviceId' ? Number(raw) : raw
-    try {
-      const res = await fetch(`/api/lab-tests/${t.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: value }),
-      })
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string }
-        setError(res.status === 400 && body.error ? `${t.name}: ${body.error}` : `Could not update ${t.name}.`)
-        return
-      }
-      router.refresh()
-    } finally {
-      setSavingId(null)
-    }
+    const res = await sendJson(`/api/lab-tests/${t.id}`, 'PATCH', { [field]: value })
+    setSavingId(null)
+    if (!res.ok) { setError(`${t.name}: ${res.error}`); return }
+    router.refresh()
   }
 
   if (tests.length === 0) return <p className="text-sm text-muted-foreground">No lab tests in the catalogue.</p>

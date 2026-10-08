@@ -21,7 +21,7 @@ describe('LabServiceAreaPanel', () => {
   })
 
   it('lets an admin paste PINs and names the invalid ones from the server', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ error: 'Some PIN codes are not valid', invalid: ['12345'] }) })))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'Some PIN codes are not valid', invalid: ['12345'] }), { status: 400 })))
     render(<LabServiceAreaPanel pins={[]} isAdmin />)
     expect(screen.getByText(/no pin codes yet/i)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('PIN codes'), { target: { value: '560001, 12345' } })
@@ -44,11 +44,21 @@ describe('HomeCollectionWindowsPanel', () => {
   })
 
   it('shows the overlap message from the server', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ error: 'This window overlaps another active window' }) })))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'This window overlaps another active window' }), { status: 409 })))
     render(<HomeCollectionWindowsPanel windows={[]} isAdmin />)
     fireEvent.change(screen.getByLabelText('Window label'), { target: { value: 'Early' } })
     fireEvent.click(screen.getByRole('button', { name: /add window/i }))
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('This window overlaps another active window'))
+  })
+
+  // Fix wave (shared client fetch helper): a network failure is shown, not an unhandled rejection.
+  it('shows a network failure in an alert and re-enables the button', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    render(<HomeCollectionWindowsPanel windows={[]} isAdmin />)
+    fireEvent.change(screen.getByLabelText('Window label'), { target: { value: 'Early' } })
+    fireEvent.click(screen.getByRole('button', { name: /add window/i }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not reach the server. Check your connection and try again.'))
+    expect(screen.getByRole('button', { name: /add window/i })).toBeEnabled()
   })
 })
 
@@ -60,7 +70,7 @@ describe('LabTestSetupPanel', () => {
   })
 
   it('lets an admin pick a sample type', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     render(<LabTestSetupPanel tests={[test]} services={[{ id: 3, code: 'LAB_CBC', name: 'CBC' }]} isAdmin />)
     fireEvent.change(screen.getByLabelText('Sample type for Complete blood count'), { target: { value: 'blood' } })
