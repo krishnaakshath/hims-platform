@@ -173,7 +173,8 @@ export function searchScopesFor(role: Role): SearchScopes {
     patients: PATIENT_DIRECTORY_ROLES.includes(role),
     trials: clinical,
     formTemplates: clinical,
-    services: TARIFF_MANAGE_ROLES.includes(role),
+    // Wave G: every price-lookup role finds services (managers open the tariff, lookup roles the price lookup).
+    services: TARIFF_LOOKUP_ROLES.includes(role),
   }
 }
 

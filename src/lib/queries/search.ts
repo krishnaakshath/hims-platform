@@ -17,6 +17,19 @@ import { ageOnDate, todayIsoIn } from '@/lib/india-time'
 export { EMPTY_SEARCH_RESULTS, type SearchResult, type SearchResults, type PatientLookupPage, type PatientLookupResult, PATIENT_LOOKUP_MAX_PAGE_SIZE }
 
 const MAX_RESULTS_PER_CATEGORY = 8
+
+// Wave G: per-caller options. `matchPhone` is off by default: only a role that
+// may see a patient's mobile (PATIENT_PICKER_PHONE_ROLES) may find a patient by
+// it -- otherwise the search would confirm whose number a given mobile is.
+// `serviceHref` is where a service hit leads for this role (the tariff editor
+// for managers, the price lookup for lookup-only roles).
+export interface SearchOptions {
+  matchPhone?: boolean
+  serviceHref?: (serviceId: number) => string
+}
+
+const defaultServiceHref = (id: number) => `/tariffs/services/${id}`
+
 // The global search bar in TopBanner -- one query fanned out across every
 // entity a staff member might be looking for by name. Patients, trials and
 // form templates run against each entity's own already-cached list query and
@@ -26,7 +39,8 @@ const MAX_RESULTS_PER_CATEGORY = 8
 // `scopes` limits which lists are even loaded: a category the caller may not
 // open is never read and comes back as []. Patient items carry only name, id
 // and UHID (no clinical fields, and the phone is matched but never echoed).
-export async function searchAll(rawQuery: string, scopes: SearchScopes): Promise<SearchResults> {
+// Patients rank: exact UHID / chart id / mobile first, then name prefix, then the rest.
+export async function searchAll(rawQuery: string, scopes: SearchScopes, opts: SearchOptions = {}): Promise<SearchResults> {
   const q = rawQuery.trim().toLowerCase()
   if (q.length === 0) return EMPTY_SEARCH_RESULTS
 
@@ -37,20 +51,28 @@ export async function searchAll(rawQuery: string, scopes: SearchScopes): Promise
     scopes.services ? listServices({ q: rawQuery.trim().slice(0, 100), limit: MAX_RESULTS_PER_CATEGORY }) : Promise.resolve([]),
   ])
 
-  const qPhone = phoneQueryDigits(q)
+  const qPhone = opts.matchPhone ? phoneQueryDigits(q) : null
+  const phoneDigitsOf = (phone: string | null | undefined) => (phone ? phone.replace(/\D/g, '') : '')
   // listPatientsWithStatus is a patient x screening join (one row per
   // screening), so keep only each patient's first row.
   const seenPatientIds = new Set<string>()
-  const patients: SearchResult[] = allPatients
-    .filter((p) => {
-      if (seenPatientIds.has(p.id)) return false
-      seenPatientIds.add(p.id)
-      const name = p.name.toLowerCase()
-      if (name.includes(q) || p.id.toLowerCase().includes(q) || (p.uhid?.toLowerCase().startsWith(q) ?? false)) return true
-      return qPhone !== null && p.phone !== null && p.phone !== undefined && p.phone.replace(/\D/g, '').includes(qPhone)
-    })
+  const ranked: { rank: number; p: (typeof allPatients)[number] }[] = []
+  for (const p of allPatients) {
+    if (seenPatientIds.has(p.id)) continue
+    seenPatientIds.add(p.id)
+    const name = p.name.toLowerCase()
+    const id = p.id.toLowerCase()
+    const uhid = p.uhid?.toLowerCase() ?? null
+    const phoneHit = qPhone !== null && phoneDigitsOf(p.phone).includes(qPhone)
+    if (!(name.includes(q) || id.includes(q) || (uhid?.startsWith(q) ?? false) || phoneHit)) continue
+    const exactPhone = phoneHit && qPhone!.length >= 10 && phoneDigitsOf(p.phone).endsWith(qPhone!.slice(-10))
+    const rank = uhid === q || id === q || exactPhone ? 0 : name.startsWith(q) ? 1 : 2
+    ranked.push({ rank, p })
+  }
+  const patients: SearchResult[] = ranked
+    .sort((a, b) => a.rank - b.rank || a.p.name.localeCompare(b.p.name, 'en-IN') || a.p.id.localeCompare(b.p.id, 'en-IN'))
     .slice(0, MAX_RESULTS_PER_CATEGORY)
-    .map((p) => ({ id: p.id, label: p.name, detail: p.uhid ? `${p.id} · ${p.uhid}` : p.id, href: `/patients/${p.id}` }))
+    .map(({ p }) => ({ id: p.id, label: p.name, detail: p.uhid ? `${p.id} · ${p.uhid}` : p.id, href: `/patients/${p.id}` }))
 
   const trials: SearchResult[] = allTrials
     .filter((t) => t.name.toLowerCase().includes(q) || t.condition.toLowerCase().includes(q) || t.nctNumber.toLowerCase().includes(q))
@@ -64,7 +86,7 @@ export async function searchAll(rawQuery: string, scopes: SearchScopes): Promise
 
   const serviceResults: SearchResult[] = services
     .slice(0, MAX_RESULTS_PER_CATEGORY)
-    .map((s) => ({ id: String(s.id), label: s.name, detail: s.departmentName ? `${s.code} · ${s.departmentName}` : s.code, href: `/tariffs/services/${s.id}` }))
+    .map((s) => ({ id: String(s.id), label: s.name, detail: s.departmentName ? `${s.code} · ${s.departmentName}` : s.code, href: (opts.serviceHref ?? defaultServiceHref)(s.id) }))
 
   return { patients, trials, formTemplates, services: serviceResults }
 }

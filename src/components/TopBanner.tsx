@@ -11,8 +11,8 @@ import type { Role } from '@/lib/auth'
 
 // Wave B P1-24: name only what this role can actually find.
 function searchPlaceholder(s: SearchScopes): string {
-  if (s.patients && s.trials) return 'Search patients (name, UHID, mobile), trials, forms…'
-  if (s.patients) return 'Search patients by name, UHID or mobile…'
+  if (s.patients && s.trials) return s.services ? 'Search patients, services, trials, forms…' : 'Search patients (name, UHID, mobile), trials, forms…'
+  if (s.patients) return s.services ? 'Search patients by name, UHID or mobile, or a service…' : 'Search patients by name, UHID or mobile…'
   if (s.services) return 'Search services (name or code)…'
   return 'Search…'
 }

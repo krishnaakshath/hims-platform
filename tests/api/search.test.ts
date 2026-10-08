@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/db/client'
 import type { Role } from '@/lib/auth'
 import { GET } from '@/app/api/search/route'
+import { logAudit } from '@/lib/audit'
+import * as tariffQ from '@/lib/queries/tariff'
 
 let sessionRole: Role = 'admin'
 let signedIn = true
@@ -75,4 +77,33 @@ describe('GET /api/search', () => {
       expect(trials.trials[0].href).toMatch(/^\/trials\//)
     })
   }
+
+  // Wave G: lookup-only roles find services and land on the price lookup;
+  // managers land on the tariff editor.
+  it('links frontdesk service hits to the price lookup', async () => {
+    sessionRole = 'frontdesk'
+    vi.spyOn(tariffQ, 'listServices').mockResolvedValueOnce([{ id: 9, code: 'CONS', name: 'Consultation', departmentName: null }] as never)
+    const body = await (await search('cons')).json()
+    expect(body.services.length).toBeGreaterThan(0)
+    for (const s of body.services) expect(s.href).toBe(`/price-lookup?serviceId=${s.id}`)
+  })
+
+  it('links billing service hits to the tariff editor', async () => {
+    sessionRole = 'billing'
+    vi.spyOn(tariffQ, 'listServices').mockResolvedValueOnce([{ id: 9, code: 'CONS', name: 'Consultation', departmentName: null }] as never)
+    const body = await (await search('cons')).json()
+    expect(body.services.length).toBeGreaterThan(0)
+    for (const s of body.services) expect(s.href).toBe(`/tariffs/services/${s.id}`)
+  })
+
+  // Wave G: a mobile (or any long digit run, e.g. an Aadhaar typed by mistake)
+  // never lands in the audit log in clear.
+  it('masks long digit runs in the audited query', async () => {
+    vi.mocked(logAudit).mockClear()
+    await search('98765 43210 asha RD-0001 ref 2345 6789 0123')
+    const action = vi.mocked(logAudit).mock.calls[0][1] as string
+    expect(action).not.toMatch(/\d{5,}/)
+    expect(action).not.toMatch(/2345/)
+    expect(action).toContain('asha RD-0001')
+  })
 })
