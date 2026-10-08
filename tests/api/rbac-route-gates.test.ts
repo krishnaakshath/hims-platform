@@ -1280,6 +1280,15 @@ const BESPOKE_ROWS = [
   'GET /api/reviews', 'POST /api/reviews', 'GET /api/reviews/[id]', 'PUT /api/reviews/[id]',
 ]
 const UNGATED_EXEMPT: Record<string, string> = {
+  // SP8 session-less integration endpoints (also pinned in tests/api/sessionless-routes.test.ts).
+  'POST /api/abdm/api/v3/hip/patient/share': 'ABDM Scan & Share callback: gateway JWT + HIP id, size and rate limits (tests/api/abdm-share-callback.test.ts)',
+  'POST /api/nhcx/callback/[...action]': 'NHCX callback: IP, rate, bearer JWT, JWE, headers, replay (tests/api/nhcx-callback.test.ts, tests/lib/nhcx/inbound.test.ts)',
+  'GET /api/nhcx/callback/[...action]': 'fixed 405, no data (tests/api/nhcx-callback.test.ts)',
+  'PUT /api/nhcx/callback/[...action]': 'fixed 405, no data',
+  'PATCH /api/nhcx/callback/[...action]': 'fixed 405, no data',
+  'DELETE /api/nhcx/callback/[...action]': 'fixed 405, no data',
+  'GET /api/cron/nhcx-sweep': 'CRON_SECRET bearer, digest compare (tests/api/nhcx-status-cron.test.ts)',
+  // end SP8
   'GET /api/auth/google/start': 'pre-login SSO redirect (tests/api/auth-google.test.ts)',
   'GET /api/auth/google/callback': 'pre-login SSO callback; links only an existing account (tests/api/auth-google.test.ts)',
   'GET /api/health': 'public liveness probe, no data (tests/api/health.test.ts)',
