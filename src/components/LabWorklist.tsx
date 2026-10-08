@@ -13,7 +13,8 @@ import Link from 'next/link'
 import { ReceiveSampleForm } from '@/components/labs/ReceiveSampleForm'
 import { displaySampleId } from '@/lib/labs/sample-id'
 import { formatDateTimeIn, formatIsoDate } from '@/lib/india-time'
-import { LAB_COLLECT_ROLES, LAB_ORDER_ROLES, LAB_RECEIVE_ROLES, LAB_RESULT_ENTRY_ROLES, LAB_VERIFY_ROLES } from '@/lib/role-policy'
+import { LAB_COLLECT_ROLES, LAB_ORDER_ROLES, LAB_RECEIVE_ROLES, LAB_REPORT_READ_ROLES, LAB_REPORT_RELEASE_ROLES, LAB_RESULT_ENTRY_ROLES, LAB_VERIFY_ROLES } from '@/lib/role-policy'
+import { ReleaseReportButton, type ReleasedReport } from '@/components/labs/ReleaseReportButton'
 // end SP5
 
 export interface WorklistOrder {
@@ -205,6 +206,17 @@ function LabRow({
   )
 }
 
+// SP5: what happened to the doctor's follow-up request when the report was released.
+function followUpNote(f: ReleasedReport['followUp']): string {
+  switch (f.outcome) {
+    case 'created': return f.dueDate ? `Follow-up visit planned for ${formatIsoDate(f.dueDate)}.` : 'Follow-up visit planned.'
+    case 'linked': return 'Linked to the patient\'s upcoming follow-up visit.'
+    case 'pending': return 'The follow-up visit will be planned once every test is reported.'
+    case 'failed': return 'The follow-up visit could not be planned automatically; please plan it from the chart.'
+    default: return ''
+  }
+}
+
 function Section({ title, count, empty, children }: { title: string; count: number; empty: string; children: React.ReactNode }) {
   return (
     <section>
@@ -222,6 +234,7 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
   const [resultFor, setResultFor] = useState<WorklistOrder | null>(null)
   const [attachFor, setAttachFor] = useState<WorklistOrder | null>(null)
   const [collectedNotice, setCollectedNotice] = useState<{ id: number; sampleId: string } | null>(null)
+  const [releasedNotice, setReleasedNotice] = useState<ReleasedReport | null>(null)
 
   // SP5 role split (src/lib/role-policy.ts): labs enters results, pi verifies, only the
   // ordering clinicians cancel; frontdesk and collector have no worklist actions.
@@ -233,6 +246,8 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
     canAttachImaging: LAB_COLLECT_ROLES.includes(role),
   }
   const canReceive = LAB_RECEIVE_ROLES.includes(role)
+  const canRelease = LAB_REPORT_RELEASE_ROLES.includes(role)
+  const canReadReports = LAB_REPORT_READ_ROLES.includes(role)
 
   const byStatus = (...statuses: LabOrderStatus[]) => orders.filter((o) => statuses.includes(o.status))
   const toCollect = byStatus('ordered', 'scheduled')
@@ -309,6 +324,20 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
         </div>
       )}
 
+      {releasedNotice && (
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm">
+          <span>
+            Report <span className="font-mono font-semibold">{releasedNotice.report.reportNumber}</span>
+            {releasedNotice.report.version > 1 ? ` (version ${releasedNotice.report.version})` : ''} released.
+            {' '}{followUpNote(releasedNotice.followUp)}
+          </span>
+          {canReadReports && (
+            <a href={`/api/lab-reports/${releasedNotice.report.id}/download`} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">Open report</a>
+          )}
+          <button type="button" onClick={() => setReleasedNotice(null)} className="ml-auto text-xs text-muted-foreground hover:underline">Dismiss</button>
+        </div>
+      )}
+
       <Section title="To collect" count={toCollect.length} empty="No orders awaiting collection.">{rows(toCollect)}</Section>
 
       <section>
@@ -324,7 +353,12 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
         <div className="space-y-4">
           {[...reportGroups.entries()].map(([key, list]) => (
             <div key={key}>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">{key === 'none' ? 'No requisition' : `Requisition #${key}`}</p>
+              <div className="mb-1 flex flex-wrap items-center gap-3">
+                <p className="text-xs font-medium text-muted-foreground">{key === 'none' ? 'No requisition' : `Requisition #${key}`}</p>
+                {canRelease && key !== 'none' && (
+                  <ReleaseReportButton requisitionId={Number(key)} onReleased={(r) => { setReleasedNotice(r); router.refresh() }} />
+                )}
+              </div>
               {rows(list)}
             </div>
           ))}

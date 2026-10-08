@@ -7,10 +7,13 @@ import { AllergyBadge } from '@/components/AllergyBadge'
 import { NoteForm, NoteCard } from '@/components/NoteForm'
 import { InsuranceCardUpload } from '@/components/InsuranceCardUpload'
 import { LabResultsSection } from '@/components/LabResultsSection'
+// SP5: released lab reports (LAB_REPORT_READ_ROLES), downloaded through the audited route.
+import { LabReportList } from '@/components/labs/LabReportList'
+import { listReportsForPatient } from '@/lib/queries/lab-reports'
 import { CarePlanSection } from '@/components/CarePlanSection'
 import { MedicationHistorySection } from '@/components/MedicationHistorySection'
 import { requireSessionOrRedirect } from '@/lib/auth'
-import { CLINICAL_ROLES } from '@/lib/role-policy'
+import { CLINICAL_ROLES, LAB_ORDER_ROLES, LAB_REPORT_READ_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { getPatientDetail } from '@/lib/queries/patients'
 import { listNotesForPatient } from '@/lib/queries/encounter-notes'
@@ -96,6 +99,7 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
   const allProviders = await listAllProviders()
   const sessionProvider = await resolveSessionProvider(session)
   const [labOrders, labTests] = await Promise.all([listOrdersForPatient(anonId), listLabTests()])
+  const labReports = LAB_REPORT_READ_ROLES.includes(session.role) ? await listReportsForPatient(anonId) : null // SP5
   const screeningSubmissions = (await listFormSubmissions({ patientId: anonId, status: 'completed' })).filter((s) => s.bandLabel !== null)
   const carePlans = await listCarePlansForPatient(anonId)
   // SP6: the patient's recent visits with their coding; doctors propose, doctors/admin reply, crc reads.
@@ -107,7 +111,7 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
   const name = patient.name
   const canWriteInsurance = ['admin', 'crc'].includes(session.role)
   // Matches POST /api/patients/[anonId]/lab-orders's own role gate (spec §8: ordering is a clinical action).
-  const canOrderLabs = ['admin', 'pi'].includes(session.role)
+  const canOrderLabs = LAB_ORDER_ROLES.includes(session.role) // SP5: named gate
   // Matches POST /api/patients/[anonId]/prescriptions's own role gate (spec §10: prescribing is the clinical tier).
   const canPrescribe = ['admin', 'pi'].includes(session.role)
   // admin needs the explicit on-behalf-of picker only when its own session
@@ -342,6 +346,7 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
 
       <section className={SECTION}>
         <LabResultsSection patientId={anonId} orders={labOrders} labTests={labTests} canOrder={canOrderLabs} />
+        {labReports && <div className="mt-4"><LabReportList reports={labReports} /></div>}
       </section>
     </div>
   )

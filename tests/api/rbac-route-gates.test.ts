@@ -433,6 +433,9 @@ import { POST as cancelHomeCollectionRoute } from '@/app/api/home-collections/[i
 import { PUT as putHomeCollectionCollector } from '@/app/api/home-collections/[id]/collector/route'
 import { COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy'
 import { POST as collectHomeCollectionRoute } from '@/app/api/home-collections/[id]/collect/route'
+import { LAB_REPORT_READ_ROLES, LAB_REPORT_RELEASE_ROLES } from '@/lib/role-policy'
+import { POST as releaseLabReportRoute } from '@/app/api/lab-requisitions/[id]/report/route'
+import { GET as downloadLabReport } from '@/app/api/lab-reports/[id]/download/route'
 // end SP5
 // SP6: the clinical-note write routes (the coder must never write or sign a note)
 import { POST as postNote } from '@/app/api/patients/[anonId]/notes/route'
@@ -688,6 +691,9 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'PUT /api/home-collections/[id]/collector', call: () => settle(() => putHomeCollectionCollector(send('PUT', `/api/home-collections/${BOGUS_ID}/collector`), ctx({ id: BOGUS_ID }))), allowed: [...HOME_COLLECTION_DISPATCH_ROLES] },
   // SP5 collector route (Task 12): `{}` fails validation before any query.
   { name: 'POST /api/home-collections/[id]/collect', call: () => settle(() => collectHomeCollectionRoute(send('POST', `/api/home-collections/${BOGUS_ID}/collect`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
+  // SP5 lab reports (Task 14): release has no body (the bogus requisition is not found); download 404s the bogus id.
+  { name: 'POST /api/lab-requisitions/[id]/report', call: () => settle(() => releaseLabReportRoute(send('POST', `/api/lab-requisitions/${BOGUS_ID}/report`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_REPORT_RELEASE_ROLES] },
+  { name: 'GET /api/lab-reports/[id]/download', call: () => settle(() => downloadLabReport(get(`/api/lab-reports/${BOGUS_ID}/download`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_REPORT_READ_ROLES] },
   // end SP5
   // SP6 (ruling 4): clinical notes are written and signed by pi/admin only -- the coder reads
   // signed notes in the coding workspace but is 403'd here. Inline allowlists in both routes.
