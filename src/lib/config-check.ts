@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { LEDGER_TABLE, migrationStatus, orderMigrationNames, type MigrationStatus } from '@/db/migrations'
 import { getRedis, isCacheConfigured } from '@/lib/cache'
+import { isBlobConfigured } from '@/lib/service-config'
 
 // Backing-service checks behind the public GET /api/health and
 // GET /api/health/ready. The report holds fixed status words only: never an
@@ -16,12 +17,15 @@ export type HealthChecks = {
   redis: 'ok' | 'fail' | 'not_configured'
   migrations: MigrationStatus
   secrets: 'ok' | 'missing'
+  // Configured or not only: no network round trip to the store.
+  blob: 'ok' | 'not_configured'
 }
 export type HealthReport = { status: 'ok' | 'degraded' | 'down'; checks: HealthChecks }
 
 export type HealthDeps = {
   pingDatabase: () => Promise<unknown>
   redisConfigured: () => boolean
+  blobConfigured: () => boolean
   pingRedis: () => Promise<unknown>
   appliedMigrations: () => Promise<string[]>
   migrationFiles: () => string[]
@@ -55,6 +59,7 @@ async function passes(fn: () => Promise<unknown>, ms: number): Promise<boolean> 
 export const defaultHealthDeps: HealthDeps = {
   pingDatabase: () => getDb().execute(sql`select 1`),
   redisConfigured: isCacheConfigured,
+  blobConfigured: () => isBlobConfigured(),
   pingRedis: () => getRedis().ping(),
   appliedMigrations: async () => {
     try {
@@ -100,10 +105,11 @@ export async function runHealthChecks(deps: HealthDeps = defaultHealthDeps, opts
     redis: !redisConfigured ? 'not_configured' : redisOk ? 'ok' : 'fail',
     migrations: migrationStatus(applied, files),
     secrets: secretsStatus(deps.env),
+    blob: deps.blobConfigured() ? 'ok' : 'not_configured',
   }
   const status: HealthReport['status'] =
     checks.database === 'fail' || checks.secrets === 'missing' ? 'down'
-      : checks.redis !== 'ok' || checks.migrations !== 'up_to_date' ? 'degraded'
+      : checks.redis !== 'ok' || checks.migrations !== 'up_to_date' || checks.blob !== 'ok' ? 'degraded'
         : 'ok'
   return { status, checks }
 }

@@ -107,7 +107,7 @@ Step by step, for a new client:
    `codes_display_trgm_idx` index, the billing immutability triggers).
    Run `db:migrate:status` again: every line must read `applied`.
 6. **Deploy** (section 5) and check `https://<client-domain>/api/health/ready`
-   answers 200 with `{"status":"ok","checks":{"database":"ok","redis":"ok","migrations":"up_to_date","secrets":"ok"}}`.
+   answers 200 with `{"status":"ok","checks":{"database":"ok","redis":"ok","migrations":"up_to_date","secrets":"ok","blob":"ok"}}`.
    Any other word names the missing piece; it never shows values.
 7. **Create the first admin** (section 6).
 8. **Code sets.** No code sets ship with the app. The owner loads the licensed

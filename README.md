@@ -346,7 +346,7 @@ npm run db:migrate           # create/upgrade the schema of DATABASE_URL
 npm run db:seed              # demo data; see below
 ```
 
-`GET /api/health` reports `database`, `redis`, `migrations` and `secrets`
+`GET /api/health` reports `database`, `redis`, `migrations`, `secrets` and `blob`
 as fixed words (`ok`, `fail`, `not_configured`, `pending`, ...); it is the
 first thing to check when sign-in fails on a new deployment.
 
