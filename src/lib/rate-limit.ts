@@ -401,4 +401,14 @@ export async function checkAbdmCallbackRateLimit(ip: string): Promise<{ allowed:
   const { success } = await _abdmCallbackLimiter.limit(ip)
   return { allowed: success }
 }
+
+// NHCX callbacks: 120 a minute per source IP and 1000 a minute in all.
+let _nhcxCallbackIp: Ratelimit | null = null
+let _nhcxCallbackAll: Ratelimit | null = null
+export async function checkNhcxCallbackRateLimit(ip: string): Promise<{ allowed: boolean }> {
+  if (!_nhcxCallbackIp) _nhcxCallbackIp = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(120, '60 s'), prefix: 'ratelimit:nhcx-callback' })
+  if (!_nhcxCallbackAll) _nhcxCallbackAll = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(1000, '60 s'), prefix: 'ratelimit:nhcx-callback-all' })
+  const [a, b] = await Promise.all([_nhcxCallbackIp.limit(ip), _nhcxCallbackAll.limit('all')])
+  return { allowed: a.success && b.success }
+}
 // end SP8

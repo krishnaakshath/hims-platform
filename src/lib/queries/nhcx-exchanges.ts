@@ -313,10 +313,11 @@ export async function dispatchExchange(exchangeId: number, partial: Partial<Disp
   if (row.isMock) {
     const built = await buildOutbound(row, null, deps, now)
     if (!built.ok) return failBuild(built.code)
-    await deps.mock.send(row, built.fhir)
     await finish(row, { state: 'sent', protocolStatus: 'request.queued', jweEncrypted: null, nextAttemptAt: null, bodySha256: sha256(JSON.stringify(built.fhir)) },
       { action: 'nhcx: dispatched exchange', outcome: 'accepted' }, null, now)
     log('accepted')
+    // The mock's synthesised answer arrives after the send is recorded, as a real callback would.
+    await deps.mock.send(row, built.fhir)
     return 'sent'
   }
 

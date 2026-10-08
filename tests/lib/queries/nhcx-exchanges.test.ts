@@ -151,6 +151,20 @@ describe.skipIf(!process.env.DATABASE_URL)('NHCX outbox and dispatch (DB)', () =
     expect(await exchange(x.exchangeId)).toMatchObject({ state: 'send_failed', lastErrorCode: 'attachments_too_large' })
   })
 
+  it('a mock row is never sent to NHCX; the labelled mock answers queued without an amount', async () => {
+    const x = await claimWithExchange()
+    await getDb().update(nhcxExchanges).set({ isMock: true }).where(eq(nhcxExchanges.id, x.exchangeId))
+    const client = vi.fn(async () => accepted())
+    expect(await dispatchExchange(x.exchangeId, { ...deps(client), config: () => ({ nhcx: { state: 'mock' }, abdm: { state: 'mock' } }) })).toBe('sent')
+    expect(client).not.toHaveBeenCalled()
+    const [inb] = await getDb().select().from(nhcxExchanges).where(and(eq(nhcxExchanges.relatedExchangeId, x.exchangeId), eq(nhcxExchanges.direction, 'inbound')))
+    expect(inb).toMatchObject({ isMock: true, summary: { outcome: 'queued', benefitPaise: null } })
+    expect(await exchange(x.exchangeId)).toMatchObject({ state: 'responded' })
+    const real = await claimWithExchange()
+    expect(await dispatchExchange(real.exchangeId, { ...deps(client), config: () => ({ nhcx: { state: 'mock' }, abdm: { state: 'mock' } }) })).toBe('failed')
+    expect(await exchange(real.exchangeId)).toMatchObject({ state: 'send_failed', lastErrorCode: 'mode_mismatch' })
+  })
+
   it('a query response goes out as communication/on_request on the insurer correlation id', async () => {
     const first = await claimWithExchange()
     const insurerCorrelation = crypto.randomUUID()
