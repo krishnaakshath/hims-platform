@@ -191,4 +191,13 @@ describe('LeftNav', () => {
       r.unmount()
     }
   })
+
+  // SP7
+  it('rcm sees RCM Dashboard and Claims, and no billing or clinical entries', () => {
+    render(<LeftNav role="rcm" />)
+    expect(screen.getByRole('link', { name: /rcm dashboard/i })).toHaveAttribute('href', '/rcm')
+    expect(screen.getByRole('link', { name: /^claims$/i })).toHaveAttribute('href', '/rcm/claims')
+    for (const label of [/charge capture/i, /invoices/i, /cash desk/i, /patients/i, /coding/i]) expect(screen.queryByRole('link', { name: label })).not.toBeInTheDocument()
+  })
+  // end SP7
 })

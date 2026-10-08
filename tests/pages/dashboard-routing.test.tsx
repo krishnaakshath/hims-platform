@@ -75,9 +75,8 @@ describe('dashboard role routing', () => {
   })
   // end SP6
 
-  // SP7: the rcm desk never falls through to the coordinator dashboard. Its home is the
-  // account page until the RCM dashboard lands (plan Task 15 changes this to /rcm).
-  it('redirects an rcm session away before loading any dashboard data', async () => {
+  // SP7: the rcm desk's home is the RCM dashboard, never the coordinator dashboard.
+  it('redirects an rcm session to /rcm before loading any dashboard data', async () => {
     vi.resetModules()
     const redirectThrows = vi.fn(() => { throw new Error('NEXT_REDIRECT') })
     const listPatients = vi.fn(async () => [])
@@ -86,7 +85,7 @@ describe('dashboard role routing', () => {
     vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: listPatients }))
     const { default: Page } = await import('@/app/(dashboard)/page')
     await expect(Page()).rejects.toThrow('NEXT_REDIRECT')
-    expect(redirectThrows).toHaveBeenCalledWith('/account')
+    expect(redirectThrows).toHaveBeenCalledWith('/rcm')
     expect(listPatients).not.toHaveBeenCalled()
   })
   // end SP7

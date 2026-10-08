@@ -316,6 +316,12 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/coding/encounters/[id]', load: () => import('@/app/(dashboard)/coding/encounters/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'coder'] },
   // SP6: /coding/service-codes -- CODING_ROLES (linked from the worklist; not a nav entry)
   { route: '/coding/service-codes', load: () => import('@/app/(dashboard)/coding/service-codes/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'coder'] },
+  // SP7: LeftNav NAV_ITEMS /rcm and /rcm/claims -- RCM_ROLES; the new-claim and workspace pages are reached from them.
+  { route: '/rcm', load: () => import('@/app/(dashboard)/rcm/page'), allowed: ['admin', 'rcm'] },
+  { route: '/rcm/claims', load: () => import('@/app/(dashboard)/rcm/claims/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/claims/new', load: () => import('@/app/(dashboard)/rcm/claims/new/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/claims/[id]', load: () => import('@/app/(dashboard)/rcm/claims/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'rcm'] },
+  // end SP7
   // end SP6
   // Wave B P1-05: price lookup -- TARIFF_LOOKUP_ROLES (LeftNav NAV_TRAILING_ITEMS /price-lookup).
   { route: '/price-lookup', load: () => import('@/app/(dashboard)/price-lookup/page'), allowed: ['admin', 'billing', 'crc', 'frontdesk', 'rcm'] }, // SP7: + rcm (TARIFF_LOOKUP_ROLES)

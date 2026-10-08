@@ -33,10 +33,9 @@ export default async function DashboardHomePage() {
   // (patient names and appointments are outside the coder's minimum PHI).
   if (session.role === 'coder') redirect('/coding')
   // end SP6
-  // SP7: the RCM desk never falls through to the coordinator dashboard (patient names,
-  // appointments). Its home becomes /rcm when the RCM dashboard lands (plan Task 15);
-  // until then it is the account page.
-  if (session.role === 'rcm') redirect('/account')
+  // SP7: the RCM desk's home is the RCM dashboard; never the coordinator dashboard
+  // (patient names and appointments are outside the RCM minimum).
+  if (session.role === 'rcm') redirect('/rcm')
   // end SP7
   // Called and awaited directly (not `<FrontDeskDashboard session={session} />`) so this
   // page resolves to a plain, already-rendered element tree instead of an unresolved async

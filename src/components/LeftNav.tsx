@@ -13,6 +13,7 @@ import {
   BookOpenCheck, FileCode2, // SP6
   UserCircle2, Calculator,
   ClipboardPlus, Banknote, SlidersHorizontal, // SP4
+  Landmark, FileStack, // SP7
 } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
@@ -90,6 +91,11 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   // besides Home; nothing clinical (patients, chart, notes) is shown to a coder.
   { href: '/coding', label: 'Coding', icon: FileCode2, roles: ['admin', 'coder'] as Role[] },
   // end SP6
+
+  // SP7: revenue cycle (insurance desk) -- RCM_ROLES. No billing, clinical or patient-directory entries for rcm.
+  { href: '/rcm', label: 'RCM Dashboard', icon: Landmark, roles: ['admin', 'rcm'] as Role[] },
+  { href: '/rcm/claims', label: 'Claims', icon: FileStack, roles: ['admin', 'rcm'] as Role[] },
+  // end SP7
 
   // Staff directory — admin/crc/pi (pi view-only; NOT frontdesk, NOT billing, NOT pharmacy, NOT labs)
   { href: '/staff', label: 'Staff', icon: IdCard, roles: ['crc', 'admin', 'pi'] as Role[] },

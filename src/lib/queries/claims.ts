@@ -255,3 +255,30 @@ export async function loadClaimReadiness(executor: WriteExecutor, claimId: numbe
 export async function getClaimReadiness(claimId: number): Promise<ReturnType<typeof checkClaimReadiness> | null> {
   return (await loadClaimReadiness(getDb(), claimId))?.result ?? null
 }
+
+// ---- the "new claim" screen -----------------------------------------------------------------------
+
+export interface NewClaimContext {
+  patient: { id: string; name: string; uhid: string | null }
+  policyId: number
+  claimType: 'ipd' | 'opd'
+  admissionId: number | null
+  encounterId: number | null
+  invoices: ClaimableInvoice[]
+  preauths: { id: number; preauthNumber: string; approvedPaise: number | null; validUntil: string | null }[]
+}
+
+/** The invoices and approved pre-auths a new claim for this episode and policy can use, or null when they do not belong together. */
+export async function getNewClaimContext(ref: { admissionId: number } | { encounterId: number }, policyId: number): Promise<NewClaimContext | null> {
+  const db = getDb()
+  const [episode, ctx] = await Promise.all([episodeOf(db, ref), loadPolicyContext(db, policyId)])
+  if (!episode || !ctx || ctx.row.patientId !== episode.patientId || ctx.row.status !== 'active') return null
+  const [patient] = await db.select({ id: patients.id, name: patients.name, uhid: patients.uhid }).from(patients).where(eq(patients.id, episode.patientId)).limit(1)
+  const live = await db.select({ id: preauths.id, preauthNumber: preauths.preauthNumber, approvedPaise: preauths.approvedPaise, validUntil: preauths.validUntil, status: preauths.status })
+    .from(preauths).where(and(eq(preauths.patientId, episode.patientId), eq(preauths.policyId, policyId))).orderBy(asc(preauths.id))
+  return {
+    patient, policyId, claimType: episode.admissionId !== null ? 'ipd' : 'opd', admissionId: episode.admissionId, encounterId: episode.encounterId,
+    invoices: (await listClaimableInvoices(db, episode, ctx.billingPayerId)).filter((i) => i.availablePaise > 0),
+    preauths: live.filter((p) => isLiveApprovedPreauth(p.status)).map((p) => ({ id: p.id, preauthNumber: p.preauthNumber, approvedPaise: p.approvedPaise, validUntil: p.validUntil })),
+  }
+}
