@@ -502,7 +502,7 @@ for (const [role, local] of STAFF) {
   const t = Date.now()
   try { await runRole(role, local) } catch (e) { fail(role, 'login', '/api/login', String(e.message ?? e)) }
   const rr = results.roles[role]
-  if (rr) console.log(`${role.padEnd(10)} pages ${rr.pages.length} (fail ${rr.pages.filter((x) => x.verdict !== 'pass').length})  links ${rr.links.length} (bad ${rr.links.filter((x) => x.verdict !== 'pass').length})  apis ${rr.apis.length} (bad ${rr.apis.filter((x) => x.verdict !== 'pass').length})  ${Math.round((Date.now() - t) / 1000)}s`)
+  if (rr) console.log(`${role.padEnd(10)} pages ${rr.pages.length} (fail ${rr.pages.filter((x) => x.verdict !== 'pass').length})  links ${rr.links.length} (bad ${rr.links.filter((x) => x.verdict !== 'pass').length})  apis ${rr.apis.length} (bad ${rr.apis.filter((x) => !['pass', 'unconfigured', 'env'].includes(x.verdict)).length}, unconfigured/env ${rr.apis.filter((x) => ['unconfigured', 'env'].includes(x.verdict)).length})  ${Math.round((Date.now() - t) / 1000)}s`)
 }
 if (!onlyRoles || onlyRoles.includes('portal')) {
   await runPortal()
