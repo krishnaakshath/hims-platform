@@ -364,3 +364,13 @@ export async function estimateForPolicy(input: { policyId: number; plannedAdmiss
   if (!ctx || ctx.row.status !== 'active') return rcmFail('policy_not_found')
   return estimatePreauth({ payerId: ctx.billingPayerId, onDate: input.plannedAdmissionDate, roomCategoryCode: input.roomCategoryCode ?? null, items: input.estimate })
 }
+
+/** The patient's admissions and visits a pre-auth may be for (newest first, at most 20 each). */
+export async function listPatientEpisodes(patientId: string): Promise<{ admissions: { id: number; admittedOn: string; status: string }[]; encounters: { id: number; date: string; type: string }[] }> {
+  const db = getDb()
+  const [a, e] = await Promise.all([
+    db.select({ id: admissions.id, admittedAt: admissions.admittedAt, status: admissions.status }).from(admissions).where(eq(admissions.patientId, patientId)).orderBy(desc(admissions.admittedAt)).limit(20),
+    db.select({ id: encounters.id, date: encounters.encounterDate, type: encounters.encounterType }).from(encounters).where(and(eq(encounters.patientId, patientId), eq(encounters.encounterType, 'opd'))).orderBy(desc(encounters.encounterDate)).limit(20),
+  ])
+  return { admissions: a.map((r) => ({ id: r.id, admittedOn: istDateOf(r.admittedAt), status: r.status })), encounters: e }
+}

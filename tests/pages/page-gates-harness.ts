@@ -321,6 +321,13 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/rcm/claims', load: () => import('@/app/(dashboard)/rcm/claims/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'rcm'] },
   { route: '/rcm/claims/new', load: () => import('@/app/(dashboard)/rcm/claims/new/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'rcm'] },
   { route: '/rcm/claims/[id]', load: () => import('@/app/(dashboard)/rcm/claims/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/preauths', load: () => import('@/app/(dashboard)/rcm/preauths/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/preauths/new', load: () => import('@/app/(dashboard)/rcm/preauths/new/page'), props: { searchParams: Promise.resolve({ patientId: 'RD-ZZZZ' }) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/preauths/[id]', load: () => import('@/app/(dashboard)/rcm/preauths/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'rcm'] },
+  { route: '/rcm/payers', load: () => import('@/app/(dashboard)/rcm/payers/page'), allowed: ['admin', 'rcm'] },
+  { route: '/rcm/payers/[id]', load: () => import('@/app/(dashboard)/rcm/payers/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'rcm'] },
+  // SP7: LeftNav NAV_TRAILING_ITEMS /rcm/settings -- RCM_SETTINGS_ROLES
+  { route: '/rcm/settings', load: () => import('@/app/(dashboard)/rcm/settings/page'), allowed: ['admin'] },
   // end SP7
   // end SP6
   // Wave B P1-05: price lookup -- TARIFF_LOOKUP_ROLES (LeftNav NAV_TRAILING_ITEMS /price-lookup).

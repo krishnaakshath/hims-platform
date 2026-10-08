@@ -94,3 +94,6 @@ export function formatRcmNumber(prefix: 'PA' | 'CLM', istYear: string, value: nu
   if (!Number.isSafeInteger(value) || value < 1 || value > 999_999) throw new RangeError('The number must be from 1 to 999999')
   return `${prefix}-${istYear}-${String(value).padStart(6, '0')}`
 }
+
+/** How an estimate line was priced (SP2 resolver scope). */
+export const PRICE_SOURCE_LABEL: Record<string, string> = { base: 'Base rate', department: 'Department rate', payer: 'Payer rate', manual: 'Manual', pharmacy: 'Pharmacy' }
