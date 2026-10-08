@@ -73,6 +73,10 @@ export function makePatientRow(overrides: Partial<PatientRow> = {}): PatientRow 
     // SP5
     notificationOptOut: false,
     notificationOptOutAt: null,
+    // SP8
+    abhaVerifiedAt: null,
+    abhaVerificationSource: null,
+    abhaVerifiedVia: null,
     ...overrides,
   }
 }

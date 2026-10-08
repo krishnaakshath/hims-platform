@@ -16,6 +16,8 @@ import {
   // SP7
   patientPolicies, preauths, preauthEvents, preauthDocuments, rcmQueries, rcmQueryResponses, claims, claimInvoices,
   claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
+  // SP8
+  abdmConsents, abdmProfileShares, nhcxEligibilityChecks, nhcxExchanges,
   bookingRequests, // Wave J
 } from '@/db/schema'
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
@@ -448,6 +450,16 @@ async function hasRetainedClaimRecords(db: DeleteTx, anonId: string): Promise<bo
 }
 // end SP7
 
+// SP8: NHCX exchanges exist only for policies, pre-auths and claims and are correspondence with
+// an insurer (ruling 4), so a patient with any exchange row cannot be deleted. SP7's check
+// above already covers most of them; this makes the rule explicit (eligibility exchanges too).
+async function hasNhcxExchanges(db: DeleteTx, anonId: string): Promise<boolean> {
+  const result = await db.execute<{ found: boolean }>(sql`
+    select exists (select 1 from nhcx_exchanges where patient_id = ${anonId}) as found`)
+  return Boolean(result.rows[0]?.found)
+}
+// end SP8
+
 /**
  * Permanently removes a patient and every row that references them, as ONE
  * transaction: either the whole chart goes or (on any error) nothing does --
@@ -487,6 +499,18 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // SP4: refuse before anything is deleted (the whole transaction rolls back).
   if (await hasFinancialRecords(db, anonId)) throw new PatientHasFinancialRecordsError()
   if (await hasRetainedClaimRecords(db, anonId)) throw new PatientHasFinancialRecordsError() // SP7
+  if (await hasNhcxExchanges(db, anonId)) throw new PatientHasFinancialRecordsError() // SP8
+
+  // SP8, before the SP7 deletes (eligibility checks reference policies; exchanges reference
+  // claims, pre-auths and policies). abdm_consents is append-only, so the purge setting is on for
+  // these deletes only. The exchanges delete is a backstop: the check above leaves none.
+  await db.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+  await db.delete(nhcxExchanges).where(eq(nhcxExchanges.patientId, anonId))
+  await db.delete(nhcxEligibilityChecks).where(eq(nhcxEligibilityChecks.patientId, anonId))
+  await db.delete(abdmProfileShares).where(eq(abdmProfileShares.patientId, anonId))
+  await db.delete(abdmConsents).where(eq(abdmConsents.patientId, anonId))
+  await db.execute(sql`select set_config('hims.allow_document_purge', 'off', true)`)
+  // end SP8
 
   // SP7, children-first and before the SP4 deletes (claim_invoices reference invoices,
   // charge_lines.preauth_id references preauths). After the check above only draft/withdrawn

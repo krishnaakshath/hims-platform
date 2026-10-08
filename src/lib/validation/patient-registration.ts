@@ -38,6 +38,8 @@ export const abhaInputSchema = z.discriminatedUnion('status', [
     status: z.literal('provided'),
     abhaNumber: z.string().transform(normalizeAbhaNumber).refine(isValidAbhaNumber, 'Enter a valid 14-digit ABHA number').optional(),
     abhaAddress: z.string().transform(normalizeAbhaAddress).refine(isValidAbhaAddress, 'Enter a valid ABHA address').optional(),
+    // SP8: the ABDM verification flow that produced this ABHA (registration stamps it verified).
+    flowId: z.uuid().optional(),
   }).superRefine((v, ctx) => {
     if (!v.abhaNumber && !v.abhaAddress) ctx.addIssue({ code: 'custom', path: ['abhaNumber'], message: 'Provide an ABHA number or ABHA address' })
   }),

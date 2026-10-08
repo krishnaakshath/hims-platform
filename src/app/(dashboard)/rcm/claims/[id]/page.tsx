@@ -4,7 +4,6 @@ import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { RCM_ROLES, WRITE_OFF_APPROVE_ROLES } from '@/lib/role-policy'
 import { parseId } from '@/lib/http'
-import { getClaimGateway } from '@/lib/rcm/gateway'
 import { getClaimWorkspace } from '@/lib/queries/claim-workspace'
 import { ClaimHeader } from '@/components/rcm/ClaimHeader'
 import { ReadinessPanel } from '@/components/rcm/ReadinessPanel'
@@ -16,6 +15,10 @@ import { InsurerUpdateForms } from '@/components/rcm/InsurerUpdateForms'
 import { SettlementPanel } from '@/components/rcm/SettlementPanel'
 import { WriteOffPanel } from '@/components/rcm/WriteOffPanel'
 import { ClaimTimeline } from '@/components/rcm/ClaimTimeline'
+// SP8
+import { NHCX_EXCHANGE_ROLES } from '@/lib/role-policy'
+import { claimNhcxChannel, listExchangesFor } from '@/lib/queries/nhcx-review'
+import { NhcxExchangePanel } from '@/components/nhcx/NhcxExchangePanel'
 
 export default async function ClaimWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSessionOrRedirect()
@@ -34,12 +37,13 @@ export default async function ClaimWorkspacePage({ params }: { params: Promise<{
     : ws.allowedActions.includes('respond_query') && openQuery ? 'respond_query' as const
     : ws.allowedActions.includes('appeal') ? 'appeal' as const : null
   const readinessForNext = mode === null ? true : ws.readiness.ready
+  const [nhcx, exchanges] = await Promise.all([claimNhcxChannel(id), listExchangesFor({ claimId: id })]) // SP8
   return (
     <div className="space-y-4">
       <ClaimHeader ws={ws} />
       <div className="grid gap-4 lg:grid-cols-2">
         <ReadinessPanel claimId={id} ready={ws.readiness.ready} items={ws.readiness.items} editable={open} />
-        <SubmitClaimDialog claimId={id} mode={mode} ready={readinessForNext} queryId={openQuery?.id ?? null} nhcxLabel={getClaimGateway('nhcx').status().label} />
+        <SubmitClaimDialog claimId={id} mode={mode} ready={readinessForNext} queryId={openQuery?.id ?? null} nhcxLabel={nhcx.label} nhcxEnabled={nhcx.enabled} />
         <ClaimInvoicesPanel claimId={id} invoices={ws.invoices} editable={status === 'draft'} />
         <ClaimDocumentsPanel claimId={id} documents={ws.documents} editable={open} />
         <ClaimVersionsPanel versions={ws.versions} />
@@ -53,6 +57,7 @@ export default async function ClaimWorkspacePage({ params }: { params: Promise<{
           <ul className="space-y-2">{ws.queries.map((q) => <li key={q.id}><p>{q.question} <span className="text-xs text-muted-foreground">({q.status}, due {q.dueOn})</span></p>{q.responses.map((r) => <p key={r.id} className="pl-3 text-xs">Reply {r.respondedOn}: {r.body}</p>)}</li>)}</ul>
         </section>
       )}
+      <NhcxExchangePanel exchanges={exchanges} canAct={NHCX_EXCHANGE_ROLES.includes(session.role)} />
       <ClaimTimeline events={ws.events} />
     </div>
   )

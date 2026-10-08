@@ -28,6 +28,11 @@ import {
   buildClaimSnapshot, codingFingerprintSource, type ClaimSnapshot, type SnapshotDiagnosis, type SnapshotDocument, type SnapshotItem, type SnapshotProcedure,
 } from '@/lib/rcm/snapshot'
 import type { ClaimSubmitRequest } from '@/lib/rcm/validation'
+// SP8
+import { readNhcxConfig } from '@/lib/integrations/config'
+import { NHCX_BUILD_ERROR_COPY } from '@/lib/fhir/nhcx/resources'
+import { recipientCodeFor, resolveNhcxClaimGateway } from '@/lib/nhcx/claim-gateway'
+import { defaultSchedule, dispatchExchange, insertOutboundClaimExchange, senderCode } from './nhcx-exchanges'
 import { lockPatientBilling } from './billing-lock'
 import { episodeOf, loadClaimReadiness } from './claims'
 import { getEncounterCodingGate } from './coding'
@@ -35,7 +40,7 @@ import { getDischargeSummaryData } from './discharge-summary'
 import type { WriteExecutor } from './executor'
 import { loadPolicyContext, loadRcmPatient, loadSnapshotHospital } from './rcm-context'
 
-function registrationOf(p: { council: 'nmc' | 'smc' | null; state: string | null; number: string | null }): string | null {
+export function registrationOf(p: { council: 'nmc' | 'smc' | null; state: string | null; number: string | null }): string | null {
   if (!p.number) return null
   if (p.council === 'nmc') return `NMC ${p.number}`
   if (p.council === 'smc' && p.state) return `SMC ${p.state} ${p.number}`
@@ -152,12 +157,15 @@ export interface SubmissionDeps {
   render: typeof renderClaimCopyPdf
   putBlob: (path: string, bytes: Uint8Array) => Promise<{ url: string }>
   gateway: (channel: SubmissionChannel) => ClaimGateway
+  // SP8: the NHCX outbox row is dispatched after commit through `schedule`.
+  schedule?: (fn: () => Promise<unknown>) => void
+  dispatch?: (exchangeId: number) => Promise<unknown>
 }
 
 export const defaultSubmissionDeps: SubmissionDeps = {
   render: renderClaimCopyPdf,
   putBlob: (path, bytes) => putPrivateBlob(path, bytes, 'application/pdf'),
-  gateway: (channel) => getClaimGateway(channel),
+  gateway: (channel) => getClaimGateway(channel, { nhcx: resolveNhcxClaimGateway() }), // SP8
 }
 
 const KIND_OF: Record<ClaimSubmitRequest['action'], (r: ClaimSubmitRequest) => SubmissionKind> = {
@@ -194,6 +202,7 @@ export async function submitClaimVersion(
   const insurerCopySha256 = sha256Hex(insurerBytes)
   const orphaned = () => { console.warn(`[rcm] orphaned claim copy ${rcmPath}`); console.warn(`[rcm] orphaned claim copy ${insurerPath}`) }
 
+  let outboxId: number | null = null // SP8
   try {
     const result = await db.transaction(async (tx) => {
       // 2. Lock, then rebuild with the same `now` and compare.
@@ -219,8 +228,21 @@ export async function submitClaimVersion(
         claimId, version, kind, snapshot: again.snapshot, snapshotSha256: again.sha256, rcmCopyBlobUrl: rcmBlob.url, rcmCopySha256,
         insurerCopyBlobUrl: insurerBlob.url, insurerCopySha256, createdByName: session.name, createdByUserId: session.userId, createdAt: now,
       }).returning({ id: claimSubmissions.id })
+      // SP8: an NHCX send is an outbox row in this transaction; the dispatch's tracking reference is its correlation id.
+      let trackingReference = sent.trackingReference
+      if (sent.transport === 'nhcx') {
+        const recipientCode = recipientCodeFor(again.snapshot.policy)
+        if (!recipientCode) return rcmFail('invalid_transition', NHCX_BUILD_ERROR_COPY.payer_not_on_nhcx)
+        const ex = await insertOutboundClaimExchange(tx, {
+          claimId, claimSubmissionId: submission.id, patientId: claim.patientId, policyId: claim.policyId, correlationId: sent.trackingReference ?? randomUUID(),
+          kind, recipientCode, senderCode: senderCode(), isMock: readNhcxConfig().state === 'mock', bodySha256: again.sha256, now,
+        })
+        trackingReference = ex.correlationId
+        outboxId = ex.exchangeId
+      }
+      // end SP8
       await tx.insert(claimDispatches).values({
-        submissionId: submission.id, channel: req.channel, transport: sent.transport, trackingReference: sent.trackingReference,
+        submissionId: submission.id, channel: req.channel, transport: sent.transport, trackingReference,
         dispatchedOn: istDateOf(now), dispatchedByName: session.name, dispatchedAt: now,
       })
       await tx.insert(claimEvents).values({ claimId, action: req.action, fromStatus: claim.status, toStatus: to, submissionId: submission.id, byName: session.name, byUserId: session.userId, at: now })
@@ -237,6 +259,11 @@ export async function submitClaimVersion(
       return rcmOk({ version, submissionId: submission.id, status: to, warnings: again.readiness.items.filter((i) => i.severity === 'warn') })
     })
     if (!result.ok) orphaned()
+    // SP8: nothing is sent inside the transaction; the committed outbox row goes out now.
+    if (result.ok && outboxId !== null) {
+      const id = outboxId
+      ;(deps.schedule ?? defaultSchedule)(() => (deps.dispatch ?? dispatchExchange)(id))
+    }
     return result
   } catch (err) {
     orphaned()

@@ -21,6 +21,7 @@ import { ACCOUNT_ROLES, TARIFF_LOOKUP_ROLES } from '@/lib/role-policy' // Wave B
 import { CASH_DESK_ROLES, COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy' // SP4, SP5
 import { ENCOUNTER_REGISTER_ROLES } from '@/lib/role-policy' // Wave F
 import { NotebookTabs } from 'lucide-react' // Wave F
+import { QrCode, Plug } from 'lucide-react' // SP8
 import { REPORTS_ROLES } from '@/lib/role-policy' // Wave I
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
@@ -70,6 +71,9 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   { href: '/front-desk/check-in', label: 'Check-In', icon: ClipboardCheck, roles: ['frontdesk', 'admin', 'crc'] as Role[] },
   { href: '/front-desk/assignments', label: 'Assignments', icon: ListChecks, roles: ['frontdesk', 'admin', 'crc'] as Role[] },
   { href: '/front-desk/follow-ups', label: 'Follow-ups', icon: CalendarSync, roles: [...FOLLOW_UP_WORKLIST_ROLES] },
+  // SP8: ABHA Scan & Share registration queue -- ABDM_SHARE_QUEUE_ROLES.
+  { href: '/front-desk/abdm-shares', label: 'ABHA Scan & Share', icon: QrCode, roles: ['admin', 'frontdesk'] as Role[] },
+  // end SP8
   { href: '/inpatient/beds', label: 'Beds / Wards', icon: BedDouble, roles: ['frontdesk', 'admin', 'crc', 'pi'] as Role[] },
   // Wave F P1-04: OPD register (SP3 encounters) -- ENCOUNTER_REGISTER_ROLES.
   { href: '/encounters', label: 'OPD Register', icon: NotebookTabs, roles: [...ENCOUNTER_REGISTER_ROLES] },
@@ -156,6 +160,8 @@ export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; role
   // end SP6
   // SP7: hospital ROHINI / HFR identifiers -- RCM_SETTINGS_ROLES (admin).
   { href: '/rcm/settings', label: 'RCM Settings', icon: Settings2, roles: ['admin'] as Role[] },
+  // SP8: ABDM / NHCX connection -- INTEGRATION_SETTINGS_ROLES (admin).
+  { href: '/settings/integrations', label: 'ABDM / NHCX', icon: Plug, roles: ['admin'] as Role[] },
   // Settings: admin and the PI only, no other role -- explicit product direction.
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['admin', 'pi'] as Role[] },
   // Wave B P1-05: price lookup (GET /api/tariff/resolve) -- TARIFF_LOOKUP_ROLES.

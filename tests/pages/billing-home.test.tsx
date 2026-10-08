@@ -52,10 +52,11 @@ describe('/billing home eligibility check', () => {
     expect(screen.queryByRole('button', { name: /verify insurance/i })).not.toBeInTheDocument()
   })
 
-  it('labels Verify Insurance as Demo when DEMO_FEATURES is on', async () => {
+  // SP8: the simulated check is retired (NHCX eligibility runs on the patient's policy).
+  it('never offers the simulated check, even with DEMO_FEATURES on', async () => {
     process.env.DEMO_FEATURES = 'true'
     render(await BillingHomePage())
-    expect(screen.getByRole('button', { name: /verify insurance.*demo/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /verify insurance/i })).not.toBeInTheDocument()
   })
 })
 

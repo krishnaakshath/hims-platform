@@ -3,6 +3,7 @@ import { getDb } from '@/db/client'
 import { patients, patientContacts, patientAadhaar, identityVerifications } from '@/db/schema'
 import { encryptSensitive } from '@/lib/crypto'
 import { logAudit } from '@/lib/audit'
+import { consumeVerifiedAbha } from './abha-link' // SP8
 import type { Session } from '@/lib/auth'
 import { buildAadhaarRow, identityAuditEntries, type IdentityAuditEntry } from '@/lib/patient-identity'
 import { nextUhid } from '@/lib/queries/uhid'
@@ -121,6 +122,9 @@ export async function registerPatient(input: PatientRegistrationInput, session: 
     // a rolled-back registration leaves no audit row.
     await logAudit(session, 'registered patient', id, null, tx)
     for (const e of auditEntries) await logAudit(session, e.action, id, e.details, tx)
+    // SP8: an ABHA verified with ABDM in this registration is stamped verified (same transaction).
+    if (abhaProvided?.flowId) await consumeVerifiedAbha(tx, id, abhaProvided.flowId, abhaProvided.abhaNumber ?? null, session)
+    // end SP8
 
     return { id, uhid, auditEntries }
   })

@@ -155,6 +155,20 @@ export const WRITE_OFF_APPROVE_ROLES: readonly Role[] = ['admin']
 export const CLAIM_ABHA_READ_ROLES: readonly Role[] = ['admin', 'rcm']
 // end SP7
 
+// SP8 ABDM / NHCX integration (plan 2026-10-07-sp8-abdm-nhcx.md, RBAC table).
+// ABHA link = create / verify / link an ABHA and capture the ABDM consent.
+// Share queue = the Scan & Share registration queue at the front desk.
+// NHCX eligibility = run and read eligibility checks (same as POLICY_READ_ROLES).
+// NHCX exchange = send a pre-auth via NHCX, view exchanges and responses, check
+// status, confirm or dismiss a response. Integration settings = the ABDM / NHCX
+// connection page and test-connection.
+export const ABHA_LINK_ROLES: readonly Role[] = ['admin', 'frontdesk', 'crc']
+export const ABDM_SHARE_QUEUE_ROLES: readonly Role[] = ['admin', 'frontdesk']
+export const NHCX_ELIGIBILITY_ROLES: readonly Role[] = ['admin', 'rcm', 'frontdesk', 'billing', 'crc']
+export const NHCX_EXCHANGE_ROLES: readonly Role[] = ['admin', 'rcm']
+export const INTEGRATION_SETTINGS_ROLES: readonly Role[] = ['admin']
+// end SP8
+
 // Wave B: account self-service and reachability.
 // Account = /account (own MFA method, MFA self-reset, "what you can do"):
 // every staff role. A named allowlist (not "no gate") so an unknown/future

@@ -41,3 +41,15 @@ export async function streamPrivateBlob(
     },
   })
 }
+
+// SP8: the bytes of a private blob (NHCX attachments), or null when it cannot be read. Server only.
+export async function getPrivateBlobBytes(url: string): Promise<Uint8Array | null> {
+  try {
+    const blob = await get(url, { access: 'private' })
+    if (!blob || blob.statusCode !== 200 || !blob.stream) return null
+    return new Uint8Array(await new Response(blob.stream).arrayBuffer())
+  } catch (err) {
+    console.warn(`[blob-store] read failed (${err instanceof Error ? err.name : 'UnknownError'})`)
+    return null
+  }
+}

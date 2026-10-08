@@ -5,8 +5,9 @@ import { useRcmAction } from './useRcmAction'
 import { Field, FormError, Panel, buttonClass, inputClass } from './ui'
 
 /** Submits the next version: `submit` for a draft, `respond_query` for an open query, or an appeal. */
-export function SubmitClaimDialog({ claimId, mode, ready, queryId, nhcxLabel }: {
+export function SubmitClaimDialog({ claimId, mode, ready, queryId, nhcxLabel, nhcxEnabled = false }: {
   claimId: number; mode: 'submit' | 'respond_query' | 'appeal' | null; ready: boolean; queryId: number | null; nhcxLabel: string
+  nhcxEnabled?: boolean // SP8: the NHCX channel is offered only when connected and the payer has an NHCX code
 }) {
   const [channel, setChannel] = useState<SubmissionChannel>('portal')
   const [tracking, setTracking] = useState('')
@@ -31,7 +32,7 @@ export function SubmitClaimDialog({ claimId, mode, ready, queryId, nhcxLabel }: 
       <form onSubmit={submit} className="grid gap-2 sm:grid-cols-2">
         <Field label="Channel">
           <select className={inputClass} value={channel} onChange={(e) => setChannel(e.target.value as SubmissionChannel)}>
-            {SUBMISSION_CHANNELS.map((c) => <option key={c} value={c} disabled={c === 'nhcx'}>{c === 'nhcx' ? nhcxLabel : CHANNEL_LABEL[c]}</option>)}
+            {SUBMISSION_CHANNELS.map((c) => <option key={c} value={c} disabled={c === 'nhcx' && !nhcxEnabled}>{c === 'nhcx' ? nhcxLabel : CHANNEL_LABEL[c]}</option>)}
           </select>
         </Field>
         <Field label="Tracking reference (portal ID, AWB, email subject)"><input className={inputClass} value={tracking} onChange={(e) => setTracking(e.target.value)} /></Field>

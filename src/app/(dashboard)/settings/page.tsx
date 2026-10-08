@@ -58,6 +58,8 @@ export default async function SettingsPage() {
       <PracticeInfoForm initial={{ practiceName: settings.practiceName, practiceSite: settings.practiceSite, practiceTimezone: settings.practiceTimezone }} isAdmin={isAdmin} />
       <div className="mt-5 border-t border-border pt-5">
         <UhidPrefixForm initialPrefix={settings.uhidPrefix} isAdmin={isAdmin} />
+        {/* SP8 */}
+        {isAdmin && <p className="mt-4 text-sm"><a href="/settings/integrations" className="text-primary hover:underline">ABDM / NHCX connection</a> <span className="text-muted-foreground">— connection state, certificates and test connection</span></p>}
       </div>
     </section>
   )

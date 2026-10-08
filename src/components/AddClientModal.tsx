@@ -19,10 +19,16 @@ interface PayerOption {
   name: string
 }
 
-export function AddClientModal({ onClose }: { onClose: () => void }) {
+// SP8: `initial` pre-fills the form (a Scan & Share profile); `onRegistered`
+// runs after the patient is created, before navigating to them.
+export function AddClientModal({ onClose, initial, onRegistered }: {
+  onClose: () => void
+  initial?: RegistrationFormState
+  onRegistered?: (patientId: string) => Promise<void>
+}) {
   const { name: brandName } = useBrand()
   const router = useRouter()
-  const [form, setForm] = useState<RegistrationFormState>(EMPTY_REGISTRATION_FORM)
+  const [form, setForm] = useState<RegistrationFormState>(initial ?? EMPTY_REGISTRATION_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -64,6 +70,7 @@ export function AddClientModal({ onClose }: { onClose: () => void }) {
     try {
       const res = await sendJson<{ id: string }>('/api/patients', 'POST', payload)
       if (res.ok) {
+        if (onRegistered) await onRegistered(res.data.id) // SP8
         onClose()
         // Navigate straight to the new patient's page so the front desk sees
         // it; ?registered=1 shows the registration-slip / check-in banner (Wave C).

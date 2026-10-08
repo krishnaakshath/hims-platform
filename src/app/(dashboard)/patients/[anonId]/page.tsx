@@ -28,6 +28,8 @@ import { listRcmPayers } from '@/lib/queries/rcm-payers'
 import { POLICY_READ_ROLES, POLICY_WRITE_ROLES } from '@/lib/role-policy'
 import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
 import { NOTIFICATION_PREFERENCE_ROLES } from '@/lib/role-policy' // SP5
+import { ABHA_LINK_ROLES, NHCX_ELIGIBILITY_ROLES } from '@/lib/role-policy' // SP8
+import { nhcxEligibilityAvailable, payersOnNhcx } from '@/lib/queries/nhcx-eligibility' // SP8
 import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
 import { formatIstDate, todayIsoIn } from '@/lib/india-time'
 import { toAadhaarView } from '@/lib/patient-identity'
@@ -105,6 +107,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         abhaUnavailableNote: patient.abhaUnavailableNote ?? null, // Wave C P2-11
         isMlc: patient.isMlc, mlcNumber: patient.mlcNumber,
         notificationOptOut: patient.notificationOptOut, // SP5
+        abhaVerifiedAt: patient.abhaVerifiedAt ? String(patient.abhaVerifiedAt) : null, abhaVerificationSource: patient.abhaVerificationSource ?? null, // SP8
         contacts: patient.contacts.map((c) => ({ kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, addressText: c.addressText, isPrimary: c.isPrimary })),
       }}
       aadhaar={aadhaarView}
@@ -112,6 +115,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
       canWriteAadhaar={AADHAAR_WRITE_ROLES.includes(session.role)}
       canEditNotifications={NOTIFICATION_PREFERENCE_ROLES.includes(session.role)} // SP5
       canUnflagMlc={MLC_UNFLAG_ROLES.includes(session.role)}
+      canVerifyAbha={ABHA_LINK_ROLES.includes(session.role)} // SP8
     />
   )
 
@@ -240,7 +244,12 @@ export default async function PatientDetailPage({ params, searchParams }: { para
     : [[], [], null] as const
   const policiesTab = canSeePolicies ? (
     <PatientPoliciesPanel patientId={patient.id} policies={[...policies]} todayIso={todayIso} canEdit={POLICY_WRITE_ROLES.includes(session.role)} legacyPrefill={legacyPrefill}
-      payers={policyPayers.filter((p) => p.profile?.active).map((p) => ({ payerId: p.payerId, name: p.name, kind: p.profile!.kind }))} />
+      payers={policyPayers.filter((p) => p.profile?.active).map((p) => ({ payerId: p.payerId, name: p.name, kind: p.profile!.kind }))}
+      eligibility={NHCX_ELIGIBILITY_ROLES.includes(session.role) ? {
+        nhcxConfigured: nhcxEligibilityAvailable(), context: justRegistered ? 'registration' : 'manual', defaultProviderId: null,
+        providers: activeProviders.map((p) => ({ id: p.id, name: p.name })),
+        payerOnNhcx: payersOnNhcx(policies, new Map(policyPayers.map((p) => [p.payerId, p.profile?.nhcxParticipantCode ?? null]))),
+      } : undefined} />
   ) : null
   // end SP7
 

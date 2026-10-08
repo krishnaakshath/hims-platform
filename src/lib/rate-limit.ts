@@ -391,3 +391,54 @@ export async function __resetBookingRequestGlobalBucketForTests(): Promise<void>
   }
   await getBookingRequestGlobalLimiter().resetUsedTokens('global')
 }
+
+// SP8: ABHA create/verify calls go to ABDM and send OTPs to patients, so each
+// staff member gets 10 calls a minute and the whole hospital 60 per ten
+// minutes (both buckets must allow). Fails closed like every limiter here: no
+// Redis means getRedis() throws ServiceNotConfiguredError.
+let _abhaStaffLimiter: Ratelimit | null = null
+let _abhaGlobalLimiter: Ratelimit | null = null
+function getAbhaLimiters(): [Ratelimit, Ratelimit] {
+  if (!_abhaStaffLimiter) {
+    _abhaStaffLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(10, '60 s'), prefix: 'ratelimit:abha-staff' })
+  }
+  if (!_abhaGlobalLimiter) {
+    _abhaGlobalLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(60, '600 s'), prefix: 'ratelimit:abha-global' })
+  }
+  return [_abhaStaffLimiter, _abhaGlobalLimiter]
+}
+
+export async function checkAbhaRateLimit(staffName: string): Promise<{ allowed: boolean }> {
+  const [staff, global] = getAbhaLimiters()
+  const [a, b] = await Promise.all([staff.limit(staffName.toLowerCase()), global.limit('all')])
+  return { allowed: a.success && b.success }
+}
+
+// Session-less ABDM callbacks (Scan & Share): 60 a minute per source IP.
+let _abdmCallbackLimiter: Ratelimit | null = null
+export async function checkAbdmCallbackRateLimit(ip: string): Promise<{ allowed: boolean }> {
+  if (!_abdmCallbackLimiter) {
+    _abdmCallbackLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(60, '60 s'), prefix: 'ratelimit:abdm-callback' })
+  }
+  const { success } = await _abdmCallbackLimiter.limit(ip)
+  return { allowed: success }
+}
+
+// NHCX callbacks: 120 a minute per source IP and 1000 a minute in all.
+let _nhcxCallbackIp: Ratelimit | null = null
+let _nhcxCallbackAll: Ratelimit | null = null
+export async function checkNhcxCallbackRateLimit(ip: string): Promise<{ allowed: boolean }> {
+  if (!_nhcxCallbackIp) _nhcxCallbackIp = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(120, '60 s'), prefix: 'ratelimit:nhcx-callback' })
+  if (!_nhcxCallbackAll) _nhcxCallbackAll = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(1000, '60 s'), prefix: 'ratelimit:nhcx-callback-all' })
+  const [a, b] = await Promise.all([_nhcxCallbackIp.limit(ip), _nhcxCallbackAll.limit('all')])
+  return { allowed: a.success && b.success }
+}
+
+// The ABDM / NHCX test-connection button: 5 a minute per staff member.
+let _integrationTestLimiter: Ratelimit | null = null
+export async function checkIntegrationTestRateLimit(staffName: string): Promise<{ allowed: boolean }> {
+  if (!_integrationTestLimiter) _integrationTestLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(5, '60 s'), prefix: 'ratelimit:integration-test' })
+  const { success } = await _integrationTestLimiter.limit(staffName.toLowerCase())
+  return { allowed: success }
+}
+// end SP8

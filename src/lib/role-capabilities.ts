@@ -35,6 +35,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP7
       'Pick an approved pre-authorisation when capturing a charge billed to an insurer',
       // end SP7
+      // SP8
+      'Create or verify a patient\'s ABHA with the patient\'s consent',
+      // end SP8
       // Wave I
       'View the hospital reports (OPD and IPD statistics, bed occupancy, discharges, revenue, collections, tariff, lab turnaround, pharmacy) and export them as CSV',
     ],
@@ -123,6 +126,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Approve or reject claim write-offs',
       'Set the hospital ROHINI and HFR identifiers',
       // end SP7
+      // SP8
+      'Connect the hospital to ABDM and NHCX and test the connection',
+      // end SP8
       // Wave I
       'View the hospital reports (OPD and IPD statistics, bed occupancy, discharges, revenue, collections, tariff, lab turnaround, pharmacy) and export them as CSV',
     ],
@@ -155,6 +161,10 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       // SP7
       'Record a patient\'s insurance policy and card at registration or admission',
       // end SP7
+      // SP8
+      'Create or verify a patient\'s ABHA with the patient\'s consent',
+      'Register patients who share their ABHA profile by scanning the desk QR code',
+      // end SP8
     ],
   },
   pharmacy: {
@@ -246,6 +256,9 @@ export const ROLE_CAPABILITIES: Record<Role, { label: string; summary: string; b
       'Record insurer portal updates: queries, approvals, deductions, rejections, appeals and settlements with TDS',
       'Reconcile settlements with the bank and request write-offs',
       'View the RCM dashboard, worklists, ageing and denial reports',
+      // SP8
+      'Send pre-authorisations and claims through NHCX and review insurer responses',
+      // end SP8
     ],
   },
   // end SP7

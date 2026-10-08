@@ -3,15 +3,12 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { IndianRupee, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags, Percent, CalendarDays, Pill, FileText, ClipboardPlus, Banknote } from 'lucide-react'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
-import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getArDashboardData } from '@/lib/queries/ar-dashboard'
 import { listCharges } from '@/lib/queries/charges'
 import { listPatientCollections } from '@/lib/queries/patient-collections'
-import { countEligibilityFollowUps } from '@/lib/queries/insurance-eligibility'
 import { ArAgingChart } from '@/components/ArAgingChart'
-import { EligibilityCheckButton } from '@/components/EligibilityCheckButton'
 import { formatPaise } from '@/lib/format'
 import type { ChargeStatus } from '@/lib/charge-status'
 // Wave E P1-19: every tile drills into the list it counts.
@@ -37,11 +34,10 @@ export default async function BillingHomePage() {
   const session = await requireSessionOrRedirect()
   if (!['admin', 'crc', 'billing'].includes(session.role)) redirect('/')
 
-  const [arData, charges, collections, eligibilityFollowUpCount, queue, today] = await Promise.all([
+  const [arData, charges, collections, queue, today] = await Promise.all([
     getArDashboardData(),
     listCharges(),
     listPatientCollections(),
-    countEligibilityFollowUps(),
     getBillingQueue(),
     getCollectionsToday(),
   ])
@@ -65,10 +61,7 @@ export default async function BillingHomePage() {
           <h1 className="text-xl font-bold text-foreground">Billing Dashboard</h1>
           <p className="text-sm text-muted-foreground">Revenue cycle — from registration to discharge</p>
         </div>
-        {/* Insurance verification lives entirely in billing now -- front
-            desk previously ran eligibility checks at check-in. */}
-        {/* Wave B P1-22: simulated eligibility -- only with DEMO_FEATURES on. */}
-        {demoFeaturesEnabled() && <EligibilityCheckButton />}
+        {/* SP8: the simulated eligibility check is retired; coverage is checked through NHCX on the patient's policy. */}
       </div>
 
       {/* Wave E P1-19: KPI tiles, each linking to the list it counts. */}
@@ -96,10 +89,7 @@ export default async function BillingHomePage() {
         <KpiTile label="Approved" value={approvedCharges.length} href="/billing/charges?status=approved" icon={CheckCircle2} tone="success" />
         <KpiTile label="Submitted" value={submittedCharges.length} href="/billing/charges?status=submitted" icon={Receipt} />
       </div>
-      {/* Wave B P1-22: eligibility checks are simulated (demo only); the count rides with the demo button, no list page exists. */}
-      {demoFeaturesEnabled() && eligibilityFollowUpCount > 0 && (
-        <p className="-mt-3 mb-6 flex items-center gap-1.5 text-xs text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />{eligibilityFollowUpCount} eligibility follow-up{eligibilityFollowUpCount === 1 ? '' : 's'} (demo)</p>
-      )}
+      {/* SP8: the simulated eligibility checks (and their demo follow-up count) are retired; coverage is checked through NHCX. */}
 
       {/* Two column: AR Aging + Quick Nav */}
       <div className="mb-6 grid gap-4 lg:grid-cols-3">

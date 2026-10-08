@@ -1,7 +1,7 @@
 import type { PublicPatientRow } from '@/lib/queries/patient-columns'
 import { formatAbhaNumber } from '@/lib/india/abha'
 import { stateName } from '@/lib/india/reference'
-import { ABHA_ADDRESS_SYSTEM, ABHA_NUMBER_SYSTEM, uhidSystem } from '@/lib/fhir/identifier-systems'
+import { ABHA_NUMBER_SYSTEM, uhidSystem } from '@/lib/fhir/identifier-systems'
 
 export interface FhirIdentifier { system?: string; type?: { text: string }; value: string }
 export interface FhirAddress { line: string[]; city?: string; district?: string; state?: string; postalCode?: string; country?: string }
@@ -26,7 +26,7 @@ export function patientToFhir(patient: PublicPatientRow): FhirPatient {
   const identifier: FhirIdentifier[] = [{ value: patient.id }]
   if (patient.uhid) identifier.push({ system: uhidSystem(), type: { text: 'UHID' }, value: patient.uhid })
   if (patient.abhaNumber) identifier.push({ system: ABHA_NUMBER_SYSTEM, type: { text: 'ABHA Number' }, value: formatAbhaNumber(patient.abhaNumber) })
-  if (patient.abhaAddress) identifier.push({ system: ABHA_ADDRESS_SYSTEM, type: { text: 'ABHA Address' }, value: patient.abhaAddress })
+  if (patient.abhaAddress) identifier.push({ type: { text: 'ABHA Address' }, value: patient.abhaAddress }) // no verified system (U14)
 
   const fhir: FhirPatient = {
     resourceType: 'Patient',

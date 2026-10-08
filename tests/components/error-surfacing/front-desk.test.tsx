@@ -14,7 +14,6 @@ afterEach(() => { vi.unstubAllGlobals(); router.refresh.mockClear(); router.push
 import { AssignmentScheduleModalTrigger } from '@/components/AssignmentScheduleModal'
 import { ConfirmBookingRequestModal } from '@/components/ConfirmBookingRequestModal'
 import { DeclineBookingRequestModal } from '@/components/DeclineBookingRequestModal'
-import { EligibilityCheckModal } from '@/components/EligibilityCheckModal'
 import { ConfirmEligibilityButton } from '@/components/ConfirmEligibilityButton'
 import { NewEventModal } from '@/components/NewEventModal'
 import { StartTelemedicineButton } from '@/components/StartTelemedicineButton'
@@ -58,24 +57,7 @@ describe.each(CASES)('$name', (c) => {
   })
 })
 
-describe('EligibilityCheckModal', () => {
-  it('shows a 403 with the fixed message', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) =>
-      init?.method === 'POST'
-        ? new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 })
-        : url.startsWith('/api/patients/lookup')
-          ? new Response(JSON.stringify({ results: [{ id: 'RD-0001', name: 'Asha Rao', uhid: 'UH1', gender: 'female', ageYears: 34 }], page: 1, pageSize: 10, hasMore: false }), { status: 200 })
-        : url.startsWith('/api/payers')
-          ? new Response(JSON.stringify([{ id: 1, name: 'Star Health' }]), { status: 200 })
-          : new Response('null', { status: 200 })))
-    render(<EligibilityCheckModal onClose={vi.fn()} />)
-    await screen.findByRole('option', { name: 'Star Health' })
-    await pickPatient()
-    fireEvent.change(screen.getByLabelText('Payer'), { target: { value: '1' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Verify' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.forbidden)
-  })
-})
+// SP8: EligibilityCheckModal was deleted with the simulated eligibility check (NHCX eligibility replaces it).
 
 describe('MessageComposer', () => {
   it('surfaces a failed send and posts only once for Enter + click', async () => {

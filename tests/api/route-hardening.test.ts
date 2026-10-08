@@ -42,7 +42,6 @@ import { GET as getTemplate, PUT as putTemplate } from '@/app/api/form-templates
 import { POST as attachConsent } from '@/app/api/form-templates/[id]/consents/route'
 import { POST as declineAssignment } from '@/app/api/front-desk/assignments/[id]/decline/route'
 import { POST as scheduleAssignment } from '@/app/api/front-desk/assignments/[id]/schedule/route'
-import { POST as eligibilityCheck } from '@/app/api/front-desk/eligibility-check/route'
 import { POST as administerMed } from '@/app/api/inpatient/admissions/[id]/medications/[medId]/administer/route'
 import { POST as orderInpatientMed } from '@/app/api/inpatient/admissions/[id]/medications/route'
 import { POST as transferAdmission } from '@/app/api/inpatient/admissions/[id]/transfer/route'
@@ -122,7 +121,7 @@ const JSON_GATES: JsonCase[] = [
   { name: 'POST /api/form-templates/[id]/consents', call: () => attachConsent(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ADMIN_CRC_PI },
   { name: 'POST /api/front-desk/assignments/[id]/decline', call: () => declineAssignment(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ['pi'] },
   { name: 'POST /api/front-desk/assignments/[id]/schedule', call: () => scheduleAssignment(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ['pi'] },
-  { name: 'POST /api/front-desk/eligibility-check', call: () => eligibilityCheck(send('POST', '/x', NOT_JSON)), allowed: ['billing', 'admin', 'crc'] },
+  // SP8: POST /api/front-desk/eligibility-check is retired (fixed 410, no body read): tests/api/front-desk-eligibility-check.test.ts.
   // These two look the admission up before reading the body: an unknown admission is a 404 (never a 500).
   { name: 'POST /api/inpatient/admissions/[id]/medications/[medId]/administer', call: () => administerMed(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID, medId: BOGUS_ID })), allowed: PI_ADMIN, allowedStatus: 404 },
   { name: 'POST /api/inpatient/admissions/[id]/medications', call: () => orderInpatientMed(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PI_ADMIN, allowedStatus: 404 },

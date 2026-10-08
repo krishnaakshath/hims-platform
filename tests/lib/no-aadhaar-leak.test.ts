@@ -59,6 +59,13 @@ const EXPORT_PATHS = [
   'src/lib/queries/coding-worklist.ts',
   'src/lib/queries/service-procedure-codes.ts',
   // end SP6
+  // SP8: NHCX protocol, FHIR, callbacks, the RCM NHCX panel and routes, the connection page API.
+  'src/lib/nhcx',
+  'src/app/api/nhcx',
+  'src/app/api/rcm/nhcx',
+  'src/app/api/settings/integrations',
+  'src/components/nhcx',
+  // end SP8
 ]
 
 describe('no Aadhaar leak (static)', () => {
@@ -120,6 +127,7 @@ describe('no Aadhaar leak (static)', () => {
       'src/app/api/patient-portal/login/mfa/route.ts',
       'src/app/api/patients/[anonId]/identity/route.ts', // KYC document (never Aadhaar)
       'src/db/seed.ts', // KYC fixtures
+      'src/lib/integrations/payload-vault.ts', // SP8: encryptWithKey/decryptWithKey under INTEGRATION_PAYLOAD_KEY (never Aadhaar)
       'src/lib/patient-identity.ts', // the one Aadhaar encryptor
       'src/lib/queries/patient-registration.ts', // KYC document (never Aadhaar)
     ])
