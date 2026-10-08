@@ -1,7 +1,7 @@
 // SP4: the invoice lifecycle. draft → finalised (numbered, snapshotted, totalled) → cancelled by a
 // full-value credit note; or draft → discarded. Every write takes the per-patient billing lock first
 // and writes its audit row on the same transaction. Issued rows are also guarded by migration-B triggers.
-import { and, asc, count, desc, eq, inArray, isNull, like, or, type SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNull, like, or, sql, type SQL } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
   chargeLines, creditNotes, invoiceLines, invoices, patients, payers,
@@ -185,7 +185,7 @@ export async function finaliseInvoice(
 
 export async function cancelInvoice(
   invoiceId: number, reason: string, session: Session, now: Date = new Date(),
-): Promise<{ ok: true; creditNoteNumber: string } | { ok: false; error: 'not_found' | 'not_finalised' }> {
+): Promise<{ ok: true; creditNoteNumber: string } | { ok: false; error: 'not_found' | 'not_finalised' | 'on_claim' }> {
   const patientId = await invoicePatient(invoiceId)
   if (patientId === null) return { ok: false, error: 'not_found' }
   return getDb().transaction(async (tx) => {
@@ -193,6 +193,11 @@ export async function cancelInvoice(
     const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).for('update')
     if (!inv) return { ok: false as const, error: 'not_found' as const }
     if (inv.status !== 'finalised') return { ok: false as const, error: 'not_finalised' as const }
+    // SP7 (ruling 2): no credit note while the invoice is on a claim beyond draft/withdrawn.
+    const onClaim = await tx.execute<{ found: boolean }>(sql`select exists (select 1 from claim_invoices ci join claims c on c.id = ci.claim_id
+      where ci.invoice_id = ${invoiceId} and c.status not in ('draft', 'withdrawn')) as found`)
+    if (onClaim.rows[0]?.found) return { ok: false as const, error: 'on_claim' as const }
+    // end SP7
     const issueDate = istDateOf(now)
     const fy = financialYearOf(issueDate)
     const creditNoteNumber = await allocateDocumentNumber(tx, 'credit_note', fy)

@@ -101,6 +101,15 @@ describe('invoice routes', () => {
     expect(await (await call.cancel({ reason: 'Wrong patient' })).json()).toEqual({ error: 'Invoice not found' })
   })
 
+  // SP7 (ruling 2)
+  it('an invoice on a submitted claim is a 409 with the plain message', async () => {
+    vi.mocked(cancelInvoice).mockResolvedValue({ ok: false, error: 'on_claim' })
+    const c = await call.cancel({ reason: 'Wrong patient' })
+    expect(c.status).toBe(409)
+    expect(await c.json()).toEqual({ error: 'This invoice is on a submitted insurance claim; withdraw the claim or record its outcome before cancelling' })
+  })
+  // end SP7
+
   it('bodies are strict; bad ids and bad JSON are 400s', async () => {
     expect((await call.finalise({ extra: 1 })).status).toBe(400)
     expect((await call.discard({ extra: 1 })).status).toBe(400)

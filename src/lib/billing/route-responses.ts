@@ -36,6 +36,7 @@ export function captureErrorResponse(error: CaptureErrorCode, violations?: unkno
 export type InvoiceErrorCode =
   | 'lines_not_found' | 'lines_not_available' | 'mixed_lines' | 'not_found' | 'not_draft' | 'empty'
   | 'settings_incomplete' | 'taxable_without_gstin' | 'series_exhausted' | 'not_finalised'
+  | 'on_claim' // SP7
 
 const INVOICE_ERRORS: Record<InvoiceErrorCode, [number, string]> = {
   lines_not_found: [404, 'Charge lines not found'],
@@ -48,6 +49,8 @@ const INVOICE_ERRORS: Record<InvoiceErrorCode, [number, string]> = {
   taxable_without_gstin: [409, 'This bill has taxable lines but no hospital GSTIN is set'],
   series_exhausted: [409, 'The invoice number series for this financial year is full'],
   not_finalised: [409, 'Only a finalised invoice can be cancelled'],
+  // SP7 (ruling 2)
+  on_claim: [409, 'This invoice is on a submitted insurance claim; withdraw the claim or record its outcome before cancelling'],
 }
 
 /** The exact HTTP mapping of an invoice lifecycle refusal (plan Task 11). */

@@ -3,7 +3,7 @@ import { getDb } from '@/db/client'
 import {
   chargeLines, claimDisallowances, claimDispatches, claimDocuments, claimEvents, claimInvoices, claims, claimSettlements,
   claimSubmissions, claimWriteOffs, patientPolicies, payerContacts, payerDocumentRequirements, payerNetworks, payerProfiles,
-  payers, preauthDocuments, encounters, patients, providers, preauthEvents, preauths, rcmQueries, rcmQueryResponses,
+  payers, preauthDocuments, encounters, patients, providers, encounterCoding, encounterCodingEvents, encounterProcedures, diagnoses, preauthEvents, preauths, rcmQueries, rcmQueryResponses,
 } from '@/db/schema'
 
 /**
@@ -90,6 +90,14 @@ export async function makeRcmBase(run: string, suffix: string): Promise<RcmBase>
 /** Deletes the base encounter and patient (after purgeRcmFixtures / purgeBillingFixtures). */
 export async function deleteRcmBasePatient(patientId: string): Promise<void> {
   const db = getDb()
+  // Coding rows a claim test may have added to the base encounter (SP6 tables reference encounters).
+  const encIds = (await db.select({ id: encounters.id }).from(encounters).where(eq(encounters.patientId, patientId))).map((e) => e.id)
+  if (encIds.length > 0) {
+    await db.delete(encounterCodingEvents).where(inArray(encounterCodingEvents.encounterId, encIds))
+    await db.delete(encounterCoding).where(inArray(encounterCoding.encounterId, encIds))
+    await db.delete(encounterProcedures).where(inArray(encounterProcedures.encounterId, encIds))
+  }
+  await db.delete(diagnoses).where(eq(diagnoses.patientId, patientId))
   await db.delete(encounters).where(eq(encounters.patientId, patientId))
   await db.delete(patients).where(eq(patients.id, patientId))
 }
