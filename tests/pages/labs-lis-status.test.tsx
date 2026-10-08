@@ -15,6 +15,7 @@ async function renderLabs() {
   vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
   vi.doMock('@/lib/queries/lab-orders', () => ({ listWorklist: vi.fn(async () => []), listPatientsWithLabOrders: vi.fn(async () => []) }))
   vi.doMock('@/lib/queries/lab-tests', () => ({ listLabTests: vi.fn(async () => []) }))
+  vi.doMock('@/lib/queries/hospital-kpis', () => ({ getLabKpis: vi.fn(async () => ({ awaitingCollection: 0, inTransit: 0, atBench: 0, toVerify: 0, toReport: 0, criticalUnverified: 0, resultedToday: 0, criticalToday: 0, medianTatMinutes: null })) })) // Wave E
   vi.doMock('@/components/LabWorklist', () => ({ LabWorklist: () => null }))
   vi.doMock('@/components/LabsPatientReports', () => ({ LabsPatientReports: () => null }))
   vi.doMock('@/components/Tabs', () => ({ Tabs: () => null }))

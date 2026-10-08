@@ -1,6 +1,7 @@
 'use client'
 import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
+import type { LabStage } from '@/lib/labs/worklist-stage' // Wave E
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { EnterLabResultModal } from '@/components/EnterLabResultModal'
@@ -226,7 +227,8 @@ function Section({ title, count, empty, children }: { title: string; count: numb
   )
 }
 
-export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[]; labTests: LabTestOption[]; role: Role }) {
+// `stage` (Wave E P1-15): show only that worklist section (a labs-home tile or the doctor's Verify link).
+export function LabWorklist({ orders, labTests, role, stage = null }: { orders: WorklistOrder[]; labTests: LabTestOption[]; role: Role; stage?: LabStage | null }) {
   const router = useRouter()
   const [busyId, setBusyId] = useState<number | null>(null)
   const [rowError, setRowError] = useState<RowError | null>(null)
@@ -312,6 +314,7 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
     onCancelBack: () => setCancelFor(null),
     onConfirmCancel: confirmCancel,
   }
+  const show = (s: LabStage) => stage === null || stage === s
   const rows = (list: WorklistOrder[]) => <div className="space-y-2">{list.map((o) => <LabRow key={o.id} order={o} {...rowProps} />)}</div>
 
   return (
@@ -338,18 +341,22 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
         </div>
       )}
 
-      <Section title="To collect" count={toCollect.length} empty="No orders awaiting collection.">{rows(toCollect)}</Section>
+      {stage !== null && (
+        <p className="text-xs text-muted-foreground">Showing one stage only. <Link href="/labs?stage=all" className="font-medium text-primary hover:underline">Show every stage</Link></p>
+      )}
 
-      <section>
+      {show('to-collect') && <Section title="To collect" count={toCollect.length} empty="No orders awaiting collection.">{rows(toCollect)}</Section>}
+
+      {show('in-transit') && <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">In transit ({inTransit.length})</h2>
         {canReceive && <ReceiveSampleForm />}
         {inTransit.length === 0 ? <p className="text-sm text-muted-foreground">No samples on their way to the lab.</p> : rows(inTransit)}
-      </section>
+      </section>}
 
-      <Section title="At the bench" count={atBench.length} empty="No samples awaiting results.">{rows(atBench)}</Section>
-      <Section title="To verify" count={toVerify.length} empty="No results awaiting verification.">{rows(toVerify)}</Section>
+      {show('at-bench') && <Section title="At the bench" count={atBench.length} empty="No samples awaiting results.">{rows(atBench)}</Section>}
+      {show('to-verify') && <Section title="To verify" count={toVerify.length} empty="No results awaiting verification.">{rows(toVerify)}</Section>}
 
-      <Section title="To report" count={toReport.length} empty="No verified results awaiting a report.">
+      {show('to-report') && <Section title="To report" count={toReport.length} empty="No verified results awaiting a report.">
         <div className="space-y-4">
           {[...reportGroups.entries()].map(([key, list]) => (
             <div key={key}>
@@ -363,11 +370,11 @@ export function LabWorklist({ orders, labTests, role }: { orders: WorklistOrder[
             </div>
           ))}
         </div>
-      </Section>
+      </Section>}
 
-      <Section title="Reported" count={reported.length} empty="No reported results yet.">{rows(reported)}</Section>
+      {show('reported') && <Section title="Reported" count={reported.length} empty="No reported results yet.">{rows(reported)}</Section>}
 
-      {cancelled.length > 0 && (
+      {stage === null && cancelled.length > 0 && (
         <details className="text-sm text-muted-foreground">
           <summary className="cursor-pointer font-medium">{cancelled.length} cancelled</summary>
           <div className="mt-2 opacity-60">{rows(cancelled)}</div>
