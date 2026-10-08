@@ -1,7 +1,7 @@
 import { formatIstDate } from '@/lib/india-time'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { IndianRupee, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags } from 'lucide-react'
+import { IndianRupee, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags, Percent, CalendarDays, Pill, FileText, ClipboardPlus, Banknote } from 'lucide-react'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
 import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { requireSessionOrRedirect } from '@/lib/auth'
@@ -14,6 +14,10 @@ import { ArAgingChart } from '@/components/ArAgingChart'
 import { EligibilityCheckButton } from '@/components/EligibilityCheckButton'
 import { formatPaise } from '@/lib/format'
 import type { ChargeStatus } from '@/lib/charge-status'
+// Wave E P1-19: every tile drills into the list it counts.
+import { getBillingQueue, getCollectionsToday } from '@/lib/queries/hospital-kpis'
+import { KpiTile } from '@/components/dashboards/KpiTile'
+import { CASH_DESK_ROLES } from '@/lib/role-policy'
 
 const SECTION = 'overflow-hidden rounded-md border border-border bg-card'
 const SECTION_HEADER = 'flex items-center justify-between border-b border-border px-5 py-3'
@@ -33,11 +37,13 @@ export default async function BillingHomePage() {
   const session = await requireSessionOrRedirect()
   if (!['admin', 'crc', 'billing'].includes(session.role)) redirect('/')
 
-  const [arData, charges, collections, eligibilityFollowUpCount] = await Promise.all([
+  const [arData, charges, collections, eligibilityFollowUpCount, queue, today] = await Promise.all([
     getArDashboardData(),
     listCharges(),
     listPatientCollections(),
     countEligibilityFollowUps(),
+    getBillingQueue(),
+    getCollectionsToday(),
   ])
 
   await logAudit(session, 'viewed billing dashboard home', null)
@@ -45,7 +51,7 @@ export default async function BillingHomePage() {
   // KPI calculations
   const draftCharges = charges.filter((c) => c.status === 'draft')
   const submittedCharges = charges.filter((c) => c.status === 'submitted')
-  const paidCharges = charges.filter((c) => c.status === 'approved')
+  const approvedCharges = charges.filter((c) => c.status === 'approved')
   const pendingCharges = charges.filter((c) => c.status === 'pending_approval')
 
   const totalBilledCents = charges.filter(c => c.status !== 'draft').reduce((s, c) => s + c.amountCents, 0)
@@ -65,64 +71,35 @@ export default async function BillingHomePage() {
         {demoFeaturesEnabled() && <EligibilityCheckButton />}
       </div>
 
-      {/* KPI Row — Mobbin-inspired: compact, data-dense tiles */}
+      {/* Wave E P1-19: KPI tiles, each linking to the list it counts. */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-md border border-border bg-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Outstanding A/R</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{formatPaise(arData.outstandingArCents)}</p>
-        </div>
-        <div className="rounded-md border border-border bg-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gross Collection Rate</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{arData.grossCollectionRate.toFixed(1)}%</p>
-        </div>
-        <div className="rounded-md border border-border bg-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Avg Days in A/R</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{arData.avgDaysInAr.toFixed(0)} days</p>
-        </div>
-        <div className="rounded-md border border-border bg-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Total Billed</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{formatPaise(totalBilledCents)}</p>
-        </div>
+        <KpiTile label="Outstanding A/R" value={formatPaise(arData.outstandingArCents)} href="/billing/ar-dashboard" icon={TrendingUp} />
+        <KpiTile label="Gross Collection Rate" value={`${arData.grossCollectionRate.toFixed(1)}%`} href="/billing/analytics" icon={Percent} tone="muted" />
+        <KpiTile label="Avg Days in A/R" value={`${arData.avgDaysInAr.toFixed(0)} days`} href="/billing/ar-dashboard" icon={CalendarDays} tone="muted" />
+        <KpiTile label="Total Billed" value={formatPaise(totalBilledCents)} href="/billing/charges" icon={IndianRupee} tone="muted" />
       </div>
 
-      {/* Second KPI row — workflow status counts */}
+      {/* SP4 work queue and the day's takings. */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="flex items-center gap-3 rounded-md border border-border bg-card p-4">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted"><Clock className="h-4 w-4 text-muted-foreground" /></span>
-          <div>
-            <p className="text-lg font-bold tabular-nums text-foreground">{draftCharges.length}</p>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Draft</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-md border border-border bg-card p-4">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10"><Receipt className="h-4 w-4 text-primary" /></span>
-          <div>
-            <p className="text-lg font-bold tabular-nums text-foreground">{submittedCharges.length}</p>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Submitted</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-md border border-border bg-card p-4">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success/10"><CheckCircle2 className="h-4 w-4 text-success" /></span>
-          <div>
-            <p className="text-lg font-bold tabular-nums text-foreground">{paidCharges.length}</p>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Approved</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-md border border-border bg-card p-4">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warning/10"><AlertTriangle className="h-4 w-4 text-warning" /></span>
-          <div>
-            <p className="text-lg font-bold tabular-nums text-foreground">{pendingCharges.length}</p>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Pending Approval</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-md border border-border bg-card p-4">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10"><ShieldCheck className="h-4 w-4 text-destructive" /></span>
-          <div>
-            <p className="text-lg font-bold tabular-nums text-foreground">{eligibilityFollowUpCount}</p>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Eligibility Follow-ups</p>
-          </div>
-        </div>
+        <KpiTile label="Draft invoices" value={queue.draftInvoices} sub="Waiting to be finalised" href="/billing/invoices?status=draft" icon={FileText} tone={queue.draftInvoices > 0 ? 'warning' : 'primary'} />
+        <KpiTile label="Lines to invoice" value={queue.uninvoicedLines} sub={`${formatPaise(queue.uninvoicedPaise)} captured, not invoiced`} href="/billing/capture" icon={ClipboardPlus} />
+        <KpiTile label="Pharmacy drafts to review" value={queue.pharmacyDraftCharges} sub="Bills raised at the pharmacy" href="/billing/charges?status=draft&source=pharmacy" icon={Pill} tone={queue.pharmacyDraftCharges > 0 ? 'warning' : 'primary'} />
+        {CASH_DESK_ROLES.includes(session.role) && (
+          <KpiTile label="Collected today" value={formatPaise(today.netPaise)} sub={`${today.receiptCount} receipt${today.receiptCount === 1 ? '' : 's'}`} href="/cash-desk" icon={Banknote} tone="success" />
+        )}
       </div>
+
+      {/* Charge workflow by status: each opens /billing/charges on that status. */}
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KpiTile label="Draft" value={draftCharges.length} href="/billing/charges?status=draft" icon={Clock} tone="muted" />
+        <KpiTile label="Pending Approval" value={pendingCharges.length} href="/billing/charges?status=pending_approval" icon={AlertTriangle} tone="warning" />
+        <KpiTile label="Approved" value={approvedCharges.length} href="/billing/charges?status=approved" icon={CheckCircle2} tone="success" />
+        <KpiTile label="Submitted" value={submittedCharges.length} href="/billing/charges?status=submitted" icon={Receipt} />
+      </div>
+      {/* Wave B P1-22: eligibility checks are simulated (demo only); the count rides with the demo button, no list page exists. */}
+      {demoFeaturesEnabled() && eligibilityFollowUpCount > 0 && (
+        <p className="-mt-3 mb-6 flex items-center gap-1.5 text-xs text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />{eligibilityFollowUpCount} eligibility follow-up{eligibilityFollowUpCount === 1 ? '' : 's'} (demo)</p>
+      )}
 
       {/* Two column: AR Aging + Quick Nav */}
       <div className="mb-6 grid gap-4 lg:grid-cols-3">
