@@ -25,6 +25,15 @@ import { PATIENT_PICKER_ROLES, DEMOGRAPHICS_CORRECTION_ROLES } from '@/lib/role-
 import { CHECK_IN_ROLES, DISCHARGE_ROLES, ENCOUNTER_STATUS_ROLES, FOLLOW_UP_BOOKING_ROLES, FOLLOW_UP_PLAN_ROLES } from '@/lib/role-policy' // SP3
 import { BILLING_AUTHORITY_ROLES, BILLING_CONFIG_ROLES, CASH_DESK_ROLES, CHARGE_CAPTURE_ROLES } from '@/lib/role-policy' // SP4
 import { gateIt } from '../pages/page-gates-harness'
+// SP7
+import { PAYER_MASTER_ROLES, RCM_SETTINGS_ROLES } from '@/lib/role-policy'
+import { POST as postRcmPayer } from '@/app/api/rcm/payers/route'
+import { PUT as putRcmPayer } from '@/app/api/rcm/payers/[id]/route'
+import { PUT as putRcmPayerContacts } from '@/app/api/rcm/payers/[id]/contacts/route'
+import { PUT as putRcmPayerNetworks } from '@/app/api/rcm/payers/[id]/networks/route'
+import { PUT as putRcmPayerRequirements } from '@/app/api/rcm/payers/[id]/requirements/route'
+import { PUT as putRcmSettings } from '@/app/api/rcm/settings/route'
+// end SP7
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
 // + importActual pattern from tests/api/patients.test.ts:27-29, except the
@@ -704,6 +713,14 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/patients/lookup', call: () => patientLookup(get('/api/patients/lookup?q=')), allowed: [...PATIENT_PICKER_ROLES] },
   // Wave C P1-11: name/DOB correction -- DEMOGRAPHICS_CORRECTION_ROLES (admin); `{}` fails validation before any query.
   { name: 'PATCH /api/patients/[anonId]/demographics', call: () => settle(() => patchDemographics(send('PATCH', `/api/patients/${BOGUS_PATIENT}/demographics`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...DEMOGRAPHICS_CORRECTION_ROLES] },
+  // SP7 insurer/TPA master (PAYER_MASTER_ROLES) and hospital identifiers (RCM_SETTINGS_ROLES): `{}` fails validation before any query.
+  { name: 'POST /api/rcm/payers', call: () => settle(() => postRcmPayer(send('POST', '/api/rcm/payers'))), allowed: [...PAYER_MASTER_ROLES] },
+  { name: 'PUT /api/rcm/payers/[id]', call: () => settle(() => putRcmPayer(send('PUT', `/api/rcm/payers/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...PAYER_MASTER_ROLES] },
+  { name: 'PUT /api/rcm/payers/[id]/contacts', call: () => settle(() => putRcmPayerContacts(send('PUT', `/api/rcm/payers/${BOGUS_ID}/contacts`), ctx({ id: BOGUS_ID }))), allowed: [...PAYER_MASTER_ROLES] },
+  { name: 'PUT /api/rcm/payers/[id]/networks', call: () => settle(() => putRcmPayerNetworks(send('PUT', `/api/rcm/payers/${BOGUS_ID}/networks`), ctx({ id: BOGUS_ID }))), allowed: [...PAYER_MASTER_ROLES] },
+  { name: 'PUT /api/rcm/payers/[id]/requirements', call: () => settle(() => putRcmPayerRequirements(send('PUT', `/api/rcm/payers/${BOGUS_ID}/requirements`), ctx({ id: BOGUS_ID }))), allowed: [...PAYER_MASTER_ROLES] },
+  { name: 'PUT /api/rcm/settings', call: () => settle(() => putRcmSettings(send('PUT', '/api/rcm/settings'))), allowed: [...RCM_SETTINGS_ROLES] },
+  // end SP7
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -784,7 +801,17 @@ const SP6_WRITE_GATES: typeof SP1_WRITE_GATES = [
 const WAVE_C_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PATCH /api/patients/[anonId]/demographics', call: () => patchDemographics(send('PATCH', `/api/patients/${BOGUS_PATIENT}/demographics`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: DEMOGRAPHICS_CORRECTION_ROLES },
 ]
-describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES])('$name (deny before parse)', (c) => {
+// SP7 writes: the same deny-before-parse contract.
+const SP7_WRITE_GATES: typeof SP1_WRITE_GATES = [
+  { name: 'POST /api/rcm/payers', call: () => postRcmPayer(send('POST', '/api/rcm/payers', NOT_JSON)), allowed: PAYER_MASTER_ROLES },
+  { name: 'PUT /api/rcm/payers/[id]', call: () => putRcmPayer(send('PUT', `/api/rcm/payers/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PAYER_MASTER_ROLES },
+  { name: 'PUT /api/rcm/payers/[id]/contacts', call: () => putRcmPayerContacts(send('PUT', `/api/rcm/payers/${BOGUS_ID}/contacts`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PAYER_MASTER_ROLES },
+  { name: 'PUT /api/rcm/payers/[id]/networks', call: () => putRcmPayerNetworks(send('PUT', `/api/rcm/payers/${BOGUS_ID}/networks`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PAYER_MASTER_ROLES },
+  { name: 'PUT /api/rcm/payers/[id]/requirements', call: () => putRcmPayerRequirements(send('PUT', `/api/rcm/payers/${BOGUS_ID}/requirements`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PAYER_MASTER_ROLES },
+  { name: 'PUT /api/rcm/settings', call: () => putRcmSettings(send('PUT', '/api/rcm/settings', NOT_JSON)), allowed: RCM_SETTINGS_ROLES },
+]
+// end SP7
+describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...SP7_WRITE_GATES])('$name (deny before parse)', (c) => {
   it('403s a denied role sending an unparseable body; an allowed role gets a 400', async () => {
     for (const role of ALL_ROLES) {
       sessionRole = role
