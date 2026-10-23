@@ -38,10 +38,9 @@ export function StartTelemedicineButton({ appointmentId }: { appointmentId: numb
     }
 
     const { id, patientJoinToken } = res.data
-    // Spec §1: "the actual send action is left to staff copying the link" --
-    // this component doesn't wire any SMS/email delivery. It shows the
-    // patient's join link as copyable text for staff to send however they
-    // already do, plus a link straight to the provider's own call screen
+    // Foundations T9: the route notifies the patient through the notification
+    // service (generic text, no link). The join link stays visible as a
+    // copyable fallback for staff to send if no channel reached the patient, plus a link straight to the provider's own call screen
     // (Step 3) for whenever staff is ready to actually join the call --
     // not an automatic redirect, which would yank staff away from this
     // table before they had a chance to copy the link.

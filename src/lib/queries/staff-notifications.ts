@@ -7,7 +7,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
   bookingRequests, chargeLines, doctorAssignments, encounterCoding, followUpOrders, homeCollectionVisits,
-  labOrders, labReports, labResults, labTests, medicationInventory, medications, notificationDeliveries,
+  labOrders, labReports, labResults, labTests, medicationInventory, medications, notificationDeliveries, notificationLog,
   patients, providers, staffNotificationReads,
 } from '@/db/schema'
 import type { Session } from '@/lib/auth'
@@ -155,19 +155,47 @@ const SOURCES: Record<FeedSource, (c: Ctx) => Promise<StaffNotification[]>> = {
     }))
   },
 
+  // Foundations T9: failed patient notices come from notification_log (what sendNotification writes).
+  // Alerts: status 'failed' -- a real send failure (adapter/provider/network) or 'invalid_vars' (a
+  // programming error, shown with its own title). Never 'skipped' (opt-out / no destination) or
+  // 'log_only' (channel not configured). Keys are `notice_failed:log:<id>`; the pre-T9
+  // notification_deliveries failures keep their original `notice_failed:<id>` key (so read state
+  // survives) and are still listed while inside the lookback window.
   async notice_failed(c) {
-    const rows = await getDb()
-      .select({ id: notificationDeliveries.id, createdAt: notificationDeliveries.createdAt, templateKey: notificationDeliveries.templateKey, patientId: patients.id, name: patients.name, uhid: patients.uhid })
-      .from(notificationDeliveries)
-      .innerJoin(patients, eq(patients.id, notificationDeliveries.patientId))
-      .where(and(eq(notificationDeliveries.status, 'failed'), gte(notificationDeliveries.createdAt, c.since)))
-      .orderBy(desc(notificationDeliveries.createdAt), desc(notificationDeliveries.id))
-      .limit(FEED_SOURCE_LIMIT)
-    return rows.map((r) => ({
-      key: `notice_failed:${r.id}`, kind: 'notice_failed', severity: 'warning', title: 'Patient message not delivered',
+    const db = getDb()
+    const [logRows, legacyRows] = await Promise.all([
+      db
+        .select({ id: notificationLog.id, createdAt: notificationLog.createdAt, templateKey: notificationLog.templateKey, errorClass: notificationLog.errorClass, patientId: patients.id, name: patients.name, uhid: patients.uhid })
+        .from(notificationLog)
+        .innerJoin(patients, eq(patients.id, notificationLog.patientId))
+        .where(and(eq(notificationLog.status, 'failed'), gte(notificationLog.createdAt, c.since)))
+        .orderBy(desc(notificationLog.createdAt), desc(notificationLog.id))
+        .limit(FEED_SOURCE_LIMIT),
+      db
+        .select({ id: notificationDeliveries.id, createdAt: notificationDeliveries.createdAt, templateKey: notificationDeliveries.templateKey, patientId: patients.id, name: patients.name, uhid: patients.uhid })
+        .from(notificationDeliveries)
+        .innerJoin(patients, eq(patients.id, notificationDeliveries.patientId))
+        .where(and(eq(notificationDeliveries.status, 'failed'), gte(notificationDeliveries.createdAt, c.since)))
+        .orderBy(desc(notificationDeliveries.createdAt), desc(notificationDeliveries.id))
+        .limit(FEED_SOURCE_LIMIT),
+    ])
+    const fromLog = logRows.map((r) => {
+      const invalid = r.errorClass === 'invalid_vars'
+      return {
+        key: `notice_failed:log:${r.id}`, kind: 'notice_failed' as const, severity: 'warning' as const,
+        title: invalid ? 'Patient message could not be built' : 'Patient message not delivered',
+        detail: invalid
+          ? `${NOTICE_LABEL[r.templateKey] ?? 'Patient notice'} · ${patientLabel(r.name, r.uhid)} — a template value was missing; tell the administrator`
+          : `${NOTICE_LABEL[r.templateKey] ?? 'Patient notice'} · ${patientLabel(r.name, r.uhid)} — check the mobile number`,
+        href: sourceHref('notice_failed', c.session.role, r.patientId), occurredAt: iso(r.createdAt),
+      }
+    })
+    const fromLegacy = legacyRows.map((r) => ({
+      key: `notice_failed:${r.id}`, kind: 'notice_failed' as const, severity: 'warning' as const, title: 'Patient message not delivered',
       detail: `${NOTICE_LABEL[r.templateKey] ?? 'Patient notice'} · ${patientLabel(r.name, r.uhid)} — check the mobile number`,
       href: sourceHref('notice_failed', c.session.role, r.patientId), occurredAt: iso(r.createdAt),
     }))
+    return [...fromLog, ...fromLegacy].sort((x, y) => y.occurredAt.localeCompare(x.occurredAt)).slice(0, FEED_SOURCE_LIMIT)
   },
 
   async home_visit(c) {

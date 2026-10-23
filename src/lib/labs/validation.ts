@@ -163,4 +163,8 @@ export const collectHomeVisitSchema = z
   .object({ sampleIds: z.array(z.string().trim().min(1).max(32)).min(1).max(20) })
   .strict()
 
-export const notificationPreferenceSchema = z.object({ optOut: z.boolean() }).strict()
+// Foundations T8: the master notices opt-out and/or per-channel switches; at least one key.
+export const notificationPreferenceSchema = z
+  .object({ optOut: z.boolean().optional(), sms: z.boolean().optional(), whatsapp: z.boolean().optional(), email: z.boolean().optional() })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, 'Nothing to change')

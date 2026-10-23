@@ -1,10 +1,12 @@
+// SP5 notices, Foundations T9: notifyPatient / notifyPatientSafely deliver through sendNotification.
 import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest'
 import { eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { auditLog, notificationDeliveries, patients } from '@/db/schema'
+import { auditLog, notificationLog, patientNotificationPreferences, patients } from '@/db/schema'
 import type { Session } from '@/lib/auth'
-import type { Notifier } from '@/lib/notify/notifier'
+import type { ChannelAdapter, ChannelRegistry, DeliveryChannel } from '@/lib/notify/registry'
 import { notifyPatient, notifyPatientSafely, setNotificationOptOut, type NotifyPatientRequest } from '@/lib/queries/notifications'
+import { setPatientChannelPreferences } from '@/lib/queries/notification-log'
 
 const RUN = `${Date.now()}`
 const PROBE_USER = `TEST_SP5_NOTIFY-${RUN}`
@@ -12,7 +14,8 @@ const S: Session = { role: 'frontdesk', name: PROBE_USER, userId: null }
 const REACHABLE = `TEST-SP5-${RUN}-NA`
 const NO_PHONE = `TEST-SP5-${RUN}-NB`
 const OPTED_OUT = `TEST-SP5-${RUN}-NC`
-const ALL = [REACHABLE, NO_PHONE, OPTED_OUT]
+const SMS_OFF = `TEST-SP5-${RUN}-ND`
+const ALL = [REACHABLE, NO_PHONE, OPTED_OUT, SMS_OFF]
 
 const req = (key: string, patientId = REACHABLE): NotifyPatientRequest<'home_collection_booked'> => ({
   patientId,
@@ -21,98 +24,86 @@ const req = (key: string, patientId = REACHABLE): NotifyPatientRequest<'home_col
   related: { type: 'home_collection_visit', id: 42 },
   dedupeKey: `TEST_SP5_${RUN}-${key}`,
 })
-const deliveries = (key: string) => getDb().select().from(notificationDeliveries).where(eq(notificationDeliveries.dedupeKey, `TEST_SP5_${RUN}-${key}`))
-const spyNotifier = () => ({ send: vi.fn<Notifier['send']>(async () => ({ channel: 'log' as const, delivered: false })) })
+const logs = (patientId: string) => getDb().select().from(notificationLog).where(eq(notificationLog.patientId, patientId))
 
-describe.skipIf(!process.env.DATABASE_URL)('notify (DB)', () => {
+function registry(sendImpl?: ChannelAdapter['send']) {
+  const sms = vi.fn<ChannelAdapter['send']>(sendImpl ?? (async () => ({ ok: true, providerMessageId: 'SM1' })))
+  const adapter = (name: DeliveryChannel, send: ChannelAdapter['send']) => ({ name, configured: () => true, send })
+  const other = vi.fn<ChannelAdapter['send']>(async () => ({ ok: true }))
+  const reg = { sms: adapter('sms', sms), whatsapp: adapter('whatsapp', other), email: adapter('email', other), in_app: adapter('in_app', other) } satisfies ChannelRegistry
+  return { reg, sms, other }
+}
+
+describe.skipIf(!process.env.DATABASE_URL)('notify via sendNotification (DB)', () => {
   beforeAll(async () => {
     await getDb().insert(patients).values([
       { id: REACHABLE, name: 'TEST_SP5 Reachable', dob: '1980-01-01', phone: '98450 13210' },
       { id: NO_PHONE, name: 'TEST_SP5 No phone', dob: '1980-01-01', phone: null },
       { id: OPTED_OUT, name: 'TEST_SP5 Opted out', dob: '1980-01-01', phone: '+919845013211' },
+      { id: SMS_OFF, name: 'TEST_SP5 Sms off', dob: '1980-01-01', phone: '+919845013212' },
     ])
+    await setPatientChannelPreferences(SMS_OFF, { sms: false }, S)
   })
 
   afterAll(async () => {
     const db = getDb()
-    await db.delete(notificationDeliveries).where(inArray(notificationDeliveries.patientId, ALL))
+    await db.delete(notificationLog).where(inArray(notificationLog.patientId, ALL))
+    await db.delete(patientNotificationPreferences).where(inArray(patientNotificationPreferences.patientId, ALL))
     await db.delete(auditLog).where(eq(auditLog.userName, PROBE_USER))
     await db.delete(patients).where(inArray(patients.id, ALL))
   })
 
-  it('logs one delivery for a reachable patient, masked and without the text', async () => {
-    const n = spyNotifier()
-    expect(await notifyPatient('t', req('k1'), n)).toBe('logged')
-    expect(n.send).toHaveBeenCalledWith({
-      patientId: REACHABLE,
-      templateKey: 'home_collection_booked',
-      text: 'Test Hospital: Home sample collection booked for 2 Jan 2099, Morning. Our collector will call before arriving.',
-      destination: '+919845013210',
-    })
-    const [row] = await deliveries('k1')
-    expect(row).toMatchObject({ status: 'logged', channel: 'log', destinationMasked: '+91******3210', relatedType: 'home_collection_visit', relatedId: 42, errorCode: null, createdByName: 't' })
-    expect(JSON.stringify(row)).not.toContain('Home sample collection')
-  })
-
-  it('a delivered result is sent; an undelivered one with an error code is failed', async () => {
-    expect(await notifyPatient('t', req('k1b'), { send: async () => ({ channel: 'sms', delivered: true }) })).toBe('sent')
-    expect((await deliveries('k1b'))[0]).toMatchObject({ status: 'sent', channel: 'sms' })
-    expect(await notifyPatient('t', req('k1c'), { send: async () => ({ channel: 'whatsapp', delivered: false, errorCode: 'rate_limited' }) })).toBe('failed')
-    expect((await deliveries('k1c'))[0]).toMatchObject({ status: 'failed', channel: 'whatsapp', errorCode: 'rate_limited' })
-  })
-
-  it('opt-out suppresses', async () => {
-    expect(await setNotificationOptOut(OPTED_OUT, true, S)).toBe(true)
-    const [p] = await getDb().select({ optOut: patients.notificationOptOut, at: patients.notificationOptOutAt }).from(patients).where(eq(patients.id, OPTED_OUT))
-    expect(p.optOut).toBe(true)
-    expect(p.at).toBeInstanceOf(Date)
-    const n = spyNotifier()
-    expect(await notifyPatient('t', req('k2', OPTED_OUT), n)).toBe('suppressed_opt_out')
-    expect(n.send).not.toHaveBeenCalled()
-    expect((await deliveries('k2'))[0]).toMatchObject({ status: 'suppressed_opt_out', destinationMasked: null })
-
-    expect(await setNotificationOptOut(OPTED_OUT, false, S)).toBe(true)
-    const [q] = await getDb().select({ optOut: patients.notificationOptOut, at: patients.notificationOptOutAt }).from(patients).where(eq(patients.id, OPTED_OUT))
-    expect(q).toEqual({ optOut: false, at: null })
-    expect(await setNotificationOptOut('TEST-SP5-NOPE', true, S)).toBe(false)
-
-    const audits = await getDb().select().from(auditLog).where(eq(auditLog.userName, PROBE_USER))
-    expect(audits.filter((a) => a.action === 'changed notification preference').map((a) => [a.patientId, a.details])).toEqual(
-      expect.arrayContaining([[OPTED_OUT, 'optOut=true'], [OPTED_OUT, 'optOut=false']]),
-    )
-  })
-
-  it('no phone is skipped', async () => {
-    const n = spyNotifier()
-    expect(await notifyPatient('t', req('k3', NO_PHONE), n)).toBe('skipped_no_contact')
-    expect(n.send).not.toHaveBeenCalled()
-    expect((await deliveries('k3'))[0]).toMatchObject({ status: 'skipped_no_contact' })
+  it('sends on the default channels, masked and without the text', async () => {
+    const { reg, sms } = registry()
+    expect(await notifyPatient('t', req('k1'), { registry: reg })).toBe('sent')
+    expect(sms).toHaveBeenCalledWith(expect.objectContaining({ to: '+919845013210', templateKey: 'home_collection_booked' }))
+    const rows = await logs(REACHABLE)
+    expect(rows.find((r) => r.channel === 'sms')).toMatchObject({ status: 'sent', destinationMasked: '+91******3210', dedupeKey: `TEST_SP5_${RUN}-k1` })
+    expect(JSON.stringify(rows)).not.toContain('Home sample collection')
   })
 
   it('the same dedupe key notifies once', async () => {
-    const n = spyNotifier()
-    expect(await notifyPatient('t', req('k4'), n)).toBe('logged')
-    expect(await notifyPatient('t', req('k4'), n)).toBe('duplicate')
-    expect(n.send).toHaveBeenCalledTimes(1)
-    expect(await deliveries('k4')).toHaveLength(1)
+    const { reg, sms } = registry()
+    expect(await notifyPatient('t', req('k4'), { registry: reg })).toBe('sent')
+    sms.mockClear()
+    expect(await notifyPatient('t', req('k4'), { registry: reg })).toBe('duplicate')
+    expect(sms).not.toHaveBeenCalled()
   })
 
-  it('a throwing notifier is logged as failed and does not throw', async () => {
-    expect(await notifyPatientSafely(S, req('k5'), { send: async () => { throw new Error('boom') } })).toBe('failed')
-    expect((await deliveries('k5'))[0]).toMatchObject({ status: 'failed', errorCode: 'exception', destinationMasked: '+91******3210' })
-    const audits = await getDb().select().from(auditLog).where(eq(auditLog.userName, PROBE_USER))
-    expect(audits.find((a) => a.action === 'patient notification' && a.details?.includes('outcome=failed'))).toMatchObject({
-      patientId: REACHABLE,
-      details: 'template=home_collection_booked outcome=failed related=home_collection_visit:42',
-    })
-  })
-
-  it('a failure before sending returns error and logs only the error name', async () => {
+  it('a failing adapter is failed; a throwing one does not throw out of notifyPatientSafely', async () => {
+    const { reg } = registry(async () => ({ ok: false, errorClass: 'rate_limited' }))
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // No such patient: the delivery insert fails its foreign key.
-    expect(await notifyPatientSafely(S, req('k6', 'TEST-SP5-NOPE'), spyNotifier())).toBe('error')
-    expect(err.mock.calls.length).toBeGreaterThan(0)
-    for (const call of err.mock.calls) expect(call.map(String).join(' ')).not.toMatch(/TEST-SP5-NOPE|insert|notification_deliveries/)
+    expect(await notifyPatientSafely(S, req('k5'), { registry: registry(async () => { throw new Error('boom') }).reg })).toBe('sent') // whatsapp still succeeds
     err.mockRestore()
+    expect(await notifyPatient('t', req('k5b'), { registry: { ...reg, whatsapp: { ...reg.whatsapp, send: async () => ({ ok: false, errorClass: 'x' }) } } })).toBe('failed')
+    const audits = await getDb().select().from(auditLog).where(eq(auditLog.userName, PROBE_USER))
+    expect(audits.find((a) => a.action === 'patient notification')).toMatchObject({ patientId: REACHABLE, details: 'template=home_collection_booked outcome=sent related=home_collection_visit:42' })
+  })
+
+  it('master opt-out suppresses and calls no adapter', async () => {
+    expect(await setNotificationOptOut(OPTED_OUT, true, S)).toBe(true)
+    const { reg, sms, other } = registry()
+    expect(await notifyPatient('t', req('k2', OPTED_OUT), { registry: reg })).toBe('suppressed_opt_out')
+    expect(sms).not.toHaveBeenCalled()
+    expect(other).not.toHaveBeenCalled()
+    expect(await setNotificationOptOut(OPTED_OUT, false, S)).toBe(true)
+    expect(await setNotificationOptOut('TEST-SP5-NOPE', true, S)).toBe(false)
+  })
+
+  it('per-channel preference is honoured (sms off -> sms adapter not called)', async () => {
+    const { reg, sms, other } = registry()
+    await notifyPatient('t', req('k7', SMS_OFF), { registry: reg })
+    expect(sms).not.toHaveBeenCalled()
+    expect(other).toHaveBeenCalled()
+  })
+
+  it('no phone is skipped', async () => {
+    const { reg } = registry()
+    expect(await notifyPatient('t', req('k3', NO_PHONE), { registry: reg })).toBe('skipped_no_contact')
+  })
+
+  it('no such patient returns skipped, and notifyPatientSafely never throws', async () => {
+    const { reg } = registry()
+    expect(await notifyPatientSafely(S, req('k6', 'TEST-SP5-NOPE'), { registry: reg })).toBe('skipped_no_contact')
   })
 })

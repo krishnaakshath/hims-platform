@@ -51,6 +51,7 @@ export interface ProfileView {
   mlcNumber: string | null
   contacts: ProfileContact[]
   notificationOptOut?: boolean // SP5
+  notificationChannels?: { sms: boolean; whatsapp: boolean; email: boolean } // Foundations T8
   // SP8: verified with ABDM (or a Scan & Share); ISO string or null.
   abhaVerifiedAt?: string | null
   abhaVerificationSource?: 'abdm' | 'abdm_sandbox_mock' | null
@@ -177,7 +178,7 @@ export function PatientProfilePanel({ patient, aadhaar, canEdit, canWriteAadhaar
       {/* SP5 */}
       {canEditNotifications && (
         <Group title="Notifications">
-          <NotificationPreferenceToggle anonId={patient.id} initialOptOut={patient.notificationOptOut ?? false} />
+          <NotificationPreferenceToggle anonId={patient.id} initialOptOut={patient.notificationOptOut ?? false} initialChannels={patient.notificationChannels} />
         </Group>
       )}
 

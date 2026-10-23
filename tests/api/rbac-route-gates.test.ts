@@ -88,6 +88,8 @@ import { INTEGRATION_SETTINGS_ROLES } from '@/lib/role-policy'
 import { GET as getNhcxPayload } from '@/app/api/rcm/nhcx/exchanges/[id]/payload/route'
 import { POST as postNhcxReview } from '@/app/api/rcm/nhcx/exchanges/[id]/review/route'
 import { POST as postIntegrationTest } from '@/app/api/settings/integrations/test/route'
+import { PUT as putNotificationTemplates } from '@/app/api/settings/notification-templates/route' // Foundations T8
+import { GET as getPatientNotices } from '@/app/api/patients/[anonId]/notices/route' // Foundations T9
 // end SP8
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -1048,6 +1050,8 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/billing/payments/upi-request/[id]/confirm', call: () => settle(() => postUpiConfirmRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/confirm`), ctx({ id: BOGUS_ID }))), allowed: [...CASH_DESK_ROLES] },
   { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => settle(() => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...CASH_DESK_ROLES] },
   // end Foundations T11
+  { name: 'PUT /api/settings/notification-templates', call: () => settle(() => putNotificationTemplates(send('PUT', '/api/settings/notification-templates'))), allowed: ['admin'] }, // Foundations T8
+  { name: 'GET /api/patients/[anonId]/notices', call: () => getPatientNotices(get(`/api/patients/${BOGUS_PATIENT}/notices`), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'crc', 'pi', 'frontdesk'] }, // Foundations T9
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1204,6 +1208,7 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/billing/payments/upi-request/[id]/confirm', call: () => postUpiConfirmRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/confirm`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
   { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
   // end Foundations T11
+  { name: 'PUT /api/settings/notification-templates', call: () => putNotificationTemplates(send('PUT', '/api/settings/notification-templates', NOT_JSON)), allowed: ['admin'] }, // Foundations T8
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

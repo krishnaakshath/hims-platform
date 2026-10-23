@@ -37,7 +37,7 @@ export function SendFormModal({ templates, patients, onClose }: {
         </DialogHeader>
         {intakePath ? (
           <div className="space-y-2" role="status">
-            <p className="text-sm">Form sent. Share this intake link with the patient:</p>
+            <p className="text-sm">Form sent. The patient has been notified where a channel is available. If they have not received it, share this intake link with them:</p>
             <input readOnly aria-label="Intake link" value={`${typeof window === 'undefined' ? '' : window.location.origin}${intakePath}`} onFocus={(e) => e.currentTarget.select()} className="w-full rounded-md border border-border bg-muted px-3 py-2 font-mono text-xs" />
           </div>
         ) : (
