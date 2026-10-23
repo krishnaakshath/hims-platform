@@ -1,9 +1,10 @@
 'use client'
+import type { QuestionType } from '@/lib/forms/question-model'
 
 export interface IntakeQuestion {
   id: string
   label: string
-  type: 'text' | 'textarea' | 'date' | 'select' | 'checkbox'
+  type: QuestionType // WS7 T1: types beyond the original five render as a text input until the v2 renderer lands
   options?: string[]
   required: boolean
 }

@@ -3,13 +3,14 @@ import { formSubmissions, formTemplates, patients } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { listConsentsForSubmission, type SubmissionConsent } from '@/lib/queries/form-submission-consents'
 import { publicPatientColumns, type PublicPatientRow } from '@/lib/queries/patient-columns'
+import type { QuestionType } from '@/lib/forms/question-model' // WS7 T1
 
 export type IntakePortalState = 'active' | 'expired' | 'completed' | 'not_found'
 
 export interface IntakePortalData {
   state: IntakePortalState
   templateName?: string
-  questions?: { id: string; label: string; type: 'text' | 'textarea' | 'date' | 'select' | 'checkbox'; options?: string[]; required: boolean }[]
+  questions?: { id: string; label: string; type: QuestionType; options?: string[]; required: boolean }[]
   existingAnswers?: Record<string, string>
   autofill?: Record<string, string>
   // Present on 'active' only. Empty for a template with no attached consents,

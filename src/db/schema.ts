@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
+import type { FormQuestion } from '../lib/forms/question-model' // WS7 T1
 // SP7
 import type { ClaimSnapshot, CodedEntry, EstimateLine, PreauthSnapshot } from '../lib/rcm/snapshot'
 // SP8
@@ -390,6 +391,7 @@ export const consentDocuments = pgTable('consent_documents', {
   name: text('name').notNull(),
   bodyText: text('body_text').notNull(),
   legalReviewStatus: legalReviewStatusEnum('legal_review_status').default('draft').notNull(),
+  translations: jsonb('translations').$type<Partial<Record<'hi' | 'kn', { name?: string; bodyText?: string }>>>().default({}).notNull(), // WS7 T1
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
@@ -407,27 +409,14 @@ export const formTemplates = pgTable('form_templates', {
   // case, shown as its own card.
   folderId: integer('folder_id').references(() => formTemplateFolders.id),
   diagnosisTag: text('diagnosis_tag').notNull(),
-  questions: jsonb('questions').$type<{
-    id: string
-    label: string
-    type: 'text' | 'textarea' | 'date' | 'select' | 'checkbox'
-    options?: string[]
-    optionScores?: (number | null)[] // NEW -- same length/order as options when present; a select question with no optionScores is simply unscored
-    hipaaSensitive: boolean
-    required: boolean
-    autofillField?: 'name' | 'dob' | 'email' | 'phone' | null
-    // Tags a question as self-reporting something checkable against the
-    // patient's actual chart -- e.g. "Currently taking antidepressants?"
-    // against medicationEpisodes. Optional; most questions (free-text
-    // symptom descriptions, consent checkboxes) have nothing to compare
-    // against and simply omit this.
-    compareToChart?: { type: 'medication_active'; medicationClass: string } | null
-  }[]>().notNull(),
+  // WS7 T1: widened to the shared question model v2 (src/lib/forms/question-model.ts); stored v1 questions are a subset.
+  questions: jsonb('questions').$type<FormQuestion[]>().notNull(), // WS7 T1
   scoringRule: jsonb('scoring_rule').$type<{
     questionIds: string[]
     bands: { min: number; max: number; label: string }[]
   } | null>(),
   isActive: boolean('is_active').default(true).notNull(),
+  languages: text('languages').array().default(sql`'{en}'::text[]`).notNull(), // WS7 T1: languages the patient may pick; 'en' always offered
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 

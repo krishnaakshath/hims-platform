@@ -9,11 +9,12 @@ import { SendFormModal } from '@/components/SendFormModal'
 import { FormTemplatePreviewModal } from '@/components/FormTemplatePreviewModal'
 import { TemplateConsentsPanel } from '@/components/TemplateConsentsPanel'
 import type { AttachedConsentRow } from '@/lib/queries/form-template-consents'
+import type { QuestionType } from '@/lib/forms/question-model'
 
 interface Question {
   id: string
   label: string
-  type: 'text' | 'textarea' | 'date' | 'select' | 'checkbox'
+  type: QuestionType // WS7 T1
   options?: string[]
   optionScores?: (number | null)[]
   hipaaSensitive: boolean

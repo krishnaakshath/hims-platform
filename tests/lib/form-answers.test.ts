@@ -23,3 +23,24 @@ describe('formatAnswerDisplay', () => {
     expect(formatAnswerDisplay(question, 'Moderate')).toBe('Moderate')
   })
 })
+
+// WS7 T1: display values for the question model v2 types.
+describe('formatAnswerDisplay (question model v2)', () => {
+  it('passes number and phone answers through', () => {
+    expect(formatAnswerDisplay({ id: 'w', label: 'Weight', type: 'number' }, '72.5')).toBe('72.5')
+    expect(formatAnswerDisplay({ id: 'p', label: 'Mobile', type: 'phone' }, '+919845012345')).toBe('+919845012345')
+  })
+
+  it('shows a file answer as an uploaded document, never the raw reference', () => {
+    expect(formatAnswerDisplay({ id: 'f', label: 'Referral letter', type: 'file' }, 'doc:42')).toBe('Document uploaded')
+    expect(formatAnswerDisplay({ id: 'f', label: 'Referral letter', type: 'file' }, undefined)).toBe('—')
+  })
+
+  it('shows a signature as the typed name', () => {
+    expect(formatAnswerDisplay({ id: 's', label: 'Signature', type: 'signature' }, 'Ananya Rao')).toBe('Signed as Ananya Rao')
+  })
+
+  it('a section never has an answer', () => {
+    expect(formatAnswerDisplay({ id: 'h', label: 'History', type: 'section' }, 'x')).toBe('—')
+  })
+})

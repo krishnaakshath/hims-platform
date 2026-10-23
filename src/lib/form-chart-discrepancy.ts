@@ -1,7 +1,9 @@
+import type { QuestionType } from '@/lib/forms/question-model'
+
 export interface FormQuestion {
   id: string
   label: string
-  type: 'text' | 'textarea' | 'date' | 'select' | 'checkbox'
+  type: QuestionType // WS7 T1
   compareToChart?: { type: 'medication_active'; medicationClass: string } | null
 }
 
