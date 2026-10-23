@@ -1,5 +1,6 @@
 import { formatIsoDate, formatIstDate, formatIstDateTime } from '@/lib/india-time'
 import type { DischargeSummaryData } from '@/lib/encounters/discharge-summary'
+import type { PrintIdentity } from '@/lib/brand'
 import { DocField, DocSection, PrintDocument } from '@/components/print/PrintDocument'
 
 // Wave F P1-13 document body, shared (Wave J) by the staff print view and the patient
@@ -29,13 +30,13 @@ export interface DischargeSummaryDocumentProps {
   now: Date
   backHref: string
   backLabel: string
-  hospitalName?: string | null
-  hospitalSubline?: string | null
+  /** WL T10: the brand's print identity, resolved by the server page. */
+  identity: PrintIdentity
   clinicalCopy: boolean
   patientCopy?: boolean
 }
 
-export function DischargeSummaryDocument({ data, now, backHref, backLabel, hospitalName, hospitalSubline, clinicalCopy: staffClinical, patientCopy = false }: DischargeSummaryDocumentProps) {
+export function DischargeSummaryDocument({ data, now, backHref, backLabel, identity, clinicalCopy: staffClinical, patientCopy = false }: DischargeSummaryDocumentProps) {
   const { patient: p, admission: a, attending: doc, clinical, record, followUp: f, signature: s } = data
   const clinicalCopy = (staffClinical || patientCopy) && clinical !== null
 
@@ -44,8 +45,7 @@ export function DischargeSummaryDocument({ data, now, backHref, backLabel, hospi
       title="Discharge summary"
       backHref={backHref}
       backLabel={backLabel}
-      hospitalName={hospitalName ?? data.hospitalName}
-      hospitalSubline={hospitalSubline}
+      identity={identity}
       meta={[
         { label: 'IP No.', value: `IP-${a.id}` },
         { label: 'Discharged', value: formatIsoDate(a.dischargedOn) },

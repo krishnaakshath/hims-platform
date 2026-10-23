@@ -73,6 +73,20 @@ export interface BrandPrint {
   logoUrl: string | null
 }
 
+/** What a printed document needs from the brand: the print identity plus the product name. */
+export type PrintIdentity = BrandPrint & { name: string }
+
+/**
+ * What invoices and receipts take from the brand (spec D3): only the logo, footer and signature
+ * line. Their legal name, address and GSTIN stay from billing settings.
+ */
+export type BillingDocumentMarks = Pick<BrandPrint, 'logoUrl' | 'footerText' | 'signatureLine'>
+
+/** The print identity of a resolved brand (pass `await getBrand()` from a server page). */
+export function printIdentity(b: Pick<Brand, 'name' | 'print'>): PrintIdentity {
+  return { ...b.print, name: b.name }
+}
+
 export interface LoginQuote {
   text: string
   /** Who said it, or null for an unattributed line (e.g. the hospital's own). */

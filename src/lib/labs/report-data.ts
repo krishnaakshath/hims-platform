@@ -9,7 +9,12 @@ import { ageOnDate, istDateOf } from '@/lib/india-time'
 export type LabResultFlag = 'normal' | 'abnormal' | 'critical'
 
 export interface LabReportData {
-  hospital: { name: string; legalName: string; site: string | null }
+  /**
+   * WL T10: the brand resolved at request time. `headerText` heads page 1 (spec D4 chain), `site`
+   * is the print subline, `footerText` prints in every page footer, `logoPng` holds the stored
+   * light logo's PNG bytes (never its blob URL) or null. `name` is the PDF producer/creator.
+   */
+  hospital: { name: string; legalName: string; headerText: string; site: string | null; footerText: string | null; logoPng: Uint8Array | null }
   reportNumber: string
   version: number
   generatedAt: string // ISO instant
@@ -55,9 +60,12 @@ export interface LabReportSource {
 
 const GENDER_LABEL = new Map<string, string>(GENDERS.map((g) => [g.code, g.label]))
 
-/** The report header names from the brand module (passed in, so this module stays pure). */
-export function hospitalFromBrand(b: Pick<Brand, 'name' | 'legalName'>, site: string | null = null): LabReportData['hospital'] {
-  return { name: b.name, legalName: b.legalName, site }
+/**
+ * The report header from the resolved brand (passed in, so this module stays pure): the print
+ * header text, subline and footer, plus the stored light logo's PNG bytes when the caller has them.
+ */
+export function hospitalFromBrand(b: Pick<Brand, 'name' | 'legalName' | 'print'>, logoPng: Uint8Array | null = null): LabReportData['hospital'] {
+  return { name: b.name, legalName: b.legalName, headerText: b.print.headerText, site: b.print.subline, footerText: b.print.footerText, logoPng }
 }
 
 /** The same rule as SP3's discharge summary. */
@@ -91,7 +99,10 @@ export function buildLabReportData(src: LabReportSource, now: Date): LabReportDa
 
   const p = src.patient
   return {
-    hospital: { name: src.hospital.name, legalName: src.hospital.legalName, site: src.hospital.site },
+    hospital: {
+      name: src.hospital.name, legalName: src.hospital.legalName, headerText: src.hospital.headerText, site: src.hospital.site,
+      footerText: src.hospital.footerText, logoPng: src.hospital.logoPng,
+    },
     reportNumber: src.reportNumber,
     version: src.version,
     generatedAt: now.toISOString(),

@@ -5,6 +5,8 @@ import { logAudit } from '@/lib/audit'
 import { getTokenSlip } from '@/lib/queries/print-slips'
 import { formatDateTimeIn } from '@/lib/india-time'
 import { PrintSlip, SlipRow } from '@/components/print/PrintSlip'
+import { getBrand } from '@/lib/brand-server'
+import { printIdentity } from '@/lib/brand'
 
 // Wave C P1-14: the OPD token slip printed after check-in -- replaces the
 // old window.print() of the whole dashboard. Same gate as check-in
@@ -21,11 +23,12 @@ export default async function TokenSlipPage({ params }: { params: Promise<{ enco
 
   const slip = await getTokenSlip(encounterId)
   if (!slip) notFound()
+  const identity = printIdentity(await getBrand())
   await logAudit(session, 'printed OPD token slip', slip.patient.id, `encounter=${slip.encounterId}`)
 
   const isOpd = slip.encounterType === 'opd'
   return (
-    <PrintSlip title={isOpd ? 'OPD token' : 'Admission check-in'} backHref="/front-desk/check-in" backLabel="Back to Check-In">
+    <PrintSlip title={isOpd ? 'OPD token' : 'Admission check-in'} backHref="/front-desk/check-in" backLabel="Back to Check-In" identity={identity}>
       <section className="py-3">
         <p className="text-[11px] uppercase tracking-wide text-black/70">Token</p>
         <p className="text-5xl font-bold leading-none tabular-nums">{slip.opdToken ?? '—'}</p>

@@ -27,7 +27,7 @@ describe('buildLabReportData', () => {
     })
     expect(d.verifiers).toEqual(['Dr Path One', 'Dr Path Two'])
     expect(d).toMatchObject({
-      hospital: { name: 'Test Hospital', legalName: 'Test Hospital Trust', site: 'Main campus' },
+      hospital: { name: 'Test Hospital', legalName: 'Test Hospital Trust', headerText: 'Test Hospital Trust', site: 'Main campus', footerText: null, logoPng: null },
       reportNumber: 'LR-2099-000001', version: 1, generatedAt: NOW.toISOString(),
       patient: { name: 'Asha Rao', uhid: 'UH-000042', patientId: 'RD-0001', gender: 'Female' },
     })
@@ -54,9 +54,18 @@ describe('buildLabReportData', () => {
     expect(json).not.toMatch(/2059-03-03/) // no date of birth, only the age
   })
 
-  it('hospitalFromBrand takes the brand names', () => {
-    expect(hospitalFromBrand({ name: 'X', legalName: 'X Trust' })).toEqual({ name: 'X', legalName: 'X Trust', site: null })
-    expect(hospitalFromBrand({ name: 'X', legalName: 'X Trust' }, 'Annex')).toEqual({ name: 'X', legalName: 'X Trust', site: 'Annex' })
+  it('hospitalFromBrand takes the brand names and print identity (WL T10)', () => {
+    const print = {
+      headerText: 'X Hospital, Pune', subline: 'Annex', footerText: 'Open 24x7', signatureLine: null,
+      address: null, gstin: null, rohiniId: null, hfrId: null, logoUrl: null,
+    }
+    expect(hospitalFromBrand({ name: 'X', legalName: 'X Trust', print })).toEqual({
+      name: 'X', legalName: 'X Trust', headerText: 'X Hospital, Pune', site: 'Annex', footerText: 'Open 24x7', logoPng: null,
+    })
+    const png = new Uint8Array([137, 80, 78, 71])
+    expect(hospitalFromBrand({ name: 'X', legalName: 'X Trust', print: { ...print, subline: null, footerText: null } }, png)).toEqual({
+      name: 'X', legalName: 'X Trust', headerText: 'X Hospital, Pune', site: null, footerText: null, logoPng: png,
+    })
   })
 })
 

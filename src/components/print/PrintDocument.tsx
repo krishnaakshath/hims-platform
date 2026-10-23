@@ -1,6 +1,6 @@
 import { BackLink } from '@/components/BackLink'
 import { PrintButton } from '@/components/PrintButton'
-import { brand } from '@/lib/brand'
+import type { PrintIdentity } from '@/lib/brand'
 import { formatIstDateTime } from '@/lib/india-time'
 
 // Wave F: the A4 shell for clinical documents (prescription slip, discharge
@@ -23,17 +23,20 @@ export interface PrintDocumentProps {
   title: string
   backHref: string
   backLabel: string
-  /** Hospital display name; defaults to the brand's legal name. */
-  hospitalName?: string | null
-  /** A second header line (site / address). */
-  hospitalSubline?: string | null
+  /**
+   * WL T10: the brand's print identity, resolved at request time by the server page
+   * (`printIdentity(await getBrand())`): header text, subline, registration ids, logo, footer
+   * and signature line. Every value renders as React text.
+   */
+  identity: PrintIdentity
   /** Right-hand header facts (document number, dates). */
   meta?: { label: string; value: string }[]
   printedAt: Date
   children: React.ReactNode
 }
 
-export function PrintDocument({ title, backHref, backLabel, hospitalName, hospitalSubline, meta = [], printedAt, children }: PrintDocumentProps) {
+export function PrintDocument({ title, backHref, backLabel, identity, meta = [], printedAt, children }: PrintDocumentProps) {
+  const ids = registrationIds(identity)
   return (
     <main className="a4-screen min-h-screen bg-neutral-100 px-4 py-8 text-neutral-900">
       <style>{A4_CSS}</style>
@@ -44,14 +47,15 @@ export function PrintDocument({ title, backHref, backLabel, hospitalName, hospit
       <article aria-label={title} className="a4-doc mx-auto w-full max-w-[210mm] bg-white p-10 text-[13px] leading-relaxed text-black shadow-sm ring-1 ring-neutral-200">
         <header className="flex items-start justify-between gap-6 border-b-2 border-neutral-800 pb-3">
           <div className="flex items-start gap-3">
-            {brand.logoUrl && (
-              // A validated https:// or /-relative URL (src/lib/brand.ts); a plain img prints reliably.
+            {identity.logoUrl && (
+              // A validated https:// or /branding/ path (src/lib/brand.ts, brand-resolve.ts); a plain img prints reliably.
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={brand.logoUrl} alt="" className="h-12 w-auto" />
+              <img src={identity.logoUrl} alt="" className="h-12 w-auto" />
             )}
             <div>
-              <p className="text-xl font-bold leading-tight">{hospitalName || brand.legalName}</p>
-              {hospitalSubline && <p className="text-xs text-neutral-700">{hospitalSubline}</p>}
+              <p className="text-xl font-bold leading-tight">{identity.headerText}</p>
+              {identity.subline && <p className="whitespace-pre-line text-xs text-neutral-700">{identity.subline}</p>}
+              {ids && <p className="text-xs text-neutral-700">{ids}</p>}
             </div>
           </div>
           <div className="text-right">
@@ -69,12 +73,24 @@ export function PrintDocument({ title, backHref, backLabel, hospitalName, hospit
           </div>
         </header>
         {children}
+        {identity.signatureLine && (
+          <div className="mt-10 flex justify-end">
+            <p className="w-64 border-t border-neutral-500 pt-1 text-right text-xs">{identity.signatureLine}</p>
+          </div>
+        )}
         <footer className="mt-8 border-t border-neutral-300 pt-2 text-[10px] text-neutral-600">
-          Computer-generated document from {brand.name}. Printed {formatIstDateTime(printedAt, { label: true })}.
+          {identity.footerText && <p className="whitespace-pre-line">{identity.footerText}</p>}
+          <p>Computer-generated document from {identity.name}. Printed {formatIstDateTime(printedAt, { label: true })}.</p>
         </footer>
       </article>
     </main>
   )
+}
+
+/** "GSTIN … · ROHINI ID … · HFR ID …" from billing settings, or null when none is set. */
+export function registrationIds(p: Pick<PrintIdentity, 'gstin' | 'rohiniId' | 'hfrId'>): string | null {
+  const parts = [p.gstin && `GSTIN ${p.gstin}`, p.rohiniId && `ROHINI ID ${p.rohiniId}`, p.hfrId && `HFR ID ${p.hfrId}`].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : null
 }
 
 /** A label/value pair inside a document's patient or admission grid. */

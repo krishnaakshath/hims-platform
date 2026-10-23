@@ -11,6 +11,7 @@ import { istDateOf } from '@/lib/india-time'
 import { buildDischargeSummary, type DischargeRecord, type DischargeSummaryData, type DischargeSummarySource } from '@/lib/encounters/discharge-summary'
 import { getFollowUpView } from './follow-ups'
 import { getLatestSignatureForSignable } from './signatures'
+import { getBrand } from '@/lib/brand-server'
 
 /**
  * Loads the discharge-summary data for a DISCHARGED admission (null otherwise,
@@ -98,6 +99,7 @@ export async function getDischargeSummaryData(
     : null
 
   const src: DischargeSummarySource = {
+    hospitalName: (await getBrand()).print.headerText,
     patient: row.patient,
     admission: { ...row.admission, dischargedAt: row.admission.dischargedAt },
     attending: row.attending,

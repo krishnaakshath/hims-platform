@@ -6,7 +6,8 @@ import { notFound } from 'next/navigation'
 import { requirePortalDocumentSession } from '@/lib/patient-portal-documents'
 import { parseId } from '@/lib/http'
 import { getPortalDischargeSummary } from '@/lib/queries/patient-portal-records'
-import { getPracticeIdentity } from '@/lib/queries/settings'
+import { getBrand } from '@/lib/brand-server'
+import { printIdentity } from '@/lib/brand'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { DischargeSummaryDocument } from '@/components/print/DischargeSummaryDocument'
 
@@ -17,7 +18,7 @@ export default async function PortalDischargeSummaryPage({ params }: { params: P
   const now = new Date()
   const data = await getPortalDischargeSummary(session.patientId, admissionId, now)
   if (!data) notFound()
-  const practice = await getPracticeIdentity()
+  const identity = printIdentity(await getBrand())
   await logPatientPortalAction('viewed discharge summary via patient portal', session.patientId, `admission=${data.admission.id}`)
 
   return (
@@ -26,8 +27,7 @@ export default async function PortalDischargeSummaryPage({ params }: { params: P
       now={now}
       backHref="/patient-portal/discharge-summaries"
       backLabel="Back to discharge summaries"
-      hospitalName={practice.practiceName}
-      hospitalSubline={practice.practiceSite}
+      identity={identity}
       clinicalCopy={false}
       patientCopy
     />

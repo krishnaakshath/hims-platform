@@ -5,6 +5,7 @@ import { CASH_DESK_ROLES } from '@/lib/role-policy'
 import { getReceipt } from '@/lib/queries/patient-ledger'
 import { getBillingSettings } from '@/lib/queries/billing-settings'
 import { ReceiptDocument } from '@/components/billing/ReceiptDocument'
+import { getBrand } from '@/lib/brand-server'
 import { BackLink } from '@/components/BackLink'
 import { PrintButton } from '@/components/PrintButton'
 
@@ -18,6 +19,7 @@ export default async function ReceiptPrintPage({ params }: { params: Promise<{ i
   const receipt = await getReceipt(Number(raw))
   if (!receipt) notFound()
   const settings = await getBillingSettings()
+  const { print } = await getBrand()
   await logAudit(session, 'billing: printed receipt', receipt.patientId)
 
   return (
@@ -26,7 +28,7 @@ export default async function ReceiptPrintPage({ params }: { params: Promise<{ i
         <BackLink href={`/cash-desk?patientId=${encodeURIComponent(receipt.patientId)}`} label="Back to cash desk" />
         <PrintButton />
       </div>
-      <ReceiptDocument receipt={receipt} settings={settings} />
+      <ReceiptDocument receipt={receipt} settings={settings} marks={print} />
     </main>
   )
 }

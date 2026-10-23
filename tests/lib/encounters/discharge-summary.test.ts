@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { brand } from '@/lib/brand'
 import { buildDischargeSummary, type DischargeSummarySource } from '@/lib/encounters/discharge-summary'
 
 const NOW = new Date('2026-10-06T04:30:00Z')
 
 const SRC: DischargeSummarySource = {
+  hospitalName: 'Sunrise Hospital, Pune',
   patient: {
     id: 'RD-0042', uhid: 'UH-000042', name: 'Asha Rao', dob: '1980-10-03', gender: 'female',
     abhaNumber: '91234567890123', abhaAddress: 'asha.rao@abdm',
@@ -33,7 +33,7 @@ describe('buildDischargeSummary', () => {
     expect(d.attending).toEqual({ providerId: 3, name: 'Dr. Meera Iyer', registration: 'SMC IN-MH 12345', departmentName: 'General Medicine' })
     expect(d.timezone).toBe('Asia/Kolkata')
     expect(d.generatedAt).toBe('2026-10-06T04:30:00.000Z')
-    expect(d.hospitalName).toBe(brand.legalName)
+    expect(d.hospitalName).toBe('Sunrise Hospital, Pune')
   })
 
   it('projects the patient explicitly: formatted ABHA, composed address, age at discharge', () => {

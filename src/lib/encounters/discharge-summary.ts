@@ -2,7 +2,6 @@
 // deferred to the documents work (spec §3 "Documents"); this is the data a
 // later renderer consumes. Every field is projected explicitly: no source row
 // is spread into the output, and there is no Aadhaar field of any kind.
-import { brand } from '@/lib/brand'
 import type { Role } from '@/lib/auth'
 import { formatAbhaNumber } from '@/lib/india/abha'
 import { formatDoctorRegistration } from '@/lib/india/registration'
@@ -48,6 +47,8 @@ export interface DischargeRecord<T> {
 
 /** The raw inputs, each already reduced to named columns by the loader. */
 export interface DischargeSummarySource {
+  /** WL T10: the brand's print header text, resolved by the loader at request time (getBrand). */
+  hospitalName: string
   patient: {
     id: string; uhid: string | null; name: string; dob: string; gender: string | null
     abhaNumber: string | null; abhaAddress: string | null
@@ -103,7 +104,7 @@ export function buildDischargeSummary(src: DischargeSummarySource, now: Date, vi
   const dischargedOn = istDateOf(a.dischargedAt)
 
   return {
-    hospitalName: brand.legalName,
+    hospitalName: src.hospitalName,
     timezone: 'Asia/Kolkata',
     generatedAt: now.toISOString(),
     patient: {

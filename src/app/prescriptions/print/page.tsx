@@ -7,9 +7,9 @@ import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { getPrintablePrescriptions } from '@/lib/queries/prescriptions'
 import { getPatientDocumentIdentity } from '@/lib/queries/print-slips'
-import { getPracticeIdentity } from '@/lib/queries/settings'
 import { DocField, PrintDocument } from '@/components/print/PrintDocument'
-import { brand } from '@/lib/brand'
+import { printIdentity } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 
 // Printing is a read of the prescriptions shown on the chart, so it uses the
 // chart's gate (CLINICAL_ROLES: admin, crc, pi) -- not narrowed to admin/pi
@@ -61,7 +61,8 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
   // medication_episodes.patient_id references a real patient row.
   if (!patient) notFound()
 
-  const practice = await getPracticeIdentity()
+  // WL T10: header chain (spec D4) print header text -> billing legal name -> practice name -> env legal name.
+  const identity = printIdentity(await getBrand())
 
   // After validation, so a rejected URL writes no audit row, and on every
   // successful render, so every print is an audited PHI access.
@@ -78,8 +79,7 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
       title="Prescription"
       backHref={`/patients/${patient.id}/medical-record`}
       backLabel="Back to Medical Record"
-      hospitalName={practice.practiceName ?? brand.legalName}
-      hospitalSubline={practice.practiceSite}
+      identity={identity}
       meta={[{ label: 'Date', value: formatIstDate(first.prescribedAt) }]}
       printedAt={new Date()}
     >
@@ -130,7 +130,7 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
       </section>
 
       <p className="mt-6 text-[10px] text-neutral-600">
-        This printout is a record of a prescription entered in {brand.name}. It was not transmitted electronically to a pharmacy.
+        This printout is a record of a prescription entered in {identity.name}. It was not transmitted electronically to a pharmacy.
       </p>
     </PrintDocument>
   )
