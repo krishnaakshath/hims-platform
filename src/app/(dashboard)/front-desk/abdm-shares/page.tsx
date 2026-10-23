@@ -4,6 +4,7 @@ import { logAudit } from '@/lib/audit'
 import { ABDM_SHARE_QUEUE_ROLES } from '@/lib/role-policy'
 import { listPendingShares, scanShareSetup } from '@/lib/queries/abdm-profile-shares'
 import { ProfileShareQueue } from '@/components/abdm/ProfileShareQueue'
+import { SimulateShareButton } from '@/components/abdm/SimulateShareButton'
 
 // ABHA Scan & Share registration queue (SP8 Task 6): patients who scanned the
 // desk QR code, by token number. ABHA numbers are masked here.
@@ -24,6 +25,7 @@ export default async function AbdmSharesPage() {
       {setup.qrUrlTemplate && (
         <p className="mb-4 text-xs text-muted-foreground">Desk QR code link (one counter id per desk): <span className="font-mono break-all">{setup.qrUrlTemplate}</span></p>
       )}
+      {setup.state === 'mock' && <SimulateShareButton />}
       <ProfileShareQueue rows={rows} />
     </div>
   )

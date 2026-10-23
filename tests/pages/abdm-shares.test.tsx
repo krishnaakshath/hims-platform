@@ -45,3 +45,14 @@ describe('/front-desk/abdm-shares', () => {
     expect(screen.getByText(/Scan & Share is not configured/)).toBeInTheDocument()
   })
 })
+
+describe('/front-desk/abdm-shares simulate button (WS12 T6)', () => {
+  it('is absent when Scan & Share is not configured and present in mock mode', async () => {
+    await renderPage([], { state: 'not_configured', qrUrlTemplate: null })
+    const { screen, cleanup: clean } = await import('@testing-library/react')
+    expect(screen.queryByRole('button', { name: 'Simulate ABHA share' })).toBeNull()
+    clean()
+    await renderPage([], { state: 'mock', qrUrlTemplate: null })
+    expect(screen.getByRole('button', { name: 'Simulate ABHA share' })).toBeInTheDocument()
+  })
+})
