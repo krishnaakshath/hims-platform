@@ -29,7 +29,7 @@ import { OrderLabTestModal } from '@/components/OrderLabTestModal'
 import { TransferAdmissionModal } from '@/components/TransferAdmissionModal'
 
 const LEAK = 'duplicate key value violates unique constraint "x"'
-const med = { id: 1, name: 'Paracetamol', genericName: null, medicationClass: 'Analgesic', commonDose: '500mg', form: 'tablet' as const, quantityOnHand: 10, reorderThreshold: 2, unit: 'tab' }
+const med = { id: 1, name: 'Paracetamol', genericName: null, medicationClass: 'Analgesic', commonDose: '500mg', form: 'tablet' as const, quantityOnHand: 10, reorderThreshold: 2, unit: 'tab', batches: [], nearestExpiry: null, expiringSoonQty: 0, expiredQty: 0 }
 
 type Case = { name: string; ui: () => ReactElement; before?: () => Promise<void> | void; submit: RegExp; status?: number }
 const CASES: Case[] = [

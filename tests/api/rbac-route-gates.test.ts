@@ -613,6 +613,11 @@ import { COVERAGE_VERIFY_ROLES } from '@/lib/role-policy'
 import { GET as getPharmacyGrns, POST as postPharmacyGrn } from '@/app/api/pharmacy/grns/route'
 import { PHARMACY_STOCK_ROLES } from '@/lib/role-policy'
 // end WS5 T3
+// WS5 T4
+import { PATCH as patchMedicationReorder } from '@/app/api/pharmacy/medications/[id]/reorder/route'
+import { POST as postBatchWriteOff } from '@/app/api/pharmacy/batches/[id]/write-off/route'
+import { POST as postUncataloguedLink } from '@/app/api/pharmacy/uncatalogued/link/route'
+// end WS5 T4
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1083,6 +1088,11 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/pharmacy/grns', call: () => settle(() => getPharmacyGrns(get('/api/pharmacy/grns?limit=50'))), allowed: [...PHARMACY_STOCK_ROLES] },
   { name: 'POST /api/pharmacy/grns', call: () => settle(() => postPharmacyGrn(send('POST', '/api/pharmacy/grns'))), allowed: [...PHARMACY_STOCK_ROLES] },
   // end WS5 T3
+  // WS5 T4: reorder level, batch write-off, uncatalogued link (an empty body is a 400 for an allowed role).
+  { name: 'PATCH /api/pharmacy/medications/[id]/reorder', call: () => settle(() => patchMedicationReorder(send('PATCH', `/api/pharmacy/medications/${BOGUS_ID}/reorder`), ctx({ id: BOGUS_ID }))), allowed: [...PHARMACY_STOCK_ROLES] },
+  { name: 'POST /api/pharmacy/batches/[id]/write-off', call: () => settle(() => postBatchWriteOff(send('POST', `/api/pharmacy/batches/${BOGUS_ID}/write-off`), ctx({ id: BOGUS_ID }))), allowed: [...PHARMACY_STOCK_ROLES] },
+  { name: 'POST /api/pharmacy/uncatalogued/link', call: () => settle(() => postUncataloguedLink(send('POST', '/api/pharmacy/uncatalogued/link'))), allowed: [...PHARMACY_STOCK_ROLES] },
+  // end WS5 T4
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

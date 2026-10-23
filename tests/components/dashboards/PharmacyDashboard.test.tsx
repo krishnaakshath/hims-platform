@@ -9,9 +9,9 @@ vi.mock('@/components/AddMedicationModal', () => ({ AddMedicationModal: () => nu
 import { PharmacyDashboard } from '@/components/dashboards/PharmacyDashboard'
 
 // Wave E P1-18: the pharmacy home is no longer a dead end.
-const med = (id: number, name: string, quantityOnHand: number, reorderThreshold = 5) => ({ id, name, genericName: null, medicationClass: 'Test', commonDose: null, form: 'tablet' as const, quantityOnHand, reorderThreshold, unit: 'tabs' })
+const med = (id: number, name: string, quantityOnHand: number, reorderThreshold = 5) => ({ id, name, genericName: null, medicationClass: 'Test', commonDose: null, form: 'tablet' as const, quantityOnHand, reorderThreshold, unit: 'tabs', batches: [], nearestExpiry: null, expiringSoonQty: 0, expiredQty: 0 })
 const MEDS = [med(1, 'Paracetamol 500', 0), med(2, 'Amoxicillin 250', 3), med(3, 'Metformin 500', 100)]
-const KPIS = { outOfStock: 1, lowStock: 1, dispensedToday: 7, unbilledDispenses: 4 }
+const KPIS = { outOfStock: 1, lowStock: 1, dispensedToday: 7, unbilledDispenses: 4, expiringIn90Days: 0, expiredBatches: 0 }
 const props = (role: 'pharmacy' | 'admin' | 'pi' | 'crc', stockFilter: 'out' | 'low' | null = null) => ({
   session: { role, name: 'T', userId: null },
   medications: MEDS,

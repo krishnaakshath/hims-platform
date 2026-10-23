@@ -3,6 +3,8 @@ import { medicationBatches, medicationInventory } from '@/db/schema'
 import { and, asc, eq, gte, isNull, sql } from 'drizzle-orm'
 import type { BatchStock } from '@/lib/pharmacy/fefo'
 import type { WriteExecutor } from './executor'
+import { logAudit } from '@/lib/audit'
+import type { Session } from '@/lib/auth'
 
 /** Every batch of a drug (written-off included), earliest expiry first, no-expiry last, then id. */
 export async function listBatches(medicationId: number, executor: WriteExecutor = getDb()): Promise<BatchStock[]> {
@@ -89,5 +91,42 @@ export async function reconcileUnbatchedStock(tx: WriteExecutor, medicationId: n
       .returning({ id: medicationBatches.id })
     if (taken.length === 0) throw new Error('Batch stock changed while reconciling')
     deficit -= take
+  }
+}
+
+// WS5 T4: write-off of one batch (expired, damaged, recalled stock). The free-text note a user may
+// type is not stored: medication_batches has no column for it (spec section 3) and audit details
+// carry enum values and counts only.
+export const WRITE_OFF_REASONS = ['expired', 'damaged', 'recalled', 'other'] as const
+export type WriteOffReason = (typeof WRITE_OFF_REASONS)[number]
+export type WriteOffResult =
+  | { ok: true; medicationId: number; quantity: number }
+  | { ok: false; error: 'not_found' | 'already_written_off' | 'opening_batch_written_off' }
+
+/**
+ * Zeroes the batch, stamps written_off_at and write_off_reason, and recomputes the drug's total,
+ * in one transaction: lock and reconcile the drug's stock first (ruling R7), then re-read the
+ * batch under that lock so the quantity written off is the one actually removed.
+ */
+export async function writeOffBatch(batchId: number, reason: WriteOffReason, session: Session): Promise<WriteOffResult> {
+  const db = getDb()
+  // medication_id never changes, so it can be read before the lock.
+  const [target] = await db.select({ medicationId: medicationBatches.medicationId }).from(medicationBatches).where(eq(medicationBatches.id, batchId))
+  if (!target) return { ok: false, error: 'not_found' }
+  try {
+    return await db.transaction(async (tx) => {
+      await reconcileUnbatchedStock(tx, target.medicationId)
+      const [batch] = await tx.select({ quantityOnHand: medicationBatches.quantityOnHand, writtenOffAt: medicationBatches.writtenOffAt })
+        .from(medicationBatches).where(eq(medicationBatches.id, batchId)).for('update')
+      if (batch.writtenOffAt !== null) return { ok: false as const, error: 'already_written_off' as const }
+      await tx.update(medicationBatches).set({ quantityOnHand: 0, writtenOffAt: new Date(), writeOffReason: reason })
+        .where(eq(medicationBatches.id, batchId))
+      await syncInventoryTotal(tx, target.medicationId)
+      await logAudit(session, 'pharmacy: wrote off batch', null, `batch=${batchId} qty=${batch.quantityOnHand} reason=${reason}`, tx)
+      return { ok: true as const, medicationId: target.medicationId, quantity: batch.quantityOnHand }
+    })
+  } catch (err) {
+    if (err instanceof OpeningBatchWrittenOffError) return { ok: false, error: 'opening_batch_written_off' }
+    throw err
   }
 }

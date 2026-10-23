@@ -5,7 +5,7 @@ import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 afterEach(() => { vi.unstubAllGlobals() })
 
-const MED = { id: 3, name: 'Paracetamol 500 mg', genericName: null, medicationClass: 'Analgesic', commonDose: null, form: 'tablet' as const, quantityOnHand: 100, reorderThreshold: 10, unit: 'tablets' }
+const MED = { id: 3, name: 'Paracetamol 500 mg', genericName: null, medicationClass: 'Analgesic', commonDose: null, form: 'tablet' as const, quantityOnHand: 100, reorderThreshold: 10, unit: 'tablets', batches: [], nearestExpiry: null, expiringSoonQty: 0, expiredQty: 0 }
 
 // Wave C P0-04: a stock-table dispense picks the patient by name/UHID/mobile.
 describe('DispenseMedicationModal', () => {
