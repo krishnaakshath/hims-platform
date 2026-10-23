@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { and, eq, like } from 'drizzle-orm'
+import { and, eq, inArray, like } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { randomUUID } from 'node:crypto'
-import { auditLog, claims, nhcxExchanges, payerProfiles, preauthEvents, preauths, rcmQueries } from '@/db/schema'
+import { admissionCoverage, admissions, auditLog, claims, coverageVerifications, nhcxExchanges, patientPolicies, payerProfiles, preauthEvents, preauths, rcmQueries, roomCategories, rooms, serviceCatalog, tariffRates } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 
 vi.mock('@/lib/blob-store', () => ({ putPrivateBlob: vi.fn(async (path: string) => ({ url: `https://blob.test/${path}` })), streamPrivateBlob: vi.fn() }))
-import { applyPreauthAction, createPreauth, estimatePreauth, getPreauthDetail, getPreauthDocumentBlob, listPreauths, uploadPreauthDocument } from '@/lib/queries/preauths'
+import { applyPreauthAction, createPreauth, estimateForPolicy, estimatePreauth, getPreauthDetail, getPreauthDocumentBlob, listPreauths, preauthDefaultsFor, uploadPreauthDocument } from '@/lib/queries/preauths'
 import { snapshotSha256 } from '@/lib/rcm/hash'
 import type { PreauthCreateInput } from '@/lib/rcm/validation'
 import { makePreauthWorld, destroyPreauthWorld, type PreauthWorld } from './preauth-world'
 import { purgeSp8Fixtures } from '../../db/sp8-fixtures'
+import { purgeCoverageFixtures } from '../../db/ws12-fixtures'
 
 const RUN = `${Date.now()}`.slice(-7)
 const PROBE = `TEST-SP7-${RUN} Preauth Probe`
@@ -24,7 +25,15 @@ describe.skipIf(!process.env.DATABASE_URL)('pre-authorisations (DB)', () => {
     treatingProviderId: w.providerId, diagnosisCodeIds: [w.dxId], procedureCodeIds: [w.pxId], estimate: [{ serviceId: w.pricedServiceId, quantity: 2 }], ...over,
   })
   beforeAll(async () => { w = await makePreauthWorld(RUN, 'A') })
+  const t8 = { roomIds: [] as number[], serviceIds: [] as number[], categoryIds: [] as number[] }
   afterAll(async () => {
+    await purgeCoverageFixtures([w.patientId], { dropAdmissions: true })
+    if (t8.roomIds.length > 0) await getDb().delete(rooms).where(inArray(rooms.id, t8.roomIds))
+    if (t8.serviceIds.length > 0) {
+      await getDb().delete(tariffRates).where(inArray(tariffRates.serviceId, t8.serviceIds))
+      await getDb().delete(serviceCatalog).where(inArray(serviceCatalog.id, t8.serviceIds))
+    }
+    if (t8.categoryIds.length > 0) await getDb().delete(roomCategories).where(inArray(roomCategories.id, t8.categoryIds))
     await purgeSp8Fixtures([w.patientId])
     await destroyPreauthWorld(w)
     await getDb().delete(auditLog).where(eq(auditLog.userName, PROBE))
@@ -204,6 +213,88 @@ describe.skipIf(!process.env.DATABASE_URL)('pre-authorisations (DB)', () => {
     expect([x.ok, y.ok].sort()).toEqual([false, true])
     expect(x.ok ? y : x).toMatchObject({ ok: false, error: 'not_ready' })
     expect((await eventsOf(id)).filter((e) => e.action === 'refresh_snapshot')).toHaveLength(1)
+  })
+
+  // ---- WS12 T8: defaults from the admission, the coverage gate and the indicative split -------
+  const categoryId = async (code: string) => {
+    const [found] = await getDb().select({ id: roomCategories.id }).from(roomCategories).where(eq(roomCategories.code, code)).limit(1)
+    if (found) return found.id
+    const [made] = await getDb().insert(roomCategories).values({ code, name: `Test ${code}` }).returning({ id: roomCategories.id })
+    t8.categoryIds.push(made.id)
+    return made.id
+  }
+  const room = async (code: string) => {
+    const [r] = await getDb().insert(rooms).values({ ward: `TEST-WS12-${RUN}`, roomNumber: `R${t8.roomIds.length + 1}`, bedNumber: '1', roomCategoryId: await categoryId(code) }).returning({ id: rooms.id })
+    t8.roomIds.push(r.id)
+    return r.id
+  }
+
+  it('preauthDefaultsFor: an ICU admission gives the attending doctor, its IST date, ICU and the primary policy', async () => {
+    const [adm] = await getDb().insert(admissions).values({
+      patientId: w.patientId, attendingProviderId: w.providerId, currentRoomId: await room('ICU'), admittedAt: new Date('2026-10-19T20:00:00Z'), status: 'admitted',
+    }).returning({ id: admissions.id })
+    const expected = { admissionId: adm.id, encounterId: null, claimType: 'ipd', plannedAdmissionDate: '2026-10-20', treatingProviderId: w.providerId, policyId: w.policyId, roomCategoryCode: 'ICU' }
+    expect(await preauthDefaultsFor(w.patientId, { admissionId: adm.id }, NOW)).toEqual(expected)
+    // The only active admission is used when no id is given.
+    expect(await preauthDefaultsFor(w.patientId, {}, NOW)).toEqual(expected)
+    // Another patient's admission id is ignored.
+    expect(await preauthDefaultsFor(w.patientId, { admissionId: 2147483000 }, NOW)).toEqual(expected)
+
+    // admission_coverage.policy_id wins over the primary policy.
+    const [second] = await getDb().insert(patientPolicies).values({
+      patientId: w.patientId, insurerPayerId: w.insurerId, tpaPayerId: w.tpaId, policyNumber: 'POL-T8', memberId: 'MEM-T8', policyType: 'individual',
+      holderName: 'Holder', relationship: 'self', validFrom: '2026-04-01', validTo: '2099-12-31', priority: 'secondary', createdByName: 'Test',
+    }).returning({ id: patientPolicies.id })
+    await getDb().insert(admissionCoverage).values({ admissionId: adm.id, mode: 'cashless', policyId: second.id, coverageState: 'unverified', recordedByName: 'Test' })
+    expect(await preauthDefaultsFor(w.patientId, { admissionId: adm.id }, NOW)).toMatchObject({ policyId: second.id })
+
+    // A visit: OPD with the visit's doctor and date.
+    expect(await preauthDefaultsFor(w.patientId, { encounterId: w.encounterId }, NOW)).toEqual({
+      admissionId: null, encounterId: w.encounterId, claimType: 'opd', plannedAdmissionDate: '2026-10-01', treatingProviderId: w.providerId, policyId: w.policyId, roomCategoryCode: null,
+    })
+    await getDb().delete(admissionCoverage).where(eq(admissionCoverage.admissionId, adm.id))
+    await getDb().update(admissions).set({ status: 'discharged', dischargedAt: NOW }).where(eq(admissions.id, adm.id))
+    await getDb().delete(patientPolicies).where(eq(patientPolicies.id, second.id))
+    // No active admission: nothing but the primary policy.
+    expect(await preauthDefaultsFor(w.patientId, {}, NOW)).toEqual({
+      admissionId: null, encounterId: null, claimType: 'ipd', plannedAdmissionDate: null, treatingProviderId: null, policyId: w.policyId, roomCategoryCode: null,
+    })
+  })
+
+  const AT8 = new Date(NOW.getTime() + 10 * 86_400_000)
+  it('createPreauth refuses a planned date outside the policy dates and a current inactive verification', async () => {
+    expect(await createPreauth(create({ plannedAdmissionDate: '2100-01-05' }), RCM, AT8))
+      .toEqual({ ok: false, error: 'policy_not_in_force', message: 'This policy is not valid on 5 Jan 2100 (valid 1 Apr 2026–31 Dec 2099)' })
+    expect(await createPreauth(create({ plannedAdmissionDate: '2026-03-31' }), RCM, AT8)).toMatchObject({ ok: false, error: 'policy_not_in_force' })
+    const [v] = await getDb().insert(coverageVerifications).values({
+      patientId: w.patientId, policyId: w.policyId, source: 'manual', result: 'inactive', context: 'manual', method: 'phone',
+      verifiedByName: 'Test Desk', verifiedAt: new Date(AT8.getTime() - 3_600_000), validUntil: new Date(AT8.getTime() + 3_600_000),
+    }).returning({ id: coverageVerifications.id })
+    expect(await createPreauth(create(), RCM, AT8)).toEqual({ ok: false, error: 'coverage_inactive' })
+    // Once that verification is no longer current, the create goes through.
+    expect((await createPreauth(create(), RCM, new Date(AT8.getTime() + 2 * 3_600_000))).ok).toBe(true)
+    expect(v.id).toBeGreaterThan(0)
+    await purgeCoverageFixtures([w.patientId]) // verifications are current by valid_until only
+  })
+
+  it('estimateForPolicy returns the indicative split with the room-rent warning when the room rate is over the limit', async () => {
+    const code = `T8${RUN}`.slice(0, 16)
+    const cat = await categoryId(code)
+    const [svc] = await getDb().insert(serviceCatalog).values({ code: `TSP7${RUN}RR`, name: 'Test room day', departmentId: w.departmentId, category: 'room_rent', hsnSac: '999312', gstRateBp: 0 }).returning({ id: serviceCatalog.id })
+    t8.serviceIds.push(svc.id)
+    await getDb().insert(tariffRates).values({ serviceId: svc.id, scope: 'base', roomCategoryId: cat, amountPaise: 5_000_00, validFrom: '2026-01-01', createdByName: 'TEST-SP7' })
+    await getDb().update(patientPolicies).set({ roomRentLimitPaise: 3_000_00, copayBp: null, sumInsuredPaise: 5_00_000_00 }).where(eq(patientPolicies.id, w.policyId))
+    const r = await estimateForPolicy({ policyId: w.policyId, plannedAdmissionDate: '2026-10-01', roomCategoryCode: code, expectedLengthOfStayDays: 3, estimate: [{ serviceId: svc.id, quantity: 3 }] }, NOW)
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect(r.value.totalPaise).toBe(15_000_00)
+    expect(r.value.coverage).toEqual({
+      insurerPaise: 9_000_00, patientPaise: 6_000_00,
+      warnings: ['Room charge of ₹5,000.00 a day is over the policy room rent limit of ₹3,000.00 a day: ₹6,000.00 for 3 days is payable by the patient.'],
+    })
+    // A policy with no limits at all gives no split.
+    await getDb().update(patientPolicies).set({ roomRentLimitPaise: null, sumInsuredPaise: null }).where(eq(patientPolicies.id, w.policyId))
+    const none = await estimateForPolicy({ policyId: w.policyId, plannedAdmissionDate: '2026-10-01', estimate: [{ serviceId: w.pricedServiceId, quantity: 1 }] }, NOW)
+    expect(none.ok && none.value.coverage).toBeNull()
   })
 
   it('stores a pre-auth document by hash and reads the detail and list without URLs', async () => {

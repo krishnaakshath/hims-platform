@@ -6,17 +6,19 @@ import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, ilike, inArray, ne, notInArray, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
-import { admissions, encounters, nhcxExchanges, patients, payerProfiles, payers, preauthDocuments, preauthEvents, preauths, providers, rcmQueries, rcmQueryResponses, rcmReasonCodes, type PreauthRow } from '@/db/schema'
+import { admissionCoverage, admissions, encounters, nhcxExchanges, patients, payerProfiles, payers, preauthDocuments, preauthEvents, preauths, providers, rcmQueries, rcmQueryResponses, rcmReasonCodes, roomCategories, rooms, serviceCatalog, type PreauthRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { lineTaxablePaise, sumPaise } from '@/lib/billing/amounts'
 import { lineTax } from '@/lib/billing/gst'
 import { DIAGNOSIS_CODE_KINDS, PROCEDURE_CODE_KINDS, type CodeSystemKind } from '@/lib/coding/code-systems'
-import { ageOnDate, istDateOf, todayIsoIn } from '@/lib/india-time'
+import { ageOnDate, formatCalendarDate, istDateOf, todayIsoIn } from '@/lib/india-time'
+import { effectiveLimits, evaluateCoverage, type CoverageLimits, type CoverageVerificationFacts } from '@/lib/insurance/coverage'
+import { applyCoverageToEstimate } from '@/lib/insurance/estimate-split'
 import { putPrivateBlob } from '@/lib/blob-store'
 import { sha256Hex } from '@/lib/rcm/hash'
 import { formatRcmNumber } from '@/lib/rcm/constants'
-import { rcmFail, rcmOk, type RcmWriteResult } from '@/lib/rcm/errors'
+import { policyNotInForceMessage, rcmFail, rcmOk, type RcmWriteResult } from '@/lib/rcm/errors'
 import { isUniqueViolation } from '@/lib/db-errors'
 import { formatPaise } from '@/lib/format'
 import { snapshotSha256 } from '@/lib/rcm/hash'
@@ -24,13 +26,15 @@ import { preauthDecisionOverdue } from '@/lib/rcm/sla'
 import { NHCX_UNDELIVERED_EXCHANGE_STATES, PREAUTH_SNAPSHOT_ACTIONS, nextPreauthStatus, type PreauthStatus } from '@/lib/rcm/preauth-status'
 import { buildPreauthSnapshot, type PreauthSnapshot } from '@/lib/rcm/snapshot'
 import type { CodedEntry, EstimateLine } from '@/lib/rcm/snapshot'
-import type { PreauthActionRequest, PreauthCreateInput } from '@/lib/rcm/validation'
+import type { PreauthFormDefaults } from '@/lib/rcm/preauth-form'
+import type { PreauthActionRequest, PreauthCreateInput, PreauthEstimateInput } from '@/lib/rcm/validation'
 import { resolvePrice } from '@/lib/tariff/resolve'
 import { lockPatientBilling } from './billing-lock'
 import { getCodesByIds } from './code-systems'
+import { currentVerification } from './coverage'
 import type { WriteExecutor } from './executor'
-import { loadPolicyContext, loadRcmPatient, loadSnapshotHospital } from './rcm-context'
-import { getPolicyView, type PolicyView } from './rcm-policies'
+import { loadPolicyContext, loadRcmPatient, loadSnapshotHospital, type PolicyContext } from './rcm-context'
+import { getPolicyView, listPatientPolicies, type PolicyView } from './rcm-policies'
 import { loadPricingContext } from './tariff'
 
 /** Prices each service as SP4 charge capture does (payer tariff first), with GST (intra-state). */
@@ -64,12 +68,33 @@ async function codedEntries(executor: WriteExecutor, ids: number[], kinds: reado
   return out
 }
 
+const NO_LIMITS: CoverageLimits = { sumInsuredPaise: null, balancePaise: null, copayBp: null, roomRentLimitPaise: null, icuLimitPaise: null }
+
+/**
+ * WS12 R4: a pre-auth is refused for a policy not in force on the planned admission date
+ * (policy_not_in_force, with the dates) or one whose current verification says inactive
+ * (coverage_inactive). Every other verdict (unverified, stale, pending, error) only warns.
+ */
+function coverageRefusal(ctx: PolicyContext, verification: CoverageVerificationFacts | null, plannedAdmissionDate: string, now: Date): ReturnType<typeof rcmFail> | null {
+  const verdict = evaluateCoverage({
+    policy: { id: ctx.row.id, status: ctx.row.status, validFrom: ctx.row.validFrom, validTo: ctx.row.validTo, insurerName: ctx.policy.insurer.name, onNhcx: false, limits: NO_LIMITS },
+    verification, pendingCheck: false, context: 'preauth', now, onDate: plannedAdmissionDate,
+  })
+  if (verdict.state === 'policy_expired' || verdict.state === 'policy_not_started') {
+    return rcmFail('policy_not_in_force', policyNotInForceMessage(formatCalendarDate(plannedAdmissionDate), formatCalendarDate(ctx.row.validFrom), formatCalendarDate(ctx.row.validTo)))
+  }
+  if (verdict.state === 'verified_inactive') return rcmFail('coverage_inactive')
+  return null
+}
+
 export async function createPreauth(input: PreauthCreateInput, session: Session, now: Date = new Date()): Promise<RcmWriteResult<{ preauthId: number; preauthNumber: string }>> {
   const db = getDb()
   const ctx = await loadPolicyContext(db, input.policyId)
   if (!ctx || ctx.row.status !== 'active') return rcmFail('policy_not_found')
   if (!ctx.payersActive) return rcmFail('payer_inactive')
   const patientId = ctx.row.patientId
+  const refusal = coverageRefusal(ctx, await currentVerification(db, ctx.row.id, now), input.plannedAdmissionDate, now)
+  if (refusal) return refusal
 
   if (input.admissionId !== undefined) {
     const [a] = await db.select({ patientId: admissions.patientId }).from(admissions).where(eq(admissions.id, input.admissionId)).limit(1)
@@ -379,11 +404,37 @@ export async function listPreauths(opts: { status?: PreauthStatus; q?: string; p
   }
 }
 
-/** The pre-auth estimate for a policy (priced with its billing payer's tariff). Not audited; writes nothing. */
-export async function estimateForPolicy(input: { policyId: number; plannedAdmissionDate: string; roomCategoryCode?: string; estimate: { serviceId: number; quantity: number }[] }): Promise<RcmWriteResult<{ lines: EstimateLine[]; totalPaise: number }>> {
-  const ctx = await loadPolicyContext(getDb(), input.policyId)
+export interface EstimateCoverage { insurerPaise: number; patientPaise: number; warnings: string[] }
+
+/**
+ * The pre-auth estimate for a policy (priced with its billing payer's tariff), with the WS12 R8
+ * indicative insurer/patient split from the effective limits (the current verification's values,
+ * else the policy's own). `coverage` is null when no limit is known, or when the policy is not in
+ * force on the planned date or its current verification says inactive (the create is refused
+ * then). Not audited; writes nothing.
+ */
+export async function estimateForPolicy(input: PreauthEstimateInput, now: Date = new Date()): Promise<RcmWriteResult<{ lines: EstimateLine[]; totalPaise: number; coverage: EstimateCoverage | null }>> {
+  const db = getDb()
+  const ctx = await loadPolicyContext(db, input.policyId)
   if (!ctx || ctx.row.status !== 'active') return rcmFail('policy_not_found')
-  return estimatePreauth({ payerId: ctx.billingPayerId, onDate: input.plannedAdmissionDate, roomCategoryCode: input.roomCategoryCode ?? null, items: input.estimate })
+  const roomCategoryCode = input.roomCategoryCode ?? null
+  const priced = await estimatePreauth({ payerId: ctx.billingPayerId, onDate: input.plannedAdmissionDate, roomCategoryCode, items: input.estimate })
+  if (!priced.ok) return priced
+  const { lines, totalPaise } = priced.value
+  const [view, current] = await Promise.all([getPolicyView(input.policyId, db), currentVerification(db, input.policyId, now)])
+  if (!view || coverageRefusal(ctx, current, input.plannedAdmissionDate, now)) return rcmOk({ lines, totalPaise, coverage: null })
+  const limits = effectiveLimits(
+    { sumInsuredPaise: view.sumInsuredPaise, balancePaise: null, copayBp: view.copayBp, roomRentLimitPaise: view.roomRentLimitPaise, icuLimitPaise: view.icuLimitPaise },
+    current?.limits ?? null,
+  )
+  if (Object.values(limits).every((v) => v === null)) return rcmOk({ lines, totalPaise, coverage: null })
+  const ids = [...new Set(lines.map((l) => l.serviceId))]
+  const categories = new Map((await db.select({ id: serviceCatalog.id, category: serviceCatalog.category }).from(serviceCatalog).where(inArray(serviceCatalog.id, ids))).map((r) => [r.id, r.category]))
+  const split = applyCoverageToEstimate({
+    lines: lines.map((l) => ({ amountPaise: l.amountPaise, category: categories.get(l.serviceId) ?? null, unitPricePaise: l.unitPricePaise, quantity: l.quantity })),
+    limits, roomCategoryCode, lengthOfStayDays: input.expectedLengthOfStayDays ?? 0,
+  })
+  return rcmOk({ lines, totalPaise, coverage: { insurerPaise: split.insurerPaise, patientPaise: split.patientPaise, warnings: split.warnings } })
 }
 
 /** The patient's admissions and visits a pre-auth may be for (newest first, at most 20 each). */
@@ -394,4 +445,55 @@ export async function listPatientEpisodes(patientId: string): Promise<{ admissio
     db.select({ id: encounters.id, date: encounters.encounterDate, type: encounters.encounterType }).from(encounters).where(and(eq(encounters.patientId, patientId), eq(encounters.encounterType, 'opd'))).orderBy(desc(encounters.encounterDate)).limit(20),
   ])
   return { admissions: a.map((r) => ({ id: r.id, admittedOn: istDateOf(r.admittedAt), status: r.status })), encounters: e }
+}
+
+export type { PreauthFormDefaults } from '@/lib/rcm/preauth-form'
+
+/**
+ * WS12 T8: what a new pre-auth starts with. From an admission (the given one, else the
+ * patient's only active admission): IPD, the IST date of admission, the attending doctor, the
+ * current room's category and the admission's coverage policy (admission_coverage.policy_id).
+ * From a visit: OPD, the visit date and its doctor. The policy otherwise is the primary active
+ * policy (preferring one in force on the planned date, else today). An id that is not this
+ * patient's is ignored. Reads only.
+ */
+export async function preauthDefaultsFor(patientId: string, opts: { admissionId?: number; encounterId?: number }, now: Date = new Date()): Promise<PreauthFormDefaults> {
+  const db = getDb()
+  const out: PreauthFormDefaults = { admissionId: null, encounterId: null, claimType: 'ipd', plannedAdmissionDate: null, treatingProviderId: null, policyId: null, roomCategoryCode: null }
+  let coveragePolicyId: number | null = null
+
+  const admissionCols = {
+    id: admissions.id, admittedAt: admissions.admittedAt, providerId: admissions.attendingProviderId, roomCategoryCode: roomCategories.code, policyId: admissionCoverage.policyId,
+  }
+  const admissionQuery = () => db.select(admissionCols).from(admissions)
+    .leftJoin(rooms, eq(rooms.id, admissions.currentRoomId))
+    .leftJoin(roomCategories, eq(roomCategories.id, rooms.roomCategoryId))
+    .leftJoin(admissionCoverage, eq(admissionCoverage.admissionId, admissions.id))
+  let admission: { id: number; admittedAt: Date; providerId: number; roomCategoryCode: string | null; policyId: number | null } | undefined
+  if (opts.admissionId !== undefined) {
+    ;[admission] = await admissionQuery().where(and(eq(admissions.id, opts.admissionId), eq(admissions.patientId, patientId))).limit(1)
+  }
+  const encounter = !admission && opts.encounterId !== undefined
+    ? (await db.select({ id: encounters.id, date: encounters.encounterDate, providerId: encounters.providerId }).from(encounters)
+      .where(and(eq(encounters.id, opts.encounterId), eq(encounters.patientId, patientId))).limit(1))[0]
+    : undefined
+  if (!admission && !encounter) {
+    const active = await admissionQuery().where(and(eq(admissions.patientId, patientId), eq(admissions.status, 'admitted'))).limit(2)
+    if (active.length === 1) admission = active[0]
+  }
+  if (admission) {
+    Object.assign(out, { admissionId: admission.id, plannedAdmissionDate: istDateOf(admission.admittedAt), treatingProviderId: admission.providerId, roomCategoryCode: admission.roomCategoryCode ?? null })
+    coveragePolicyId = admission.policyId
+  } else if (encounter) {
+    Object.assign(out, { encounterId: encounter.id, claimType: 'opd', plannedAdmissionDate: encounter.date, treatingProviderId: encounter.providerId })
+  }
+
+  const policies = (await listPatientPolicies(patientId, db)).filter((p) => p.status === 'active')
+  const onDate = out.plannedAdmissionDate ?? todayIsoIn(undefined, now)
+  const inForce = (p: PolicyView) => p.validFrom <= onDate && onDate <= p.validTo
+  const chosen = policies.find((p) => p.id === coveragePolicyId)
+    ?? policies.find((p) => p.priority === 'primary' && inForce(p)) ?? policies.find(inForce)
+    ?? policies.find((p) => p.priority === 'primary') ?? policies[0]
+  out.policyId = chosen?.id ?? null
+  return out
 }

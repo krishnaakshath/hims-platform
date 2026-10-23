@@ -165,7 +165,9 @@ export const preauthCreateSchema = preauthCreateBase.superRefine((v, ctx) => {
 })
 export type PreauthCreateInput = z.infer<typeof preauthCreateSchema>
 
-export const preauthEstimateSchema = preauthCreateBase.pick({ policyId: true, estimate: true, roomCategoryCode: true, plannedAdmissionDate: true }).strict()
+// WS12 T8: the expected stay (optional) lets the indicative split speak about the room-rent limit.
+export const preauthEstimateSchema = preauthCreateBase.pick({ policyId: true, estimate: true, roomCategoryCode: true, plannedAdmissionDate: true, expectedLengthOfStayDays: true })
+  .partial({ expectedLengthOfStayDays: true }).strict()
 export type PreauthEstimateInput = z.infer<typeof preauthEstimateSchema>
 
 export const preauthActionSchema = z.discriminatedUnion('action', [
