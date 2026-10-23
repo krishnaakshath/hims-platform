@@ -12,6 +12,9 @@ import { LAB_WORKLIST_ROLES } from '@/lib/role-policy' // SP5
 import { LAB_STAGE_STATUSES, parseLabStage, type LabStage } from '@/lib/labs/worklist-stage'
 import { getLabKpis } from '@/lib/queries/hospital-kpis'
 import { KpiTile, formatMinutes } from '@/components/dashboards/KpiTile'
+import { NeedsAttentionStrip } from '@/components/dashboards/NeedsAttentionStrip' // WS8 T15
+import { loadNeedsAttention } from '@/lib/queries/needs-attention' // WS8 T15
+import { todayIsoIn } from '@/lib/india-time' // WS8 T15
 
 export default async function LabsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   const session = await requireSessionOrRedirect()
@@ -20,7 +23,11 @@ export default async function LabsPage({ searchParams }: { searchParams?: Promis
   if (!LAB_WORKLIST_ROLES.includes(session.role)) redirect('/')
 
   const stageParam = parseLabStage((await searchParams)?.stage)
-  const [orders, labTests, patientRoster, kpis] = await Promise.all([listWorklist(), listLabTests(), listPatientsWithLabOrders(), getLabKpis()])
+  const [orders, labTests, patientRoster, kpis, attention] = await Promise.all([
+    listWorklist(), listLabTests(), listPatientsWithLabOrders(), getLabKpis(),
+    // WS8 T15: the strip belongs to the labs role's home (this page); other roles have their own homes.
+    session.role === 'labs' ? loadNeedsAttention(session.role, todayIsoIn()) : Promise.resolve([]),
+  ])
   await logAudit(session, session.role === 'labs' ? 'viewed labs dashboard' : 'viewed lab worklist', null)
 
   // Same trimmed-nonempty rule as the FHIR webhook; only the boolean reaches
@@ -55,6 +62,8 @@ export default async function LabsPage({ searchParams }: { searchParams?: Promis
           </div>
         </div>
       </div>
+
+      <NeedsAttentionStrip items={attention} /> {/* WS8 T15 */}
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiTile label="Awaiting collection" value={inStage('to-collect')} href="/labs?stage=to-collect" icon={ClipboardList} tone="warning" />

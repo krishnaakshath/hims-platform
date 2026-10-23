@@ -10,12 +10,19 @@ import { getInsuranceAttention } from '@/lib/queries/coverage-attention'
 import { RcmKpis } from '@/components/rcm/RcmKpis'
 import { ClaimCandidateTable } from '@/components/rcm/ClaimCandidateTable'
 import { InsuranceAttentionTiles } from '@/components/rcm/InsuranceAttentionTiles'
+import { NeedsAttentionStrip } from '@/components/dashboards/NeedsAttentionStrip' // WS8 T15
+import { loadNeedsAttention } from '@/lib/queries/needs-attention' // WS8 T15
+import { todayIsoIn } from '@/lib/india-time' // WS8 T15
 
 export default async function RcmDashboardPage() {
   const session = await requireSessionOrRedirect()
   if (!RCM_ROLES.includes(session.role)) redirect('/')
 
-  const [dashboard, candidates, attention] = await Promise.all([getRcmDashboard(), listClaimCandidates(), getInsuranceAttention()])
+  const [dashboard, candidates, attention, needsAttention] = await Promise.all([
+    getRcmDashboard(), listClaimCandidates(), getInsuranceAttention(),
+    // WS8 T15: the strip belongs to the rcm role's home (this page); admin has its own home.
+    session.role === 'rcm' ? loadNeedsAttention(session.role, todayIsoIn()) : Promise.resolve([]),
+  ])
   await logAudit(session, 'rcm: viewed RCM dashboard', null)
   return (
     <div className="space-y-6">
@@ -29,6 +36,7 @@ export default async function RcmDashboardPage() {
           <Link href="/rcm/preauths" className="rounded-lg border border-border px-3 py-1.5 hover:bg-muted">Pre-authorisations</Link>
         </div>
       </div>
+      <NeedsAttentionStrip items={needsAttention} /> {/* WS8 T15 */}
       <InsuranceAttentionTiles data={attention} canEditSettings={RCM_SETTINGS_ROLES.includes(session.role)} />
       <RcmKpis data={dashboard} />
       <section className="space-y-2">

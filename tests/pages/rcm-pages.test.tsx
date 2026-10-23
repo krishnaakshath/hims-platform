@@ -19,6 +19,8 @@ function mocks(role = 'rcm') {
   vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Farah', userId: 3 })) }))
   vi.doMock('@/lib/audit', () => ({ logAudit }))
   vi.doMock('next/navigation', () => ({ redirect, notFound, useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }))
+  // WS8 T15: the needs-attention strip has its own tests (tests/lib/queries/needs-attention.test.ts).
+  vi.doMock('@/lib/queries/needs-attention', () => ({ loadNeedsAttention: vi.fn(async () => []) }))
   return { logAudit, redirect, notFound }
 }
 

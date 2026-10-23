@@ -14,6 +14,8 @@ import type { HospitalSnapshot } from '@/lib/dashboard-tiles' // Wave E
 import { HospitalOverview } from '@/components/dashboards/HospitalOverview' // Wave E
 import { Tabs } from '@/components/Tabs' // Wave E
 import { Tags, Building2, IdCard, History, BedDouble, CalendarSync, SlidersHorizontal, Settings2 } from 'lucide-react' // Wave E
+import { NeedsAttentionStrip } from '@/components/dashboards/NeedsAttentionStrip' // WS8 T15
+import type { AttentionItem } from '@/lib/queries/needs-attention' // WS8 T15
 
 export interface DashboardData {
   latestForms: { id: number; status: string; sentDate: Date | string | null; completedDate: Date | string | null; templateName: string; patientName: string }[]
@@ -48,6 +50,10 @@ export interface DashboardPageProps {
   canStartTelemedicine: boolean
   // Wave E: live hospital KPIs, scoped to the viewing role (getHospitalSnapshot).
   hospital: HospitalSnapshot
+  // WS8 T15: the needs-attention strip (loadNeedsAttention, already scoped to the viewing role).
+  // For admin it carries the credential-expiry count (30 days, linking to /staff); the Credential
+  // Expiry list in the Operations tab keeps the names.
+  attention?: AttentionItem[]
 }
 
 const FORM_STATUS_STYLE: Record<string, string> = {
@@ -150,7 +156,7 @@ function ConfigurationCard({ staffByRole }: { staffByRole: { role: string; count
   )
 }
 
-export function AdminDashboard({ session, data, templates, patients, appointmentsInRange, staffByRole, expiringCredentials = [], canStartTelemedicine, hospital }: DashboardPageProps) {
+export function AdminDashboard({ session, data, templates, patients, appointmentsInRange, staffByRole, expiringCredentials = [], canStartTelemedicine, hospital, attention = [] }: DashboardPageProps) {
   const totalPatients = resolveTotalPatients(data, patients)
   const screenedCount = data.screeningBreakdown.green + data.screeningBreakdown.yellow + data.screeningBreakdown.red
   const unscreenedCount = Math.max(totalPatients - screenedCount, 0)
@@ -170,7 +176,7 @@ export function AdminDashboard({ session, data, templates, patients, appointment
           <p className="mt-1 text-xs text-muted-foreground">Busiest 2-hour window across scheduled appointments</p>
         </div>
 
-        <div className={`${CARD_SURFACE} p-5`}>
+        <Link href="/patients" className={`${CARD_SURFACE} block p-5 transition-colors hover:bg-muted/40`}>
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Total Patients</span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true"><Users className="h-4 w-4" /></span>
@@ -180,7 +186,7 @@ export function AdminDashboard({ session, data, templates, patients, appointment
             <div className="h-full bg-primary" style={{ width: `${screenedPct}%` }} />
           </div>
           <p className="mt-1.5 text-xs text-muted-foreground">{screenedCount} screened · {unscreenedCount} not yet screened</p>
-        </div>
+        </Link>
 
         <div className={`${CARD_SURFACE} p-5`}>
           <div className="mb-3 flex items-center justify-between">
@@ -333,6 +339,8 @@ export function AdminDashboard({ session, data, templates, patients, appointment
         </div>
         <DashboardHomeClient templates={templates} />
       </div>
+
+      <NeedsAttentionStrip items={attention} /> {/* WS8 T15 */}
 
       {/* Wave E P1-07: live hospital KPIs first; the trial widgets move to the Research tab. */}
       <HospitalOverview role={session.role} hospital={hospital} />

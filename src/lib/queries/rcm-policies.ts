@@ -2,7 +2,7 @@
 // the legacy prefill and the RCM patient search. Card blob URLs never leave the server; audit
 // details carry ids and enum values only (never policy or member numbers).
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, between, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import { patientPolicies, patients, payerProfiles, payers, type PatientPolicyRow } from '@/db/schema'
@@ -255,3 +255,14 @@ export async function legacyPolicyPrefill(patientId: string): Promise<Partial<Po
   if (p.relationship) out.relationship = p.relationship
   return out
 }
+
+// WS8 T15: the dashboard needs-attention strip. Same rule as listExpiringPolicies (coverage-attention.ts),
+// the list /rcm/policies?expiring=7 shows: active policies whose valid_to falls in [fromIso, toIso].
+export async function countPoliciesExpiringBetween(fromIso: string, toIso: string): Promise<number> {
+  const [r] = await getDb()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(patientPolicies)
+    .where(and(eq(patientPolicies.status, 'active'), between(patientPolicies.validTo, fromIso, toIso)))
+  return r?.n ?? 0
+}
+// end WS8 T15

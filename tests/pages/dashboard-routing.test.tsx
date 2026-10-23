@@ -6,6 +6,8 @@ import { describe, it, expect, vi } from 'vitest'
 // version) -- `vi.hoisted` is the supported way to get the same effect, with
 // no change to what the test actually verifies.
 const { mockRedirect } = vi.hoisted(() => ({ mockRedirect: vi.fn() }))
+// WS8 T15: the needs-attention strip has its own tests (tests/lib/queries/needs-attention.test.ts).
+vi.mock('@/lib/queries/needs-attention', () => ({ loadNeedsAttention: vi.fn(async () => []) }))
 vi.mock('next/navigation', () => ({ redirect: mockRedirect }))
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Test PI' })) }))
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))

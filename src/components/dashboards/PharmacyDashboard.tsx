@@ -3,6 +3,8 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { AlertTriangle, XCircle, Pill, PackagePlus, PackageCheck, Clock, Search } from 'lucide-react'
 import { KpiTile } from '@/components/dashboards/KpiTile'
+import { NeedsAttentionStrip } from '@/components/dashboards/NeedsAttentionStrip' // WS8 T15
+import type { AttentionItem } from '@/lib/queries/needs-attention' // WS8 T15
 import type { PharmacyKpi } from '@/lib/queries/hospital-kpis'
 import { Button } from '@/components/ui/button'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
@@ -71,6 +73,7 @@ export function PharmacyDashboard({
   kpis,
   stockFilter = null,
   canUseCounter = false,
+  attention = [],
 }: {
   session: Session
   medications: MedicationWithInventory[]
@@ -82,6 +85,8 @@ export function PharmacyDashboard({
   kpis: PharmacyKpi
   stockFilter?: 'out' | 'low' | null
   canUseCounter?: boolean
+  // WS8 T15: the needs-attention strip, loaded by the page for the pharmacy role's home.
+  attention?: AttentionItem[]
 }) {
   const [dispensing, setDispensing] = useState<MedicationWithInventory | null>(null)
   // `null` = closed; `{}` = open with no prefill (header button);
@@ -108,6 +113,8 @@ export function PharmacyDashboard({
           </Link>
         )}
       </div>
+
+      <NeedsAttentionStrip items={attention} /> {/* WS8 T15 */}
 
       {/* Wave E P1-18: every tile drills somewhere -- stock tiles filter the table below. */}
       <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">

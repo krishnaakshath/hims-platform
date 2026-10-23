@@ -5,7 +5,7 @@
 // ordinary receipt through insertPaymentInTx, the same ledger write every other mode uses.
 // UTRs are stored on the request and as the receipt reference, never in the audit log or console.
 import QRCode from 'qrcode'
-import { and, desc, eq, gt } from 'drizzle-orm'
+import { and, desc, eq, gt, isNotNull, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { invoices, paymentRequests } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
@@ -250,3 +250,18 @@ export function manualUpiProvider(session: Session, clock: () => Date = () => ne
     },
   }
 }
+
+// WS8 T15: the dashboard needs-attention strip. Patient-portal UPI requests the patient has reported
+// a UTR against and the cash desk has not yet confirmed, inside the same TTL the cash desk lists.
+// A count only: the UTR itself never leaves this query.
+export async function countReportedPortalUpiRequests(now: Date = new Date()): Promise<number> {
+  const [r] = await getDb()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(paymentRequests)
+    .where(and(
+      eq(paymentRequests.source, 'portal'), eq(paymentRequests.status, 'pending'), isNotNull(paymentRequests.reportedUtr),
+      gt(paymentRequests.createdAt, new Date(now.getTime() - UPI_REQUEST_TTL_MS)),
+    ))
+  return r?.n ?? 0
+}
+// end WS8 T15

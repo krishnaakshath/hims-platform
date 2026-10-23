@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import DoctorPortalPage from '@/app/(dashboard)/doctor/page'
 
+// WS8 T15: the needs-attention strip has its own tests (tests/lib/queries/needs-attention.test.ts).
+vi.mock('@/lib/queries/needs-attention', () => ({ loadNeedsAttention: vi.fn(async () => []) }))
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam' })) }))
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
 vi.mock('@/lib/queries/patients', () => ({
@@ -270,6 +272,9 @@ describe('PI dashboard (/doctor)', () => {
     expect(screen.getByRole('link', { name: /note patient/i })).toHaveAttribute('href', '/patients/RD-0002/medical-record')
     expect(container.querySelector('a[href="/encounters?doctor=1"]')).not.toBeNull()
     expect(deadLinks(container, 'pi')).toEqual([])
+    // WS8 T15: the header counts are links to the sections that list them.
+    for (const href of ['/doctor#panel', '/doctor#schedule', '/doctor#triage']) expect(container.querySelector(`a[href="${href}"]`), href).not.toBeNull()
+    for (const id of ['panel', 'schedule', 'triage']) expect(container.querySelector(`#${id}`), id).not.toBeNull()
   })
 
   it('Wave E: no workload query (and no panels) without a matched provider row', async () => {

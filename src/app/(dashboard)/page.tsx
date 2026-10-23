@@ -10,6 +10,8 @@ import { AdminDashboard } from '@/components/dashboards/AdminDashboard'
 import { CoordinatorDashboard } from '@/components/dashboards/CoordinatorDashboard'
 import { FrontDeskDashboard } from '@/components/dashboards/FrontDeskDashboard'
 import { getHospitalSnapshot } from '@/lib/queries/hospital-kpis' // Wave E
+import { loadNeedsAttention } from '@/lib/queries/needs-attention' // WS8 T15
+import { todayIsoIn } from '@/lib/india-time' // WS8 T15
 
 export default async function DashboardHomePage() {
   const session = await requireSessionOrRedirect()
@@ -43,20 +45,21 @@ export default async function DashboardHomePage() {
   // @testing-library/react in tests) can't render an async component directly as JSX.
   if (session.role === 'frontdesk') {
     await logAudit(session, 'viewed front desk dashboard', null)
-    return await FrontDeskDashboard({ session })
+    return await FrontDeskDashboard({ session, attention: await loadNeedsAttention(session.role, todayIsoIn()) }) // WS8 T15
   }
 
   const now = new Date()
   const rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
   const rangeEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
 
-  const [data, templates, appointmentsInRange, allStaff, expiringCredentials, hospital] = await Promise.all([
+  const [data, templates, appointmentsInRange, allStaff, expiringCredentials, hospital, attention] = await Promise.all([
     getDashboardData(),
     listFormTemplates(),
     listAppointmentsInRange(rangeStart, rangeEnd),
     listAllUsers(),
     listExpiringOrExpiredCredentials(),
     getHospitalSnapshot(session.role), // Wave E: scoped to what this role may open
+    loadNeedsAttention(session.role, todayIsoIn()), // WS8 T15: only items this role may open
   ])
   await logAudit(session, 'viewed home dashboard', null)
 
@@ -82,6 +85,7 @@ export default async function DashboardHomePage() {
     // allow-list to match the API route's own role gate exactly.
     canStartTelemedicine: (['admin', 'pi'] as string[]).includes(session.role),
     hospital,
+    attention, // WS8 T15
   }
 
   return session.role === 'admin'

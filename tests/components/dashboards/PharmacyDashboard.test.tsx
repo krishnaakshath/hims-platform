@@ -64,4 +64,13 @@ describe('PharmacyDashboard (Wave E P1-18)', () => {
     const { container } = render(<PharmacyDashboard {...props(role)} />)
     expect(deadLinks(container, role)).toEqual([])
   })
+
+  // WS8 T15
+  it('shows the needs-attention strip for the pharmacy home', () => {
+    const { container } = render(<PharmacyDashboard {...props('pharmacy')} attention={[
+      { id: 'low_stock', label: 'Medicines out of stock or low', count: 4, href: '/pharmacy?stock=out', tone: 'danger' },
+    ]} />)
+    expect(screen.getByRole('region', { name: 'Needs attention' }).querySelector('a[href="/pharmacy?stock=out"]')).not.toBeNull()
+    expect(deadLinks(container, 'pharmacy')).toEqual([])
+  })
 })

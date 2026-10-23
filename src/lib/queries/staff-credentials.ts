@@ -112,3 +112,22 @@ export async function listExpiringOrExpiredCredentials(): Promise<ExpiringCreden
     return { ...r, expiresOn, daysUntilExpiry, status: expiresOn < todayStr ? 'expired' as const : 'expiring_soon' as const }
   })
 }
+
+// WS8 T15: the dashboard needs-attention strip. Credentials of staff still on the roster (terminated
+// staff excluded, as in listExpiringOrExpiredCredentials) that have expired or expire within `days`
+// days of todayIso (inclusive). Counts only: no names or credential numbers.
+export async function countCredentialsExpiringWithin(todayIso: string, days: number): Promise<{ expired: number; expiring: number }> {
+  const d = new Date(`${todayIso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  const cutoff = d.toISOString().slice(0, 10)
+  const [r] = await getDb()
+    .select({
+      expired: sql<number>`(count(*) filter (where ${staffCredentials.expiresOn} < ${todayIso}))::int`,
+      expiring: sql<number>`(count(*) filter (where ${staffCredentials.expiresOn} >= ${todayIso}))::int`,
+    })
+    .from(staffCredentials)
+    .innerJoin(staffMembers, eq(staffMembers.id, staffCredentials.staffMemberId))
+    .where(and(isNotNull(staffCredentials.expiresOn), sql`${staffCredentials.expiresOn} <= ${cutoff}`, ne(staffMembers.employmentStatus, 'terminated')))
+  return { expired: r?.expired ?? 0, expiring: r?.expiring ?? 0 }
+}
+// end WS8 T15
