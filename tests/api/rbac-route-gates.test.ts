@@ -130,7 +130,6 @@ afterEach(() => {
 import { PUT as putUhidPrefix } from '@/app/api/settings/uhid-prefix/route'
 import { GET as getWorkbookFull } from '@/app/api/workbook/full/route'
 import { GET as getWorkbookExport } from '@/app/api/workbook/export/route'
-import { POST as postMockPayment } from '@/app/api/mock-payments/route'
 import { GET as listBroadcasts, POST as postBroadcast } from '@/app/api/broadcasts/route'
 import { GET as getBroadcast } from '@/app/api/broadcasts/[id]/route'
 import { GET as listBroadcastRecipients } from '@/app/api/broadcasts/recipients/route'
@@ -197,35 +196,6 @@ describe('GET /api/workbook/export', () => {
     expect(res.status).toBe(403)
     expect(buildWorkbookSpy).not.toHaveBeenCalled()
     buildWorkbookSpy.mockRestore()
-  })
-})
-
-describe('POST /api/mock-payments', () => {
-  // /billing/pay's own page gate is admin/crc/billing, matching
-  // VirtualCardPaymentForm's only POST target -- every other role 403s.
-  it('403s every role outside admin, crc, billing', async () => {
-    for (const role of deniedFor(['admin', 'crc', 'billing'])) {
-      sessionRole = role
-      const res = await postMockPayment(
-        new NextRequest('http://localhost/api/mock-payments', { method: 'POST', body: JSON.stringify({}) })
-      )
-      expect(res.status, `role ${role}`).toBe(403)
-    }
-  })
-
-  // An intentionally invalid (empty) body so an allowed role's response
-  // proves it: the gate must let admin/crc/billing through to the route's
-  // own Zod validation, which then 400s on the missing fields -- never
-  // recording a payment. Anything other than 403 here shows the gate didn't
-  // block them; the 400 itself is the route's own concern, not this test's.
-  it('does not 403 admin, crc, or billing', async () => {
-    for (const role of ['admin', 'crc', 'billing'] as const) {
-      sessionRole = role
-      const res = await postMockPayment(
-        new NextRequest('http://localhost/api/mock-payments', { method: 'POST', body: JSON.stringify({}) })
-      )
-      expect(res.status, `role ${role}`).not.toBe(403)
-    }
   })
 })
 
@@ -493,6 +463,9 @@ import { POST as finaliseInvoiceRoute } from '@/app/api/billing/invoices/[id]/fi
 import { POST as discardInvoiceRoute } from '@/app/api/billing/invoices/[id]/discard/route'
 import { POST as cancelInvoiceRoute } from '@/app/api/billing/invoices/[id]/cancel/route'
 import { POST as postPaymentRoute } from '@/app/api/billing/payments/route'
+import { POST as postUpiRequestRoute } from '@/app/api/billing/payments/upi-request/route' // Foundations T11
+import { POST as postUpiConfirmRoute } from '@/app/api/billing/payments/upi-request/[id]/confirm/route' // Foundations T11
+import { POST as postUpiCancelRoute } from '@/app/api/billing/payments/upi-request/[id]/cancel/route' // Foundations T11
 import { POST as postRefundRoute } from '@/app/api/billing/refunds/route'
 // end SP4
 // SP5
@@ -1070,6 +1043,11 @@ export const API_GATES: ApiGateCase[] = [
     ]
   })(),
   // end Wave I
+  // Foundations T11: UPI QR request and confirm -- CASH_DESK_ROLES, like POST /api/billing/payments.
+  { name: 'POST /api/billing/payments/upi-request', call: () => settle(() => postUpiRequestRoute(send('POST', '/api/billing/payments/upi-request'))), allowed: [...CASH_DESK_ROLES] },
+  { name: 'POST /api/billing/payments/upi-request/[id]/confirm', call: () => settle(() => postUpiConfirmRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/confirm`), ctx({ id: BOGUS_ID }))), allowed: [...CASH_DESK_ROLES] },
+  { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => settle(() => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...CASH_DESK_ROLES] },
+  // end Foundations T11
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1221,6 +1199,11 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/nhcx/eligibility', call: () => postNhcxEligibility(send('POST', '/api/nhcx/eligibility', NOT_JSON)), allowed: NHCX_ELIGIBILITY_ROLES },
   { name: 'POST /api/rcm/nhcx/exchanges/[id]/review', call: () => postNhcxReview(send('POST', `/api/rcm/nhcx/exchanges/${BOGUS_ID}/review`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: NHCX_EXCHANGE_ROLES },
   { name: 'POST /api/settings/integrations/test', call: () => postIntegrationTest(send('POST', '/api/settings/integrations/test', NOT_JSON)), allowed: INTEGRATION_SETTINGS_ROLES },
+  // Foundations T11
+  { name: 'POST /api/billing/payments/upi-request', call: () => postUpiRequestRoute(send('POST', '/api/billing/payments/upi-request', NOT_JSON)), allowed: CASH_DESK_ROLES },
+  { name: 'POST /api/billing/payments/upi-request/[id]/confirm', call: () => postUpiConfirmRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/confirm`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
+  { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
+  // end Foundations T11
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {
@@ -1290,7 +1273,7 @@ describe.each(API_GATES.filter((r) => /\/api\/(trials|workbook)\b/.test(r.name))
 // without a row fails this test; so does an exemption left behind for a
 // handler that no longer exists.
 const BESPOKE_ROWS = [
-  'GET /api/workbook/full', 'GET /api/workbook/export', 'POST /api/mock-payments',
+  'GET /api/workbook/full', 'GET /api/workbook/export',
   'GET /api/broadcasts', 'POST /api/broadcasts', 'GET /api/broadcasts/[id]', 'GET /api/broadcasts/recipients',
   'GET /api/reviews', 'POST /api/reviews', 'GET /api/reviews/[id]', 'PUT /api/reviews/[id]',
 ]

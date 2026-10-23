@@ -2706,3 +2706,38 @@ export const staffNotificationReads = pgTable('staff_notification_reads', {
   index('staff_notification_reads_read_at_idx').on(t.readAt),
 ])
 // end Wave G
+
+// Foundations T11: payment requests
+// (scripts/migrations/2026-10-23-payment-requests.sql). One row per UPI QR shown at the cash desk.
+// Confirming it with the payer's UTR posts the ordinary receipt (patient_payments, mode 'upi') in
+// the same transaction; the partial unique index on utr makes a second use of a UTR a 23505.
+export const paymentRequests = pgTable('payment_requests', {
+  id: serial('id').primaryKey(),
+  provider: text('provider').default('manual_upi_qr').notNull(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  kind: patientPaymentKindEnum('kind').default('receipt').notNull(),
+  admissionId: integer('admission_id').references(() => admissions.id),
+  invoiceId: integer('invoice_id').references(() => invoices.id),
+  amountPaise: bigint('amount_paise', { mode: 'number' }).notNull(),
+  vpa: text('vpa').notNull(),
+  note: text('note').notNull(),
+  status: text('status').default('pending').notNull(),
+  utr: text('utr'),                               // never written to the audit log
+  paymentId: integer('payment_id').references(() => patientPayments.id),
+  createdBy: text('created_by').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  confirmedAt: timestamp('confirmed_at'),
+}, (t) => [
+  check('payment_requests_amount_positive', sql`${t.amountPaise} > 0`),
+  check('payment_requests_status_valid', sql`${t.status} IN ('pending', 'confirmed', 'cancelled')`),
+  check('payment_requests_confirmed_has_utr', sql`${t.status} <> 'confirmed' OR (${t.utr} IS NOT NULL AND ${t.paymentId} IS NOT NULL)`),
+  uniqueIndex('payment_requests_utr_unique').on(t.utr).where(sql`${t.utr} IS NOT NULL`),
+  index('payment_requests_patient_idx').on(t.patientId),
+])
+export type PaymentRequestRow = typeof paymentRequests.$inferSelect
+// Migration-only (scripts/migrations/2026-10-23-payment-requests-utr-guard.sql), like the SP4
+// document triggers: UNIQUE INDEX patient_payments_upi_reference_unique ON patient_payments
+// ((upper(regexp_replace(reference, '[[:space:]-]', '', 'g')))) WHERE mode = 'upi' AND reference IS NOT NULL
+// -- one receipt per normalised UTR across patients (UPI_REFERENCE_UNIQUE in patient-ledger.ts).
+// end Foundations T11

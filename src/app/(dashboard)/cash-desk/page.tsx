@@ -10,9 +10,19 @@ import { findPatientForCashDesk, getPatientLedger, listPayableInvoices } from '@
 import { CashDeskPanel } from '@/components/billing/CashDeskPanel'
 import { Balance, LedgerTable } from '@/components/billing/LedgerTable'
 import { FIELD_CLASS } from '@/components/tariff/api'
+import { MAX_DOCUMENT_PAISE } from '@/lib/billing/amounts'
+import { upiConfig } from '@/lib/payments/upi'
+
+// Foundations T11: "Collect payment" links prefill the payment tab. A positive whole number of
+// paise up to the document maximum, else ignored; an invoice only if it is this patient's and payable.
+function prefillAmountPaise(raw: unknown): number | undefined {
+  if (typeof raw !== 'string' || !/^[1-9]\d{0,12}$/.test(raw)) return undefined
+  const n = Number(raw)
+  return n <= MAX_DOCUMENT_PAISE ? n : undefined
+}
 
 // SP4 cash desk (CASH_DESK_ROLES: admin, billing, crc, frontdesk). Record-keeping only.
-export default async function CashDeskPage({ searchParams }: { searchParams: Promise<{ q?: string; patientId?: string }> }) {
+export default async function CashDeskPage({ searchParams }: { searchParams: Promise<{ q?: string; patientId?: string; amountPaise?: string; invoiceId?: string }> }) {
   const session = await requireSessionOrRedirect()
   if (!CASH_DESK_ROLES.includes(session.role)) redirect('/')
 
@@ -27,6 +37,9 @@ export default async function CashDeskPage({ searchParams }: { searchParams: Pro
   const invoices = ledger ? await listPayableInvoices(ledger.patient.id) : []
   if (ledger) await logAudit(session, 'billing: viewed patient ledger', ledger.patient.id)
   const legacyLinks = CHARGES_ROLES.includes(session.role)
+  const initialAmountPaise = ledger ? prefillAmountPaise(sp.amountPaise) : undefined
+  const rawInvoiceId = typeof sp.invoiceId === 'string' && /^[1-9]\d{0,9}$/.test(sp.invoiceId) ? Number(sp.invoiceId) : undefined
+  const initialInvoiceId = initialAmountPaise !== undefined && invoices.some((i) => i.id === rawInvoiceId) ? rawInvoiceId : undefined
 
   return (
     <div>
@@ -104,7 +117,8 @@ export default async function CashDeskPage({ searchParams }: { searchParams: Pro
             </section>
             <section>
               <h2 className="mb-2 text-lg font-semibold">Take money</h2>
-              <CashDeskPanel patientId={ledger.patient.id} admissionId={ledger.activeAdmissionId} finalisedInvoices={invoices} canRefund={BILLING_AUTHORITY_ROLES.includes(session.role)} />
+              <CashDeskPanel patientId={ledger.patient.id} admissionId={ledger.activeAdmissionId} finalisedInvoices={invoices} canRefund={BILLING_AUTHORITY_ROLES.includes(session.role)}
+                upiReady={upiConfig() !== null} initialAmountPaise={initialAmountPaise} initialInvoiceId={initialInvoiceId} />
             </section>
           </div>
         </div>

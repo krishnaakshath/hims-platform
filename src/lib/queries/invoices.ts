@@ -5,11 +5,13 @@ import { and, asc, count, desc, eq, inArray, isNull, like, or, sql, type SQL } f
 import { getDb } from '@/db/client'
 import {
   chargeLines, creditNotes, invoiceLines, invoices, patients, payers,
+  patientPayments, refunds, // Foundations T11
   type ChargeLineRow, type CreditNoteRow, type InvoiceLineRow, type InvoiceRow,
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
-import { sumPaise } from '@/lib/billing/amounts'
+import { paiseFromDb, sumPaise } from '@/lib/billing/amounts'
+import { invoiceOutstandingPaise } from '@/lib/billing/invoice-balance' // Foundations T11
 import {
   GST_STATE_CODES, documentTitle, lineTax, placeOfSupply, stateCodeOfGstin, type InvoiceSnapshot, type SupplyType,
 } from '@/lib/billing/gst'
@@ -284,7 +286,30 @@ export interface InvoiceListRow {
   invoiceDate: string | null
   totalPaise: number | null
   createdAt: Date
+  paidPaise: number // Foundations T11: receipts taken against this invoice
+  outstandingPaise: number | null // finalised: total less paid (floor 0); cancelled: 0; draft/discarded: null
 }
+
+// Foundations T11: an invoice's paid amount is the receipts recorded against it at the cash desk
+// (any mode) less the refunds issued against those receipts, floored at 0; what is still owed on a
+// finalised invoice is its total less that.
+const paidForInvoice = (invoiceId: SQL | number) => sql<string | null>`greatest(0,
+  coalesce((select sum(${patientPayments.amountPaise}) from ${patientPayments} where ${patientPayments.invoiceId} = ${invoiceId}), 0)
+  - coalesce((select sum(${refunds.amountPaise}) from ${refunds} inner join ${patientPayments} on ${patientPayments.id} = ${refunds.againstPaymentId}
+      where ${patientPayments.invoiceId} = ${invoiceId}), 0))`
+const invoicePaidSql = paidForInvoice(sql`${invoices.id}`)
+
+/** Receipts against the invoice less refunds against those receipts, floored at 0. Usable inside a transaction. */
+export async function invoicePaidPaise(executor: Pick<ReturnType<typeof getDb>, 'execute'>, invoiceId: number): Promise<number> {
+  const result = await executor.execute(sql`select ${paidForInvoice(invoiceId)}::text as paid`)
+  const rows = (Array.isArray(result) ? result : (result as unknown as { rows: unknown[] }).rows) as { paid: string | null }[]
+  return paiseFromDb(rows[0]?.paid ?? null)
+}
+
+export async function getInvoicePaidPaise(invoiceId: number): Promise<number> {
+  return invoicePaidPaise(getDb(), invoiceId)
+}
+// end Foundations T11
 
 export const INVOICE_PAGE_SIZE = 50
 
@@ -303,10 +328,17 @@ export async function listInvoices(opts: { status?: InvoiceStatus; q?: string; p
   const rows = await db.select({
     id: invoices.id, invoiceNumber: invoices.invoiceNumber, status: invoices.status, patientId: invoices.patientId, patientName: patients.name,
     uhid: patients.uhid, payerName: payers.name, invoiceDate: invoices.invoiceDate, totalPaise: invoices.totalPaise, createdAt: invoices.createdAt,
+    paid: invoicePaidSql,
   }).from(invoices).innerJoin(patients, eq(patients.id, invoices.patientId)).leftJoin(payers, eq(payers.id, invoices.payerId)).where(where)
     .orderBy(desc(invoices.createdAt), desc(invoices.id)).limit(INVOICE_PAGE_SIZE).offset((page - 1) * INVOICE_PAGE_SIZE)
   const [{ n }] = await db.select({ n: count() }).from(invoices).innerJoin(patients, eq(patients.id, invoices.patientId)).where(where)
-  return { rows, total: n }
+  return {
+    rows: rows.map(({ paid, ...r }) => {
+      const paidPaise = paiseFromDb(paid)
+      return { ...r, paidPaise, outstandingPaise: invoiceOutstandingPaise(r.status, r.totalPaise, paidPaise) }
+    }),
+    total: n,
+  }
 }
 
 /** Captured lines of a visit or stay that are not on any invoice yet. */

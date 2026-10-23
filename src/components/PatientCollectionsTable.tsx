@@ -18,8 +18,8 @@ const COLUMNS: DataGridColumn[] = [
   { key: 'actions', label: 'Actions' },
 ]
 
-// showCollectPayment (Wave B P1-21): the action opens the demo card form, so
-// the page passes demoFeaturesEnabled().
+// Foundations T11: "Collect Payment" opens the Cash Desk for the patient with the balance
+// prefilled (legacy amount_cents are read as paise, as everywhere else in billing).
 export function PatientCollectionsTable({ rows, linkPatients = true, showCollectPayment = true }: { rows: Row[]; linkPatients?: boolean; showCollectPayment?: boolean }) {
   const router = useRouter()
   const [search, setSearch] = useState('')
@@ -67,7 +67,7 @@ export function PatientCollectionsTable({ rows, linkPatients = true, showCollect
                     <td className="p-3">
                       {showCollectPayment && r.balanceCents > 0 ? (
                         <Link
-                          href={`/billing/pay?patientId=${r.patientId}&amountCents=${r.balanceCents}`}
+                          href={`/cash-desk?${new URLSearchParams({ patientId: r.patientId, amountPaise: String(r.balanceCents) })}`}
                           className="rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
                         >
                           Collect Payment

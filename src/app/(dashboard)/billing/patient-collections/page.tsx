@@ -3,7 +3,6 @@ import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { listPatientCollections } from '@/lib/queries/patient-collections'
 import { PatientCollectionsTable } from '@/components/PatientCollectionsTable'
-import { demoFeaturesEnabled } from '@/lib/demo-features'
 
 export default async function PatientCollectionsPage() {
   const session = await requireSessionOrRedirect()
@@ -15,7 +14,7 @@ export default async function PatientCollectionsPage() {
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold text-foreground">Patient Collections</h1>
-      <PatientCollectionsTable rows={rows} linkPatients={session.role !== 'billing'} showCollectPayment={demoFeaturesEnabled()} />
+      <PatientCollectionsTable rows={rows} linkPatients={session.role !== 'billing'} />
     </div>
   )
 }

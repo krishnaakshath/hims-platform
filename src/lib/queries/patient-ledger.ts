@@ -6,6 +6,7 @@ import { getDb } from '@/db/client'
 import {
   admissions, chargeLines, charges, creditNotes, invoices, patientPayments, patients, refunds, type PatientPaymentRow,
   claims, claimSettlements, claimWriteOffs, // SP7
+  paymentRequests, // Foundations T11
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
@@ -16,6 +17,8 @@ import { computeLedger, type LedgerEntry } from '@/lib/billing/ledger'
 import { financialYearOf } from '@/lib/billing/numbering'
 import type { PaymentInput, RefundInput } from '@/lib/billing/validation'
 import { istDateOf } from '@/lib/india-time'
+import { isUniqueViolation } from '@/lib/db-errors'
+import { normaliseUtr } from '@/lib/payments/provider' // Foundations T11
 import { lockPatientBilling } from './charge-capture'
 import { SeriesExhaustedError, allocateDocumentNumber } from './document-numbers'
 import type { WriteExecutor } from './executor'
@@ -120,7 +123,7 @@ export async function findPatientForCashDesk(query: string): Promise<{ id: strin
 }
 
 /** A full number series rolls the whole transaction back and becomes a plain refusal. */
-async function withSeriesGuard<T>(run: () => Promise<T>): Promise<T | { ok: false; error: 'series_exhausted' }> {
+export async function withSeriesGuard<T>(run: () => Promise<T>): Promise<T | { ok: false; error: 'series_exhausted' }> {
   try {
     return await run()
   } catch (err) {
@@ -136,43 +139,84 @@ export async function listPayableInvoices(patientId: string): Promise<{ id: numb
   return rows.map((r) => ({ id: r.id, invoiceNumber: r.invoiceNumber ?? '', totalPaise: r.totalPaise ?? 0 }))
 }
 
-async function patientExists(patientId: string): Promise<boolean> {
+export async function patientExists(patientId: string): Promise<boolean> {
   const [p] = await getDb().select({ id: patients.id }).from(patients).where(eq(patients.id, patientId)).limit(1)
   return Boolean(p)
 }
 
-async function admissionIsPatients(executor: WriteExecutor, admissionId: number, patientId: string): Promise<boolean> {
+export async function admissionIsPatients(executor: WriteExecutor, admissionId: number, patientId: string): Promise<boolean> {
   const [a] = await executor.select({ id: admissions.id }).from(admissions).where(and(eq(admissions.id, admissionId), eq(admissions.patientId, patientId))).limit(1)
   return Boolean(a)
 }
 
+export type RecordPaymentError = 'patient_not_found' | 'admission_mismatch' | 'invoice_not_payable' | 'series_exhausted'
+  | 'duplicate_utr' // Foundations T11
+
+// Foundations T11: the unique expression index over the normalised UPI reference
+// (scripts/migrations/2026-10-23-payment-requests-utr-guard.sql).
+export const UPI_REFERENCE_UNIQUE = 'patient_payments_upi_reference_unique'
+
+/**
+ * Foundations T11: is this UPI reference (UTR) already on a receipt, typed by hand or confirmed
+ * through a UPI QR request? Compared after normaliseUtr (spaces and dashes dropped, upper-cased),
+ * the same expression the unique index uses. The index is the race-proof guard; this check gives
+ * the plain refusal without relying on an aborted transaction.
+ */
+export async function upiReferenceTaken(executor: WriteExecutor, reference: string): Promise<boolean> {
+  const utr = normaliseUtr(reference)
+  const [onRequest] = await executor.select({ id: paymentRequests.id }).from(paymentRequests).where(eq(paymentRequests.utr, utr)).limit(1)
+  if (onRequest) return true
+  const [onReceipt] = await executor.select({ id: patientPayments.id }).from(patientPayments)
+    .where(and(eq(patientPayments.mode, 'upi'), sql`upper(regexp_replace(${patientPayments.reference}, '[[:space:]-]', '', 'g')) = ${utr}`)).limit(1)
+  return Boolean(onReceipt)
+}
+
 export async function recordPayment(
   input: PaymentInput, session: Session, now: Date = new Date(),
-): Promise<{ ok: true; receiptNumber: string; paymentId: number } | { ok: false; error: 'patient_not_found' | 'admission_mismatch' | 'invoice_not_payable' | 'series_exhausted' }> {
+): Promise<{ ok: true; receiptNumber: string; paymentId: number } | { ok: false; error: RecordPaymentError }> {
   if (!(await patientExists(input.patientId))) return { ok: false, error: 'patient_not_found' }
-  return withSeriesGuard(() => getDb().transaction(async (tx) => {
-    await lockPatientBilling(tx, input.patientId)
-    if (input.admissionId !== undefined && !(await admissionIsPatients(tx, input.admissionId, input.patientId))) {
-      return { ok: false as const, error: 'admission_mismatch' as const }
-    }
-    if (input.invoiceId !== undefined) {
-      const [inv] = await tx.select({ id: invoices.id }).from(invoices)
-        .where(and(eq(invoices.id, input.invoiceId), eq(invoices.patientId, input.patientId), eq(invoices.status, 'finalised'))).limit(1)
-      if (!inv) return { ok: false as const, error: 'invoice_not_payable' as const }
-    }
-    const receiptDate = istDateOf(now)
-    const financialYear = financialYearOf(receiptDate)
-    // Advances and receipts share the RCT series.
-    const receiptNumber = await allocateDocumentNumber(tx, 'receipt', financialYear)
-    const [row] = await tx.insert(patientPayments).values({
-      receiptNumber, kind: input.kind, patientId: input.patientId, admissionId: input.admissionId ?? null, invoiceId: input.invoiceId ?? null,
-      mode: input.mode, reference: input.reference?.trim() || null, amountPaise: input.amountPaise, financialYear, receiptDate,
-      receivedByName: session.name, receivedByUserId: session.userId, receivedAt: now,
-    }).returning({ id: patientPayments.id })
-    await logAudit(session, `billing: recorded ${input.kind}`, input.patientId,
-      `receipt=${receiptNumber} mode=${input.mode} amount=${input.amountPaise}`, tx)
-    return { ok: true as const, receiptNumber, paymentId: row.id }
-  }))
+  try {
+    return await withSeriesGuard(() => getDb().transaction(async (tx) => {
+      await lockPatientBilling(tx, input.patientId)
+      // Foundations T11: one receipt per UTR, whichever path recorded it first.
+      const upiRef = input.mode === 'upi' ? input.reference?.trim() : undefined
+      if (upiRef && (await upiReferenceTaken(tx, upiRef))) return { ok: false as const, error: 'duplicate_utr' as const }
+      return insertPaymentInTx(tx, input, session, now)
+    }))
+  } catch (err) {
+    if (isUniqueViolation(err, UPI_REFERENCE_UNIQUE)) return { ok: false, error: 'duplicate_utr' } // a concurrent payment won
+    throw err
+  }
+}
+
+/**
+ * The one ledger write for every payment mode (cash desk form and Foundations T11 UPI QR alike):
+ * checks the admission and invoice, allocates the RCT number and inserts the receipt. Must run
+ * inside the caller's transaction after lockPatientBilling; a full series throws SeriesExhaustedError.
+ */
+export async function insertPaymentInTx(
+  tx: WriteExecutor, input: PaymentInput, session: Session, now: Date,
+): Promise<{ ok: true; receiptNumber: string; paymentId: number } | { ok: false; error: 'admission_mismatch' | 'invoice_not_payable' }> {
+  if (input.admissionId !== undefined && !(await admissionIsPatients(tx, input.admissionId, input.patientId))) {
+    return { ok: false as const, error: 'admission_mismatch' as const }
+  }
+  if (input.invoiceId !== undefined) {
+    const [inv] = await tx.select({ id: invoices.id }).from(invoices)
+      .where(and(eq(invoices.id, input.invoiceId), eq(invoices.patientId, input.patientId), eq(invoices.status, 'finalised'))).limit(1)
+    if (!inv) return { ok: false as const, error: 'invoice_not_payable' as const }
+  }
+  const receiptDate = istDateOf(now)
+  const financialYear = financialYearOf(receiptDate)
+  // Advances and receipts share the RCT series.
+  const receiptNumber = await allocateDocumentNumber(tx, 'receipt', financialYear)
+  const [row] = await tx.insert(patientPayments).values({
+    receiptNumber, kind: input.kind, patientId: input.patientId, admissionId: input.admissionId ?? null, invoiceId: input.invoiceId ?? null,
+    mode: input.mode, reference: input.reference?.trim() || null, amountPaise: input.amountPaise, financialYear, receiptDate,
+    receivedByName: session.name, receivedByUserId: session.userId, receivedAt: now,
+  }).returning({ id: patientPayments.id })
+  await logAudit(session, `billing: recorded ${input.kind}`, input.patientId,
+    `receipt=${receiptNumber} mode=${input.mode} amount=${input.amountPaise}`, tx)
+  return { ok: true as const, receiptNumber, paymentId: row.id }
 }
 
 export async function issueRefund(

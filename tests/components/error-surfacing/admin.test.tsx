@@ -144,20 +144,11 @@ describe('more admin components (500 -> alert, no server text)', () => {
   })
 })
 
-import { VirtualCardPaymentForm } from '@/components/VirtualCardPaymentForm'
 import { ReceiveDocumentModal } from '@/components/ReceiveDocumentModal'
 import { SignConsentFormAction } from '@/components/SignConsentFormAction'
 import { BroadcastWizard } from '@/components/BroadcastWizard'
 
 describe('billing, documents, consent and broadcast components', () => {
-  it('VirtualCardPaymentForm shows a 500 with the fixed message', async () => {
-    mockFetch(500, { error: LEAK })
-    render(<VirtualCardPaymentForm patients={[{ id: 'RD-1', name: 'P' }] as never} />)
-    await fillAll()
-    fireEvent.click(screen.getByRole('button', { name: 'Process Demo Transaction' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
-  })
-
   it('ReceiveDocumentModal shows a 413/500 failure', async () => {
     mockFetch(500, { error: LEAK })
     const { container } = render(<ReceiveDocumentModal patientOptions={[]} activeAdmissions={[]} onClose={vi.fn()} />)
