@@ -107,9 +107,14 @@ describe('evaluateCoverage', () => {
 
   it('(h) a pending NHCX check with no current verification is pending', () => {
     const v = run({ context: 'ipd_admission', pendingCheck: true })
-    expect(v.state).toBe('pending'); expect(v.severity).toBe('info'); expect(v.verifiedHoursAgo).toBeNull()
+    // R4: nothing current confirms cover, so admission and pre-auth still warn while the check runs.
+    expect(v.state).toBe('pending'); expect(v.severity).toBe('warn'); expect(v.verifiedHoursAgo).toBeNull()
+    expect(run({ context: 'preauth', pendingCheck: true }).severity).toBe('warn')
+    for (const context of ['view', 'registration', 'opd_checkin'] as const) expect(run({ context, pendingCheck: true }).severity).toBe('info')
     const old = verification({ verifiedAt: new Date(NOW.getTime() - 30 * H), validUntil: new Date(NOW.getTime() - 6 * H) })
     expect(run({ context: 'view', pendingCheck: true, verification: old }).state).toBe('pending')
+    // An expired verification plus a pending check does not drop below stale's warning at admission.
+    expect(run({ context: 'ipd_admission', pendingCheck: true, verification: old })).toMatchObject({ state: 'pending', severity: 'warn' })
     // A current verification wins over a pending re-check.
     expect(run({ context: 'view', pendingCheck: true, verification: verification() }).state).toBe('verified_active')
   })

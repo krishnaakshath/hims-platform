@@ -85,7 +85,7 @@ describe.skipIf(!process.env.DATABASE_URL)('coverage queries (DB)', () => {
     const later = new Date(NOW.getTime() + 30 * H)
     const s = await getCoverageSummary(b.patientId, 'ipd_admission', later)
     expect(s.primary!.current).toBeNull()
-    expect(s.primary!.verdict.state).toBe('pending')
+    expect(s.primary!.verdict).toMatchObject({ state: 'pending', severity: 'warn' })
     expect(s.primary!.limits.balancePaise).toBeNull()
   })
 

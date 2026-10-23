@@ -87,7 +87,7 @@ function blockOrWarn(context: CoverageContext, emergency: boolean): Severity {
   if (context === 'ipd_admission') return emergency ? 'warn' : 'block'
   return 'warn'
 }
-/** Missing, stale or failed verification: a warning where the insurer is about to be relied on. */
+/** Missing, stale, pending or failed verification: a warning where the insurer is about to be relied on. */
 function attention(context: CoverageContext): Severity {
   return context === 'ipd_admission' || context === 'preauth' ? 'warn' : 'info'
 }
@@ -142,7 +142,7 @@ export function evaluateCoverage(i: { policy: CoveragePolicyFacts | null; verifi
     return verdict('verification_error', attention(context), 'Verification failed', `The last check ${hoursAgoLabel(hoursAgo ?? 0)} returned an error: verify again or record a manual verification.${current.source === 'nhcx_mock' ? ` ${MOCK_LABEL}.` : ''}`, true)
   }
   if (i.pendingCheck) {
-    return verdict('pending', 'info', 'Verification in progress', "Waiting for the insurer's answer", false)
+    return verdict('pending', attention(context), 'Verification in progress', "Waiting for the insurer's answer", false)
   }
   if (verification) {
     return verdict('stale', attention(context), 'Verification out of date', `Last verified ${hoursAgoLabel(hoursAgo ?? 0)}: verify again before relying on the cover`, true)
