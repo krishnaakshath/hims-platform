@@ -97,14 +97,22 @@ export function sniffImageType(bytes: Uint8Array): SniffedImageType | null {
  */
 export function checkSvgSafe(text: string): { ok: true } | { ok: false; reason: string } {
   const s = text.toLowerCase()
+  // Element names may carry a namespace prefix (<s:script xmlns:s="http://www.w3.org/2000/svg">).
+  const el = (names: string) => new RegExp(`<(?:[a-z0-9_.-]+:)?(?:${names})`)
   const checks: [RegExp, string][] = [
     [/<!doctype/, 'doctype'],
     [/<!entity/, 'entity'],
-    [/<script/, 'script'],
+    // The XML parser decodes character references before librsvg sees the text, so
+    // `u&#114;l(` or `&#106;avascript:` would slip past every check below. DOCTYPE is
+    // banned, so only the five predefined entities can be legitimate.
+    [/&#/, 'entity'],
+    [/&(?!(?:amp|lt|gt|quot|apos);)/, 'entity'],
+    [el('script'), 'script'],
     [/javascript:/, 'script'],
-    [/<foreignobject/, 'foreign_object'],
-    [/<(?:iframe|embed|object)[\s>/]/, 'embedded_content'],
+    [el('foreignobject'), 'foreign_object'],
+    [el('iframe|embed|object'), 'embedded_content'],
     [/on[a-z]+\s*=/, 'event_handler'],
+    [/xml:base/, 'external_ref'],
     [/data:/, 'data_uri'],
     // Any href / xlink:href (including on <image>, <use>, <feImage> and <?xml-stylesheet?>)
     // whose value does not start with '#'. Whitespace inside the lookahead keeps
@@ -112,7 +120,8 @@ export function checkSvgSafe(text: string): { ok: true } | { ok: false; reason: 
     [/href\s*=(?!\s*["']?\s*#)/, 'external_ref'],
     [/url\((?!\s*["']?\s*#)/, 'external_ref'],
     [/@import/, 'external_ref'],
-    [/<style[\s\S]*?url\(/, 'style_url'],
+    // url( inside a <style> element (closed or not); url(#g) in an attribute stays allowed.
+    [/<(?:[a-z0-9_.-]+:)?style[^>]*>(?:(?!<\/(?:[a-z0-9_.-]+:)?style)[\s\S])*?url\(/, 'style_url'],
     // CSS escapes (u\72l(...)) could smuggle a url() past the checks above.
     [/\\/, 'css_escape'],
   ]

@@ -53,6 +53,21 @@ describe('checkSvgSafe', () => {
     ['<style> containing url(#)', svg('<style>.a{fill:url(#g)}</style>')],
     ['xml-stylesheet processing instruction', `<?xml-stylesheet href="x.css"?>${svg('')}`],
     ['CSS escape', svg('<rect style="fill:u\\72l(https://x)"/>')],
+    // XML decodes character references before librsvg sees them.
+    ['numeric reference in url(', svg('<rect width="1" height="1" style="fill:u&#114;l(https://x)"/>')],
+    ['numeric references hiding @import and data:', svg('<style>&#64;import "&#100;ata:text/css,a{}";</style>')],
+    ['numeric reference hiding javascript:', svg('<text>&#106;avascript:alert(1)</text>')],
+    ['hex numeric reference', svg('<text>&#x6a;avascript:</text>')],
+    ['unknown named entity', svg('<text>&nbsp;</text>')],
+    ['bare ampersand', svg('<text>A & B</text>')],
+    // Namespace-prefixed elements.
+    ['prefixed <s:script>', svg('<s:script xmlns:s="http://www.w3.org/2000/svg">alert(1)</s:script>')],
+    ['prefixed <s:foreignObject>', svg('<s:foreignObject xmlns:s="http://www.w3.org/2000/svg"/>')],
+    ['prefixed <s:iframe>', svg('<s:iframe xmlns:s="http://www.w3.org/1999/xhtml"/>')],
+    ['prefixed <s:use> external', svg('<s:use xmlns:s="http://www.w3.org/2000/svg" href="x.svg#a"/>')],
+    ['prefixed <s:style> with url(#)', svg('<s:style xmlns:s="http://www.w3.org/2000/svg">.a{fill:url(#g)}</s:style>')],
+    ['unclosed <style> with url(#)', svg('<style>.a{fill:url(#g)}')],
+    ['xml:base', svg('<g xml:base="https://x/"><use href="#a"/></g>')],
   ]
   it.each(rejects)('rejects %s', (_label, text) => {
     const r = checkSvgSafe(text)
@@ -89,5 +104,24 @@ describe('checkSvgSafe', () => {
   <text x="50" y="30" font-family="sans-serif" dominant-baseline="middle">Sanjeevani</text>
 </svg>`
     expect(checkSvgSafe(clean)).toEqual({ ok: true })
+  })
+
+  it('reports numeric character references as entity', () => {
+    expect(checkSvgSafe(svg('<text>&#106;avascript:</text>'))).toEqual({ ok: false, reason: 'entity' })
+  })
+
+  it('accepts the five predefined entities', () => {
+    expect(checkSvgSafe(svg('<text>Shah &amp; Sons &lt;Pune&gt; &quot;OPD&quot; &apos;24x7&apos;</text>'))).toEqual({
+      ok: true,
+    })
+  })
+
+  it('accepts a <style> block without url( alongside fill="url(#g)" outside it', () => {
+    const text = svg(
+      '<style>.a{fill:#194f81;stroke-width:2}</style>' +
+        '<defs><linearGradient id="g"><stop offset="0" stop-color="#194f81"/></linearGradient></defs>' +
+        '<rect class="a" width="10" height="10"/><rect width="10" height="10" fill="url(#g)"/>',
+    )
+    expect(checkSvgSafe(text)).toEqual({ ok: true })
   })
 })
