@@ -4,10 +4,12 @@
 // checked after the fact), so another patient's id simply finds nothing and the caller
 // answers 404. Every table is read by named columns: no whole patient row, no staff-only
 // fields (user ids, card image blobs, coding internals), and nothing from Aadhaar.
-import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNotNull, ne, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
-import { admissions, appointments, bookingRequests, formSubmissions, formTemplates, invoices, medicationEpisodes, patientPayments, patientPolicies, patients, payers, providers } from '@/db/schema' // WS7 T3: + formSubmissions, formTemplates
+import { admissions, appointments, bookingRequests, departments, encounters, formSubmissions, formTemplates, invoices, medicationEpisodes, patientPayments, patientPolicies, patients, payers, providers } from '@/db/schema' // WS7 T3: + formSubmissions, formTemplates; WS7 T7: + departments, encounters
+import { istDateOf, startOfIstDay, todayIsoIn } from '@/lib/india-time' // WS7 T7
+import type { VisitMode } from './appointments' // WS7 T7
 import { getInvoice, type InvoiceDetail } from './invoices'
 import { getDischargeSummaryData } from './discharge-summary'
 import { getLatestSignatureForSignable } from './signatures'
@@ -263,17 +265,99 @@ export async function pendingRequestAppointmentIds(patientId: string, appointmen
   return new Set(rows.map((r) => r.appointmentId!))
 }
 
-/** Active doctors a patient may name as a preference: id, name and specialty only. */
+// WS7 T7 (spec D6): a doctor the portal offers is active, marked portal-bookable and in a
+// clinical department -- so a pathologist or radiologist is never offered.
+const portalBookable = and(eq(providers.isActive, true), eq(providers.portalBookable, true), eq(departments.kind, 'clinical'))
+
+/** Doctors a patient may name as a preference: id, name and specialty only. */
 export async function listPortalBookableProviders(): Promise<{ id: number; name: string; specialty: string }[]> {
   return getDb()
     .select({ id: providers.id, name: providers.name, specialty: providers.specialty })
     .from(providers)
-    .where(eq(providers.isActive, true))
+    .innerJoin(departments, eq(departments.id, providers.departmentId))
+    .where(portalBookable)
     .orderBy(asc(providers.name))
 }
 
+/** True when the portal offers this doctor (the same rule as the list above). */
+export async function isPortalBookableProvider(providerId: number): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ id: providers.id })
+    .from(providers)
+    .innerJoin(departments, eq(departments.id, providers.departmentId))
+    .where(and(eq(providers.id, providerId), portalBookable))
+  return row !== undefined
+}
+
+// ---------- past visits (WS7 T7) ----------
+
+export interface PortalPastVisit {
+  kind: 'opd' | 'ipd' | 'lab' | 'video'
+  /** IST calendar date (YYYY-MM-DD): the visit day, or the discharge day of a stay. */
+  date: string
+  doctorName: string
+  departmentName: string | null
+  status: string
+  /** The patient copy of a signed discharge summary; null for visits and unsigned stays. */
+  dischargeSummaryHref: string | null
+}
+
+const PAST_VISIT_MONTHS = 24
+
+/** IST date `months` months before `todayIso` (day clamped to the end of a shorter month). */
+function monthsBefore(todayIso: string, months: number): string {
+  const [y, m, d] = todayIso.split('-').map(Number)
+  const total = y * 12 + (m - 1) - months
+  const year = Math.floor(total / 12)
+  const month = total % 12
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(Math.min(d, lastDay)).padStart(2, '0')}`
+}
+
+/**
+ * The patient's completed visits (OPD, video, lab) from encounters and their discharged stays
+ * from admissions, newest first, over the last 24 months. A stay is listed once, from its
+ * admission (its IPD encounter is skipped). Scoped by patient id in every WHERE clause.
+ */
+export async function listPortalPastVisits(patientId: string, now: Date = new Date()): Promise<PortalPastVisit[]> {
+  const since = monthsBefore(todayIsoIn(undefined, now), PAST_VISIT_MONTHS)
+  const db = getDb()
+  const visitDept = alias(departments, 'visit_department')
+  const visits = await db
+    .select({
+      id: encounters.id, type: encounters.encounterType, date: encounters.encounterDate, status: encounters.status,
+      doctorName: providers.name, departmentName: visitDept.name, visitMode: appointments.visitMode,
+    })
+    .from(encounters)
+    .innerJoin(providers, eq(providers.id, encounters.providerId))
+    .leftJoin(visitDept, eq(visitDept.id, encounters.departmentId))
+    .leftJoin(appointments, eq(appointments.id, encounters.appointmentId))
+    .where(and(eq(encounters.patientId, patientId), eq(encounters.status, 'completed'), ne(encounters.encounterType, 'ipd'), gte(encounters.encounterDate, since)))
+  const stays = await db
+    .select({ id: admissions.id, dischargedAt: admissions.dischargedAt, status: admissions.status, doctorName: providers.name, departmentName: departments.name })
+    .from(admissions)
+    .innerJoin(providers, eq(providers.id, admissions.attendingProviderId))
+    .leftJoin(departments, eq(departments.id, providers.departmentId))
+    .where(and(eq(admissions.patientId, patientId), eq(admissions.status, 'discharged'), isNotNull(admissions.dischargedAt), gte(admissions.dischargedAt, startOfIstDay(since))))
+
+  const rows: (PortalPastVisit & { sortId: number })[] = visits.map((v) => ({
+    kind: v.type === 'opd' && v.visitMode === 'video' ? 'video' : v.type === 'lab' ? 'lab' : 'opd',
+    date: v.date, doctorName: v.doctorName, departmentName: v.departmentName, status: v.status, dischargeSummaryHref: null, sortId: v.id,
+  }))
+  for (const s of stays) {
+    const signed = (await getLatestSignatureForSignable('admission_discharge', s.id)) !== null
+    rows.push({
+      kind: 'ipd', date: istDateOf(s.dischargedAt!), doctorName: s.doctorName, departmentName: s.departmentName, status: s.status,
+      dischargeSummaryHref: signed ? `/patient-portal/documents/discharge/${s.id}` : null, sortId: s.id,
+    })
+  }
+  rows.sort((a, b) => (a.date === b.date ? b.sortId - a.sortId : a.date < b.date ? 1 : -1))
+  return rows.map((r) => ({ kind: r.kind, date: r.date, doctorName: r.doctorName, departmentName: r.departmentName, status: r.status, dischargeSummaryHref: r.dischargeSummaryHref }))
+}
+// end WS7 T7
+
 export type PortalAppointmentRequestInput =
-  | { kind: 'new'; preferredProviderId: number | null; preferredDateRangeStart: string; preferredDateRangeEnd: string; reason: string }
+  | { kind: 'new'; preferredProviderId: number | null; preferredDateRangeStart: string; preferredDateRangeEnd: string; reason: string; visitMode?: VisitMode | null /* WS7 T7 */ }
   | { kind: 'reschedule'; appointmentId: number; preferredDateRangeStart: string; preferredDateRangeEnd: string; reason: string }
   | { kind: 'cancel'; appointmentId: number; preferredDateRangeStart: string; preferredDateRangeEnd: string; reason: string }
 
@@ -300,6 +384,7 @@ export async function createPortalAppointmentRequest(patientId: string, input: P
         patientId,
         requestKind: input.kind,
         appointmentId: input.kind === 'new' ? null : input.appointmentId,
+        requestedVisitMode: input.kind === 'new' ? (input.visitMode ?? null) : null, // WS7 T7
       }).returning({ id: bookingRequests.id })
       const target = input.kind === 'new' ? '' : ` appointment=${input.appointmentId}`
       await logPatientPortalAction(`requested appointment ${input.kind === 'new' ? 'booking' : input.kind} via patient portal`, patientId, `request=${row.id}${target}`, tx)

@@ -621,6 +621,7 @@ export const providers = pgTable('providers', {
   registrationNumber: text('registration_number'),
   consultationFeePaise: integer('consultation_fee_paise'),
   currency: text('currency').default('INR').notNull(),
+  portalBookable: boolean('portal_bookable').default(true).notNull(), // WS7 T7 (scripts/migrations/2026-10-26-ws7-portal-bookable.sql; same column as Plan A WS6 T6)
 }, (t) => [check('providers_consultation_fee_nonneg', sql`${t.consultationFeePaise} IS NULL OR ${t.consultationFeePaise} >= 0`)])
 
 export const departmentKindEnum = pgEnum('department_kind', ['clinical', 'diagnostic', 'support', 'administrative'])

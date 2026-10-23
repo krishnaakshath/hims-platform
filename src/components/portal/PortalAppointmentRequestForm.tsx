@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { sendJson } from '@/lib/client-fetch'
+import type { VisitMode } from '@/lib/queries/appointments' // WS7 T7
 
 // Wave J (P1-20): the patient asks for a new visit. Nothing is booked here: the request goes
 // to the hospital's booking queue and the front desk confirms a time.
@@ -17,6 +18,7 @@ export function PortalAppointmentRequestForm({ providers, minDate, defaultStart,
 }) {
   const router = useRouter()
   const [providerId, setProviderId] = useState('')
+  const [visitMode, setVisitMode] = useState<VisitMode>('in_person') // WS7 T7
   const [start, setStart] = useState(defaultStart ?? minDate)
   const [end, setEnd] = useState(defaultEnd ?? defaultStart ?? minDate)
   const [reason, setReason] = useState(defaultReason)
@@ -34,6 +36,7 @@ export function PortalAppointmentRequestForm({ providers, minDate, defaultStart,
       preferredDateRangeStart: start,
       preferredDateRangeEnd: end,
       reason: reason.trim(),
+      visitMode, // WS7 T7
     })
     setBusy(false)
     if (!res.ok) { setError(res.error); return }
@@ -54,6 +57,18 @@ export function PortalAppointmentRequestForm({ providers, minDate, defaultStart,
           {providers.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.specialty}</option>)}
         </select>
       </label>
+      {/* WS7 T7 (spec D20): the patient says how they would like to be seen; staff confirm it. */}
+      <fieldset className="space-y-1 sm:col-span-2">
+        <legend className={LABEL}>How would you like to be seen?</legend>
+        <div className="flex flex-wrap gap-4">
+          {([['in_person', 'In person'], ['video', 'Video consultation']] as const).map(([value, label]) => (
+            <label key={value} className="inline-flex min-h-11 items-center gap-2 text-sm text-foreground">
+              <input type="radio" name="visitMode" value={value} checked={visitMode === value} onChange={() => setVisitMode(value)} className="h-4 w-4 accent-primary" />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <label className="space-y-1">
         <span className={LABEL}>Earliest date</span>
         <input type="date" required min={minDate} value={start} onChange={(e) => { setStart(e.target.value); if (end < e.target.value) setEnd(e.target.value) }} className={INPUT} />

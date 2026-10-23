@@ -5,22 +5,19 @@
 // (never a 403). Rate limited per patient; audited on the same transaction as the insert.
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { and, eq } from 'drizzle-orm'
-import { getDb } from '@/db/client'
-import { providers } from '@/db/schema'
 import { requirePatientSession } from '@/lib/patient-session'
 import { readJsonBody } from '@/lib/http'
 import { checkPortalAppointmentRequestRateLimit } from '@/lib/rate-limit'
 import { istDateOf, todayIsoIn } from '@/lib/india-time'
 import { daysBetweenIso } from '@/lib/follow-ups/rules'
-import { createPortalAppointmentRequest, getPortalChangeableAppointment, type PortalAppointmentRequestInput } from '@/lib/queries/patient-portal-records'
+import { createPortalAppointmentRequest, getPortalChangeableAppointment, isPortalBookableProvider, type PortalAppointmentRequestInput } from '@/lib/queries/patient-portal-records'
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((s) => !Number.isNaN(Date.parse(`${s}T00:00:00Z`)) && new Date(`${s}T00:00:00Z`).toISOString().startsWith(s), 'Invalid date')
 const appointmentId = z.number().int().positive().max(2_147_483_647)
 const reason = z.string().trim().max(500)
 
 const schema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('new'), preferredProviderId: z.number().int().positive().max(2_147_483_647).nullable().optional(), preferredDateRangeStart: isoDate, preferredDateRangeEnd: isoDate, reason: reason.min(1) }).strict(),
+  z.object({ kind: z.literal('new'), preferredProviderId: z.number().int().positive().max(2_147_483_647).nullable().optional(), preferredDateRangeStart: isoDate, preferredDateRangeEnd: isoDate, reason: reason.min(1), visitMode: z.enum(['in_person', 'video']).nullable().optional() /* WS7 T7 */ }).strict(),
   z.object({ kind: z.literal('reschedule'), appointmentId, preferredDateRangeStart: isoDate, preferredDateRangeEnd: isoDate, reason: reason.optional() }).strict(),
   z.object({ kind: z.literal('cancel'), appointmentId, reason: reason.optional() }).strict(),
 ])
@@ -56,10 +53,10 @@ export async function POST(request: NextRequest) {
   if (body.kind === 'new') {
     const providerId = body.preferredProviderId ?? null
     if (providerId !== null) {
-      const [p] = await getDb().select({ id: providers.id }).from(providers).where(and(eq(providers.id, providerId), eq(providers.isActive, true)))
-      if (!p) return NextResponse.json({ error: 'Choose a doctor from the list' }, { status: 400 })
+      // WS7 T7: only a doctor the portal offers (portal-bookable, clinical department) may be named.
+      if (!(await isPortalBookableProvider(providerId))) return NextResponse.json({ error: 'Choose a doctor from the list' }, { status: 400 })
     }
-    input = { kind: 'new', preferredProviderId: providerId, preferredDateRangeStart: body.preferredDateRangeStart, preferredDateRangeEnd: body.preferredDateRangeEnd, reason: body.reason }
+    input = { kind: 'new', preferredProviderId: providerId, preferredDateRangeStart: body.preferredDateRangeStart, preferredDateRangeEnd: body.preferredDateRangeEnd, reason: body.reason, visitMode: body.visitMode ?? null }
   } else {
     const appt = await getPortalChangeableAppointment(session.patientId, body.appointmentId)
     if (!appt) return NextResponse.json({ error: 'Appointment not found' }, { status: 404 })

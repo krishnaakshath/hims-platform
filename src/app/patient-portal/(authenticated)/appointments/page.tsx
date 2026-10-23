@@ -1,6 +1,7 @@
 import { formatCalendarDate, formatIstDate, formatIstDateTime, todayIsoIn } from '@/lib/india-time'
 import { notFound } from 'next/navigation'
-import { CalendarClock, BellRing } from 'lucide-react'
+import Link from 'next/link'
+import { CalendarClock, BellRing, BedDouble, FlaskConical, Stethoscope, Video } from 'lucide-react'
 import { requirePatientSessionOrRedirect } from '@/lib/patient-session'
 import { getPatientPortalData } from '@/lib/queries/patient-portal'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
@@ -9,7 +10,7 @@ import type { AppointmentStatus } from '@/lib/queries/appointments'
 import { normalizeVisitReason } from '@/lib/notification-templates'
 // Wave J (P1-20): booking / reschedule / cancel requests and follow-up reminders.
 import { getPortalFollowUps } from '@/lib/queries/follow-ups'
-import { listPortalAppointmentRequests, listPortalBookableProviders, pendingRequestAppointmentIds } from '@/lib/queries/patient-portal-records'
+import { listPortalAppointmentRequests, listPortalBookableProviders, listPortalPastVisits, pendingRequestAppointmentIds, type PortalPastVisit } from '@/lib/queries/patient-portal-records' // WS7 T7: + listPortalPastVisits
 import { PORTAL_FOLLOW_UP_LABEL } from '@/lib/follow-ups/rules'
 import { PortalAppointmentActions } from '@/components/portal/PortalAppointmentActions'
 import { PortalAppointmentRequestForm } from '@/components/portal/PortalAppointmentRequestForm'
@@ -17,6 +18,10 @@ import { PortalAppointmentRequestForm } from '@/components/portal/PortalAppointm
 const REQUEST_KIND_LABEL = { new: 'New appointment', reschedule: 'Reschedule', cancel: 'Cancellation' } as const
 const REQUEST_STATUS_LABEL = { pending: 'Waiting for the hospital', confirmed: 'Confirmed', declined: 'Not possible, please call the hospital' } as const
 // end Wave J
+
+// WS7 T7: past visits come from encounters and admissions (dates are IST calendar dates).
+const PAST_VISIT_LABEL: Record<PortalPastVisit['kind'], string> = { opd: 'Outpatient visit', video: 'Video consultation', lab: 'Lab visit', ipd: 'Hospital stay' }
+const PAST_VISIT_ICON = { opd: Stethoscope, video: Video, lab: FlaskConical, ipd: BedDouble } as const
 
 const SECTION = 'rounded-xl border border-primary/10 bg-card/80 p-5 shadow-sm backdrop-blur-sm'
 const HEADING = 'mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
@@ -47,11 +52,12 @@ export default async function PatientPortalAppointmentsPage() {
 
   // Wave J
   const today = todayIsoIn()
-  const [followUps, requests, providers, pending] = await Promise.all([
+  const [followUps, requests, providers, pending, pastVisits] = await Promise.all([
     getPortalFollowUps(session.patientId, today),
     listPortalAppointmentRequests(session.patientId),
     listPortalBookableProviders(),
     pendingRequestAppointmentIds(session.patientId, data.upcomingAppointments.map((a) => a.id)),
+    listPortalPastVisits(session.patientId), // WS7 T7
   ])
   // A due or missed follow-up prefills the request form with its window (from today at the earliest).
   const toBook = followUps.find((f) => f.status === 'planned' || f.status === 'missed')
@@ -87,21 +93,34 @@ export default async function PatientPortalAppointmentsPage() {
         )}
       </section>
 
-      <section className={SECTION}>
-        <h2 className={HEADING}>Past visits</h2>
-        {data.pastAppointments.length === 0 ? (
+      {/* WS7 T7: completed visits and hospital stays (encounters, admissions), not past appointments. */}
+      <section className={SECTION} aria-labelledby="past-visits">
+        <h2 id="past-visits" className={HEADING}>Past visits</h2>
+        {pastVisits.length === 0 ? (
           <p className="text-sm text-muted-foreground">No past visits on file.</p>
         ) : (
           <ul className="space-y-2">
-            {data.pastAppointments.map((a) => (
-              <AppointmentRow
-                key={a.id}
-                visitReason={a.visitReason}
-                providerName={a.providerName}
-                status={a.status}
-                dateLabel={formatIstDate(a.startsAt)}
-              />
-            ))}
+            {pastVisits.map((v, i) => {
+              const Icon = PAST_VISIT_ICON[v.kind]
+              return (
+                <li key={`${v.kind}-${v.date}-${i}`} className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-secondary/30 px-3 py-2.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary" aria-hidden="true">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{PAST_VISIT_LABEL[v.kind]}{v.departmentName ? ` · ${v.departmentName}` : ''}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {v.kind === 'ipd' ? 'Discharged' : 'Seen'} {formatCalendarDate(v.date)} · {v.doctorName}
+                    </p>
+                  </div>
+                  {v.dischargeSummaryHref && (
+                    <Link href={v.dischargeSummaryHref} className="inline-flex min-h-11 items-center text-sm font-medium text-primary hover:underline">
+                      Discharge summary<span className="sr-only"> for the stay discharged {formatCalendarDate(v.date)}</span>
+                    </Link>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>

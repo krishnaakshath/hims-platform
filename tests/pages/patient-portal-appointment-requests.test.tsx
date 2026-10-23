@@ -22,6 +22,7 @@ vi.mock('@/lib/queries/patient-portal-records', () => ({
   listPortalAppointmentRequests: vi.fn(async () => []),
   listPortalBookableProviders: vi.fn(async () => [{ id: 4, name: 'Dr. Meera Iyer', specialty: 'Endocrinology' }]),
   pendingRequestAppointmentIds: vi.fn(async () => new Set([2])),
+  listPortalPastVisits: vi.fn(async () => []), // WS7 T7
 }))
 
 import Page from '@/app/patient-portal/(authenticated)/appointments/page'
@@ -84,7 +85,22 @@ describe('/patient-portal/appointments (Wave J)', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'Send request' }))
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Request sent'))
     const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body))
-    expect(body).toEqual({ kind: 'new', preferredProviderId: 4, preferredDateRangeStart: todayIsoIn(), preferredDateRangeEnd: todayIsoIn(), reason: 'Knee pain' })
+    expect(body).toEqual({ kind: 'new', preferredProviderId: 4, preferredDateRangeStart: todayIsoIn(), preferredDateRangeEnd: todayIsoIn(), reason: 'Knee pain', visitMode: 'in_person' })
+  })
+
+  // WS7 T7 (spec D20)
+  it('the patient can ask for a video consultation', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 4 }), { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(await Page())
+    const form = screen.getByRole('form', { name: 'Request an appointment' })
+    expect(within(form).getByRole('radio', { name: 'In person' })).toBeChecked()
+    fireEvent.click(within(form).getByRole('radio', { name: 'Video consultation' }))
+    fireEvent.change(within(form).getByLabelText('Reason for the visit'), { target: { value: 'Skin rash' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Send request' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Request sent'))
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body))
+    expect(body).toMatchObject({ kind: 'new', visitMode: 'video', reason: 'Skin rash' })
   })
 
   it('lists the patient\'s requests with a plain status', async () => {
