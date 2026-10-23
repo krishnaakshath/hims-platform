@@ -8,8 +8,20 @@ export type PreauthStatus = (typeof PREAUTH_STATUSES)[number]
 
 export const PREAUTH_ACTIONS = [
   'request', 'record_query', 'respond_query', 'approve', 'reject', 'request_enhancement', 'approve_enhancement', 'reject_enhancement', 'cancel',
+  'refresh_snapshot', // WS12 T7: a fresh snapshot of a request still with the insurer; the status does not move
 ] as const
 export type PreauthAction = (typeof PREAUTH_ACTIONS)[number]
+
+/** WS12 T7: the pre-auth events whose snapshot is what NHCX is sent (the latest of these). */
+export const PREAUTH_SNAPSHOT_ACTIONS = ['request', 'request_enhancement', 'refresh_snapshot'] as const satisfies readonly PreauthAction[]
+
+/**
+ * WS12 T7: outbound NHCX exchange states that mean the insurer never got the snapshot. Any other
+ * state counts as sent: the same snapshot is not sent again and cannot be refreshed.
+ * `error` is the insurer's response.error: the request was not accepted, so it counts as
+ * undelivered and the snapshot may be resent or refreshed.
+ */
+export const NHCX_UNDELIVERED_EXCHANGE_STATES = ['send_failed', 'error'] as const
 
 /** Statuses in which an approval is in force (an enhancement in flight keeps the last approval). */
 export const LIVE_APPROVED_PREAUTH_STATUSES = ['approved', 'enhancement_requested', 'enhancement_queried', 'enhanced'] as const satisfies readonly PreauthStatus[]
@@ -60,6 +72,8 @@ export function nextPreauthStatus(from: PreauthStatus, action: PreauthAction, ct
       return ctx?.enhancedBefore ? 'enhanced' : 'approved'
     case 'cancel':
       return from === 'rejected' || from === 'cancelled' ? null : 'cancelled'
+    case 'refresh_snapshot':
+      return from === 'requested' || from === 'enhancement_requested' ? from : null
     default:
       return null
   }

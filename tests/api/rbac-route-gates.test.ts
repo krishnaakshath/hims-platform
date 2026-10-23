@@ -91,6 +91,9 @@ import { POST as postIntegrationTest } from '@/app/api/settings/integrations/tes
 import { PUT as putNotificationTemplates } from '@/app/api/settings/notification-templates/route' // Foundations T8
 import { GET as getPatientNotices } from '@/app/api/patients/[anonId]/notices/route' // Foundations T9
 // end SP8
+// WS12 T6
+import { POST as postSimulateAbdmShare } from '@/app/api/abdm/shares/simulate/route'
+// end WS12 T6
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
 // + importActual pattern from tests/api/patients.test.ts:27-29, except the
@@ -597,6 +600,15 @@ import { ACCOUNT_ROLES, PAYER_LIST_ROLES, PHARMACY_STOCK_READ_ROLES } from '@/li
 import { GET as getReportCsv } from '@/app/api/reports/[report]/csv/route'
 import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
 // end Wave I
+// WS12 T2
+import { GET as getPatientCoverage } from '@/app/api/patients/[anonId]/coverage/route'
+import { COVERAGE_READ_ROLES } from '@/lib/role-policy'
+// end WS12 T2
+// WS12 T3
+import { POST as postPolicyVerification } from '@/app/api/rcm/policies/[id]/verifications/route'
+import { GET as getVerificationDocument } from '@/app/api/rcm/verification-documents/[id]/route'
+import { COVERAGE_VERIFY_ROLES } from '@/lib/role-policy'
+// end WS12 T3
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1052,6 +1064,17 @@ export const API_GATES: ApiGateCase[] = [
   // end Foundations T11
   { name: 'PUT /api/settings/notification-templates', call: () => settle(() => putNotificationTemplates(send('PUT', '/api/settings/notification-templates'))), allowed: ['admin'] }, // Foundations T8
   { name: 'GET /api/patients/[anonId]/notices', call: () => getPatientNotices(get(`/api/patients/${BOGUS_PATIENT}/notices`), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'crc', 'pi', 'frontdesk'] }, // Foundations T9
+  // WS12 T6
+  { name: 'POST /api/abdm/shares/simulate', call: () => settle(() => postSimulateAbdmShare(send('POST', '/api/abdm/shares/simulate'))), allowed: [...ABDM_SHARE_QUEUE_ROLES] },
+  // end WS12 T6
+  // WS12 T2: patient coverage summary (unknown patient: 404 after the gate).
+  { name: 'GET /api/patients/[anonId]/coverage', call: () => settle(() => getPatientCoverage(get(`/api/patients/${BOGUS_PATIENT}/coverage`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...COVERAGE_READ_ROLES] },
+  // end WS12 T2
+  // WS12 T3: manual verification (multipart: allowed roles get 400 for a JSON body, so no SP8_WRITE_GATES row;
+  // deny-before-readUpload is pinned in tests/api/coverage-manual-verification.test.ts) and its document stream.
+  { name: 'POST /api/rcm/policies/[id]/verifications', call: () => settle(() => postPolicyVerification(send('POST', `/api/rcm/policies/${BOGUS_ID}/verifications`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_VERIFY_ROLES] },
+  { name: 'GET /api/rcm/verification-documents/[id]', call: () => settle(() => getVerificationDocument(get(`/api/rcm/verification-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_READ_ROLES] },
+  // end WS12 T3
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1209,6 +1232,9 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
   // end Foundations T11
   { name: 'PUT /api/settings/notification-templates', call: () => putNotificationTemplates(send('PUT', '/api/settings/notification-templates', NOT_JSON)), allowed: ['admin'] }, // Foundations T8
+  // WS12 T6
+  { name: 'POST /api/abdm/shares/simulate', call: () => postSimulateAbdmShare(send('POST', '/api/abdm/shares/simulate', NOT_JSON)), allowed: ABDM_SHARE_QUEUE_ROLES },
+  // end WS12 T6
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

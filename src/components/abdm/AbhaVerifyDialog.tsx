@@ -6,12 +6,16 @@ import { Button } from '@/components/ui/button'
 import { Field, INPUT_CLASS } from '@/components/registration/Field'
 import { fetchJson, sendJson } from '@/lib/client-fetch'
 import { AbhaConsentStep, type ConsentText } from './AbhaConsentStep'
+import { IDENTITY_MISMATCH_MESSAGE, type IdentityComparison, type IdentityField } from '@/lib/abdm/identity-match'
 
 // Create or verify a patient's ABHA through ABDM (SP8 Task 5). Steps: choose
 // method -> consent (verbatim text) -> identifier -> OTP -> (account choice)
 // -> (address choice) -> confirm. The Aadhaar number and OTPs live only in
 // component state until their request resolves, then are cleared; the server
 // never returns tokens or transaction ids.
+// WS12 T5: when verifying for an existing patient, the confirm step shows the
+// chart and the ABHA profile side by side; a mismatch needs a typed reason
+// (10-300 characters) and the button reads "Link anyway".
 
 export type AbdmStatus = { state: 'configured' | 'mock'; label: string; enrolment: ConsentText | null; verification: ConsentText }
 export type VerifiedAbha = { abhaNumber: string; abhaAddress: string | null; flowId: string }
@@ -40,6 +44,36 @@ const PASS = { passThrough: [410, 429, 502, 503] as const }
 
 export const SANDBOX_MOCK_LABEL = 'Sandbox mock - not real'
 
+const FIELD_LABEL: Record<IdentityField, string> = { name: 'Name', dob: 'Date of birth', gender: 'Gender' }
+const RESULT_LABEL = { match: 'Matches', mismatch: 'Does not match', unavailable: 'Not available' } as const
+const ROW_CLASS = { match: '', mismatch: 'bg-red-50 text-red-900', unavailable: 'text-muted-foreground' } as const
+const REASON_MIN = 10
+const REASON_MAX = 300
+
+function IdentityTable({ comparison, forced }: { comparison: IdentityComparison | null; forced: IdentityField[] }) {
+  const rows = comparison?.fields ?? forced.map((field) => ({ field, result: 'mismatch' as const, chart: null, abdm: null }))
+  return (
+    <table className="w-full text-sm" aria-label="Chart and ABHA profile">
+      <thead>
+        <tr className="text-left text-xs text-muted-foreground"><th className="py-1">Field</th><th>This patient</th><th>ABHA profile</th><th>Result</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((f) => {
+          const result = forced.includes(f.field) ? 'mismatch' : f.result
+          return (
+            <tr key={f.field} data-result={result} className={`border-t border-border ${ROW_CLASS[result]}`}>
+              <th scope="row" className="py-1 text-left font-medium">{FIELD_LABEL[f.field]}</th>
+              <td>{f.chart ?? '-'}</td>
+              <td>{f.abdm ?? 'Not given'}</td>
+              <td className="text-xs">{RESULT_LABEL[result]}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+
 export function AbhaVerifyDialog({ patientId, mode, status, onVerified, onClose }: {
   patientId: string | null
   mode: 'register' | 'profile'
@@ -57,6 +91,9 @@ export function AbhaVerifyDialog({ patientId, mode, status, onVerified, onClose 
   const [accounts, setAccounts] = useState<{ abhaNumber: string; name: string | null }[]>([])
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [comparison, setComparison] = useState<IdentityComparison | null>(null)
+  const [forcedMismatch, setForcedMismatch] = useState<IdentityField[]>([])
+  const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isEnrolment = method === 'enrolment'
@@ -97,7 +134,7 @@ export function AbhaVerifyDialog({ patientId, mode, status, onVerified, onClose 
     )
   }
 
-  type VerifyResponse = { step: 'verified' | 'choose_account'; profile?: Profile; suggestions?: string[]; accounts?: { abhaNumber: string; name: string | null }[] }
+  type VerifyResponse = { step: 'verified' | 'choose_account'; profile?: Profile; suggestions?: string[]; accounts?: { abhaNumber: string; name: string | null }[]; comparison?: IdentityComparison }
   const verifyOtp = () => run(
     () => (isEnrolment
       ? sendJson<VerifyResponse>('/api/abdm/abha/enrol/verify', 'POST', { flowId, otp, mobile }, PASS)
@@ -105,13 +142,14 @@ export function AbhaVerifyDialog({ patientId, mode, status, onVerified, onClose 
     (d) => {
       if (d.step === 'choose_account') { setAccounts(d.accounts ?? []); setStep('account'); return }
       setProfile(d.profile ?? null)
+      setComparison(d.comparison ?? null)
       if (isEnrolment && (d.suggestions?.length ?? 0) > 0) { setSuggestions(d.suggestions!); setStep('address') } else setStep('confirm')
     },
   )
 
   const chooseAccount = (accountIndex: number) => run(
-    () => sendJson<{ profile: Profile }>('/api/abdm/abha/login/account', 'POST', { flowId, accountIndex }, PASS),
-    (d) => { setProfile(d.profile); setStep('confirm') },
+    () => sendJson<{ profile: Profile; comparison?: IdentityComparison }>('/api/abdm/abha/login/account', 'POST', { flowId, accountIndex }, PASS),
+    (d) => { setProfile(d.profile); setComparison(d.comparison ?? null); setStep('confirm') },
   )
 
   const chooseAddress = (abhaAddress: string) => run(
@@ -119,14 +157,28 @@ export function AbhaVerifyDialog({ patientId, mode, status, onVerified, onClose 
     (d) => { setProfile((p) => (p ? { ...p, abhaAddress: d.abhaAddress } : p)); setStep('confirm') },
   )
 
-  const confirm = () => {
+  const mismatched = (comparison?.mismatch ?? false) || forcedMismatch.length > 0
+  const reasonOk = reason.trim().length >= REASON_MIN && reason.trim().length <= REASON_MAX
+
+  const confirm = async () => {
     if (!profile || !flowId) return
     const v = { abhaNumber: profile.abhaNumber, abhaAddress: profile.abhaAddress, flowId }
     if (mode === 'register' || !patientId) { onVerified(v); return }
-    return run(
-      () => fetchJson(`/api/patients/${encodeURIComponent(patientId)}/abha/link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ flowId }) }, PASS),
-      () => onVerified(v),
-    )
+    if (mismatched && !reasonOk) return
+    setBusy(true); setError(null)
+    try {
+      const body = mismatched ? { flowId, mismatchReason: reason.trim() } : { flowId }
+      const r = await fetchJson(`/api/patients/${encodeURIComponent(patientId)}/abha/link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, PASS)
+      if (r.ok) { onVerified(v); return }
+      const b = r.body as { code?: unknown; fields?: unknown } | undefined
+      if (r.status === 409 && b?.code === 'identity_mismatch' && Array.isArray(b.fields)) {
+        setForcedMismatch(b.fields.filter((f): f is IdentityField => f === 'name' || f === 'dob' || f === 'gender'))
+        return
+      }
+      setError(r.error)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -223,7 +275,18 @@ export function AbhaVerifyDialog({ patientId, mode, status, onVerified, onClose 
               <dt className="text-muted-foreground">ABHA address</dt><dd>{profile.abhaAddress ?? 'None'}</dd>
               <dt className="text-muted-foreground">Year of birth</dt><dd>{profile.yearOfBirth ?? 'Not given'}</dd>
             </dl>
-            <Button type="button" disabled={busy} onClick={confirm}>{mode === 'register' ? 'Use this ABHA' : 'Link to this patient'}</Button>
+            {mode === 'profile' && (comparison || forcedMismatch.length > 0) && <IdentityTable comparison={comparison} forced={forcedMismatch} />}
+            {mode === 'profile' && mismatched ? (
+              <>
+                <p role="alert" className="text-sm text-destructive">{IDENTITY_MISMATCH_MESSAGE}</p>
+                <Field label="Reason for linking anyway" hint={`${REASON_MIN} to ${REASON_MAX} characters. Recorded with your name.`}>
+                  {(p) => <textarea {...p} rows={2} maxLength={REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} className={INPUT_CLASS} />}
+                </Field>
+                <Button type="button" variant="destructive" disabled={busy || !reasonOk} onClick={confirm}>Link anyway</Button>
+              </>
+            ) : (
+              <Button type="button" disabled={busy} onClick={confirm}>{mode === 'register' ? 'Use this ABHA' : 'Link to this patient'}</Button>
+            )}
           </div>
         )}
       </DialogContent>

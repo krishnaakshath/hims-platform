@@ -26,7 +26,7 @@ function digitsFrom(hex: string, n: number): string {
   return out
 }
 
-const fabricatedAbha = (seed: string) => `91${digitsFrom(sha(seed), 12)}`
+export const fabricatedAbhaNumber = (seed: string) => `91${digitsFrom(sha(seed), 12)}`
 const mockAddress = (abhaNumber: string) => `mock${abhaNumber.slice(-8)}`
 
 function profileFor(abhaNumber: string, mobile: string | null): AbhaProfileView {
@@ -78,13 +78,13 @@ export function mockAbdmGateway(): AbdmGateway {
     async enrolByAadhaarOtp({ txnId, encryptedOtp, mobile }) {
       if (!txnId.startsWith('mock-enrol-')) return invalid
       if (encryptedOtp !== OTP_OK) return otpInvalid
-      const abhaNumber = fabricatedAbha(txnId)
+      const abhaNumber = fabricatedAbhaNumber(txnId)
       return { ok: true, value: { txnId, userToken: userTokenFor(abhaNumber), profile: profileFor(abhaNumber, mobile), isNew: true } }
     },
 
     async enrolAddressSuggestions({ txnId }) {
       if (!txnId.startsWith('mock-enrol-')) return invalid
-      const base = mockAddress(fabricatedAbha(txnId))
+      const base = mockAddress(fabricatedAbhaNumber(txnId))
       return { ok: true, value: { suggestions: [base, `${base}.sbx`] } }
     },
 
@@ -100,7 +100,7 @@ export function mockAbdmGateway(): AbdmGateway {
       const cipher = parts[0]
       const carried = parts.length === 2 ? parts[1] : null
       if (!isCipher(cipher)) return invalid
-      const abhaNumber = carried && isValidAbhaNumber(carried) ? carried : fabricatedAbha(`${route}:${cipher}`)
+      const abhaNumber = carried && isValidAbhaNumber(carried) ? carried : fabricatedAbhaNumber(`${route}:${cipher}`)
       return { ok: true, value: { txnId: `mock-login-${route}-${abhaNumber}` } }
     },
 
@@ -110,7 +110,7 @@ export function mockAbdmGateway(): AbdmGateway {
       if (encryptedOtp !== OTP_OK) return otpInvalid
       const abhaNumber = m[2]
       if (route === 'mobile_otp') {
-        const second = fabricatedAbha(`second:${abhaNumber}`)
+        const second = fabricatedAbhaNumber(`second:${abhaNumber}`)
         return {
           ok: true,
           value: { userToken: null, transientToken: `mock-t:${txnId}`, accounts: [{ abhaNumber, name: 'Sandbox Mock Patient' }, { abhaNumber: second, name: 'Sandbox Mock Relative' }] },
@@ -123,7 +123,7 @@ export function mockAbdmGateway(): AbdmGateway {
       if (transientToken !== `mock-t:${txnId}`) return invalid
       const m = /^mock-login-mobile_otp-(\d{14})$/.exec(txnId)
       if (!m) return invalid
-      const allowed = [m[1], fabricatedAbha(`second:${m[1]}`)]
+      const allowed = [m[1], fabricatedAbhaNumber(`second:${m[1]}`)]
       const chosen = normalizeAbhaNumber(abhaNumber)
       if (!allowed.includes(chosen)) return invalid
       return { ok: true, value: { userToken: userTokenFor(chosen) } }

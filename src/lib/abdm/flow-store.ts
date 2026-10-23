@@ -3,6 +3,7 @@ import { getRedis } from '@/lib/cache'
 import { openPayload, sealPayload } from '@/lib/integrations/payload-vault'
 import type { AbdmConsentPurpose, AbhaVerificationSource, AbhaVerifiedVia } from './constants'
 import type { LoginRoute } from './gateway'
+import type { AbhaIdentityProfile } from './identity-match'
 
 // Short-lived state of one ABHA create/verify flow, between the staff
 // member's steps. Redis key `abdm:flow:<flowId>`, the value sealed with the
@@ -25,7 +26,14 @@ export interface AbhaFlow {
   transientToken: string | null
   consentId: number | null
   consentPurpose: AbdmConsentPurpose | null
-  verified: { abhaNumber: string; abhaAddress: string | null; via: AbhaVerifiedVia; source: AbhaVerificationSource } | null
+  verified: {
+    abhaNumber: string
+    abhaAddress: string | null
+    via: AbhaVerifiedVia
+    source: AbhaVerificationSource
+    /** WS12 T5: the ABDM profile, compared with the chart before a link. Absent on flows from before the guard (a name mismatch). */
+    profile?: AbhaIdentityProfile
+  } | null
   /** Normalised 14-digit ABHA numbers offered by a mobile login, in the order shown. */
   accounts: string[]
 }

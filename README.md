@@ -23,6 +23,11 @@ HIMS covers the day-to-day running of a clinic or hospital in one place:
 - **Pharmacy and labs**: a dispensing counter and inventory; a lab worklist
   with collection, results, imaging and an electronic lab-results webhook.
 - **Billing**: charges, claims, collections, statements, A/R and analytics.
+- **Insurance verification**: every cover check is saved with who, when,
+  source and limits; manual verification (with a document) for insurers not on
+  NHCX; policy validity and sub-limits feed pre-auth and the charge rules; an
+  ABHA identity guard stops silent wrong-person links. NHCX and ABDM run as a
+  labelled sandbox mock until credentials exist (`docs/ABDM-NHCX.md`).
 - **Pre-screening**: a rule engine screens each patient against a trial's
   criteria and marks every criterion Meets, Needs Verification or Potential
   Exclusion, backed by the exact chart quote. See **Pre-screening** below.

@@ -50,9 +50,21 @@ describe('SP7 migration C (pre-auths and claims)', () => {
       [preauthStatusEnum, PREAUTH_STATUSES], [preauthActionEnum, PREAUTH_ACTIONS], [claimStatusEnum, CLAIM_STATUSES], [claimEventActionEnum, CLAIM_EVENT_ACTIONS],
       [submissionKindEnum, SUBMISSION_KINDS], [rcmQueryStatusEnum, RCM_QUERY_STATUSES], [writeOffStatusEnum, WRITE_OFF_STATUSES], [documentSourceEnum, DOCUMENT_SOURCES],
     ] as const
+    // Values added after migration C live in their own enum-only migrations (appended, in order).
+    const later: Record<string, { file: string; values: string[] }> = {
+      preauth_action: { file: '2026-10-24-ws12-preauth-refresh-enum.sql', values: ['refresh_snapshot'] }, // WS12 T7
+    }
     for (const [e, values] of pairs) {
       expect(e.enumValues).toEqual([...values])
-      expect(s, e.enumName).toContain(`CREATE TYPE ${e.enumName} AS ENUM (${e.enumValues.map((v) => `'${v}'`).join(', ')});`)
+      const added = later[e.enumName]?.values ?? []
+      const original = e.enumValues.filter((v) => !added.includes(v))
+      expect(e.enumValues.slice(original.length), e.enumName).toEqual(added)
+      expect(s, e.enumName).toContain(`CREATE TYPE ${e.enumName} AS ENUM (${original.map((v) => `'${v}'`).join(', ')});`)
+      if (added.length > 0) {
+        const m = readMigration(later[e.enumName].file)
+        expect(idempotencyProblems(m)).toEqual([])
+        for (const v of added) expect(m).toContain(`ALTER TYPE ${e.enumName} ADD VALUE IF NOT EXISTS '${v}';`)
+      }
     }
     expect([...ID_PROOF_TYPE_VALUES]).toEqual([...ID_PROOF_TYPES])
   })
@@ -104,6 +116,10 @@ describe.skipIf(!process.env.DATABASE_URL)('claims schema (DB)', () => {
     expect(await code(db().update(claimSubmissions).set({ snapshotSha256: 'd'.repeat(64) }).where(eq(claimSubmissions.id, submissionId)))).toBe('55000')
     expect(await code(db().delete(claimSubmissions).where(eq(claimSubmissions.id, submissionId)))).toBe('55000')
     expect(await code(db().update(claimEvents).set({ note: 'x' }).where(eq(claimEvents.id, eventId)))).toBe('55000')
+  })
+  it('the database preauth_action enum equals PREAUTH_ACTIONS in order (WS12 T7)', async () => {
+    const r = await db().execute<{ v: string }>(sql`select unnest(enum_range(null::preauth_action))::text as v`)
+    expect(r.rows.map((x) => x.v)).toEqual([...PREAUTH_ACTIONS])
   })
   it('a dispatch accepts the insurer reference once', async () => {
     await db().update(claimDispatches).set({ insurerReference: 'INS/1', acknowledgedOn: '2026-10-03', acknowledgedByName: 'Test' }).where(eq(claimDispatches.id, dispatchId))

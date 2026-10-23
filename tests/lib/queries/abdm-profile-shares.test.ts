@@ -60,7 +60,8 @@ describe.skipIf(!process.env.DATABASE_URL)('ABDM profile shares (DB)', () => {
 
   it('linking a share verifies the patient ABHA via scan_and_share', async () => {
     const pid = `TEST-SP8-${RUN.slice(-7)}-L`
-    await getDb().insert(patients).values({ id: pid, name: 'TEST-SP8 L', dob: '1990-01-01', gender: 'female' })
+    // WS12 T5: the chart matches the shared profile (name, DOB, gender), so no override is needed.
+    await getDb().insert(patients).values({ id: pid, name: 'Asha Rao', dob: '1990-03-12', gender: 'female' })
     createdPatients.push(pid)
     const s = await share(31, new Date(), { abhaNumber: abha(31), abhaAddress: `link${RUN.slice(-8)}@sbx` })
     expect(await resolveShare(s.shareId, { action: 'linked' }, SESSION)).toEqual({ ok: false, error: 'patient_required' })
@@ -74,7 +75,7 @@ describe.skipIf(!process.env.DATABASE_URL)('ABDM profile shares (DB)', () => {
 
   it('linking an ABHA already on another patient is a conflict and leaves the share pending', async () => {
     const pid = `TEST-SP8-${RUN.slice(-7)}-C`
-    await getDb().insert(patients).values({ id: pid, name: 'TEST-SP8 C', dob: '1990-01-01', gender: 'female' })
+    await getDb().insert(patients).values({ id: pid, name: 'Asha Rao', dob: '1990-03-12', gender: 'female' })
     createdPatients.push(pid)
     const s = await share(41, new Date(), { abhaNumber: abha(31), abhaAddress: null })
     expect(await resolveShare(s.shareId, { action: 'linked', patientId: pid }, SESSION)).toEqual({ ok: false, error: 'abha_conflict' })

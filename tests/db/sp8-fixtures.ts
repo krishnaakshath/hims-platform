@@ -1,6 +1,6 @@
 import { inArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { abdmConsents, abdmProfileShares, nhcxEligibilityChecks, nhcxExchanges, nhcxInboundCalls } from '@/db/schema'
+import { abdmConsents, abdmProfileShares, abhaLinkOverrides, nhcxEligibilityChecks, nhcxExchanges, nhcxInboundCalls } from '@/db/schema'
 
 /**
  * Removes every SP8 row of the given test patients, children first, in one transaction.
@@ -19,6 +19,7 @@ export async function purgeSp8Fixtures(patientIds: string[]): Promise<void> {
       await tx.delete(nhcxExchanges).where(inArray(nhcxExchanges.id, exchangeIds))
     }
     await tx.delete(nhcxEligibilityChecks).where(inArray(nhcxEligibilityChecks.patientId, patientIds))
+    await tx.delete(abhaLinkOverrides).where(inArray(abhaLinkOverrides.patientId, patientIds)) // WS12 T5
     await tx.delete(abdmProfileShares).where(inArray(abdmProfileShares.patientId, patientIds))
     await tx.delete(abdmConsents).where(inArray(abdmConsents.patientId, patientIds))
   })

@@ -12,6 +12,7 @@ import { logGatewayEvent } from '@/lib/integrations/system-audit'
 import { ABDM_PATHS } from '@/lib/abdm/constants'
 import { abdmHeaders, defaultSessionDeps, getGatewayToken, timeoutSignal, ABDM_TIMEOUT_MS, type SessionDeps } from '@/lib/abdm/session'
 import { applyVerifiedAbhaTx } from './abha-link'
+import type { IdentityField } from '@/lib/abdm/identity-match'
 
 // ABHA Scan & Share (S1 hiecm-scan-and-register.yaml). A patient scans the
 // desk QR code; ABDM calls our HIP bridge with their profile; we give a token
@@ -191,7 +192,7 @@ export async function getSharePrefill(shareId: number): Promise<SharePrefill | n
   }
 }
 
-export type ResolveShareError = 'not_found' | 'already_resolved' | 'patient_required' | 'abha_conflict' | 'abha_missing'
+export type ResolveShareError = 'not_found' | 'already_resolved' | 'patient_required' | 'abha_conflict' | 'abha_missing' | 'identity_mismatch'
 
 /**
  * Resolves a pending share. `linked`: the share's ABHA is verified onto an
@@ -199,12 +200,16 @@ export type ResolveShareError = 'not_found' | 'already_resolved' | 'patient_requ
  * registered from the share; the verification columns are stamped when the
  * registered ABHA number is the shared one. `dismissed`: the profile is
  * scrubbed. Audit 'abdm: resolved profile share'.
+ * WS12 T5: `linked` compares the shared name, DOB and gender with the chart
+ * under the patient lock; a mismatch is 'identity_mismatch' (with the field
+ * names, the share stays pending) unless `mismatchReason` is given, which is
+ * then recorded in abha_link_overrides.
  */
 export async function resolveShare(
   shareId: number,
-  input: { action: 'registered' | 'linked' | 'dismissed'; patientId?: string },
+  input: { action: 'registered' | 'linked' | 'dismissed'; patientId?: string; mismatchReason?: string },
   session: Session,
-): Promise<{ ok: true } | { ok: false; error: ResolveShareError }> {
+): Promise<{ ok: true } | { ok: false; error: Exclude<ResolveShareError, 'identity_mismatch'> } | { ok: false; error: 'identity_mismatch'; fields: IdentityField[] }> {
   if (input.action !== 'dismissed' && !input.patientId) return { ok: false, error: 'patient_required' }
   try {
     return await getDb().transaction(async (tx) => {
@@ -216,8 +221,14 @@ export async function resolveShare(
 
       if (input.action === 'linked') {
         if (!share.abhaNumber) return { ok: false as const, error: 'abha_missing' as const }
-        const r = await applyVerifiedAbhaTx(tx, patientId!, { abhaNumber: share.abhaNumber, abhaAddress: share.abhaAddress, via: 'scan_and_share', source }, null, session)
-        if (r === 'not_found') return { ok: false as const, error: 'not_found' as const }
+        const profile = { name: share.name, gender: share.gender, yearOfBirth: share.yearOfBirth, monthOfBirth: share.monthOfBirth, dayOfBirth: share.dayOfBirth }
+        // Every field is acknowledged by the reason: the comparison under the lock decides which are recorded.
+        const override = input.mismatchReason ? { fields: ['name', 'dob', 'gender'] as IdentityField[], reason: input.mismatchReason } : undefined
+        const r = await applyVerifiedAbhaTx(
+          tx, patientId!, { abhaNumber: share.abhaNumber, abhaAddress: share.abhaAddress, via: 'scan_and_share', source, profile }, null, session,
+          { override, shareId },
+        )
+        if (!r.ok) return r
       } else if (input.action === 'registered') {
         const [p] = await tx.select({ abhaNumber: patients.abhaNumber }).from(patients).where(eq(patients.id, patientId!)).for('update')
         if (!p) return { ok: false as const, error: 'not_found' as const }

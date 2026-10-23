@@ -4,8 +4,9 @@ import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { POLICY_WRITE_ROLES, RCM_ROLES } from '@/lib/role-policy'
-import { todayIsoIn } from '@/lib/india-time'
+import { formatCalendarDate, todayIsoIn } from '@/lib/india-time'
 import { findPatientsForRcm, legacyPolicyPrefill, listPatientPolicies } from '@/lib/queries/rcm-policies'
+import { listExpiringPolicies, EXPIRING_DAYS } from '@/lib/queries/coverage-attention'
 import { listRcmPayers } from '@/lib/queries/rcm-payers'
 import { PatientPoliciesPanel } from '@/components/rcm/PatientPoliciesPanel'
 
@@ -18,6 +19,7 @@ export default async function RcmPoliciesPage({ searchParams }: { searchParams: 
   const sp = await searchParams
   const q = (one(sp.q) ?? '').slice(0, 60)
   const patientId = (one(sp.patientId) ?? '').slice(0, 40)
+  const expiring = one(sp.expiring) === String(EXPIRING_DAYS) ? await listExpiringPolicies() : null
   const hits = q.trim().length >= 2 ? await findPatientsForRcm(q) : []
   let panel: React.ReactNode = null
   if (patientId) {
@@ -43,6 +45,16 @@ export default async function RcmPoliciesPage({ searchParams }: { searchParams: 
         <input name="q" defaultValue={q} placeholder="Patient name, UHID or ID" className="w-72 rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
         <button type="submit" className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">Find patient</button>
       </form>
+      {expiring && (
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">Policies expiring in {EXPIRING_DAYS} days ({expiring.length})</h2>
+          {expiring.length === 0 ? <p className="text-sm text-muted-foreground">No active policy expires in the next {EXPIRING_DAYS} days.</p> : (
+            <ul className="rounded-lg border border-border bg-card text-sm">
+              {expiring.map((e) => <li key={e.policyId} className="border-t border-border px-3 py-2 first:border-t-0"><Link className="text-primary hover:underline" href={`/rcm/policies?patientId=${encodeURIComponent(e.patientId)}`}>{e.name}</Link> · {e.uhid ?? '—'} · {e.payerName} · ends {formatCalendarDate(e.validTo)}</li>)}
+            </ul>
+          )}
+        </section>
+      )}
       {hits.length > 0 && (
         <ul className="rounded-lg border border-border bg-card text-sm">
           {hits.map((h) => <li key={h.id} className="border-t border-border px-3 py-2 first:border-t-0"><Link className="text-primary hover:underline" href={`/rcm/policies?patientId=${encodeURIComponent(h.id)}`}>{h.name}</Link> · {h.uhid ?? '—'}</li>)}

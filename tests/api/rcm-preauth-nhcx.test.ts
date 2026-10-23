@@ -40,6 +40,12 @@ describe('POST /api/rcm/preauths/[id]/nhcx', () => {
     const r = await call()
     expect(r.status).toBe(409); expect(await r.json()).toEqual({ error: 'Already sent through NHCX' })
   })
+  it('a stale snapshot is a 422 that says to refresh it (WS12 T7)', async () => {
+    const message = 'This request was saved before the insurer\'s NHCX code was added. Use "Refresh snapshot", then send.'
+    create.mockResolvedValue({ ok: false, error: 'not_ready', message })
+    const r = await call()
+    expect(r.status).toBe(422); expect(await r.json()).toEqual({ error: message })
+  })
   it('a body with keys or a bad id is a 400', async () => {
     expect((await call('{"x":1}')).status).toBe(400)
     expect((await call('{}', 'abc')).status).toBe(400)

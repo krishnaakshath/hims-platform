@@ -253,3 +253,12 @@ export const LAB_TAT_REPORT_ROLES: readonly Role[] = ['admin', 'crc', 'labs']
 export const PHARMACY_REPORT_ROLES: readonly Role[] = ['admin', 'crc', 'pharmacy']
 export const REPORTS_ROLES: readonly Role[] = ['admin', 'crc', 'billing', 'labs', 'pharmacy']
 // end Wave I
+
+// WS12 T1: insurance verification (spec docs/superpowers/specs/2026-10-23-insurance-verification-design.md).
+// Coverage read = the policy readers; verify (manual verification, NHCX re-check) = the policy
+// writers (admin, rcm, frontdesk); admission coverage (mode, policy, pre-auth, deposit) = the desks
+// that admit plus RCM.
+export const COVERAGE_READ_ROLES: readonly Role[] = POLICY_READ_ROLES
+export const COVERAGE_VERIFY_ROLES: readonly Role[] = POLICY_WRITE_ROLES
+export const ADMISSION_COVERAGE_ROLES: readonly Role[] = ['admin', 'frontdesk', 'crc', 'rcm']
+// end WS12 T1

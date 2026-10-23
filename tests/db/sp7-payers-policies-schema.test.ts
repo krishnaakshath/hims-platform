@@ -17,11 +17,13 @@ import { readMigration, idempotencyProblems, missingColumns } from './migration-
 
 const M = '2026-10-09-sp7-b-payers-policies.sql'
 const TABLES = [payerProfiles, payerNetworks, payerContacts, payerDocumentRequirements, rcmReasonCodes, patientPolicies] as const
+// Later migrations that add patient_policies columns/constraints (WS12 T1: icu_limit_paise, patient_policies_icu_limit_range).
+const LATER = () => readMigration('2026-10-24-ws12-coverage.sql')
 
 describe('SP7 migration B (payers and policies)', () => {
   it('migration B is idempotent and declares every column', () => {
     const s = readMigration(M); expect(idempotencyProblems(s)).toEqual([])
-    for (const t of TABLES) expect(missingColumns(t, s)).toEqual([])
+    for (const t of TABLES) expect(missingColumns(t, s + LATER())).toEqual([])
     for (const c of ['rohini_id', 'hfr_id']) expect(s).toContain(c)
     expect(s).not.toMatch(/\bUPDATE\s+(payers|patients)\b/i)
   })
@@ -36,7 +38,7 @@ describe('SP7 migration B (payers and policies)', () => {
     for (const t of TABLES) {
       const c = getTableConfig(t)
       for (const n of [...c.foreignKeys.map((f) => f.getName()), ...c.checks.map((k) => k.name), ...c.indexes.map((i) => i.config.name!)]) {
-        expect(n.length, n).toBeLessThanOrEqual(63); expect(s, n).toContain(n)
+        expect(n.length, n).toBeLessThanOrEqual(63); expect(s + LATER(), n).toContain(n)
       }
       for (const fk of c.foreignKeys) expect(fk.onDelete ?? 'no action').toBe('no action')
     }

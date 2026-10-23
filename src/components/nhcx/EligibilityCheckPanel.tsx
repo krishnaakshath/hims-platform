@@ -1,13 +1,30 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { fetchJson, sendJson } from '@/lib/client-fetch'
+import { formatPaise } from '@/lib/money'
 
 // SP8: NHCX coverage eligibility for one policy. Posts the check, then polls
 // its state every 5 s for up to 2 minutes. Never a simulated answer: with no
 // NHCX connection the button is disabled; a payer not on NHCX is sent to the
-// insurer portal.
+// insurer portal. WS12: a final answer is saved as a coverage verification by the server;
+// the panel then refreshes the page (badges pick it up) and shows the saved limits.
 
-export type EligibilityPanelState = { status: 'pending' | 'eligible' | 'not_eligible' | 'error' | 'no_response'; isMock: boolean }
+export type EligibilityLimits = { sumInsuredPaise: number | null; balancePaise: number | null; copayBp: number | null; roomRentLimitPaise: number | null; icuLimitPaise: number | null }
+export type EligibilityPanelState = { status: 'pending' | 'eligible' | 'not_eligible' | 'error' | 'no_response'; isMock: boolean; limits?: EligibilityLimits | null }
+
+/** One line of the limits a verification saved, e.g. "Sum insured ₹5,00,000.00 · co-pay 10%"; null when it saved none. */
+export function limitsLine(l: EligibilityLimits | null | undefined): string | null {
+  if (!l) return null
+  const parts = [
+    l.sumInsuredPaise !== null ? `Sum insured ${formatPaise(l.sumInsuredPaise)}` : null,
+    l.balancePaise !== null ? `balance ${formatPaise(l.balancePaise)}` : null,
+    l.copayBp !== null ? `co-pay ${l.copayBp / 100}%` : null,
+    l.roomRentLimitPaise !== null ? `room rent ${formatPaise(l.roomRentLimitPaise)}/day` : null,
+    l.icuLimitPaise !== null ? `ICU ${formatPaise(l.icuLimitPaise)}/day` : null,
+  ].filter((p): p is string => p !== null)
+  return parts.length > 0 ? parts.join(' · ') : null
+}
 const POLL_MS = 5_000
 const MAX_POLL_MS = 120_000
 const PASS = { passThrough: [409, 422, 503] as const }
@@ -28,6 +45,7 @@ export function EligibilityCheckPanel({ policyId, context, purpose = 'validation
   nhcxConfigured: boolean
   payerOnNhcx: boolean
 }) {
+  const router = useRouter()
   const [providerId, setProviderId] = useState<number | null>(defaultProviderId)
   const [state, setState] = useState<EligibilityPanelState | null>(null)
   const [waiting, setWaiting] = useState(false)
@@ -50,9 +68,9 @@ export function EligibilityCheckPanel({ policyId, context, purpose = 'validation
       const r = await fetchJson<EligibilityPanelState>(`/api/nhcx/eligibility/${checkId}`)
       if (r.ok && r.data) {
         setState(r.data)
-        if (r.data.status !== 'pending') { setWaiting(false); return }
+        if (r.data.status !== 'pending') { setWaiting(false); router.refresh(); return }
       }
-      if (Date.now() - started >= MAX_POLL_MS) { setWaiting(false); setState({ status: 'no_response', isMock: r.ok && r.data ? r.data.isMock : false }); return }
+      if (Date.now() - started >= MAX_POLL_MS) { setWaiting(false); setState({ status: 'no_response', isMock: r.ok && r.data ? r.data.isMock : false }); router.refresh(); return }
       poll(checkId, started)
     }, POLL_MS)
   }
@@ -66,6 +84,7 @@ export function EligibilityCheckPanel({ policyId, context, purpose = 'validation
   }
 
   const result = state && state.status !== 'pending' ? RESULT[state.status] : null
+  const limits = state && state.status !== 'pending' ? limitsLine(state.limits) : null
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <select aria-label="Treating doctor" value={providerId ?? ''} onChange={(e) => setProviderId(e.target.value ? Number(e.target.value) : null)} className="rounded-md border border-border px-2 py-1">
@@ -75,6 +94,7 @@ export function EligibilityCheckPanel({ policyId, context, purpose = 'validation
       <button type="button" disabled={waiting} onClick={run} className="rounded-md border border-border px-2 py-1 hover:bg-secondary disabled:opacity-50">Check eligibility (NHCX)</button>
       {waiting && <span className="text-muted-foreground">Asking the insurer…</span>}
       {result && <span className={`font-semibold ${result.className}`}>{result.text}</span>}
+      {limits && <span className="text-muted-foreground">{limits}</span>}
       {state?.isMock && <span className="font-semibold text-amber-800">Sandbox mock - not real</span>}
       {error && <span role="alert" className="text-destructive">{error}</span>}
     </div>
