@@ -1,6 +1,7 @@
 import { getDb } from '@/db/client'
-import { providers } from '@/db/schema'
-import { eq } from 'drizzle-orm'
+import { providers, serviceCatalog, tariffRates } from '@/db/schema'
+import { and, desc, eq, gte, isNull, lte, or } from 'drizzle-orm'
+import { istDateOf } from '@/lib/india-time'
 import type { ProviderProfileInput } from '@/lib/validation/provider-profile'
 import { getOrSetCache, invalidateCache, providersListCacheKey } from '@/lib/cache'
 
@@ -39,3 +40,47 @@ export async function updateProviderProfile(id: number, patch: ProviderProfileIn
   await invalidateCache(providersListCacheKey())
   return updated ?? null
 }
+
+// Foundations T10: the consultation fee has ONE source, the tariff. The stored
+// providers.consultation_fee_paise column is kept but never used for a price decision.
+
+/** Current base rate (paise) of each department's active consultation service, keyed by department id. */
+async function currentConsultationRates(departmentId?: number, now = new Date()): Promise<Map<number, number>> {
+  const today = istDateOf(now)
+  const rows = await getDb()
+    .select({ departmentId: serviceCatalog.departmentId, serviceId: serviceCatalog.id, amountPaise: tariffRates.amountPaise })
+    .from(serviceCatalog)
+    .innerJoin(tariffRates, eq(tariffRates.serviceId, serviceCatalog.id))
+    .where(and(
+      eq(serviceCatalog.category, 'consultation'),
+      eq(serviceCatalog.isActive, true),
+      departmentId === undefined ? undefined : eq(serviceCatalog.departmentId, departmentId),
+      eq(tariffRates.scope, 'base'),
+      isNull(tariffRates.deactivatedAt),
+      lte(tariffRates.validFrom, today),
+      or(isNull(tariffRates.validTo), gte(tariffRates.validTo, today)),
+    ))
+    .orderBy(serviceCatalog.id, desc(tariffRates.validFrom), desc(tariffRates.id))
+  const out = new Map<number, number>()
+  const seenService = new Map<number, number>()
+  for (const r of rows) {
+    // First consultation service of the department (lowest id) wins; its newest valid rate.
+    const owner = seenService.get(r.departmentId)
+    if (owner === undefined) { seenService.set(r.departmentId, r.serviceId); out.set(r.departmentId, r.amountPaise) }
+  }
+  return out
+}
+
+/** A doctor's consultation fee in paise from the tariff, or null (no department or no current consultation rate). */
+export async function consultationFeePaise(providerId: number): Promise<number | null> {
+  const [p] = await getDb().select({ departmentId: providers.departmentId }).from(providers).where(eq(providers.id, providerId))
+  if (!p || p.departmentId === null) return null
+  return (await currentConsultationRates(p.departmentId)).get(p.departmentId) ?? null
+}
+
+/** The roster with each doctor's tariff-derived fee (read-only display). */
+export async function listAllProvidersWithTariffFee() {
+  const [rows, rates] = await Promise.all([listAllProviders(), currentConsultationRates()])
+  return rows.map((p) => ({ ...p, tariffFeePaise: p.departmentId === null ? null : rates.get(p.departmentId) ?? null }))
+}
+// end Foundations T10

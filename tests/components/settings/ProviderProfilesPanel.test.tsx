@@ -15,21 +15,23 @@ const departments = [{ id: 3, code: 'CARD', name: 'Cardiology', kind: 'clinical'
 beforeEach(() => { refresh.mockReset(); vi.unstubAllGlobals() })
 
 describe('ProviderProfilesPanel', () => {
-  it('shows the fee as rupees', () => {
-    render(<ProviderProfilesPanel providers={[base]} departments={departments} isAdmin />)
-    expect(screen.getByText(/₹1,500\.00/)).toBeInTheDocument()
+  it('shows the tariff-derived fee, not the stored one, and says where to set it', () => {
+    render(<ProviderProfilesPanel providers={[{ ...base, tariffFeePaise: 60000 }]} departments={departments} isAdmin />)
+    expect(screen.getByText(/₹600\.00/)).toBeInTheDocument()
+    expect(screen.queryByText(/₹1,500\.00/)).toBeNull()
+    fireEvent.click(screen.getByLabelText('Edit Dr A'))
+    expect(screen.getByText(/Set in Tariffs/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Consultation fee (₹)')).toBeNull()
   })
-  it('converts rupee input to paise on save', async () => {
+  it('never sends a fee on save', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     render(<ProviderProfilesPanel providers={[base]} departments={departments} isAdmin />)
     fireEvent.click(screen.getByLabelText('Edit Dr A'))
-    fireEvent.change(screen.getByLabelText('Consultation fee (₹)'), { target: { value: '500' } })
     fireEvent.click(screen.getByText('Save'))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toBe('/api/providers/7')
-    expect(JSON.parse(init.body as string).consultationFeePaise).toBe(50000)
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)
+    expect(body).not.toHaveProperty('consultationFeePaise')
   })
   it('shows the state select only for SMC and sends council fields', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }))
@@ -45,15 +47,5 @@ describe('ProviderProfilesPanel', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)
     expect(body).toMatchObject({ registrationCouncil: 'smc', registrationStateCode: 'IN-MH', registrationNumber: 'MMC/2011/12345', departmentId: 3 })
-  })
-  it('rejects an invalid rupee amount without calling the API', async () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-    render(<ProviderProfilesPanel providers={[base]} departments={departments} isAdmin />)
-    fireEvent.click(screen.getByLabelText('Edit Dr A'))
-    fireEvent.change(screen.getByLabelText('Consultation fee (₹)'), { target: { value: 'abc' } })
-    fireEvent.click(screen.getByText('Save'))
-    expect(await screen.findByText(/valid fee/i)).toBeInTheDocument()
-    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

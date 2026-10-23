@@ -124,8 +124,8 @@ describe('LabResultsSection — imaging on the Medical Record page', () => {
   // SP5: the order modal is a checklist (one requisition of several tests), grouped by category.
   it("groups the order modal's checklist into Labs and Imaging", () => {
     const labTests: LabTestOption[] = [
-      { id: 1, name: 'Complete Blood Count', code: 'CBC', defaultUnit: null, referenceRange: null, category: 'lab' },
-      { id: 2, name: 'Chest X-Ray, 2 Views', code: 'XR-CHEST-2V', defaultUnit: null, referenceRange: null, category: 'imaging' },
+      { id: 1, name: 'Complete Blood Count', code: 'CBC', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: 1, isActive: true, priced: true },
+      { id: 2, name: 'Chest X-Ray, 2 Views', code: 'XR-CHEST-2V', defaultUnit: null, referenceRange: null, category: 'imaging', serviceId: 1, isActive: true, priced: true },
     ]
     render(<OrderLabTestModal patientId="RD-0001" labTests={labTests} onClose={vi.fn()} />)
     const labsGroup = screen.getByRole('group', { name: 'Labs' })

@@ -8,7 +8,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 
 const pin = (o: object) => ({ id: 1, pinCode: '560001', areaLabel: 'Indiranagar', isActive: true, createdByName: 'x', createdAt: new Date(), updatedAt: new Date(), ...o }) as never
 const win = (o: object) => ({ id: 1, label: 'Morning', startTime: '07:00', endTime: '09:00', capacity: 10, isActive: true, sortOrder: 0, createdAt: new Date(), updatedAt: new Date(), ...o }) as never
-const test = { id: 5, name: 'Complete blood count', code: '58410-2', category: 'lab' as const, sampleType: null, container: null, serviceId: null, serviceCode: null, serviceName: null }
+const test = { id: 5, name: 'Complete blood count', code: '58410-2', category: 'lab' as const, sampleType: null, container: null, serviceId: null, serviceCode: null, serviceName: null, isActive: true }
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -75,5 +75,13 @@ describe('LabTestSetupPanel', () => {
     render(<LabTestSetupPanel tests={[test]} services={[{ id: 3, code: 'LAB_CBC', name: 'CBC' }]} isAdmin />)
     fireEvent.change(screen.getByLabelText('Sample type for Complete blood count'), { target: { value: 'blood' } })
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/lab-tests/5', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ sampleType: 'blood' }) })))
+  })
+
+  it('lists unmapped tests first (Foundations T10)', () => {
+    const mapped = { ...test, id: 6, name: 'AAA mapped', code: 'AAA', serviceId: 3, serviceCode: 'LAB_CBC', serviceName: 'CBC' }
+    render(<LabTestSetupPanel tests={[mapped, test]} services={[{ id: 3, code: 'LAB_CBC', name: 'CBC' }]} isAdmin />)
+    const names = screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '')
+    expect(names[0]).toContain('Complete blood count')
+    expect(names[1]).toContain('AAA mapped')
   })
 })

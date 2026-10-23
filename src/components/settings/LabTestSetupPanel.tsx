@@ -12,7 +12,7 @@ export interface InvestigationServiceOption { id: number; code: string; name: st
 type Field = 'sampleType' | 'container' | 'serviceId'
 
 // SP5 Settings → Lab setup: each lab test's sample type, tube and the SP2 tariff service that
-// prices it (Ruling 11). An unmapped test is still orderable; its quote says "unmapped".
+// prices it (Ruling 11). Foundations T10: an unmapped test cannot be ordered, so those are listed first.
 export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTestSetupRow[]; services: InvestigationServiceOption[]; isAdmin: boolean }) {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
@@ -28,6 +28,8 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
     router.refresh()
   }
 
+  // Unmapped first (stable within each group: the list arrives sorted by name).
+  const ordered = [...tests.filter((t) => t.serviceId === null), ...tests.filter((t) => t.serviceId !== null)]
   if (tests.length === 0) return <p className="text-sm text-muted-foreground">No lab tests in the catalogue.</p>
 
   return (
@@ -44,7 +46,7 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {tests.map((t) => (
+            {ordered.map((t) => (
               <tr key={t.id} aria-busy={savingId === t.id || undefined}>
                 <td className="py-2 pr-3">
                   <span className="font-medium text-foreground">{t.name}</span>
@@ -66,8 +68,8 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
                       </select>
                     </td>
                     <td className="py-2">
-                      <select aria-label={`Tariff service for ${t.name}`} value={t.serviceId ?? ''} disabled={savingId === t.id} onChange={(e) => save(t, 'serviceId', e.target.value)} className={SELECT}>
-                        <option value="">Not mapped</option>
+                      <select aria-label={`Tariff service for ${t.name}`} title={t.serviceId === null ? 'No price: map this test so it can be ordered' : undefined} value={t.serviceId ?? ''} disabled={savingId === t.id} onChange={(e) => save(t, 'serviceId', e.target.value)} className={SELECT}>
+                        <option value="">{t.serviceId === null ? 'Map…' : 'Unmap'}</option>
                         {/* Keep a mapped service selectable even when it is outside the loaded list. */}
                         {t.serviceId !== null && !services.some((s) => s.id === t.serviceId) && (
                           <option value={t.serviceId}>{t.serviceCode ?? ''} {t.serviceName ?? ''}</option>
@@ -80,7 +82,7 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
                   <>
                     <td className="py-2 pr-3 text-xs text-muted-foreground">{t.sampleType ? SAMPLE_TYPE_LABEL[t.sampleType] : 'Not set'}</td>
                     <td className="py-2 pr-3 text-xs text-muted-foreground">{t.container ? SAMPLE_CONTAINER_LABEL[t.container] : 'Not set'}</td>
-                    <td className="py-2 text-xs text-muted-foreground">{t.serviceCode ? `${t.serviceCode} · ${t.serviceName ?? ''}` : 'Not mapped'}</td>
+                    <td className="py-2 text-xs text-muted-foreground">{t.serviceCode ? `${t.serviceCode} · ${t.serviceName ?? ''}` : 'Not mapped: cannot be ordered'}</td>
                   </>
                 )}
               </tr>
