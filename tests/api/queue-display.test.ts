@@ -213,7 +213,7 @@ describe('GET /api/queue-display', () => {
     const providerRows = await listActiveProviders()
     const [appointment] = await getDb().insert(appointments).values({ patientId: 'RD-0001', providerId: providerRows[0].id, startsAt: new Date(), endsAt: new Date(Date.now() + 15 * 60000), visitReason: 'x' }).returning()
     createdAppointmentIds.push(appointment.id)
-    const r = await checkInVisit({ patientId: 'RD-0001', providerId: providerRows[0].id, visitType: 'outpatient', urgency: 'routine', reason: 'x', roomId: null, appointmentId: appointment.id, createAdmission: false }, SP3_SESSION)
+    const r = await checkInVisit({ patientId: 'RD-0001', providerId: providerRows[0].id, visitType: 'outpatient', urgency: 'routine', reason: 'x', appointmentId: appointment.id }, SP3_SESSION)
     if (!r.ok) throw new Error(`check-in failed: ${r.error}`)
     createdEncounterIds.push(r.encounter.id)
     createdAssignmentIds.push(r.assignment.id)

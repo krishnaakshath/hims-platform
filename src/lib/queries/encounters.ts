@@ -50,24 +50,23 @@ export async function allocateOpdToken(executor: WriteExecutor, encounterDate: s
 export interface CheckInVisitInput {
   patientId: string
   providerId: number
-  visitType: 'inpatient' | 'outpatient'
+  // WS3 T2: outpatient only; admission is admitPatient (src/lib/queries/admit-patient.ts).
+  visitType: 'outpatient'
   urgency: 'routine' | 'urgent' | 'emergency'
   reason: string
-  roomId: number | null
   appointmentId: number | null
-  createAdmission: boolean
 }
 
 export type CheckInVisitError = 'appointment_not_found' | 'appointment_mismatch' | 'appointment_not_scheduled' | 'appointment_not_today' | 'appointment_already_checked_in'
 
 export type CheckInVisitResult =
-  | { ok: true; assignment: DoctorAssignmentRow; encounter: Encounter; admissionId: number | null; completedFollowUpOrderId: number | null; charges: AutoChargeOutcome[] }
+  | { ok: true; assignment: DoctorAssignmentRow; encounter: Encounter; completedFollowUpOrderId: number | null; charges: AutoChargeOutcome[] }
   | { ok: false; error: CheckInVisitError }
 
 /**
- * The whole front-desk check-in as ONE transaction: the linked follow-up order
+ * The whole front-desk OPD check-in as ONE transaction: the linked follow-up order
  * and the appointment (row-locked, in that order), OPD token, the doctor assignment (its lobby ticket is the
- * token), the optional admission, the encounter, completing a booked
+ * token), the encounter, completing a booked
  * follow-up, and the audit rows. Any failure rolls all of it back.
  * `now` is the check-in instant; the business date is its IST date.
  */
@@ -109,7 +108,7 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
       visitType: input.visitType,
       urgency: input.urgency,
       reason: input.reason,
-      roomId: input.roomId,
+      roomId: null,
       assignedByName: session.name,
       // A booked appointment needs no second accept from the doctor's queue.
       status: input.appointmentId !== null ? 'scheduled' : 'pending',
@@ -118,23 +117,11 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
       createdAt: now,
     }).returning()
 
-    let admissionId: number | null = null
-    if (input.createAdmission) {
-      const [admission] = await tx.insert(admissions).values({
-        patientId: input.patientId,
-        currentRoomId: input.roomId,
-        attendingProviderId: input.providerId,
-        admissionType: 'elective',
-        createdFromAssignmentId: assignment.id,
-      }).returning({ id: admissions.id })
-      admissionId = admission.id
-    }
-
     const [provider] = await tx.select({ departmentId: providers.departmentId }).from(providers).where(eq(providers.id, input.providerId))
 
     const [encounter] = await tx.insert(encounters).values({
       patientId: input.patientId,
-      encounterType: input.visitType === 'inpatient' ? 'ipd' : 'opd',
+      encounterType: 'opd',
       visitType: defaultEncounterVisitType({ urgency: input.urgency, followUpLinked: !!order }),
       status: 'checked_in',
       encounterDate,
@@ -142,7 +129,6 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
       departmentId: provider?.departmentId ?? null,
       providerId: input.providerId,
       appointmentId: input.appointmentId,
-      admissionId,
       doctorAssignmentId: assignment.id,
       checkedInByName: session.name,
       checkedInAt: now,
@@ -162,7 +148,7 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
     // Never blocks the check-in: an unpriced or blocked charge comes back as an outcome.
     const charges = await captureVisitChargesInTx(tx, encounter, session, now)
 
-    return { ok: true, assignment, encounter, admissionId, completedFollowUpOrderId: order?.id ?? null, charges }
+    return { ok: true, assignment, encounter, completedFollowUpOrderId: order?.id ?? null, charges }
   })
 }
 

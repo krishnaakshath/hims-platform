@@ -280,3 +280,6 @@ export const DISPENSE_ROLES: readonly Role[] = ['admin', 'pi', 'pharmacy']
 export const MEDICATION_PRICE_ROLES: readonly Role[] = ['admin', 'pharmacy']
 export const INVOICE_READY_ROLES: readonly Role[] = CHARGE_CAPTURE_ROLES
 // end WS1/WS2 roles
+// WS3 T2: admission (spec 3.1 item 11). A pi may admit only as the attending (route-level check).
+export const ADMISSION_ROLES: readonly Role[] = ['frontdesk', 'admin', 'crc', 'pi']
+// end WS3 T2

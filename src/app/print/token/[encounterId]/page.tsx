@@ -20,7 +20,8 @@ export default async function TokenSlipPage({ params }: { params: Promise<{ enco
   const encounterId = Number(raw)
 
   const slip = await getTokenSlip(encounterId)
-  if (!slip) notFound()
+  // WS3 T2 (spec 3.1 item 6): an IPD stay has no OPD token, so it has no token slip.
+  if (!slip || slip.encounterType === 'ipd') notFound()
   await logAudit(session, 'printed OPD token slip', slip.patient.id, `encounter=${slip.encounterId}`)
 
   const isOpd = slip.encounterType === 'opd'

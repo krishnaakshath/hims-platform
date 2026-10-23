@@ -42,6 +42,7 @@ import { refusesSampleCodes, addEncounterDiagnosis, addEncounterProcedure, apply
 import { raiseCodingQuery } from '../lib/queries/coding-queries'
 import { nextUhid } from '../lib/queries/uhid'
 import { checkInVisit } from '../lib/queries/encounters'
+import { admitPatient } from '../lib/queries/admit-patient' // WS3 T2
 import { captureChargeLine } from '../lib/queries/charge-capture'
 import { voidChargeLine } from '../lib/queries/charge-capture' // WS2 T9
 import type { AutoChargeOutcome } from '../lib/queries/auto-charge' // WS2 T9
@@ -211,6 +212,13 @@ async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Prom
     await db.update(labTests)
       .set({ serviceId: serviceIds.get(m.serviceCode) ?? null, sampleType: m.sampleType, container: m.container })
       .where(and(eq(labTests.code, code), isNull(labTests.serviceId)))
+  }
+  // WS3 T2: a reset releases every lab test's service (seed.ts clear) but keeps the rows, so an
+  // India test that already exists is re-linked here too (only while it has no service).
+  for (const t of INDIA_LAB_TESTS) {
+    if (!t.serviceCode || !existing.has(t.code)) continue
+    await db.update(labTests).set({ serviceId: serviceIds.get(t.serviceCode) ?? null })
+      .where(and(eq(labTests.code, t.code), isNull(labTests.serviceId)))
   }
   // WS2 T10: fasting blood sugar and the lipid profile need a fasting sample (lane ruling R3).
   await db.update(labTests).set({ fastingRequired: true }).where(inArray(labTests.code, FASTING_LAB_TEST_CODES))
@@ -479,10 +487,9 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     return a.id
   }
 
-  async function checkIn(patientId: string, providerId: number, at: Date, reason: string, opts: { appointmentId?: number | null; inpatient?: boolean; roomId?: number | null; urgency?: 'routine' | 'urgent' | 'emergency' } = {}) {
+  async function checkIn(patientId: string, providerId: number, at: Date, reason: string, opts: { appointmentId?: number | null; urgency?: 'routine' | 'urgent' | 'emergency' } = {}) {
     const r = must(await checkInVisit({
-      patientId, providerId, visitType: opts.inpatient ? 'inpatient' : 'outpatient', urgency: opts.urgency ?? 'routine', reason,
-      roomId: opts.roomId ?? null, appointmentId: opts.appointmentId ?? null, createAdmission: Boolean(opts.inpatient),
+      patientId, providerId, visitType: 'outpatient', urgency: opts.urgency ?? 'routine', reason, appointmentId: opts.appointmentId ?? null,
     }, sessions.frontdesk, at), `check-in ${patientId}`)
     encounterCount++
     return r
@@ -658,13 +665,19 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   for (const s of stays) {
     const at = istAt(day(s.offset), '10:30')
     const roomId = room(...s.ward)
-    const ci = await checkIn(s.patientId, doctorId(s.doctor), at, s.reason, { inpatient: true, roomId, urgency: s.type === 'emergency' ? 'emergency' : 'routine' })
-    const admissionId = ci.admissionId!
+    // WS3 T2: through the admission path (bed claim, IPD encounter without a token, payer and deposit
+    // on admission_coverage). The demo ships only SAMPLE ICD-10 codes (no licensed version), so the
+    // provisional diagnosis is free text.
+    const adm = must(await admitPatient({
+      patientId: s.patientId, attendingProviderId: doctorId(s.doctor), roomId, admissionType: s.type, reason: s.reason,
+      provisionalDiagnosis: { text: s.reason }, expectedStayDays: s.type === 'emergency' ? 5 : 3, attendant: null,
+      policyId: s.payer ? (policyIds.get(s.patientId) ?? null) : null, preauthId: null,
+      depositRequiredPaise: s.payer ? 0 : 15_000_00, wardGenderOverrideReason: null, openOpdVisit: 'keep',
+    }, sessions.frontdesk, at), `admission ${s.patientId}`)
+    encounterCount++
+    const admissionId = adm.admissionId
     admissionIds.push(admissionId)
-    await db.update(admissions).set({ admittedAt: at, admissionType: s.type }).where(eq(admissions.id, admissionId))
-    await db.update(doctorAssignments).set({ status: 'scheduled' }).where(eq(doctorAssignments.id, ci.assignment.id))
-    await db.update(rooms).set({ status: 'occupied', occupiedByPatientId: s.patientId }).where(eq(rooms.id, roomId))
-    await setEncounterStatus(ci.encounter.id, 'in_consultation', plusMinutes(at, 20), s.doctor)
+    await setEncounterStatus(adm.encounterId, 'in_consultation', plusMinutes(at, 20), s.doctor)
 
     // Advance (deposit) on admission for self-pay stays.
     if (!s.payer) {

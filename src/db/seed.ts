@@ -892,7 +892,7 @@ async function clearExistingData() {
     await tx.delete(documentCounters)
   })
   await db.delete(chargeRuleConfigs)
-  await db.update(billingSettings).set({ roomRentServiceId: null })
+  await db.update(billingSettings).set({ roomRentServiceId: null, registrationServiceId: null }) // WS3 T2: WS2 T9's registration link too
   // end SP4
   // Wave D: everything else that hangs off appointments, admissions, rooms and medication
   // episodes, children first.

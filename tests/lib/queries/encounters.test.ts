@@ -1,12 +1,13 @@
 import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { admissions, appointments, auditLog, chargeLines, departments, doctorAssignments, encounters, followUpOrders, patients, providers } from '@/db/schema'
+import { admissionCoverage, admissions, appointments, auditLog, billingSettings, chargeLines, departments, diagnoses, doctorAssignments, encounters, followUpOrders, patients, providers, rooms } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 import {
   allocateOpdToken, checkInVisit, completeAdmissionEncounter, getEncounterById, listEncountersForPatient, transitionEncounter,
   type CheckInVisitInput,
 } from '@/lib/queries/encounters'
+import { admitPatient } from '@/lib/queries/admit-patient' // WS3 T2: admission left checkInVisit
 
 // Real logAudit by default; a test can make the audit insert itself fail.
 vi.mock('@/lib/audit', async () => {
@@ -29,6 +30,7 @@ const NOW3 = new Date('2099-03-08T10:00:00Z') // IST 2099-03-08
 let providerId = 0
 let otherProviderId = 0
 let deptId = 0
+let savedRegistrationServiceId: number | null = null // WS3 T2
 
 describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
   const appointmentIds: number[] = []
@@ -42,6 +44,11 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     providerId = p1.id
     otherProviderId = p2.id
     await db.insert(patients).values({ id: PATIENT, name: 'TEST_SP3 Encounter Patient', dob: '1990-01-01' })
+    // WS3 T2: the seeded demo sets a registration fee (WS2 T9), whose capture adds its own audit row;
+    // these tests pin the check-in's audit rows, so run without one and restore it after.
+    const [bs] = await db.select({ reg: billingSettings.registrationServiceId }).from(billingSettings).where(eq(billingSettings.id, 1))
+    savedRegistrationServiceId = bs?.reg ?? null
+    await db.update(billingSettings).set({ registrationServiceId: null }).where(eq(billingSettings.id, 1))
   })
 
   afterEach(async () => {
@@ -50,9 +57,12 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     await db.delete(followUpOrders).where(eq(followUpOrders.patientId, PATIENT))
     // WS2 T9: check-in captures visit charges (registration when billing_settings sets a service).
     await db.delete(chargeLines).where(eq(chargeLines.patientId, PATIENT))
+    await db.delete(admissionCoverage).where(inArray(admissionCoverage.admissionId, db.select({ id: admissions.id }).from(admissions).where(eq(admissions.patientId, PATIENT)))) // WS3 T2
+    await db.delete(diagnoses).where(eq(diagnoses.patientId, PATIENT)) // WS3 T2
     await db.delete(encounters).where(eq(encounters.patientId, PATIENT))
     await db.delete(admissions).where(eq(admissions.patientId, PATIENT))
     await db.delete(doctorAssignments).where(eq(doctorAssignments.patientId, PATIENT))
+    if (roomIds.length) await db.delete(rooms).where(inArray(rooms.id, roomIds.splice(0))) // WS3 T2
     if (appointmentIds.length) await db.delete(appointments).where(inArray(appointments.id, appointmentIds.splice(0)))
     await db.delete(auditLog).where(eq(auditLog.userName, PROBE_USER))
     vi.mocked(logAudit).mockClear()
@@ -60,6 +70,7 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
 
   afterAll(async () => {
     const db = getDb()
+    await db.update(billingSettings).set({ registrationServiceId: savedRegistrationServiceId }).where(eq(billingSettings.id, 1)) // WS3 T2
     await db.delete(patients).where(eq(patients.id, PATIENT))
     await db.delete(providers).where(inArray(providers.id, [providerId, otherProviderId]))
     await db.delete(departments).where(eq(departments.id, deptId))
@@ -67,8 +78,22 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
 
   const input = (over: Partial<CheckInVisitInput> = {}): CheckInVisitInput => ({
     patientId: PATIENT, providerId, visitType: 'outpatient', urgency: 'routine', reason: 'TEST_SP3 visit',
-    roomId: null, appointmentId: null, createAdmission: false, ...over,
+    appointmentId: null, ...over,
   })
+
+  // WS3 T2: an admitted stay (its IPD encounter) now comes from admitPatient.
+  const roomIds: number[] = []
+  async function admit() {
+    const [room] = await getDb().insert(rooms).values({ ward: 'TEST_SP3 Ward', roomNumber: `E${roomIds.length}`, bedNumber: 'A' }).returning()
+    roomIds.push(room.id)
+    const r = await admitPatient({
+      patientId: PATIENT, attendingProviderId: providerId, roomId: room.id, admissionType: 'elective', reason: 'TEST_SP3 stay',
+      provisionalDiagnosis: { text: 'Observation' }, expectedStayDays: 2, attendant: null, policyId: null, preauthId: null,
+      depositRequiredPaise: 0, wardGenderOverrideReason: null, openOpdVisit: 'keep',
+    }, SESSION, NOW)
+    if (!r.ok) throw new Error(`admit failed: ${r.error}`)
+    return r
+  }
 
   async function makeAppointment(over: Partial<typeof appointments.$inferInsert> = {}) {
     const startsAt = new Date('2099-03-01T04:00:00Z') // 09:30 IST on 2099-03-01
@@ -102,7 +127,6 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
       expect(b.assignment.queueTicketNumber).toBe(b.encounter.opdToken)
       expect(a.encounter).toMatchObject({ encounterType: 'opd', visitType: 'new', status: 'checked_in', encounterDate: '2099-03-01', providerId, departmentId: deptId, doctorAssignmentId: a.assignment.id, checkedInByName: PROBE_USER, appointmentId: null, admissionId: null })
       expect(a.assignment).toMatchObject({ status: 'pending', assignedByName: PROBE_USER, appointmentId: null })
-      expect(a.admissionId).toBeNull()
       expect(a.completedFollowUpOrderId).toBeNull()
     }
   })
@@ -277,23 +301,6 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     expect(await encountersOfPatient()).toHaveLength(1)
   })
 
-  it('inpatient check-in creates and links the admission', async () => {
-    const r = await checkInVisit(input({ visitType: 'inpatient', createAdmission: true }), SESSION, NOW)
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.encounter.encounterType).toBe('ipd')
-    expect(r.admissionId).not.toBeNull()
-    expect(r.encounter.admissionId).toBe(r.admissionId)
-    const [adm] = await getDb().select().from(admissions).where(eq(admissions.id, r.admissionId!))
-    expect(adm).toMatchObject({ createdFromAssignmentId: r.assignment.id, admissionType: 'elective', attendingProviderId: providerId, status: 'admitted' })
-  })
-
-  it('inpatient check-in without createAdmission opens an ipd encounter with no admission', async () => {
-    const r = await checkInVisit(input({ visitType: 'inpatient', createAdmission: false }), SESSION, NOW)
-    expect(r.ok && r.encounter.encounterType).toBe('ipd')
-    expect(r.ok && r.encounter.admissionId).toBeNull()
-  })
-
   it('writes the check-in audit row on the same transaction', async () => {
     const r = await checkInVisit(input(), SESSION, NOW)
     expect(r.ok).toBe(true)
@@ -348,16 +355,14 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
   })
 
   it('the front desk cannot cancel an IPD visit while its admission is active; admin can (M8)', async () => {
-    const r = await checkInVisit(input({ visitType: 'inpatient', createAdmission: true }), SESSION, NOW)
-    if (!r.ok) throw new Error('check-in failed')
-    expect(await transitionEncounter(r.encounter.id, 'cancelled', SESSION, { cancelReason: 'x' })).toEqual({ ok: false, error: 'admission_active' })
-    expect((await getEncounterById(r.encounter.id))?.status).toBe('checked_in')
+    const r = await admit()
+    expect(await transitionEncounter(r.encounterId, 'cancelled', SESSION, { cancelReason: 'x' })).toEqual({ ok: false, error: 'admission_active' })
+    expect((await getEncounterById(r.encounterId))?.status).toBe('checked_in')
     // An IPD visit with no admission is not blocked.
-    const bare = await checkInVisit(input({ visitType: 'inpatient', createAdmission: false }), SESSION, NOW)
-    if (!bare.ok) throw new Error('check-in failed')
-    expect((await transitionEncounter(bare.encounter.id, 'cancelled', SESSION, { cancelReason: 'x' })).ok).toBe(true)
+    const [bare] = await getDb().insert(encounters).values({ patientId: PATIENT, encounterType: 'ipd', encounterDate: '2099-03-01', providerId, checkedInByName: PROBE_USER }).returning()
+    expect((await transitionEncounter(bare.id, 'cancelled', SESSION, { cancelReason: 'x' })).ok).toBe(true)
     const admin: Session = { ...SESSION, role: 'admin' }
-    expect((await transitionEncounter(r.encounter.id, 'cancelled', admin, { cancelReason: 'x' })).ok).toBe(true)
+    expect((await transitionEncounter(r.encounterId, 'cancelled', admin, { cancelReason: 'x' })).ok).toBe(true)
   })
 
   it('cancelling a visit reopens the follow-up it completed and frees the appointment for a new check-in (I6)', async () => {
@@ -409,12 +414,11 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
   })
 
   it('completeAdmissionEncounter closes the open IPD encounter once', async () => {
-    const r = await checkInVisit(input({ visitType: 'inpatient', createAdmission: true }), SESSION, NOW)
-    if (!r.ok) throw new Error('check-in failed')
-    expect(await completeAdmissionEncounter(getDb(), r.admissionId!, PROBE_USER)).toBe(r.encounter.id)
-    const e = await getEncounterById(r.encounter.id)
+    const r = await admit()
+    expect(await completeAdmissionEncounter(getDb(), r.admissionId, PROBE_USER)).toBe(r.encounterId)
+    const e = await getEncounterById(r.encounterId)
     expect(e).toMatchObject({ status: 'completed', statusChangedByName: PROBE_USER })
     expect(e?.completedAt).toBeInstanceOf(Date)
-    expect(await completeAdmissionEncounter(getDb(), r.admissionId!, PROBE_USER)).toBeNull()
+    expect(await completeAdmissionEncounter(getDb(), r.admissionId, PROBE_USER)).toBeNull()
   })
 })
