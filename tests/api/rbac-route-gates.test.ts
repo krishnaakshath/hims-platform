@@ -1342,6 +1342,7 @@ const UNGATED_EXEMPT: Record<string, string> = {
   'GET /api/intake/[token]': 'intake token possession (tests/api/intake-portal.test.ts)',
   'PUT /api/intake/[token]': 'intake token possession (tests/api/intake-portal.test.ts)',
   'POST /api/intake/[token]/consents/[formSubmissionConsentId]/sign': 'intake token possession (tests/api/intake-consent-sign.test.ts)',
+  'POST /api/intake/[token]/files': 'intake token possession, rate limited per submission (tests/api/intake-files.test.ts)', // WS7 T3
   'GET /api/telemedicine/join/[token]/signal': 'patient join token possession (tests/api/telemedicine-join-signal.test.ts)',
   'POST /api/telemedicine/join/[token]/signal': 'patient join token possession (tests/api/telemedicine-join-signal.test.ts)',
   'POST /api/public/booking-requests': 'public booking form, rate limited (tests/api/public-booking-requests.test.ts)',

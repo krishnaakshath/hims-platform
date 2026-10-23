@@ -61,10 +61,14 @@ async function makeDoc(bodyText: string, legalReviewStatus: 'draft' | 'reviewed'
   return doc
 }
 
-async function makeTemplate(attach: { docId: number; sortOrder: number }[] = []) {
+// WS7 T3: PUT /api/intake/[token] keeps only answers to the template's own
+// questions, so a test that saves answers gives its template that question.
+const Q1 = [{ id: 'q1', label: 'Note', type: 'text' as const, hipaaSensitive: false, required: false }]
+
+async function makeTemplate(attach: { docId: number; sortOrder: number }[] = [], questions: typeof Q1 = []) {
   const db = getDb()
   const [t] = await db.insert(formTemplates).values({
-    name: `Intake Sign Test ${Date.now()}`, category: 'Uncategorized', diagnosisTag: 'test', questions: [],
+    name: `Intake Sign Test ${Date.now()}`, category: 'Uncategorized', diagnosisTag: 'test', questions,
   }).returning()
   templateIds.push(t.id)
   for (const a of attach) await db.insert(formTemplateConsents).values({ formTemplateId: t.id, consentDocumentId: a.docId, sortOrder: a.sortOrder })
@@ -290,7 +294,7 @@ describe('PUT /api/intake/[token] completion gate', () => {
   it('rejects complete: true while any consent is unsigned; partial save is unaffected; succeeds once all signed', async () => {
     const a = await makeDoc('Gate A')
     const b = await makeDoc('Gate B')
-    const t = await makeTemplate([{ docId: a.id, sortOrder: 0 }, { docId: b.id, sortOrder: 1 }])
+    const t = await makeTemplate([{ docId: a.id, sortOrder: 0 }, { docId: b.id, sortOrder: 1 }], Q1)
     const { id, accessToken } = await sendRealForm(t.id)
     const [fscA, fscB] = await fscRowsFor(id)
 

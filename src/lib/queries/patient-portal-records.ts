@@ -7,13 +7,15 @@
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
-import { admissions, appointments, bookingRequests, invoices, medicationEpisodes, patientPayments, patientPolicies, patients, payers, providers } from '@/db/schema'
+import { admissions, appointments, bookingRequests, formSubmissions, formTemplates, invoices, medicationEpisodes, patientPayments, patientPolicies, patients, payers, providers } from '@/db/schema' // WS7 T3: + formSubmissions, formTemplates
 import { getInvoice, type InvoiceDetail } from './invoices'
 import { getDischargeSummaryData } from './discharge-summary'
 import { getLatestSignatureForSignable } from './signatures'
 import type { DischargeSummaryData } from '@/lib/encounters/discharge-summary'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { isUniqueViolation } from '@/lib/db-errors'
+import { formLanguages, type FormLang, type FormQuestion } from '@/lib/forms/question-model' // WS7 T3
+import { listConsentsForSubmission, type SubmissionConsent } from './form-submission-consents' // WS7 T3
 
 // ---------- bills and receipts ----------
 
@@ -308,3 +310,45 @@ export async function createPortalAppointmentRequest(patientId: string, input: P
     throw err
   }
 }
+
+// WS7 T3 ---------- signed form copy ----------
+
+export interface PortalFormCopy {
+  submissionId: number
+  templateName: string
+  completedDate: Date | null
+  patientName: string
+  uhid: string | null
+  languages: FormLang[]
+  questions: FormQuestion[]
+  answers: Record<string, string>
+  /** Each attached consent as signed: the stored attestation text, typed name and time. */
+  consents: SubmissionConsent[]
+}
+
+/** The patient's own COMPLETED submission; another patient's, or one not yet submitted, is null. */
+export async function getPortalFormCopy(patientId: string, submissionId: number): Promise<PortalFormCopy | null> {
+  const [row] = await getDb()
+    .select({
+      id: formSubmissions.id, completedDate: formSubmissions.completedDate, answers: formSubmissions.answers,
+      templateName: formTemplates.name, questions: formTemplates.questions, languages: formTemplates.languages,
+      patientName: patients.name, uhid: patients.uhid,
+    })
+    .from(formSubmissions)
+    .innerJoin(formTemplates, eq(formTemplates.id, formSubmissions.templateId))
+    .innerJoin(patients, eq(patients.id, formSubmissions.patientId))
+    .where(and(eq(formSubmissions.id, submissionId), eq(formSubmissions.patientId, patientId), eq(formSubmissions.status, 'completed')))
+  if (!row) return null
+  return {
+    submissionId: row.id,
+    templateName: row.templateName,
+    completedDate: row.completedDate,
+    patientName: row.patientName,
+    uhid: row.uhid,
+    languages: formLanguages(row.languages),
+    questions: row.questions,
+    answers: row.answers ?? {},
+    consents: await listConsentsForSubmission(row.id),
+  }
+}
+// end WS7 T3

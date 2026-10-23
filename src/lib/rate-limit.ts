@@ -442,3 +442,18 @@ export async function checkIntegrationTestRateLimit(staffName: string): Promise<
   return { allowed: success }
 }
 // end SP8
+
+// WS7 T3: intake file uploads have no session, only the intake token. The
+// bucket is keyed on the token's submission id (the same bucket as the token,
+// without putting the token itself into a Redis key). Generous for a patient
+// attaching a few documents and retrying a failed one; stops a script from
+// filling the file store through one leaked link.
+let _intakeFileUploadLimiter: Ratelimit | null = null
+export async function checkIntakeFileUploadRateLimit(submissionId: number): Promise<{ allowed: boolean }> {
+  if (!_intakeFileUploadLimiter) {
+    _intakeFileUploadLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(20, '600 s'), prefix: 'ratelimit:intake-file-upload' })
+  }
+  const { success } = await _intakeFileUploadLimiter.limit(`submission:${submissionId}`)
+  return { allowed: success }
+}
+// end WS7 T3
