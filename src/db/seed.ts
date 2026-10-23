@@ -7,6 +7,7 @@ import { nextUhid } from '../lib/queries/uhid'
 import { setPatientPortalPassword } from '../lib/queries/patient-portal'
 import { addDaysIso } from '../lib/follow-ups/rules'
 import { todayIsoIn } from '../lib/india-time'
+import { encounterVitals, encounterConsults } from './schema' // WS1 T2
 import {
   // SP6
   codingQueryResponses, codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures, serviceProcedureCodes,
@@ -959,6 +960,10 @@ async function clearExistingData() {
   await db.delete(encounterCoding)
   await db.delete(encounterProcedures)
   // end SP6
+  // WS1 T2: vitals and consult records reference encounters and patients.
+  await db.delete(encounterVitals)
+  await db.delete(encounterConsults)
+  // end WS1 T2
   await db.delete(encounters)
   // Wave D: an admission references its doctor assignment, appointment and room.
   await db.delete(admissions)

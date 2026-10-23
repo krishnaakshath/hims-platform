@@ -90,6 +90,9 @@ import { POST as postNhcxReview } from '@/app/api/rcm/nhcx/exchanges/[id]/review
 import { POST as postIntegrationTest } from '@/app/api/settings/integrations/test/route'
 import { PUT as putNotificationTemplates } from '@/app/api/settings/notification-templates/route' // Foundations T8
 import { GET as getPatientNotices } from '@/app/api/patients/[anonId]/notices/route' // Foundations T9
+import { POST as postEncounterVitals } from '@/app/api/encounters/[id]/vitals/route' // WS1 T2
+import { PUT as putEncounterConsult } from '@/app/api/encounters/[id]/consult/route' // WS1 T2
+import { VITALS_ROLES, CLINICAL_WRITE_ROLES } from '@/lib/role-policy' // WS1 T2
 // end SP8
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -1052,6 +1055,8 @@ export const API_GATES: ApiGateCase[] = [
   // end Foundations T11
   { name: 'PUT /api/settings/notification-templates', call: () => settle(() => putNotificationTemplates(send('PUT', '/api/settings/notification-templates'))), allowed: ['admin'] }, // Foundations T8
   { name: 'GET /api/patients/[anonId]/notices', call: () => getPatientNotices(get(`/api/patients/${BOGUS_PATIENT}/notices`), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'crc', 'pi', 'frontdesk'] }, // Foundations T9
+  { name: 'POST /api/encounters/[id]/vitals', call: () => settle(() => postEncounterVitals(send('POST', `/api/encounters/${BOGUS_ID}/vitals`), ctx({ id: BOGUS_ID }))), allowed: [...VITALS_ROLES] }, // WS1 T2
+  { name: 'PUT /api/encounters/[id]/consult', call: () => settle(() => putEncounterConsult(send('PUT', `/api/encounters/${BOGUS_ID}/consult`), ctx({ id: BOGUS_ID }))), allowed: [...CLINICAL_WRITE_ROLES] }, // WS1 T2
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1209,6 +1214,8 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
   // end Foundations T11
   { name: 'PUT /api/settings/notification-templates', call: () => putNotificationTemplates(send('PUT', '/api/settings/notification-templates', NOT_JSON)), allowed: ['admin'] }, // Foundations T8
+  { name: 'POST /api/encounters/[id]/vitals', call: () => postEncounterVitals(send('POST', `/api/encounters/${BOGUS_ID}/vitals`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: VITALS_ROLES }, // WS1 T2
+  { name: 'PUT /api/encounters/[id]/consult', call: () => putEncounterConsult(send('PUT', `/api/encounters/${BOGUS_ID}/consult`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CLINICAL_WRITE_ROLES }, // WS1 T2
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

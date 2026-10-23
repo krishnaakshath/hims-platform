@@ -31,6 +31,7 @@ import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
 import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
 import { publicPatientColumns, patientPortalConfiguredSql, type PublicPatientRow } from '@/lib/queries/patient-columns'
+import { encounterVitals, encounterConsults } from '@/db/schema' // WS1 T2
 import { logAudit } from '@/lib/audit'
 import { lockPatientBilling } from './charge-capture' // SP4
 import type { Session } from '@/lib/auth'
@@ -546,6 +547,11 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   if (await hasFinancialRecords(db, anonId)) throw new PatientHasFinancialRecordsError()
   if (await hasRetainedClaimRecords(db, anonId)) throw new PatientHasFinancialRecordsError() // SP7
   if (await hasNhcxExchanges(db, anonId)) throw new PatientHasFinancialRecordsError() // SP8
+
+  // WS1 T2: vitals and the consultation record reference encounters and patients.
+  await db.delete(encounterVitals).where(eq(encounterVitals.patientId, anonId))
+  await db.delete(encounterConsults).where(eq(encounterConsults.patientId, anonId))
+  // end WS1 T2
 
   // SP8, before the SP7 deletes (eligibility checks reference policies; exchanges reference
   // claims, pre-auths and policies). abdm_consents is append-only, so the purge setting is on for
