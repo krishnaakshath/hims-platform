@@ -12,7 +12,7 @@
 import { normalizePhone } from '@/lib/india/phone'
 import { maskDestination } from '@/lib/notify/notifier'
 import { getChannelRegistry, type Channel, type ChannelRegistry, type DeliveryChannel } from '@/lib/notify/registry'
-import { notificationSubject, renderNotification, templateParams, type NotificationTemplateKey, type TemplateVars } from '@/lib/notify/templates'
+import { notificationSubject, renderNotification, templateParams, templateVarsValid, type NotificationTemplateKey, type TemplateVars } from '@/lib/notify/templates'
 import { dbNotificationStore } from '@/lib/queries/notification-log'
 
 export type { Channel } from '@/lib/notify/registry'
@@ -22,6 +22,8 @@ export interface SendNotificationInput {
   templateKey: NotificationTemplateKey
   vars: unknown
   destination: { phone?: string; email?: string }
+  /** Foundations T9: stable per-event key (e.g. `form:12`). A prior sent/log_only attempt for the same patient+template+key within 24h is not repeated. */
+  dedupeKey?: string
 }
 
 export type AttemptStatus = 'sent' | 'failed' | 'skipped' | 'log_only'
@@ -34,6 +36,8 @@ export interface NotificationAttempt {
 
 export interface SendNotificationResult {
   attempts: NotificationAttempt[]
+  /** True when a prior attempt with the same dedupeKey was found and nothing was sent. */
+  deduped?: boolean
 }
 
 export interface NotificationLogEntry {
@@ -44,6 +48,7 @@ export interface NotificationLogEntry {
   status: AttemptStatus
   providerMessageId: string | null
   errorClass: string | null
+  dedupeKey?: string | null
 }
 
 export interface TemplateChannelConfig {
@@ -64,6 +69,8 @@ export interface NotificationStore {
   /** null when there is no such patient. */
   patientPreferences(patientId: string): Promise<PatientChannelPreferences | null>
   record(rows: NotificationLogEntry[]): Promise<void>
+  /** Foundations T9: sent/log_only attempts for this patient+template+key in the last 24 hours. */
+  findRecentAttempts?(patientId: string, templateKey: NotificationTemplateKey, dedupeKey: string): Promise<NotificationAttempt[]>
 }
 
 export interface SendNotificationDeps {
@@ -93,7 +100,22 @@ export async function sendNotification(input: SendNotificationInput, deps: SendN
   const [config, prefs] = await Promise.all([store.templateConfig(templateKey), store.patientPreferences(patientId)])
   if (!prefs) return { attempts: [] }
 
-  const vars = (input.vars ?? {}) as TemplateVars[typeof templateKey]
+  // Foundations T9: retried request -> report the earlier attempts as skipped, send nothing.
+  if (input.dedupeKey && store.findRecentAttempts) {
+    const prior = await store.findRecentAttempts(patientId, templateKey, input.dedupeKey)
+    if (prior.length > 0) return { attempts: prior.map((a) => ({ channel: a.channel, status: 'skipped' as const })), deduped: true }
+  }
+  const dedupeKey = input.dedupeKey ?? null
+  if (!templateVarsValid(templateKey, input.vars)) {
+    console.error(`[notify] invalid vars for template ${templateKey}`)
+    try {
+      await store.record([{ patientId, templateKey, channel: 'log', destinationMasked: null, status: 'failed', providerMessageId: null, errorClass: 'invalid_vars', ...(dedupeKey ? { dedupeKey } : {}) }])
+    } catch (err) {
+      console.error(`[notify] notification log write failed (${err instanceof Error ? err.name : typeof err})`)
+    }
+    return { attempts: [{ channel: 'log', status: 'failed' }] }
+  }
+  const vars = input.vars as TemplateVars[typeof templateKey]
   const text = renderNotification(templateKey, vars)
   const params = templateParams(templateKey, vars)
   const hospitalName = String((input.vars as { hospitalName?: unknown } | null)?.hospitalName ?? '')
@@ -102,7 +124,7 @@ export async function sendNotification(input: SendNotificationInput, deps: SendN
   const rows: NotificationLogEntry[] = []
   const attempts: NotificationAttempt[] = []
   const push = (channel: Channel, status: AttemptStatus, destinationMasked: string | null, errorClass: string | null, providerMessageId?: string) => {
-    rows.push({ patientId, templateKey, channel, destinationMasked, status, providerMessageId: providerMessageId ?? null, errorClass })
+    rows.push({ patientId, templateKey, channel, destinationMasked, status, providerMessageId: providerMessageId ?? null, errorClass, ...(dedupeKey ? { dedupeKey } : {}) })
     attempts.push(providerMessageId ? { channel, status, providerMessageId } : { channel, status })
   }
 

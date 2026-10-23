@@ -1,14 +1,14 @@
 // Foundations T8: notification_log rows, per-template channel config and per-patient channel
 // preferences. The log stores ids, a masked destination, a status and an error class, never a
 // message body. Writes that a person makes (template config, preferences) are audited.
-import { desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { notificationLog, notificationTemplateConfig, patientNotificationPreferences, patients } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { DELIVERY_CHANNELS, type DeliveryChannel } from '@/lib/notify/registry'
 import { NOTIFICATION_TEMPLATE_KEYS, type NotificationTemplateKey } from '@/lib/notify/templates'
-import type { NotificationLogEntry, NotificationStore, PatientChannelPreferences, TemplateChannelConfig } from '@/lib/notify/send'
+import type { NotificationAttempt, NotificationLogEntry, NotificationStore, PatientChannelPreferences, TemplateChannelConfig } from '@/lib/notify/send'
 
 /** Channels a template uses until an admin saves its row. Email goes only when an address is given. */
 export const DEFAULT_TEMPLATE_CHANNELS: readonly DeliveryChannel[] = ['sms', 'whatsapp']
@@ -21,6 +21,32 @@ export function normaliseChannels(channels: readonly string[]): DeliveryChannel[
 export async function recordNotificationAttempts(rows: NotificationLogEntry[]): Promise<void> {
   if (rows.length === 0) return
   await getDb().insert(notificationLog).values(rows)
+}
+
+// Foundations T9: attempts that already went out (or were logged) for this event in the last 24h.
+export async function findRecentNotificationAttempts(patientId: string, templateKey: NotificationTemplateKey, dedupeKey: string): Promise<NotificationAttempt[]> {
+  const rows = await getDb()
+    .select({ channel: notificationLog.channel, status: notificationLog.status })
+    .from(notificationLog)
+    .where(and(
+      eq(notificationLog.patientId, patientId),
+      eq(notificationLog.templateKey, templateKey),
+      eq(notificationLog.dedupeKey, dedupeKey),
+      inArray(notificationLog.status, ['sent', 'log_only']),
+      gt(notificationLog.createdAt, sql`now() - interval '24 hours'`),
+    ))
+    .orderBy(notificationLog.id)
+  return rows.map((r) => ({ channel: r.channel, status: r.status as NotificationAttempt['status'] }))
+}
+
+/** Foundations T9: what the patient chart's "Recent notices" panel shows. No destination, no text. */
+export async function listPatientNotices(patientId: string, limit = 10) {
+  return getDb()
+    .select({ templateKey: notificationLog.templateKey, channel: notificationLog.channel, status: notificationLog.status, createdAt: notificationLog.createdAt })
+    .from(notificationLog)
+    .where(eq(notificationLog.patientId, patientId))
+    .orderBy(desc(notificationLog.createdAt), desc(notificationLog.id))
+    .limit(limit)
 }
 
 export async function listRecentNotifications(patientId: string, limit = 10) {
@@ -119,4 +145,5 @@ export const dbNotificationStore: NotificationStore = {
   templateConfig: getNotificationTemplateConfig,
   patientPreferences: getPatientChannelPreferences,
   record: recordNotificationAttempts,
+  findRecentAttempts: findRecentNotificationAttempts,
 }

@@ -1,15 +1,15 @@
-// SP5 patient notifications: the delivery log, the dedupe key and the opt-out flag. Callers
-// notify only AFTER their clinical write has committed, through notifyPatientSafely, which
-// never throws. Each attempt writes one notification_deliveries row (masked destination, no
-// message text).
+// SP5 patient notifications and the opt-out flag. Callers notify only AFTER their clinical write
+// has committed, through notifyPatientSafely, which never throws. Foundations T9: delivery goes
+// through sendNotification (channel config, per-patient opt-out, adapters, notification_log with
+// a masked destination and no message text, dedupe by the request's key).
 import { eq, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { notificationDeliveries, patients } from '@/db/schema'
+import { patients } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
-import { normalizePhone } from '@/lib/india/phone'
-import { renderNotification, type NotificationTemplateKey, type TemplateVars } from '@/lib/notify/templates'
-import { getNotifier, maskDestination, type Notifier, type NotifierResult } from '@/lib/notify/notifier'
+import type { NotificationTemplateKey, TemplateVars } from '@/lib/notify/templates'
+import { sendNotification, type SendNotificationDeps, type SendNotificationResult } from '@/lib/notify/send'
+import { getPatientChannelPreferences } from '@/lib/queries/notification-log'
 
 export interface NotifyPatientRequest<K extends NotificationTemplateKey> {
   patientId: string
@@ -21,61 +21,61 @@ export interface NotifyPatientRequest<K extends NotificationTemplateKey> {
 
 export type NotifyOutcome = 'logged' | 'sent' | 'failed' | 'suppressed_opt_out' | 'skipped_no_contact' | 'duplicate'
 
-type DeliveryUpdate = Partial<Pick<typeof notificationDeliveries.$inferInsert, 'status' | 'channel' | 'destinationMasked' | 'errorCode'>>
+/** Phone and email the notification service may use for this patient (null when no such patient). */
+async function patientContact(patientId: string): Promise<{ phone?: string; email?: string } | null> {
+  const [p] = await getDb().select({ phone: patients.phone, email: patients.email }).from(patients).where(eq(patients.id, patientId))
+  if (!p) return null
+  return { ...(p.phone ? { phone: p.phone } : {}), ...(p.email ? { email: p.email } : {}) }
+}
 
 /**
- * One notice: claim the dedupe key with a 'logged' row first (a retried request finds it and
- * stops), then decide (opt-out, no reachable phone) and send. The delivery row ends in the
- * outcome. Throws only if the DB itself fails; a notifier error is recorded as 'failed'.
+ * Foundations T9: the one place staff-triggered patient notices go through. Loads the patient's
+ * contact details and hands over to sendNotification (channel config, opt-out, adapters, log,
+ * dedupe by key). Never throws: a failure is reported by error name only and returns null, so a
+ * notice can never fail the primary action. `vars` must never carry a token or link.
+ */
+export async function sendPatientNotice<K extends NotificationTemplateKey>(
+  req: { patientId: string; templateKey: K; vars: TemplateVars[K]; dedupeKey: string },
+  deps?: SendNotificationDeps,
+): Promise<SendNotificationResult | null> {
+  try {
+    const destination = (await patientContact(req.patientId)) ?? {}
+    return await sendNotification({ patientId: req.patientId, templateKey: req.templateKey, vars: req.vars, destination, dedupeKey: req.dedupeKey }, deps)
+  } catch (err) {
+    console.error('[notify] failed', err instanceof Error ? err.name : 'error')
+    return null
+  }
+}
+
+function outcomeOf(r: SendNotificationResult): NotifyOutcome {
+  if (r.deduped) return 'duplicate'
+  const has = (s: string) => r.attempts.some((a) => a.status === s)
+  if (has('sent')) return 'sent'
+  if (has('failed')) return 'failed'
+  if (has('log_only')) return 'logged'
+  return 'skipped_no_contact'
+}
+
+/**
+ * One SP5 notice through sendNotification. Throws only if the notification service itself
+ * cannot read its config; a channel failure is recorded in notification_log as 'failed'.
  */
 export async function notifyPatient<K extends NotificationTemplateKey>(
-  actorName: string,
+  _actorName: string,
   req: NotifyPatientRequest<K>,
-  notifier: Notifier = getNotifier(),
+  deps?: SendNotificationDeps,
 ): Promise<NotifyOutcome> {
-  const db = getDb()
-  const [claimed] = await db
-    .insert(notificationDeliveries)
-    .values({
-      patientId: req.patientId,
-      templateKey: req.templateKey,
-      channel: 'log',
-      status: 'logged',
-      relatedType: req.related.type,
-      relatedId: req.related.id,
-      dedupeKey: req.dedupeKey,
-      createdByName: actorName,
-    })
-    .onConflictDoNothing({ target: notificationDeliveries.dedupeKey })
-    .returning({ id: notificationDeliveries.id })
-  if (!claimed) return 'duplicate'
+  const destination = await patientContact(req.patientId)
+  if (!destination) return 'skipped_no_contact'
+  const r = await sendNotification({ patientId: req.patientId, templateKey: req.templateKey, vars: req.vars, destination, dedupeKey: req.dedupeKey }, deps)
+  // Every channel opted out (master toggle or per-channel) is reported as suppressed.
+  const suppressed = r.attempts.length > 0 && !r.deduped && r.attempts.every((a) => a.status === 'skipped') && (await optedOutEverywhere(req.patientId))
+  return suppressed ? 'suppressed_opt_out' : outcomeOf(r)
+}
 
-  const finish = async (outcome: Exclude<NotifyOutcome, 'duplicate'>, set: DeliveryUpdate = {}): Promise<NotifyOutcome> => {
-    await db.update(notificationDeliveries).set({ status: outcome, ...set }).where(eq(notificationDeliveries.id, claimed.id))
-    return outcome
-  }
-
-  const [patient] = await db
-    .select({ phone: patients.phone, notificationOptOut: patients.notificationOptOut })
-    .from(patients)
-    .where(eq(patients.id, req.patientId))
-  if (!patient) return finish('skipped_no_contact')
-  if (patient.notificationOptOut) return finish('suppressed_opt_out')
-  const destination = patient.phone ? normalizePhone(patient.phone) : null
-  if (!destination) return finish('skipped_no_contact')
-
-  const destinationMasked = maskDestination(destination)
-  const text = renderNotification(req.templateKey, req.vars)
-  let result: NotifierResult
-  try {
-    result = await notifier.send({ patientId: req.patientId, templateKey: req.templateKey, text, destination })
-  } catch {
-    return finish('failed', { destinationMasked, errorCode: 'exception' })
-  }
-  if (result.delivered) return finish('sent', { channel: result.channel, destinationMasked })
-  if (result.errorCode) return finish('failed', { channel: result.channel, destinationMasked, errorCode: result.errorCode.slice(0, 64) })
-  if (result.channel === 'log') return finish('logged', { channel: 'log', destinationMasked })
-  return finish('failed', { channel: result.channel, destinationMasked, errorCode: 'not_delivered' })
+async function optedOutEverywhere(patientId: string): Promise<boolean> {
+  const p = await getPatientChannelPreferences(patientId)
+  return !!p && p.optOut
 }
 
 /**
@@ -86,11 +86,11 @@ export async function notifyPatient<K extends NotificationTemplateKey>(
 export async function notifyPatientSafely<K extends NotificationTemplateKey>(
   session: Session,
   req: NotifyPatientRequest<K>,
-  notifier?: Notifier,
+  deps?: SendNotificationDeps,
 ): Promise<NotifyOutcome | 'error'> {
   let outcome: NotifyOutcome
   try {
-    outcome = await notifyPatient(session.name, req, notifier)
+    outcome = await notifyPatient(session.name, req, deps)
   } catch (err) {
     console.error('[notify] failed', err instanceof Error ? err.name : 'error')
     return 'error'

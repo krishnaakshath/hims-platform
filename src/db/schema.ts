@@ -2716,9 +2716,15 @@ export const notificationLog = pgTable('notification_log', {
   status: text('status', { enum: ['queued', 'sent', 'failed', 'skipped', 'log_only'] }).notNull(),
   providerMessageId: text('provider_message_id'),
   errorClass: text('error_class'),
+  // Foundations T9: caller-chosen stable key (e.g. form:<id>) so a retried request never double-sends.
+  dedupeKey: text('dedupe_key'),
+  // end Foundations T9
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (t) => [
   index('notification_log_patient_created_idx').on(t.patientId, t.createdAt),
+  // Foundations T9
+  index('notification_log_dedupe_idx').on(t.patientId, t.templateKey, t.dedupeKey),
+  // end Foundations T9
   check('notification_log_channel_check', sql`${t.channel} IN ('sms', 'email', 'whatsapp', 'in_app', 'log')`),
   check('notification_log_status_check', sql`${t.status} IN ('queued', 'sent', 'failed', 'skipped', 'log_only')`),
 ])

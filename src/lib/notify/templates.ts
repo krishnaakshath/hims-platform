@@ -76,6 +76,16 @@ export function templateParams<K extends NotificationTemplateKey>(key: K, vars: 
   })
 }
 
+// Foundations T9: true when every declared var is present (a non-empty string; dates are YYYY-MM-DD).
+export function templateVarsValid(key: NotificationTemplateKey, vars: unknown): boolean {
+  if (vars === null || typeof vars !== 'object') return false
+  return (PARAM_KEYS[key] as readonly string[]).every((k) => {
+    const v = (vars as Record<string, unknown>)[k]
+    if (typeof v !== 'string' || v.trim() === '') return false
+    return k === 'visitDate' ? /^\d{4}-\d{2}-\d{2}$/.test(v) : true
+  })
+}
+
 const SUBJECTS: { [K in NotificationTemplateKey]: string } = {
   lab_tests_ordered: 'Lab tests ordered',
   home_collection_booked: 'Home sample collection booked',
