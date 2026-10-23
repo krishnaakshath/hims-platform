@@ -20,6 +20,7 @@ import {
   claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
   // SP8
   abdmConsents, abdmProfileShares, nhcxEligibilityChecks, nhcxExchanges,
+  admissionCoverage, coverageVerifications, // WS12 T1
   bookingRequests, // Wave J
   payers,
 } from '@/db/schema'
@@ -546,6 +547,15 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   if (await hasFinancialRecords(db, anonId)) throw new PatientHasFinancialRecordsError()
   if (await hasRetainedClaimRecords(db, anonId)) throw new PatientHasFinancialRecordsError() // SP7
   if (await hasNhcxExchanges(db, anonId)) throw new PatientHasFinancialRecordsError() // SP8
+
+  // WS12 T1, before SP8 and SP7: verifications reference eligibility checks and policies;
+  // admission coverage references admissions, policies, pre-auths and verifications.
+  // coverage_verifications is append-only, so the purge setting is on for these deletes only.
+  await db.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+  await db.delete(admissionCoverage).where(inArray(admissionCoverage.admissionId, db.select({ id: admissions.id }).from(admissions).where(eq(admissions.patientId, anonId))))
+  await db.delete(coverageVerifications).where(eq(coverageVerifications.patientId, anonId))
+  await db.execute(sql`select set_config('hims.allow_document_purge', 'off', true)`)
+  // end WS12 T1
 
   // SP8, before the SP7 deletes (eligibility checks reference policies; exchanges reference
   // claims, pre-auths and policies). abdm_consents is append-only, so the purge setting is on for

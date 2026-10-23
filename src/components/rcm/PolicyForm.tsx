@@ -21,7 +21,7 @@ export function PolicyForm({ patientId, payers, initial, policyId, onDone }: {
     policyNumber: initial?.policyNumber ?? '', memberId: initial?.memberId ?? '', planName: initial?.planName ?? '', policyType: initial?.policyType ?? 'individual',
     corporateName: initial?.corporateName ?? '', employeeId: initial?.employeeId ?? '', holderName: initial?.holderName ?? '', relationship: initial?.relationship ?? 'self',
     validFrom: initial?.validFrom ?? '', validTo: initial?.validTo ?? '', sumInsured: rupees(initial?.sumInsuredPaise), copayPercent: initial?.copayBp ? String(initial.copayBp / 100) : '',
-    roomRentLimit: rupees(initial?.roomRentLimitPaise), priority: initial?.priority ?? 'primary', status: initial?.status ?? 'active',
+    roomRentLimit: rupees(initial?.roomRentLimitPaise), icuLimit: rupees(initial?.icuLimitPaise), priority: initial?.priority ?? 'primary', status: initial?.status ?? 'active',
   })
   const run = useRcmAction()
   const set = (k: keyof typeof v, val: string) => setV((x) => ({ ...x, [k]: val }))
@@ -34,7 +34,7 @@ export function PolicyForm({ patientId, payers, initial, policyId, onDone }: {
       patientId, insurerPayerId: Number(v.insurerPayerId), tpaPayerId: v.tpaPayerId ? Number(v.tpaPayerId) : null, policyNumber: v.policyNumber.trim(), memberId: v.memberId.trim(),
       ...(v.planName.trim() ? { planName: v.planName.trim() } : {}), policyType: v.policyType, ...(v.corporateName.trim() ? { corporateName: v.corporateName.trim() } : {}),
       ...(v.employeeId.trim() ? { employeeId: v.employeeId.trim() } : {}), holderName: v.holderName.trim(), relationship: v.relationship, validFrom: v.validFrom, validTo: v.validTo,
-      sumInsuredPaise: money(v.sumInsured), copayBp: Number.isFinite(copay) ? copay : null, roomRentLimitPaise: money(v.roomRentLimit), priority: v.priority, status: v.status,
+      sumInsuredPaise: money(v.sumInsured), copayBp: Number.isFinite(copay) ? copay : null, roomRentLimitPaise: money(v.roomRentLimit), icuLimitPaise: money(v.icuLimit), priority: v.priority, status: v.status,
     }
     const parsed = policySchema.safeParse(body)
     if (!parsed.success) { run.setError(parsed.error.issues[0]?.message ?? 'Check the policy details'); return }
@@ -63,6 +63,7 @@ export function PolicyForm({ patientId, payers, initial, policyId, onDone }: {
         {text('sumInsured', 'Sum insured (₹)')}
         {text('copayPercent', 'Co-pay (%)')}
         {text('roomRentLimit', 'Room rent limit per day (₹)')}
+        {text('icuLimit', 'ICU limit per day (₹)')}
         <Field label="Priority"><select className={inputClass} value={v.priority} onChange={(e) => set('priority', e.target.value)}><option value="primary">Primary</option><option value="secondary">Secondary</option></select></Field>
         <Field label="Status"><select className={inputClass} value={v.status} onChange={(e) => set('status', e.target.value)}><option value="active">Active</option><option value="inactive">Inactive</option></select></Field>
       </div>

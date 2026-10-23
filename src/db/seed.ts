@@ -58,6 +58,7 @@ import {
   claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
   // SP8
   nhcxInboundCalls, nhcxExchanges, nhcxEligibilityChecks, abdmProfileShares, abdmConsents,
+  admissionCoverage, coverageVerifications, // WS12 T1
   // SP3
   encounters,
   followUpOrders,
@@ -845,6 +846,10 @@ async function clearExistingData() {
   // service link is released before service_catalog is deleted below.
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+    // WS12 T1: admission coverage references admissions, policies, pre-auths and verifications;
+    // verifications (append-only, purge flag above) reference eligibility checks and policies.
+    await tx.delete(admissionCoverage)
+    await tx.delete(coverageVerifications)
     // SP8: NHCX exchanges reference claims, claim versions, pre-auths, queries, policies and
     // eligibility checks; eligibility checks reference policies and payers; consents and shares
     // reference patients. Inbound calls and consents are append-only (purge flag above).

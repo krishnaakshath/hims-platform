@@ -25,7 +25,8 @@ export type NhcxReviewState = (typeof NHCX_REVIEW_STATES)[number]
 export const ELIGIBILITY_PURPOSES = ['validation', 'benefits', 'auth-requirements', 'discovery'] as const
 export type EligibilityPurpose = (typeof ELIGIBILITY_PURPOSES)[number]
 
-export const ELIGIBILITY_CONTEXTS = ['registration', 'admission', 'preauth', 'manual'] as const
+// WS12: + 'checkin' (OPD check-in auto eligibility; scripts/migrations/2026-10-24-ws12-coverage.sql).
+export const ELIGIBILITY_CONTEXTS = ['registration', 'checkin', 'admission', 'preauth', 'manual'] as const
 export type EligibilityContext = (typeof ELIGIBILITY_CONTEXTS)[number]
 
 export const ELIGIBILITY_STATUSES = ['pending', 'eligible', 'not_eligible', 'error', 'no_response'] as const

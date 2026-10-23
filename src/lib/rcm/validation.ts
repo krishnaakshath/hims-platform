@@ -111,6 +111,7 @@ const policyFields = {
   sumInsuredPaise: paise.nullable().optional(),
   copayBp: z.number().int().min(0).max(10_000).nullable().optional(),
   roomRentLimitPaise: paise.nullable().optional(),
+  icuLimitPaise: paise.nullable().optional(), // WS12 R7
   priority: z.enum(POLICY_PRIORITIES),
 }
 

@@ -9,3 +9,13 @@ describe('RCM error catalogue', () => {
     expect(RCM_ERROR_MESSAGE.gateway_not_configured).toBe('NHCX is not connected yet; submit through the insurer portal or email and record it')
   })
 })
+
+describe('WS12 RCM errors', () => {
+  it('policy_not_in_force is 422 and coverage_inactive 409, with the spec messages', async () => {
+    const { policyNotInForceMessage } = await import('@/lib/rcm/errors')
+    expect(RCM_ERROR_STATUS.policy_not_in_force).toBe(422)
+    expect(RCM_ERROR_STATUS.coverage_inactive).toBe(409)
+    expect(RCM_ERROR_MESSAGE.coverage_inactive).toBe('The last verification says this policy is not in force')
+    expect(policyNotInForceMessage('2 Nov 2026', '1 Apr 2026', '30 Oct 2026')).toBe('This policy is not valid on 2 Nov 2026 (valid 1 Apr 2026–30 Oct 2026)')
+  })
+})

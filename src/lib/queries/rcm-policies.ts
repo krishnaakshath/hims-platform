@@ -48,7 +48,7 @@ export interface PolicyView {
   insurer: { payerId: number; name: string }; tpa: { payerId: number; name: string } | null
   policyNumber: string; memberId: string; planName: string | null; policyType: PolicyType; corporateName: string | null
   holderName: string; relationship: PolicyRelationship; validFrom: string; validTo: string
-  sumInsuredPaise: number | null; copayBp: number | null; roomRentLimitPaise: number | null
+  sumInsuredPaise: number | null; copayBp: number | null; roomRentLimitPaise: number | null; icuLimitPaise: number | null
   priority: PolicyPriority; status: PolicyStatus; hasCardFront: boolean; hasCardBack: boolean
 }
 
@@ -62,7 +62,7 @@ function toView(p: PatientPolicyRow, insurerName: string, tpaName: string | null
     tpa: p.tpaPayerId === null ? null : { payerId: p.tpaPayerId, name: tpaName ?? '' },
     policyNumber: p.policyNumber, memberId: p.memberId, planName: p.planName, policyType: p.policyType, corporateName: p.corporateName,
     holderName: p.holderName, relationship: p.relationship, validFrom: p.validFrom, validTo: p.validTo,
-    sumInsuredPaise: p.sumInsuredPaise, copayBp: p.copayBp, roomRentLimitPaise: p.roomRentLimitPaise,
+    sumInsuredPaise: p.sumInsuredPaise, copayBp: p.copayBp, roomRentLimitPaise: p.roomRentLimitPaise, icuLimitPaise: p.icuLimitPaise,
     priority: p.priority, status: p.status, hasCardFront: p.cardFrontBlobUrl !== null, hasCardBack: p.cardBackBlobUrl !== null,
   }
 }
@@ -125,7 +125,7 @@ export async function createPolicy(input: PolicyInput, session: Session): Promis
         patientId: input.patientId, insurerPayerId: input.insurerPayerId, tpaPayerId, policyNumber: input.policyNumber, memberId: input.memberId,
         planName: input.planName ?? null, policyType: input.policyType, corporateName: input.corporateName ?? null, employeeId: input.employeeId ?? null,
         holderName: input.holderName, relationship: input.relationship, validFrom: input.validFrom, validTo: input.validTo,
-        sumInsuredPaise: input.sumInsuredPaise ?? null, copayBp: input.copayBp ?? null, roomRentLimitPaise: input.roomRentLimitPaise ?? null,
+        sumInsuredPaise: input.sumInsuredPaise ?? null, copayBp: input.copayBp ?? null, roomRentLimitPaise: input.roomRentLimitPaise ?? null, icuLimitPaise: input.icuLimitPaise ?? null,
         priority: input.priority, status: input.status, createdByName: session.name, updatedByName: session.name,
       }).returning({ id: patientPolicies.id })
       if (isActivePrimary(input)) {
@@ -144,7 +144,7 @@ export async function createPolicy(input: PolicyInput, session: Session): Promis
 
 const PATCH_KEYS = [
   'insurerPayerId', 'tpaPayerId', 'policyNumber', 'memberId', 'planName', 'policyType', 'corporateName', 'employeeId', 'holderName',
-  'relationship', 'validFrom', 'validTo', 'sumInsuredPaise', 'copayBp', 'roomRentLimitPaise', 'priority', 'status',
+  'relationship', 'validFrom', 'validTo', 'sumInsuredPaise', 'copayBp', 'roomRentLimitPaise', 'icuLimitPaise', 'priority', 'status',
 ] as const satisfies readonly (keyof PolicyPatchInput & keyof PatientPolicyRow)[]
 
 export async function updatePolicy(policyId: number, patch: PolicyPatchInput, session: Session): Promise<RcmWriteResult<null>> {

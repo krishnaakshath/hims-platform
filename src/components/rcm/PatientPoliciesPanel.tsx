@@ -62,7 +62,7 @@ export function PatientPoliciesPanel({ patientId, policies, payers, canEdit, leg
               <PolicyForm patientId={patientId} payers={payers} policyId={p.id} onDone={() => setEditing(null)} initial={{
                 insurerPayerId: p.insurer.payerId, tpaPayerId: p.tpa?.payerId ?? null, policyNumber: p.policyNumber, memberId: p.memberId, planName: p.planName ?? undefined,
                 policyType: p.policyType, corporateName: p.corporateName ?? undefined, holderName: p.holderName, relationship: p.relationship, validFrom: p.validFrom, validTo: p.validTo,
-                sumInsuredPaise: p.sumInsuredPaise, copayBp: p.copayBp, roomRentLimitPaise: p.roomRentLimitPaise, priority: p.priority, status: p.status,
+                sumInsuredPaise: p.sumInsuredPaise, copayBp: p.copayBp, roomRentLimitPaise: p.roomRentLimitPaise, icuLimitPaise: p.icuLimitPaise, priority: p.priority, status: p.status,
               }} />
             )}
           </li>
