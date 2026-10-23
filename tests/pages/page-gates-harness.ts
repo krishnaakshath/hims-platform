@@ -1,6 +1,6 @@
 import { it, vi } from 'vitest'
 import type { Role } from '@/lib/auth'
-import { ALL_ROLES as POLICY_ALL_ROLES } from '@/lib/role-policy'
+import { ALL_ROLES as POLICY_ALL_ROLES, CLINICAL_ROLES } from '@/lib/role-policy'
 
 // Plain (non-`.test.`) helper module so Tasks 2-5 can import `PageGateCase`,
 // `runPage`, `PAGE_GATES`, and `ALL_ROLES` without re-triggering
@@ -396,4 +396,6 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/billing/insurance-collections', load: () => import('@/app/(dashboard)/billing/insurance-collections/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/rcm/claims'])) },
   { route: '/billing/statements', load: () => import('@/app/(dashboard)/billing/statements/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/cash-desk'])) },
   // end Foundations T11
+  // WS7 T2: the empty form builder ("Create New Form") -- CLINICAL_ROLES, same gate as /forms/[templateId].
+  { route: '/forms/new', load: () => import('@/app/(dashboard)/forms/new/page'), props: { searchParams: Promise.resolve({ folderId: '1' }) }, allowed: [...CLINICAL_ROLES] },
 ]

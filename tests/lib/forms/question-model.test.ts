@@ -6,6 +6,7 @@ import {
   visibleQuestions,
   validateAnswers,
   localiseQuestion,
+  formLanguages,
   type FormQuestion,
 } from '@/lib/forms/question-model'
 
@@ -202,5 +203,13 @@ describe('localiseQuestion', () => {
   it('blank translated strings fall back to English string by string', () => {
     const blanky = { ...question, i18n: { kn: { label: '  ', options: ['ಹೌದು', ''] } } }
     expect(localiseQuestion(blanky, 'kn')).toEqual({ label: 'Do you smoke?', options: ['ಹೌದು', 'No'] })
+  })
+})
+
+describe('formLanguages (WS7 T2)', () => {
+  it('reads the stored column as FormLang[]: en always first, unknown values dropped', () => {
+    expect(formLanguages(['kn', 'en', 'hi'])).toEqual(['en', 'hi', 'kn'])
+    expect(formLanguages(['hi', 'fr'])).toEqual(['en', 'hi'])
+    expect(formLanguages(null)).toEqual(['en'])
   })
 })

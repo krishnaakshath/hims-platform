@@ -11,6 +11,12 @@ import { normalizePhone } from '@/lib/india/phone'
 
 export const FORM_LANGS = ['en', 'hi', 'kn'] as const
 export type FormLang = (typeof FORM_LANGS)[number]
+
+/** A stored languages column (text[]) as FormLang[]: unknown values dropped, 'en' always first. */
+export function formLanguages(stored: readonly string[] | null | undefined): FormLang[] {
+  const known = new Set((stored ?? []).filter((l): l is FormLang => (FORM_LANGS as readonly string[]).includes(l)))
+  return FORM_LANGS.filter((l) => l === 'en' || known.has(l))
+}
 type TranslatedLang = Exclude<FormLang, 'en'>
 
 export const QUESTION_TYPES = [

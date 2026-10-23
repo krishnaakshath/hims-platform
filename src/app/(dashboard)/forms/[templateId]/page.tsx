@@ -9,6 +9,7 @@ import { listConsentsForTemplate } from '@/lib/queries/form-template-consents'
 import { listConsentDocuments } from '@/lib/queries/consent-documents'
 import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { FormBuilderEditor } from '@/components/FormBuilderEditor'
+import { formLanguages } from '@/lib/forms/question-model'
 
 export default async function FormTemplateDetailPage({ params }: { params: Promise<{ templateId: string }> }) {
   const session = await requireSessionOrRedirect()
@@ -34,11 +35,14 @@ export default async function FormTemplateDetailPage({ params }: { params: Promi
   return (
     <FormBuilderEditor
       templateId={template.id}
-      initialName={template.name}
-      initialCategory={template.category}
-      initialDiagnosisTag={template.diagnosisTag}
-      initialQuestions={template.questions}
-      initialFolderId={template.folderId}
+      initial={{
+        name: template.name,
+        category: template.category,
+        diagnosisTag: template.diagnosisTag,
+        questions: template.questions,
+        languages: formLanguages(template.languages), // WS7 T2
+        folderId: template.folderId,
+      }}
       initialIsActive={template.isActive}
       folders={folders.map((f) => ({ id: f.id, name: f.name }))}
       attachedConsents={attachedConsents}
