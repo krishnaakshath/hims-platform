@@ -46,7 +46,7 @@ describe('selectRange', () => {
 
 describe('flagAnalyteValue', () => {
   const female = selectRange(HB.ranges, 'female', 30 * 365)
-  it('critical limits are inclusive at the stated bound (Hb < 7 is critical, 7.0 is low)', () => {
+  it('critical only strictly beyond the stored limit (Hb < 7 is critical: 6.99 is LL, 7.0 is L)', () => {
     expect(flagAnalyteValue(HB, '6.5', female)).toEqual({ flag: 'critical', interpretation: 'LL' })
     expect(flagAnalyteValue(HB, '6.99', female)).toEqual({ flag: 'critical', interpretation: 'LL' })
     expect(flagAnalyteValue(HB, '7.0', female)).toEqual({ flag: 'abnormal', interpretation: 'L' })

@@ -40,20 +40,43 @@ function toDraft(a: AnalyteRecord): AnalyteDraft {
 }
 
 const textOrNull = (s: string) => (s.trim() === '' ? null : s.trim())
-const numOrNull = (s: string) => (s.trim() === '' ? null : Number(s))
+// A plain decimal ("12", "-0.5", "6.25"); "12,5", "1e3" or "abc" are refused, never sent as null.
+const DECIMAL = /^-?\d+(\.\d+)?$/
 const listOrNull = (s: string) => {
   const items = s.split(',').map((x) => x.trim()).filter(Boolean)
   return items.length === 0 ? null : items
 }
 
-function toInput(d: AnalyteDraft): AnalyteDefinitionInput {
+/**
+ * The request body for one analyte, or the first field that is not a number. Empty fields are
+ * null; a non-empty field that is not a plain number blocks the save (JSON would otherwise turn
+ * NaN into null and silently remove a bound such as a critical limit).
+ */
+function toInput(d: AnalyteDraft, index: number): { ok: true; input: AnalyteDefinitionInput } | { ok: false; error: string } {
+  const who = d.code.trim().toUpperCase() || `Analyte ${index + 1}`
+  let bad: string | null = null
+  const num = (s: string, field: string): number | null => {
+    const t = s.trim()
+    if (t === '') return null
+    if (!DECIMAL.test(t) || !Number.isFinite(Number(t))) { bad ??= field; return null }
+    return Number(t)
+  }
+  const decimals = num(d.decimals, 'Decimals')
+  const ranges = d.ranges.map((r, i) => {
+    const at = (f: keyof typeof RANGE_FIELD_LABEL) => num(r[f], `${RANGE_FIELD_LABEL[f]} (range ${i + 1})`)
+    return {
+      sex: r.sex, ageMinDays: at('ageMinDays') ?? 0, ageMaxDays: at('ageMaxDays'), normalLow: at('normalLow'), normalHigh: at('normalHigh'),
+      criticalLow: at('criticalLow'), criticalHigh: at('criticalHigh'), displayText: textOrNull(r.displayText),
+    }
+  })
+  if (bad !== null) return { ok: false, error: `${who}: ${bad} must be a number` }
   return {
-    code: d.code.trim().toUpperCase(), name: d.name.trim(), unit: textOrNull(d.unit), valueType: d.valueType, decimals: numOrNull(d.decimals),
-    loincCode: textOrNull(d.loincCode), options: listOrNull(d.options), abnormalOptions: listOrNull(d.abnormalOptions), criticalOptions: listOrNull(d.criticalOptions),
-    ranges: d.ranges.map((r) => ({
-      sex: r.sex, ageMinDays: Number(r.ageMinDays || '0'), ageMaxDays: numOrNull(r.ageMaxDays), normalLow: numOrNull(r.normalLow), normalHigh: numOrNull(r.normalHigh),
-      criticalLow: numOrNull(r.criticalLow), criticalHigh: numOrNull(r.criticalHigh), displayText: textOrNull(r.displayText),
-    })),
+    ok: true,
+    input: {
+      code: d.code.trim().toUpperCase(), name: d.name.trim(), unit: textOrNull(d.unit), valueType: d.valueType, decimals,
+      loincCode: textOrNull(d.loincCode), options: listOrNull(d.options), abnormalOptions: listOrNull(d.abnormalOptions), criticalOptions: listOrNull(d.criticalOptions),
+      ranges,
+    },
   }
 }
 
@@ -89,8 +112,14 @@ export function LabAnalytesEditor({ labTestId, testName, onClose }: { labTestId:
     if (!drafts) return
     setError(null)
     setSaved(false)
+    const analytes: AnalyteDefinitionInput[] = []
+    for (const [i, d] of drafts.entries()) {
+      const r = toInput(d, i)
+      if (!r.ok) { setError(r.error); return }
+      analytes.push(r.input)
+    }
     setSaving(true)
-    const res = await sendJson<{ analytes: AnalyteRecord[] }>(`/api/lab-tests/${labTestId}/analytes`, 'PUT', { analytes: drafts.map(toInput) })
+    const res = await sendJson<{ analytes: AnalyteRecord[] }>(`/api/lab-tests/${labTestId}/analytes`, 'PUT', { analytes })
     setSaving(false)
     if (!res.ok) { setError(res.error); return }
     setDrafts(res.data.analytes.map(toDraft))
