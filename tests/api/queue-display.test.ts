@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { appSettings, patients, doctorAssignments, appointments, admissions, rooms, encounters, auditLog } from '@/db/schema'
+import { appSettings, patients, doctorAssignments, appointments, admissions, rooms, encounters, auditLog, providers } from '@/db/schema'
 import { GET } from '@/app/api/queue-display/route'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { getAppSettings } from '@/lib/queries/settings'
@@ -15,6 +15,8 @@ interface ResponseTicket {
   ticketNumber: number
   urgency: 'routine' | 'urgent' | 'emergency'
   stage: 'waiting' | 'ready'
+  providerName: string
+  room: string | null
 }
 
 // A fixed, unique-per-suite-run IP for every test below that isn't itself
@@ -221,7 +223,7 @@ describe('GET /api/queue-display', () => {
     expect(r.assignment).toMatchObject({ status: 'scheduled', roomId: null })
     const res = await GET(new Request('http://localhost/api/queue-display', { headers: FUNCTIONAL_HEADERS(TEST_PIN) }) as never)
     const body = await res.json()
-    expect(body.tickets.filter((t: ResponseTicket) => t.ticketNumber === r.encounter.opdToken)).toEqual([{ ticketNumber: r.encounter.opdToken, urgency: 'routine', stage: 'waiting' }])
+    expect(body.tickets.filter((t: ResponseTicket) => t.ticketNumber === r.encounter.opdToken)).toMatchObject([{ ticketNumber: r.encounter.opdToken, urgency: 'routine', stage: 'waiting' }])
   })
 
   it('drops the ticket once the encounter is completed or cancelled', async () => {
@@ -247,6 +249,38 @@ describe('GET /api/queue-display', () => {
     const res = await GET(new Request('http://localhost/api/queue-display', { headers: FUNCTIONAL_HEADERS(TEST_PIN) }) as never)
     const body = await res.json()
     expect(body.tickets.some((t: ResponseTicket) => t.ticketNumber === 701)).toBe(false)
+  })
+
+  // WS6 T10: doctor and room on the board, still never a patient identifier.
+  it('carries the doctor and room (OPD room for outpatients, the bed\'s room for inpatients) and no patient key', async () => {
+    await setPin(TEST_PIN)
+    const [provider] = await listActiveProviders()
+    const [before] = await getDb().select({ opdRoom: providers.opdRoom }).from(providers).where(eq(providers.id, provider.id))
+    await getDb().update(providers).set({ opdRoom: 'OPD 3' }).where(eq(providers.id, provider.id))
+    try {
+      const [room] = await getDb().insert(rooms).values({ ward: 'Test Ward', roomNumber: '902', bedNumber: 'B', status: 'occupied' }).returning()
+      createdRoomIds.push(room.id)
+      const [opd] = await getDb().insert(doctorAssignments).values({ patientId: 'RD-0001', providerId: provider.id, visitType: 'outpatient', urgency: 'routine', reason: 'x', assignedByName: 'Test Staff', queueTicketNumber: 801, status: 'pending' }).returning()
+      createdAssignmentIds.push(opd.id)
+      const [ipd] = await getDb().insert(doctorAssignments).values({ patientId: 'RD-0001', providerId: provider.id, visitType: 'inpatient', urgency: 'routine', reason: 'x', assignedByName: 'Test Staff', queueTicketNumber: 802, status: 'scheduled', roomId: room.id }).returning()
+      createdAssignmentIds.push(ipd.id)
+
+      const res = await GET(new Request('http://localhost/api/queue-display', { headers: FUNCTIONAL_HEADERS(TEST_PIN) }) as never)
+      const body = await res.json()
+      const opdRow = body.tickets.find((t: ResponseTicket) => t.ticketNumber === 801)
+      const ipdRow = body.tickets.find((t: ResponseTicket) => t.ticketNumber === 802)
+      expect(opdRow).toEqual({ ticketNumber: 801, urgency: 'routine', stage: 'waiting', providerName: provider.name, room: 'OPD 3' })
+      expect(ipdRow).toEqual({ ticketNumber: 802, urgency: 'routine', stage: 'ready', providerName: provider.name, room: 'Test Ward 902' })
+      for (const ticket of body.tickets as Record<string, unknown>[]) {
+        for (const key of Object.keys(ticket)) {
+          expect(key).not.toMatch(/patient|uhid|chart/i)
+          if (key !== 'providerName') expect(key).not.toMatch(/name/i)
+        }
+      }
+      expect(Object.keys(body)).toEqual(['tickets'])
+    } finally {
+      await getDb().update(providers).set({ opdRoom: before.opdRoom }).where(eq(providers.id, provider.id))
+    }
   })
 
   describe('rate limiting (Important #2)', () => {

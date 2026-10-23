@@ -628,6 +628,9 @@ import { GET as getQueueSummary } from '@/app/api/front-desk/queue-summary/route
 import { GET as getPatientPhoto, POST as postPatientPhoto } from '@/app/api/patients/[anonId]/photo/route'
 import { PATIENT_DIRECTORY_ROLES } from '@/lib/role-policy'
 // end WS6 T8
+// WS6 T10
+import { POST as postGenerateQueuePin } from '@/app/api/settings/queue-display-pin/generate/route'
+// end WS6 T10
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1117,6 +1120,9 @@ export const API_GATES: ApiGateCase[] = [
   // WS6 T9: the check-in dialog's queue length per clinical doctor.
   { name: 'GET /api/front-desk/queue-summary', call: () => settle(() => getQueueSummary()), allowed: [...CHECK_IN_ROLES] },
   // end WS6 T9
+  // WS6 T10: generate the lobby display PIN (a malformed body is a 400 for an admin, so no PIN is rotated).
+  { name: 'POST /api/settings/queue-display-pin/generate', call: () => settle(() => postGenerateQueuePin(send('POST', '/api/settings/queue-display-pin/generate', '{not json'))), allowed: ['admin'] },
+  // end WS6 T10
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

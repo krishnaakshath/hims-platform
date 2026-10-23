@@ -2,12 +2,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Siren } from 'lucide-react'
 import { BrandLogo } from '@/components/BrandLogo'
+import { QUEUE_LANGS, QUEUE_LANG_NAMES, isQueueLang, queueLabels, type QueueLabels, type QueueLang } from '@/lib/queue-display-i18n'
 
 interface QueueDisplayRow {
   ticketNumber: number
   urgency: 'routine' | 'urgent' | 'emergency'
   stage: 'waiting' | 'ready'
+  providerName: string // WS6 T10
+  room: string | null // WS6 T10
 }
+
+// WS6 T10: how many called tokens the "Now serving" band shows.
+const NOW_SERVING_COUNT = 3
 
 const PIN_STORAGE_KEY = 'queueDisplayPin'
 const POLL_INTERVAL_MS = 8000
@@ -15,40 +21,93 @@ const POLL_INTERVAL_MS = 8000
 // Small label + icon alongside color -- never color alone, matching
 // AssignmentStatusChip.tsx's convention -- so an urgent/emergency ticket
 // reads correctly for a colorblind viewer across a waiting room.
-function UrgencyBadge({ urgency }: { urgency: QueueDisplayRow['urgency'] }) {
+function UrgencyBadge({ urgency, labels }: { urgency: QueueDisplayRow['urgency']; labels: QueueLabels }) {
   if (urgency === 'routine') return null
   const isEmergency = urgency === 'emergency'
   const Icon = isEmergency ? Siren : AlertTriangle
   return (
     <span className={`inline-flex items-center gap-2 text-xl font-bold uppercase tracking-wide ${isEmergency ? 'text-destructive' : 'text-warning'}`}>
       <Icon className="h-6 w-6" aria-hidden="true" />
-      {urgency}
+      {isEmergency ? labels.emergency : labels.urgent}
     </span>
   )
 }
 
-function TicketCard({ ticket }: { ticket: QueueDisplayRow }) {
+// WS6 T10: "Dr Name, Room 5" -- the doctor and where to go, never the patient.
+function whereToGo(ticket: QueueDisplayRow, labels: QueueLabels): string {
+  return ticket.room ? `${ticket.providerName}, ${labels.room} ${ticket.room}` : ticket.providerName
+}
+
+function TicketCard({ ticket, labels }: { ticket: QueueDisplayRow; labels: QueueLabels }) {
   return (
-    <div className="flex items-center justify-between rounded-2xl border-2 border-border bg-card px-8 py-6 shadow-sm">
-      <span className="text-7xl font-black tabular-nums text-foreground">{ticket.ticketNumber}</span>
-      <UrgencyBadge urgency={ticket.urgency} />
+    <div className="flex items-center justify-between gap-4 rounded-2xl border-2 border-border bg-card px-8 py-6 shadow-sm">
+      <div className="min-w-0">
+        <span className="block text-7xl font-black tabular-nums text-foreground">{ticket.ticketNumber}</span>
+        <span className="mt-1 block truncate text-lg text-muted-foreground">{whereToGo(ticket, labels)}</span>
+      </div>
+      <UrgencyBadge urgency={ticket.urgency} labels={labels} />
     </div>
   )
 }
 
-function QueueSection({ title, tickets }: { title: string; tickets: QueueDisplayRow[] }) {
+// WS6 T10: the most recently called tokens. Tokens are issued in order through
+// the IST day, so the highest ready token numbers are the latest called.
+function NowServingBand({ tickets, labels }: { tickets: QueueDisplayRow[]; labels: QueueLabels }) {
+  const serving = [...tickets].sort((a, b) => b.ticketNumber - a.ticketNumber).slice(0, NOW_SERVING_COUNT)
+  return (
+    <section aria-labelledby="now-serving-title" className="mb-10 rounded-2xl border-2 border-primary bg-primary/5 px-8 py-6">
+      <h2 id="now-serving-title" className="mb-4 text-3xl font-bold text-primary">{labels.nowServing}</h2>
+      {serving.length === 0 ? (
+        <p className="text-xl text-muted-foreground">{labels.noTickets}</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {serving.map((t, i) => (
+            <div key={`serving-${t.ticketNumber}-${i}`} data-testid="now-serving-token" data-ticket={t.ticketNumber} className="rounded-xl bg-card px-6 py-4 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-8xl font-black tabular-nums text-foreground">{t.ticketNumber}</span>
+                <UrgencyBadge urgency={t.urgency} labels={labels} />
+              </div>
+              <p className="mt-2 text-2xl font-semibold text-foreground">{whereToGo(t, labels)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function LanguageToggle({ lang, onChange }: { lang: QueueLang; onChange: (lang: QueueLang) => void }) {
+  return (
+    <div className="flex gap-1 rounded-lg border border-border p-1" role="group" aria-label="Language">
+      {QUEUE_LANGS.map((l) => (
+        <button
+          key={l}
+          type="button"
+          lang={l}
+          aria-pressed={l === lang}
+          onClick={() => onChange(l)}
+          className={`rounded-md px-3 py-1 text-sm font-medium ${l === lang ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-secondary'}`}
+        >
+          {QUEUE_LANG_NAMES[l]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function QueueSection({ title, tickets, labels }: { title: string; tickets: QueueDisplayRow[]; labels: QueueLabels }) {
   return (
     <div className="flex-1">
       <h2 className="mb-4 text-3xl font-bold text-foreground">{title}</h2>
       {tickets.length === 0 ? (
-        <p className="text-xl text-muted-foreground">No tickets</p>
+        <p className="text-xl text-muted-foreground">{labels.noTickets}</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {/* Keyed on stage+ticketNumber+index, not ticketNumber alone --
               a duplicate ticket number (the DEFAULT-0 sentinel, or a
               genuine same-day race per the plan's Scope decision #5) would
               otherwise collide as a React key. */}
-          {tickets.map((t, i) => <TicketCard key={`${t.stage}-${t.ticketNumber}-${i}`} ticket={t} />)}
+          {tickets.map((t, i) => <TicketCard key={`${t.stage}-${t.ticketNumber}-${i}`} ticket={t} labels={labels} />)}
         </div>
       )}
     </div>
@@ -92,6 +151,7 @@ export default function QueueDisplayPage() {
   const [tickets, setTickets] = useState<QueueDisplayRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [initialized, setInitialized] = useState(false)
+  const [lang, setLang] = useState<QueueLang>('en') // WS6 T10: ?lang=en|hi|kn
   // Mirrors `pin` for use inside setInterval's closure without re-creating
   // the interval on every render.
   const pinRef = useRef<string | null>(null)
@@ -132,6 +192,10 @@ export default function QueueDisplayPage() {
   // mismatch) -- a one-time read-on-mount effect is the correct escape
   // hatch here, not the derived-state anti-pattern this lint rule targets.
   useEffect(() => {
+    // WS6 T10: ?lang= is read here with the PIN (same browser-only reason).
+    const requested = new URLSearchParams(window.location.search).get('lang')
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see comment above
+    if (isQueueLang(requested)) setLang(requested)
     let storedPin: string | null = null
     try {
       storedPin = sessionStorage.getItem(PIN_STORAGE_KEY)
@@ -140,7 +204,6 @@ export default function QueueDisplayPage() {
     }
     if (storedPin) {
       pinRef.current = storedPin
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- see comment above
       setPin(storedPin)
       fetchTickets(storedPin)
     }
@@ -175,6 +238,13 @@ export default function QueueDisplayPage() {
     fetchTickets(enteredPin)
   }
 
+  function changeLang(next: QueueLang) {
+    setLang(next)
+    const url = new URL(window.location.href)
+    url.searchParams.set('lang', next)
+    window.history.replaceState(window.history.state, '', url)
+  }
+
   if (!initialized) return null
 
   if (!pin) {
@@ -189,19 +259,24 @@ export default function QueueDisplayPage() {
     )
   }
 
+  const labels = queueLabels(lang)
   const waiting = tickets.filter((t) => t.stage === 'waiting')
   const ready = tickets.filter((t) => t.stage === 'ready')
 
   return (
-    <div className="min-h-screen bg-background px-10 py-8">
-      <div className="mb-8 flex items-center justify-between">
+    <div lang={lang} className="min-h-screen bg-background px-10 py-8">
+      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <BrandLogo className="text-xl font-semibold tracking-tight text-foreground" />
-        <h1 className="text-2xl font-bold text-foreground">Queue Status</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold text-foreground">Queue Status</h1>
+          <LanguageToggle lang={lang} onChange={changeLang} />
+        </div>
       </div>
       {error && <p className="mb-4 text-center text-sm text-destructive">{error}</p>}
+      <NowServingBand tickets={ready} labels={labels} />
       <div className="flex flex-col gap-10 lg:flex-row">
-        <QueueSection title="Waiting" tickets={waiting} />
-        <QueueSection title="Ready" tickets={ready} />
+        <QueueSection title={labels.waiting} tickets={waiting} labels={labels} />
+        <QueueSection title={labels.ready} tickets={ready} labels={labels} />
       </div>
     </div>
   )
