@@ -8,6 +8,7 @@ afterEach(() => { vi.unstubAllGlobals() })
 const MED = {
   id: 3, name: 'Paracetamol 500 mg', genericName: null, medicationClass: 'Analgesic', commonDose: null, form: 'tablet' as const, quantityOnHand: 100, reorderThreshold: 10, unit: 'tablets',
   mrpPerUnitPaise: 350, gstRateBp: 1200, hsn: null, effectiveGstRateBp: 1200, // WS2 T8
+  batches: [], nearestExpiry: null, expiringSoonQty: 0, expiredQty: 0, // WS5 T4
 }
 const AMOX = { ...MED, id: 4, name: 'Amoxicillin 500 mg', genericName: 'Amoxicillin', medicationClass: 'Antibiotic' }
 
@@ -141,6 +142,57 @@ describe('DispenseMedicationModal', () => {
     await pick(/ravi kumar/i)
     expect(screen.queryByLabelText(/i have checked this allergy/i)).not.toBeInTheDocument()
     expect(screen.queryAllByRole('alert').some((a) => /sulfa/i.test(a.textContent ?? ''))).toBe(false)
+  })
+
+  // WS5 T5: batch select, FEFO by default, expired batches listed but disabled.
+  it('defaults to the FEFO batch, disables expired batches and sends a picked batch', async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () => new Response('{}', { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const batches = [
+      { id: 11, batchNo: 'OLD-9', expiryDate: '2020-01-31', quantityOnHand: 5, mrpPerUnitPaise: 900, writtenOff: false },
+      { id: 12, batchNo: 'SOON-9', expiryDate: '2030-12-31', quantityOnHand: 40, mrpPerUnitPaise: 1000, writtenOff: false },
+      { id: 13, batchNo: 'LATE-9', expiryDate: '2031-06-30', quantityOnHand: 60, mrpPerUnitPaise: 1250, writtenOff: false },
+      { id: 14, batchNo: 'GONE-9', expiryDate: '2031-06-30', quantityOnHand: 0, mrpPerUnitPaise: 1250, writtenOff: true },
+    ]
+    render(<DispenseMedicationModal medication={{ ...MED, batches }} initialPatientId="RD-0001" today="2026-10-23" onClose={vi.fn()} />)
+    const select = screen.getByLabelText(/batch/i) as HTMLSelectElement
+    expect(select.value).toBe('')
+    expect(select.selectedOptions[0].textContent).toBe('FEFO: SOON-9 · exp Dec 2030')
+    expect(screen.getByRole('option', { name: /OLD-9/ })).toBeDisabled()
+    expect(screen.queryByRole('option', { name: /GONE-9/ })).not.toBeInTheDocument()
+    // The shown batch's MRP drives the WS2 price line; a received batch needs no typed strip.
+    expect(screen.getByTestId('dispense-price')).toHaveTextContent('MRP ₹10.00 per tablet, GST included')
+    expect(screen.queryByLabelText(/batch number/i)).not.toBeInTheDocument()
+
+    fireEvent.change(select, { target: { value: '13' } })
+    expect(screen.getByTestId('dispense-price')).toHaveTextContent('MRP ₹12.50 per tablet, GST included')
+    fireEvent.change(screen.getByLabelText(/quantity/i), { target: { value: '2' } })
+    expect(screen.getByTestId('dispense-price')).toHaveTextContent('₹12.50 × 2 (MRP, GST included)')
+    fireEvent.click(screen.getByRole('button', { name: 'Dispense' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const [, init] = fetchMock.mock.calls.find(([u]) => u === '/api/pharmacy/dispense')!
+    expect(JSON.parse(init!.body as string)).toMatchObject({ patientId: 'RD-0001', medicationId: 3, quantity: 2, batchId: 13 })
+  })
+
+  it('an OPENING batch (MRP 0) falls back to the catalogue MRP and asks for the strip', () => {
+    const batches = [{ id: 21, batchNo: 'OPENING', expiryDate: null, quantityOnHand: 100, mrpPerUnitPaise: 0, writtenOff: false }]
+    render(<DispenseMedicationModal medication={{ ...MED, batches }} initialPatientId="RD-0001" today="2026-10-23" prescribedQuantity={15} onClose={vi.fn()} />)
+    expect(screen.getByTestId('dispense-price')).toHaveTextContent('₹3.50 × 15')
+    expect(screen.getByLabelText(/batch number/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Dispense' })).toBeDisabled()
+    fillBatch()
+    expect(screen.getByRole('button', { name: 'Dispense' })).toBeEnabled()
+  })
+
+  it('sends no batchId when FEFO is left selected', async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () => new Response('{}', { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const batches = [{ id: 12, batchNo: 'SOON-9', expiryDate: '2030-12-31', quantityOnHand: 40, mrpPerUnitPaise: 1000, writtenOff: false }]
+    render(<DispenseMedicationModal medication={{ ...MED, batches }} initialPatientId="RD-0001" today="2026-10-23" onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText(/quantity/i), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Dispense' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string)).not.toHaveProperty('batchId')
   })
 })
 

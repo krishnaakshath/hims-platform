@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { patients, medications, medicationInventory, medicationDispenses, medicationEpisodes } from '@/db/schema'
+import { patients, medications, medicationInventory, medicationDispenses, medicationEpisodes, medicationBatches } from '@/db/schema'
 import { dispenseMedication, listDispensesForPatient, type DispenseResult } from '@/lib/queries/medication-dispenses'
 import type { Session } from '@/lib/auth'
 
@@ -19,6 +19,8 @@ afterEach(async () => {
   while (createdEpisodeIds.length > 0) await getDb().delete(medicationEpisodes).where(eq(medicationEpisodes.id, createdEpisodeIds.pop()!))
   while (createdMedIds.length > 0) {
     const id = createdMedIds.pop()!
+    await getDb().delete(medicationDispenses).where(eq(medicationDispenses.medicationId, id)) // WS5 T5: rows reference batches
+    await getDb().delete(medicationBatches).where(eq(medicationBatches.medicationId, id))
     await getDb().delete(medicationInventory).where(eq(medicationInventory.medicationId, id))
     await getDb().delete(medications).where(eq(medications.id, id))
   }

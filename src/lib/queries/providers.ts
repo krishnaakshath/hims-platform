@@ -1,5 +1,5 @@
 import { getDb } from '@/db/client'
-import { providers, serviceCatalog, tariffRates } from '@/db/schema'
+import { departments, providers, serviceCatalog, tariffRates } from '@/db/schema'
 import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { istDateOf } from '@/lib/india-time'
 import type { ProviderProfileInput } from '@/lib/validation/provider-profile'
@@ -37,6 +37,8 @@ export async function updateProviderProfile(id: number, patch: ProviderProfileIn
   if (patch.registrationStateCode !== undefined) set.registrationStateCode = patch.registrationStateCode
   if (patch.registrationNumber !== undefined) set.registrationNumber = patch.registrationNumber
   if (patch.consultationFeePaise !== undefined) set.consultationFeePaise = patch.consultationFeePaise
+  if (patch.opdRoom !== undefined) set.opdRoom = patch.opdRoom // WS6 T6
+  if (patch.portalBookable !== undefined) set.portalBookable = patch.portalBookable // WS6 T6
   const [updated] = await getDb().update(providers).set(set).where(eq(providers.id, id)).returning()
   await invalidateCache(providersListCacheKey())
   return updated ?? null
@@ -107,3 +109,27 @@ export async function listAllProvidersWithTariffFee() {
   return rows.map((p) => ({ ...p, tariffFeePaise: p.departmentId === null ? null : rates.get(p.departmentId) ?? null }))
 }
 // end Foundations T10
+
+// WS6 T8 (spec D6): active doctors in active clinical departments, for the registration
+// dialog's "Next available" hint. Ids, names, department and OPD room only.
+export interface ClinicalDoctor {
+  id: number
+  name: string
+  departmentId: number
+  departmentName: string
+  opdRoom: string | null
+}
+
+/** The one definition of "a clinical doctor": active, in an active clinical department. Needs the departments join. */
+export const clinicalDoctorCondition = and(eq(providers.isActive, true), eq(departments.isActive, true), eq(departments.kind, 'clinical'))
+
+export async function listClinicalDoctors(): Promise<ClinicalDoctor[]> {
+  const rows = await getDb()
+    .select({ id: providers.id, name: providers.name, departmentId: departments.id, departmentName: departments.name, opdRoom: providers.opdRoom })
+    .from(providers)
+    .innerJoin(departments, eq(providers.departmentId, departments.id))
+    .where(clinicalDoctorCondition)
+    .orderBy(departments.name, providers.name, providers.id)
+  return rows
+}
+// end WS6 T8

@@ -8,7 +8,7 @@ import { listAllProvidersWithTariffFee } from '@/lib/queries/providers'
 import { listAllUsers } from '@/lib/queries/users'
 import { listDepartments } from '@/lib/queries/departments'
 import { AutoClassifyToggle } from '@/components/AutoClassifyToggle'
-import { QueueDisplayPinForm } from '@/components/QueueDisplayPinForm'
+import { QueueDisplayCard } from '@/components/settings/QueueDisplayCard'
 import { PracticeInfoForm } from '@/components/PracticeInfoForm'
 import { UhidPrefixForm } from '@/components/settings/UhidPrefixForm'
 import { ProviderProfilesPanel } from '@/components/settings/ProviderProfilesPanel'
@@ -79,7 +79,7 @@ export default async function SettingsPage() {
 
   const queueDisplayTab = (
     <section className={SECTION}>
-      <QueueDisplayPinForm isAdmin={isAdmin} configured={settings.queueDisplayPinConfigured} />
+      <QueueDisplayCard isAdmin={isAdmin} configured={settings.queueDisplayPinConfigured} />
     </section>
   )
 

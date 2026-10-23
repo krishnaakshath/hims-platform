@@ -283,3 +283,8 @@ export const INVOICE_READY_ROLES: readonly Role[] = CHARGE_CAPTURE_ROLES
 // WL T6: Settings > Branding (read, save, reset, logo upload, onboarding). Admin only (spec D17).
 export const BRAND_SETTINGS_ROLES: readonly Role[] = MASTER_DATA_ADMIN_ROLES
 // end WL T6
+
+// WS5 T3: pharmacy stock writes (goods received notes; later write-off and reorder): the
+// /pharmacy page roles that may change stock.
+export const PHARMACY_STOCK_ROLES: readonly Role[] = ['admin', 'pharmacy']
+// end WS5 T3

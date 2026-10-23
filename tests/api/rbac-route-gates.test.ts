@@ -645,6 +645,35 @@ import { POST as postBrandingOnboarding } from '@/app/api/settings/branding/onbo
 // WL T7
 import { POST as postBrandingAsset, DELETE as deleteBrandingAsset } from '@/app/api/settings/branding/assets/route'
 // end WL T7
+// WS5 T3
+import { GET as getPharmacyGrns, POST as postPharmacyGrn } from '@/app/api/pharmacy/grns/route'
+import { PHARMACY_STOCK_ROLES } from '@/lib/role-policy'
+// end WS5 T3
+// WS5 T4
+import { PATCH as patchMedicationReorder } from '@/app/api/pharmacy/medications/[id]/reorder/route'
+import { POST as postBatchWriteOff } from '@/app/api/pharmacy/batches/[id]/write-off/route'
+import { POST as postUncataloguedLink } from '@/app/api/pharmacy/uncatalogued/link/route'
+// end WS5 T4
+// WS6 T6
+import { GET as getProviderSchedule, PUT as putProviderSchedule } from '@/app/api/providers/[id]/schedule/route'
+import { GET as getProviderSlots } from '@/app/api/providers/[id]/slots/route'
+// end WS6 T6
+// WS6 T8
+import { GET as getClinicalDoctors } from '@/app/api/providers/route'
+import { GET as getQueueSummary } from '@/app/api/front-desk/queue-summary/route' // WS6 T9
+import { GET as getPatientPhoto, POST as postPatientPhoto } from '@/app/api/patients/[anonId]/photo/route'
+import { PATIENT_DIRECTORY_ROLES } from '@/lib/role-policy'
+// end WS6 T8
+// WS6 T10
+import { POST as postGenerateQueuePin } from '@/app/api/settings/queue-display-pin/generate/route'
+// end WS6 T10
+// WS6 T11
+import { POST as postHandoverOtp } from '@/app/api/home-collections/[id]/otp/route'
+// end WS6 T11
+// WS6 T12
+import { POST as postDoorPayment } from '@/app/api/home-collections/[id]/payment/route'
+import { POST as postDoorPaymentConfirm } from '@/app/api/home-collections/[id]/payment/confirm/route'
+// end WS6 T12
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1150,6 +1179,39 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/settings/branding/assets', call: () => settle(() => postBrandingAsset(send('POST', '/api/settings/branding/assets'))), allowed: ['admin'] },
   { name: 'DELETE /api/settings/branding/assets', call: () => settle(() => deleteBrandingAsset(del('/api/settings/branding/assets'))), allowed: ['admin'] },
   // end WL T7
+  // WS5 T3: goods received notes (an empty body is a 400 for an allowed role).
+  { name: 'GET /api/pharmacy/grns', call: () => settle(() => getPharmacyGrns(get('/api/pharmacy/grns?limit=50'))), allowed: [...PHARMACY_STOCK_ROLES] },
+  { name: 'POST /api/pharmacy/grns', call: () => settle(() => postPharmacyGrn(send('POST', '/api/pharmacy/grns'))), allowed: [...PHARMACY_STOCK_ROLES] },
+  // end WS5 T3
+  // WS5 T4: reorder level, batch write-off, uncatalogued link (an empty body is a 400 for an allowed role).
+  { name: 'PATCH /api/pharmacy/medications/[id]/reorder', call: () => settle(() => patchMedicationReorder(send('PATCH', `/api/pharmacy/medications/${BOGUS_ID}/reorder`), ctx({ id: BOGUS_ID }))), allowed: [...PHARMACY_STOCK_ROLES] },
+  { name: 'POST /api/pharmacy/batches/[id]/write-off', call: () => settle(() => postBatchWriteOff(send('POST', `/api/pharmacy/batches/${BOGUS_ID}/write-off`), ctx({ id: BOGUS_ID }))), allowed: [...PHARMACY_STOCK_ROLES] },
+  { name: 'POST /api/pharmacy/uncatalogued/link', call: () => settle(() => postUncataloguedLink(send('POST', '/api/pharmacy/uncatalogued/link'))), allowed: [...PHARMACY_STOCK_ROLES] },
+  // end WS5 T4
+  // WS6 T6: working hours, slot length, leave and computed slots (an empty body is a 400 for an allowed role).
+  { name: 'GET /api/providers/[id]/schedule', call: () => settle(() => getProviderSchedule(get(`/api/providers/${BOGUS_ID}/schedule`), ctx({ id: BOGUS_ID }))), allowed: [...SCHEDULING_ROLES] },
+  { name: 'PUT /api/providers/[id]/schedule', call: () => settle(() => putProviderSchedule(send('PUT', `/api/providers/${BOGUS_ID}/schedule`), ctx({ id: BOGUS_ID }))), allowed: [...MASTER_DATA_ADMIN_ROLES] },
+  { name: 'GET /api/providers/[id]/slots', call: () => settle(() => getProviderSlots(get(`/api/providers/${BOGUS_ID}/slots?date=2026-11-02`), ctx({ id: BOGUS_ID }))), allowed: [...SCHEDULING_ROLES] },
+  // end WS6 T6
+  // WS6 T8: clinical doctors for the registration hint; patient photo (a JSON body is a 400 for an
+  // allowed role; an unknown patient's photo is a 404).
+  { name: 'GET /api/providers', call: () => settle(() => getClinicalDoctors()), allowed: [...SCHEDULING_ROLES] },
+  { name: 'POST /api/patients/[anonId]/photo', call: () => settle(() => postPatientPhoto(send('POST', `/api/patients/${BOGUS_PATIENT}/photo`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...new Set([...REGISTRATION_ROLES, ...PATIENT_PROFILE_EDIT_ROLES])] },
+  { name: 'GET /api/patients/[anonId]/photo', call: () => settle(() => getPatientPhoto(get(`/api/patients/${BOGUS_PATIENT}/photo`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...PATIENT_DIRECTORY_ROLES] },
+  // end WS6 T8
+  // WS6 T9: the check-in dialog's queue length per clinical doctor.
+  { name: 'GET /api/front-desk/queue-summary', call: () => settle(() => getQueueSummary()), allowed: [...CHECK_IN_ROLES] },
+  // end WS6 T9
+  // WS6 T10: generate the lobby display PIN (a malformed body is a 400 for an admin, so no PIN is rotated).
+  { name: 'POST /api/settings/queue-display-pin/generate', call: () => settle(() => postGenerateQueuePin(send('POST', '/api/settings/queue-display-pin/generate', '{not json'))), allowed: ['admin'] },
+  // end WS6 T10
+  // WS6 T11: send the handover code (an unknown visit is a 404 for an allowed role; nothing is sent).
+  { name: 'POST /api/home-collections/[id]/otp', call: () => settle(() => postHandoverOtp(send('POST', `/api/home-collections/${BOGUS_ID}/otp`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
+  // end WS6 T11
+  // WS6 T12: payment at the door (an empty body is a 400 for an allowed role; nothing is posted).
+  { name: 'POST /api/home-collections/[id]/payment', call: () => settle(() => postDoorPayment(send('POST', `/api/home-collections/${BOGUS_ID}/payment`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
+  { name: 'POST /api/home-collections/[id]/payment/confirm', call: () => settle(() => postDoorPaymentConfirm(send('POST', `/api/home-collections/${BOGUS_ID}/payment/confirm`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
+  // end WS6 T12
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

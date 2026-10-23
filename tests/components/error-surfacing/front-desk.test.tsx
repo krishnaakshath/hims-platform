@@ -28,12 +28,18 @@ const LEAK = 'ECONNRESET at pg pool'
 const assignment = { id: 42, patientId: 'RD-0001', providerId: 1, visitType: 'outpatient', urgency: 'routine', reason: 'r', status: 'pending' } as unknown as DoctorAssignmentRow
 const request = { id: 5, requesterName: 'Morgan', reason: 'Checkup', preferredProviderId: null, preferredDateRangeStart: '2026-11-01', preferredDateRangeEnd: '2026-11-10' } as unknown as BookingRequestRow
 
+// WS6 T7: the time comes from the doctor's slots; when they fail to load the typed time is shown.
+async function pickDoctor(label: string) {
+  fireEvent.change(screen.getByLabelText(label), { target: { value: '1' } })
+  await screen.findByLabelText('Start time (IST)')
+}
+
 type Case = { name: string; ui: () => ReactElement; before?: () => void | Promise<void>; submit: RegExp }
 const CASES: Case[] = [
   { name: 'AssignmentScheduleModal', ui: () => <AssignmentScheduleModalTrigger assignment={assignment} />, before: () => fireEvent.click(screen.getByText('Review')), submit: /^Schedule$/ },
-  { name: 'ConfirmBookingRequestModal', ui: () => <ConfirmBookingRequestModal request={request} providers={[{ id: 1, name: 'Dr' }]} onClose={vi.fn()} />, before: pickPatient, submit: /^Confirm$/ },
+  { name: 'ConfirmBookingRequestModal', ui: () => <ConfirmBookingRequestModal request={request} providers={[{ id: 1, name: 'Dr' }]} onClose={vi.fn()} />, before: async () => { await pickPatient(); await pickDoctor('Provider') }, submit: /^Confirm$/ },
   { name: 'DeclineBookingRequestModal', ui: () => <DeclineBookingRequestModal request={request} onClose={vi.fn()} />, submit: /^Decline$/ },
-  { name: 'NewEventModal', ui: () => <NewEventModal providers={[{ id: 1, name: 'Dr' }]} defaultDate="2026-10-08" initialPatient={{ id: 'RD-0001', name: 'P', uhid: null }} onClose={vi.fn()} />, submit: /^Save$/ },
+  { name: 'NewEventModal', ui: () => <NewEventModal providers={[{ id: 1, name: 'Dr' }]} defaultDate="2026-10-08" initialPatient={{ id: 'RD-0001', name: 'P', uhid: null }} onClose={vi.fn()} />, before: () => pickDoctor('Doctor'), submit: /^Save$/ },
   { name: 'ConfirmEligibilityButton', ui: () => <ConfirmEligibilityButton anonId="RD-0001" />, submit: /confirm/i },
   { name: 'StartTelemedicineButton', ui: () => <StartTelemedicineButton appointmentId={3} />, submit: /start|telemedicine|video/i },
   { name: 'PatientPortalAccessPanel', ui: () => <PatientPortalAccessPanel anonId="RD-0001" initialConfigured={false} mfaEnabled={false} isAdmin />, submit: /Enable portal access/ },

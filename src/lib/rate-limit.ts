@@ -478,3 +478,15 @@ export async function __resetBrandUploadGlobalBucketForTests(): Promise<void> {
   await getBrandUploadLimiters()[1].resetUsedTokens('all')
 }
 // end WL T7
+// WS6 T11: sending a home-collection handover code. Each send resets the visit's wrong-code count,
+// so this bucket is what bounds guessing: 3 sends per visit in 15 minutes (5 tries each). Keyed on
+// the visit id alone -- only the assigned collector (or admin) reaches it.
+let _handoverOtpSendLimiter: Ratelimit | null = null
+export async function checkHandoverOtpSendRateLimit(visitId: number): Promise<{ allowed: boolean }> {
+  if (!_handoverOtpSendLimiter) {
+    _handoverOtpSendLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(3, '900 s'), prefix: 'ratelimit:handover-otp-send' })
+  }
+  const { success } = await _handoverOtpSendLimiter.limit(String(visitId))
+  return { allowed: success }
+}
+// end WS6 T11

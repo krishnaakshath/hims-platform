@@ -25,6 +25,8 @@ const fresh = () => P[nextP++]
 
 const NOW = new Date('2099-06-02T05:00:00Z') // 10:30 IST, 2 Jun 2099
 const DAY = '2099-06-02'
+/** WS6 T11: the pre-handover-proof tests record a waiver (SMS not configured). */
+const WAIVE = { waiverReason: 'sms_unavailable' as const }
 
 let providerId = 0
 let departmentId = 0
@@ -112,7 +114,7 @@ describe.skipIf(!process.env.DATABASE_URL)('home collection: route list and coll
   it('collects matching tubes, releases the rest, and opens a completed lab encounter', async () => {
     const { visit, orders: [oA, oB] } = await scheduledVisit(fresh(), 2)
     // Typed with the display dashes and lower case: still the same tube.
-    const r = await collectHomeVisit(visit.id, [displaySampleId(oA.sampleId).toLowerCase()], COLLECTOR_S, NOW)
+    const r = await collectHomeVisit(visit.id, [displaySampleId(oA.sampleId).toLowerCase()], COLLECTOR_S, NOW, WAIVE)
     expect(r).toMatchObject({ ok: true, collectedOrderIds: [oA.id], notCollectedOrderIds: [oB.id] })
     if (!r.ok) return
 
@@ -133,17 +135,17 @@ describe.skipIf(!process.env.DATABASE_URL)('home collection: route list and coll
     expect(v.collectedAt?.getTime()).toBe(NOW.getTime())
 
     const audits = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, PROBE_COL), eq(auditLog.action, 'collected home samples')))
-    expect(audits.map((a) => a.details)).toContain(`visit=${visit.id} orders=${oA.id} missed=${oB.id} encounter=${r.encounterId}`)
+    expect(audits.map((a) => a.details)).toContain(`visit=${visit.id} orders=${oA.id} missed=${oB.id} encounter=${r.encounterId} handover=waived:sms_unavailable`)
     expect(audits.find((a) => a.details?.includes(`visit=${visit.id}`))?.patientId).toBe(visit.patientId)
 
     // A second collect of a collected visit changes nothing.
-    expect(await collectHomeVisit(visit.id, [oA.sampleId], COLLECTOR_S, NOW)).toEqual({ ok: false, error: 'not_collectable' })
+    expect(await collectHomeVisit(visit.id, [oA.sampleId], COLLECTOR_S, NOW, WAIVE)).toEqual({ ok: false, error: 'not_collectable' })
   })
 
   it('refuses a sample ID from another visit and changes nothing', async () => {
     const mine = await scheduledVisit(fresh(), 2)
     const other = await scheduledVisit(fresh(), 1)
-    const r = await collectHomeVisit(mine.visit.id, [mine.orders[0].sampleId, other.orders[0].sampleId], COLLECTOR_S, NOW)
+    const r = await collectHomeVisit(mine.visit.id, [mine.orders[0].sampleId, other.orders[0].sampleId], COLLECTOR_S, NOW, WAIVE)
     expect(r).toEqual({ ok: false, error: 'sample_not_on_visit', sampleId: other.orders[0].sampleId })
     for (const o of [...mine.orders, ...other.orders]) expect((await orderRow(o.id)).status).toBe('scheduled')
     expect((await visitRow(mine.visit.id)).status).toBe('booked')
@@ -157,40 +159,40 @@ describe.skipIf(!process.env.DATABASE_URL)('home collection: route list and coll
     const last = Number(digits.at(-1))
     const typo = `L${digits.slice(0, -1)}${(last + 1) % 10}`
     expect(parseSampleId(typo)).toBeNull()
-    expect(await collectHomeVisit(visit.id, [typo], COLLECTOR_S, NOW)).toEqual({ ok: false, error: 'invalid_sample_id', sampleId: typo })
-    expect(await collectHomeVisit(visit.id, [o.sampleId, displaySampleId(o.sampleId)], COLLECTOR_S, NOW))
+    expect(await collectHomeVisit(visit.id, [typo], COLLECTOR_S, NOW, WAIVE)).toEqual({ ok: false, error: 'invalid_sample_id', sampleId: typo })
+    expect(await collectHomeVisit(visit.id, [o.sampleId, displaySampleId(o.sampleId)], COLLECTOR_S, NOW, WAIVE))
       .toEqual({ ok: false, error: 'invalid_sample_id', sampleId: displaySampleId(o.sampleId) })
     // A well-formed ID that is on no order at all.
     const stray = formatSampleId('2099-06-01', 999_999)
-    expect(await collectHomeVisit(visit.id, [stray], COLLECTOR_S, NOW)).toEqual({ ok: false, error: 'sample_not_on_visit', sampleId: stray })
+    expect(await collectHomeVisit(visit.id, [stray], COLLECTOR_S, NOW, WAIVE)).toEqual({ ok: false, error: 'sample_not_on_visit', sampleId: stray })
     expect((await orderRow(o.id)).status).toBe('scheduled')
     expect((await visitRow(visit.id)).status).toBe('booked')
   })
 
   it('refuses a collector who is not assigned, and an unknown visit', async () => {
     const { visit, orders: [o] } = await scheduledVisit(fresh(), 1)
-    expect(await collectHomeVisit(visit.id, [o.sampleId], COLLECTOR2_S, NOW)).toEqual({ ok: false, error: 'not_assigned' })
-    expect(await collectHomeVisit(visit.id, [o.sampleId], { ...COLLECTOR_S, userId: null }, NOW)).toEqual({ ok: false, error: 'not_assigned' })
+    expect(await collectHomeVisit(visit.id, [o.sampleId], COLLECTOR2_S, NOW, WAIVE)).toEqual({ ok: false, error: 'not_assigned' })
+    expect(await collectHomeVisit(visit.id, [o.sampleId], { ...COLLECTOR_S, userId: null }, NOW, WAIVE)).toEqual({ ok: false, error: 'not_assigned' })
     const unassigned = await scheduledVisit(fresh(), 1, { collectorUserId: null })
-    expect(await collectHomeVisit(unassigned.visit.id, [unassigned.orders[0].sampleId], COLLECTOR_S, NOW)).toEqual({ ok: false, error: 'not_assigned' })
-    expect(await collectHomeVisit(2147483000, [o.sampleId], COLLECTOR_S, NOW)).toEqual({ ok: false, error: 'not_found' })
+    expect(await collectHomeVisit(unassigned.visit.id, [unassigned.orders[0].sampleId], COLLECTOR_S, NOW, WAIVE)).toEqual({ ok: false, error: 'not_assigned' })
+    expect(await collectHomeVisit(2147483000, [o.sampleId], COLLECTOR_S, NOW, WAIVE)).toEqual({ ok: false, error: 'not_found' })
     expect((await orderRow(o.id)).status).toBe('scheduled')
     // Admin covers for any collector.
-    const r = await collectHomeVisit(unassigned.visit.id, [unassigned.orders[0].sampleId], ADMIN_S, NOW)
+    const r = await collectHomeVisit(unassigned.visit.id, [unassigned.orders[0].sampleId], ADMIN_S, NOW, WAIVE)
     expect(r.ok).toBe(true)
   })
 
   it('a cancelled visit is not collectable', async () => {
     const { visit, orders: [o] } = await scheduledVisit(fresh(), 1, { status: 'cancelled', cancelledAt: NOW, cancelledByName: PROBE_ADMIN, cancelReason: 'other' })
-    expect(await collectHomeVisit(visit.id, [o.sampleId], COLLECTOR_S, NOW)).toEqual({ ok: false, error: 'not_collectable' })
+    expect(await collectHomeVisit(visit.id, [o.sampleId], COLLECTOR_S, NOW, WAIVE)).toEqual({ ok: false, error: 'not_collectable' })
   })
 
   it('two concurrent collects of the same visit: exactly one wins and one encounter is written', async () => {
     const { visit, orders: [o1, o2] } = await scheduledVisit(fresh(), 2)
     const rs = await Promise.all([
-      collectHomeVisit(visit.id, [o1.sampleId, o2.sampleId], COLLECTOR_S, NOW),
-      collectHomeVisit(visit.id, [o1.sampleId], COLLECTOR_S, NOW),
-      collectHomeVisit(visit.id, [o2.sampleId], ADMIN_S, NOW),
+      collectHomeVisit(visit.id, [o1.sampleId, o2.sampleId], COLLECTOR_S, NOW, WAIVE),
+      collectHomeVisit(visit.id, [o1.sampleId], COLLECTOR_S, NOW, WAIVE),
+      collectHomeVisit(visit.id, [o2.sampleId], ADMIN_S, NOW, WAIVE),
     ])
     expect(rs.filter((r) => r.ok)).toHaveLength(1)
     expect(rs.filter((r) => !r.ok).every((r) => !r.ok && r.error === 'not_collectable')).toBe(true)
@@ -215,7 +217,7 @@ describe.skipIf(!process.env.DATABASE_URL)('home collection: route list and coll
       contactPhone: '+919845013210',
       address: { line1: '12 Test Road', line2: null, city: 'Test City', district: null, stateCode: 'IN-KA', pinCode: '990001', landmark: 'Near the temple' },
       notes: 'Ring twice',
-      tests: early.orders.map((o) => ({ orderId: o.id, testName: `TEST_SP5 collect lab ${RUN}`, sampleType: 'blood', container: 'edta_lavender', sampleId: o.sampleId, status: 'scheduled' })),
+      tests: early.orders.map((o) => ({ orderId: o.id, testName: `TEST_SP5 collect lab ${RUN}`, sampleType: 'blood', container: 'edta_lavender', sampleId: o.sampleId, status: 'scheduled', quotedPricePaise: null })),
     })
     const json = JSON.stringify(mine)
     expect(json).not.toMatch(/dob|aadhaar|abha|1980-06-03|Reg line/i)

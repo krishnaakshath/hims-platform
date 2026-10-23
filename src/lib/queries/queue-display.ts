@@ -1,5 +1,5 @@
 import { getDb } from '@/db/client'
-import { doctorAssignments, appointments, admissions, encounters } from '@/db/schema'
+import { doctorAssignments, appointments, admissions, encounters, providers, rooms } from '@/db/schema'
 import { and, eq, gte, lt, ne } from 'drizzle-orm'
 import { istDayBounds } from '@/lib/india-time'
 
@@ -9,6 +9,9 @@ export interface QueueDisplayRow {
   ticketNumber: number
   urgency: 'routine' | 'urgent' | 'emergency'
   stage: QueueDisplayStage
+  // WS6 T10: the doctor's name and where to go. Never a patient identifier.
+  providerName: string
+  room: string | null
 }
 
 // Reuses doctorAssignments/rooms/admissions/appointments -- no new status
@@ -28,11 +31,18 @@ export async function getQueueDisplayRows(): Promise<QueueDisplayRow[]> {
       appointmentStatus: appointments.status,
       admissionId: admissions.id,
       encounterStatus: encounters.status, // SP3
+      visitType: doctorAssignments.visitType, // WS6 T10
+      providerName: providers.name, // WS6 T10
+      opdRoom: providers.opdRoom, // WS6 T10
+      bedWard: rooms.ward, // WS6 T10
+      bedRoomNumber: rooms.roomNumber, // WS6 T10
     })
     .from(doctorAssignments)
     .leftJoin(appointments, eq(doctorAssignments.appointmentId, appointments.id))
     .leftJoin(admissions, eq(admissions.createdFromAssignmentId, doctorAssignments.id))
     .leftJoin(encounters, eq(encounters.doctorAssignmentId, doctorAssignments.id)) // SP3
+    .innerJoin(providers, eq(providers.id, doctorAssignments.providerId)) // WS6 T10
+    .leftJoin(rooms, eq(rooms.id, doctorAssignments.roomId)) // WS6 T10
     .where(and(gte(doctorAssignments.createdAt, today.start), lt(doctorAssignments.createdAt, today.end), ne(doctorAssignments.status, 'declined')))
 
   const result: QueueDisplayRow[] = []
@@ -52,14 +62,18 @@ export async function getQueueDisplayRows(): Promise<QueueDisplayRow[]> {
     if (row.appointmentStatus === 'completed' || row.appointmentStatus === 'cancelled' || row.appointmentStatus === 'no_show') continue
     // SP3: a finished or cancelled visit leaves the lobby board.
     if (row.encounterStatus === 'completed' || row.encounterStatus === 'cancelled') continue
+    // WS6 T10: OPD goes to the doctor's OPD room; a bed assignment to the bed's room.
+    const bedRoom = row.bedRoomNumber !== null ? `${row.bedWard} ${row.bedRoomNumber}` : null
+    const room = row.visitType === 'outpatient' ? (row.opdRoom ?? bedRoom) : bedRoom
+    const base = { ticketNumber: row.queueTicketNumber, urgency: row.urgency, providerName: row.providerName, room }
     if (row.status === 'pending') {
-      result.push({ ticketNumber: row.queueTicketNumber, urgency: row.urgency, stage: 'waiting' })
+      result.push({ ...base, stage: 'waiting' })
     } else if (row.status === 'scheduled' && row.roomId !== null) {
-      result.push({ ticketNumber: row.queueTicketNumber, urgency: row.urgency, stage: 'ready' })
+      result.push({ ...base, stage: 'ready' })
     } else if (row.status === 'scheduled' && row.roomId === null && row.appointmentId !== null && row.encounterStatus === 'checked_in') {
       // SP3: checked in against a booked appointment (e.g. a follow-up) -- the
       // assignment is born 'scheduled', and the patient waits in the lobby.
-      result.push({ ticketNumber: row.queueTicketNumber, urgency: row.urgency, stage: 'waiting' })
+      result.push({ ...base, stage: 'waiting' })
     }
     // Any other 'scheduled' with no roomId has no bucket here -- see "Scope decisions" #3.
   }

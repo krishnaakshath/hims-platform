@@ -10,6 +10,7 @@ import { getBrandOnboarding } from '@/lib/brand-server'
 import type { BrandOnboardingStatus } from '@/lib/brand-resolve'
 import { BrandOnboardingCard } from '@/components/BrandOnboardingCard'
 import { BRAND_SETTINGS_ROLES } from '@/lib/role-policy'
+import { ToastProvider } from '@/components/ui/toast'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession()
@@ -44,8 +45,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <LeftNav role={session.role} badges={badges} demoFeatures={demoFeaturesEnabled()} trials={trialsEnabled()} />
         <main className="flex-1 overflow-y-auto p-6">
-          {onboarding && !onboarding.complete && !onboarding.dismissed && <BrandOnboardingCard status={onboarding} />}
-          {children}
+          <ToastProvider>
+            {onboarding && !onboarding.complete && !onboarding.dismissed && <BrandOnboardingCard status={onboarding} />}
+            {children}
+          </ToastProvider>
         </main>
       </div>
     </div>

@@ -125,3 +125,16 @@ export const LANGUAGES = [
   { code: 'pa', label: 'Punjabi' },
   { code: 'as', label: 'Assamese' },
 ] as const satisfies readonly Coded[]
+
+// WS6 T8: how the patient came to the hospital (patients.referral_source CHECK list).
+export const REFERRAL_SOURCES = [
+  { code: 'self', label: 'Self / walk-in' },
+  { code: 'doctor', label: 'Referred by a doctor' },
+  { code: 'hospital', label: 'Referred by another hospital' },
+  { code: 'camp', label: 'Health camp' },
+  { code: 'insurer', label: 'Insurer / TPA' },
+  { code: 'online', label: 'Online' },
+  { code: 'other', label: 'Other' },
+] as const satisfies readonly Coded[]
+export const REFERRAL_SOURCE_CODES = REFERRAL_SOURCES.map((r) => r.code) as unknown as readonly ['self', 'doctor', 'hospital', 'camp', 'insurer', 'online', 'other']
+// end WS6 T8

@@ -6,6 +6,7 @@ describe('notification templates', () => {
     expect(NOTIFICATION_TEMPLATE_KEYS).toEqual([
       'lab_tests_ordered', 'home_collection_booked', 'home_collection_rescheduled', 'home_collection_cancelled', 'lab_report_ready',
       'form_sent', 'video_visit_link', 'booking_confirmed', 'appointment_reminder',
+      'home_collection_handover_otp', // WS6 T11
     ])
   })
 

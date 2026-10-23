@@ -12,7 +12,8 @@ describe('WS1 allergy columns (schema + migration)', () => {
   })
 
   it('declares the columns as the last columns of their tables', () => {
-    expect(getTableConfig(patients).columns.at(-1)!.name).toBe('allergy_status')
+    // WS6 T8's referral columns come from a later migration (2026-10-25), so they follow it.
+    expect(getTableConfig(patients).columns.slice(-3).map((c) => c.name)).toEqual(['allergy_status', 'referral_source', 'referral_note'])
     expect(getTableConfig(allergies).columns.slice(-3).map((c) => c.name)).toEqual(['recorded_by_name', 'recorded_at', 'inactivated_at'])
     const sqlText = readMigration(FILE)
     for (const name of ['allergy_status', 'recorded_by_name', 'recorded_at', 'inactivated_at', 'patients_allergy_status_valid']) {

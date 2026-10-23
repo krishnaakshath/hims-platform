@@ -36,6 +36,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         case 'admission_mismatch': return billingError(400, "That admission is not this patient's")
         case 'invoice_not_payable': return billingError(409, 'Payments can only be taken against a finalised invoice of this patient')
         case 'series_exhausted': return billingError(409, 'The receipt number series for this financial year is full')
+        // Only a caller's under-lock check (door payments) returns this; none is passed here.
+        case 'already_paid': return billingError(409, 'This payment has already been recorded')
       }
     }
     return NextResponse.json({ receiptNumber: result.receiptNumber, paymentId: result.paymentId }, { status: 201 })

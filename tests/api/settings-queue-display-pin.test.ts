@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { NextResponse } from 'next/server'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { appSettings } from '@/db/schema'
+import { appSettings, auditLog } from '@/db/schema'
 import { getAppSettings } from '@/lib/queries/settings'
 import { PUT } from '@/app/api/settings/queue-display-pin/route'
+import { POST as generate } from '@/app/api/settings/queue-display-pin/generate/route'
+import { GET as getQueueDisplay } from '@/app/api/queue-display/route'
 
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: 'admin' as const, name: 'Test Admin' })) }))
 
@@ -70,5 +72,40 @@ describe('PUT /api/settings/queue-display-pin', () => {
     const req = new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ pin: '482100' }) })
     const res = await PUT(req as never)
     expect(res.status).toBe(200)
+  })
+})
+
+// WS6 T10
+describe('POST /api/settings/queue-display-pin/generate', () => {
+  const post = (body: unknown) => new Request('http://localhost/api/settings/queue-display-pin/generate', { method: 'POST', body: JSON.stringify(body) })
+
+  it('returns a 6-digit PIN once, which then unlocks the display API', async () => {
+    const res = await generate(post({}) as never)
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(Object.keys(body)).toEqual(['pin'])
+    expect(body.pin).toMatch(/^\d{6}$/)
+    expect((await getAppSettings()).queueDisplayPin).toBe(body.pin)
+
+    const headers = { 'x-queue-display-pin': body.pin, 'x-forwarded-for': `198.51.100.90-${Date.now()}` }
+    const display = await getQueueDisplay(new Request('http://localhost/api/queue-display', { headers }) as never)
+    expect(display.status).toBe(200)
+
+    const audits = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, 'Test Admin'), eq(auditLog.action, 'generated queue display PIN')))
+    expect(audits.length).toBeGreaterThan(0)
+    for (const a of audits) expect(`${a.action} ${a.details ?? ''}`).not.toContain(body.pin)
+    await getDb().delete(auditLog).where(and(eq(auditLog.userName, 'Test Admin'), eq(auditLog.action, 'generated queue display PIN')))
+  })
+
+  it('refuses a non-admin with 403', async () => {
+    const auth = await import('@/lib/auth')
+    vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'frontdesk', name: 'Test Frontdesk', userId: null })
+    const res = await generate(post({}) as never)
+    expect(res.status).toBe(403)
+  })
+
+  it('rejects any body field', async () => {
+    const res = await generate(post({ pin: '123456' }) as never)
+    expect(res.status).toBe(400)
   })
 })

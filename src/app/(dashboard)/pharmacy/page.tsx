@@ -5,6 +5,10 @@ import { listMedicationsWithInventory, listActiveMedicationEpisodeSummary } from
 import { PharmacyDashboard } from '@/components/dashboards/PharmacyDashboard'
 import { getPharmacyKpis } from '@/lib/queries/hospital-kpis' // Wave E
 import { MEDICATION_PRICE_ROLES } from '@/lib/role-policy' // WS2 T8
+import { todayIsoIn } from '@/lib/india-time' // WS5 T4
+import type { StockFilter } from '@/components/dashboards/PharmacyDashboard' // WS5 T4
+
+const STOCK_FILTERS: readonly StockFilter[] = ['out', 'low', 'expiring', 'expired'] // WS5 T4
 
 export default async function PharmacyPage({ searchParams }: { searchParams?: Promise<{ stock?: string | string[] }> } = {}) {
   const session = await requireSessionOrRedirect()
@@ -12,8 +16,9 @@ export default async function PharmacyPage({ searchParams }: { searchParams?: Pr
   // with no actual server-side check.
   if (!['crc', 'pi', 'admin', 'pharmacy'].includes(session.role)) redirect('/')
   const stock = (await searchParams)?.stock
-  const stockFilter = stock === 'out' || stock === 'low' ? stock : null
-  const [medications, prescribedSummary, kpis] = await Promise.all([listMedicationsWithInventory(), listActiveMedicationEpisodeSummary(), getPharmacyKpis()])
+  const stockFilter = STOCK_FILTERS.find((f) => f === stock) ?? null
+  const today = todayIsoIn() // WS5 T4: one IST date for the expiry fields, the KPIs and the "Expires in" labels
+  const [medications, prescribedSummary, kpis] = await Promise.all([listMedicationsWithInventory(today), listActiveMedicationEpisodeSummary(), getPharmacyKpis(today)])
   await logAudit(session, 'viewed pharmacy dashboard', null)
 
   return (
@@ -28,6 +33,7 @@ export default async function PharmacyPage({ searchParams }: { searchParams?: Pr
       // The counter pages (/pharmacy/patient-lookup, /pharmacy/billing) admit pharmacy and admin only.
       canUseCounter={['admin', 'pharmacy'].includes(session.role)}
       canEditPrice={MEDICATION_PRICE_ROLES.includes(session.role)} // WS2 T8: MRP column editor
+      today={today}
     />
   )
 }

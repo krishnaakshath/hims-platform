@@ -190,10 +190,12 @@ describe.skipIf(!process.env.DATABASE_URL)('patient ledger (DB)', () => {
   })
 
   it('a full receipt or refund series is a friendly refusal, nothing written', async () => {
-    const { pl, getDb, documentCounters, patientPayments, eq } = await m()
+    const { pl, getDb, documentCounters, patientPayments, eq, and } = await m()
     const adv = await pay({ amountPaise: 1000 })
     if (!adv.ok) throw new Error('advance failed')
-    await getDb().update(documentCounters).set({ lastValue: 999_999 }).where(eq(documentCounters.series, 'receipt'))
+    // Only this test's 2099-00 series: an unscoped update also filled the live year's receipt series
+    // on the shared test DB, so every later receipt test failed with series_exhausted.
+    await getDb().update(documentCounters).set({ lastValue: 999_999 }).where(and(eq(documentCounters.series, 'receipt'), eq(documentCounters.financialYear, '2099-00')))
     expect(await pay({ amountPaise: 500 })).toEqual({ ok: false, error: 'series_exhausted' })
     expect(await getDb().select().from(patientPayments).where(eq(patientPayments.patientId, PID))).toHaveLength(1)
     await getDb().insert(documentCounters).values({ series: 'refund', financialYear: '2099-00', lastValue: 999_999 })

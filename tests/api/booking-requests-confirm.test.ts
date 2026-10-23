@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { PATCH as confirmRoute } from '@/app/api/booking-requests/[id]/confirm/route'
 import { PATCH as declineRoute } from '@/app/api/booking-requests/[id]/decline/route'
 import { getDb } from '@/db/client'
-import { bookingRequests, appointments, patients } from '@/db/schema'
+import { bookingRequests, appointments, patients, providerSchedules, providers } from '@/db/schema'
+import { todayIsoIn } from '@/lib/india-time'
 import { createBookingRequest } from '@/lib/queries/booking-requests'
 import { listActiveProviders } from '@/lib/queries/providers'
 
@@ -204,5 +205,54 @@ describe('PATCH /api/booking-requests/[id]/confirm -- visitReason length (patien
     expect(res.status).toBe(200)
     const [appt] = await getDb().select().from(appointments).where(eq(appointments.id, body.appointmentId))
     expect(appt.visitReason).toBe(visitReason)
+  })
+})
+
+// WS6 T7 (spec D5): confirming at a time outside the doctor's working hours needs outsideHoursConfirmed.
+describe('PATCH /api/booking-requests/[id]/confirm -- working hours', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000
+  const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10)
+  const weekdayOf = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay()
+  const today = todayIsoIn()
+  const monday = addDays(today, 1 + ((1 - weekdayOf(addDays(today, 1)) + 7) % 7))
+  let hoursProviderId = 0
+
+  beforeAll(async () => {
+    const [p] = await getDb().insert(providers).values({ name: 'Confirm Hours Probe', specialty: 'General Medicine', colorTag: 'chart-1' }).returning({ id: providers.id })
+    hoursProviderId = p.id
+    await getDb().insert(providerSchedules).values({ providerId: p.id, weekday: 1, startTime: '09:00', endTime: '13:00' })
+  })
+
+  afterAll(async () => {
+    await getDb().delete(appointments).where(eq(appointments.providerId, hoursProviderId))
+    await getDb().delete(providerSchedules).where(eq(providerSchedules.providerId, hoursProviderId))
+    await getDb().delete(providers).where(eq(providers.id, hoursProviderId))
+  })
+
+  const payload = async (from: string, to: string, extra: Record<string, unknown> = {}) => ({
+    ...(await confirmPayload()), providerId: hoursProviderId, startsAt: `${monday}T${from}:00+05:30`, endsAt: `${monday}T${to}:00+05:30`, ...extra,
+  })
+
+  it('refuses an outside-hours time without the confirmation and leaves the request pending', async () => {
+    const request = await makePendingRequest()
+    const res = await confirmRoute(req(await payload('16:00', '16:15')) as never, params(request.id))
+    expect(res.status).toBe(422)
+    expect((await res.json()).code).toBe('outside_working_hours')
+    const [row] = await getDb().select().from(bookingRequests).where(eq(bookingRequests.id, request.id))
+    expect(row.status).toBe('pending')
+  })
+
+  it('confirms an outside-hours time with the confirmation', async () => {
+    const request = await makePendingRequest()
+    const res = await confirmRoute(req(await payload('16:00', '16:15', { outsideHoursConfirmed: true })) as never, params(request.id))
+    expect(res.status).toBe(200)
+    createdAppointmentIds.push((await res.json()).appointmentId)
+  })
+
+  it('confirms a time inside a session without it', async () => {
+    const request = await makePendingRequest()
+    const res = await confirmRoute(req(await payload('10:00', '10:15')) as never, params(request.id))
+    expect(res.status).toBe(200)
+    createdAppointmentIds.push((await res.json()).appointmentId)
   })
 })

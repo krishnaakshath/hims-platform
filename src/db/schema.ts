@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, unique, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, unique, uuid, time, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 import { smallint } from 'drizzle-orm/pg-core' // WS1 T2
 // SP4
@@ -151,10 +151,13 @@ export const patients = pgTable('patients', {
   abhaVerificationSource: text('abha_verification_source', { enum: ABHA_VERIFICATION_SOURCES }),
   abhaVerifiedVia: text('abha_verified_via', { enum: ABHA_VERIFIED_VIA }),
   allergyStatus: text('allergy_status', { enum: ['unknown', 'none_known', 'recorded'] }).default('unknown').notNull(), // WS1 T1
+  referralSource: text('referral_source', { enum: ['self', 'doctor', 'hospital', 'camp', 'insurer', 'online', 'other'] }), // WS6 T8
+  referralNote: text('referral_note'), // WS6 T8
 }, (t) => [
   // SP8
   check('patients_abha_verification_complete', sql`(${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerificationSource} IS NULL) AND (${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerifiedVia} IS NULL)`),
   check('patients_abha_verification_source_valid', sql`${t.abhaVerificationSource} IS NULL OR ${t.abhaVerificationSource} IN ('abdm', 'abdm_sandbox_mock')`),
+  check('patients_referral_source_valid', sql`${t.referralSource} IS NULL OR ${t.referralSource} IN ('self', 'doctor', 'hospital', 'camp', 'insurer', 'online', 'other')`), // WS6 T8
   // abha_verified_via is checked in TypeScript only (ABHA_VERIFIED_VIA): the SP8 migration carries no
   // Aadhaar-named literal, which its static test pins.
   check('patients_allergy_status_valid', sql`${t.allergyStatus} IN ('unknown', 'none_known', 'recorded')`), // WS1 T1
@@ -649,7 +652,13 @@ export const providers = pgTable('providers', {
   registrationNumber: text('registration_number'),
   consultationFeePaise: integer('consultation_fee_paise'),
   currency: text('currency').default('INR').notNull(),
-}, (t) => [check('providers_consultation_fee_nonneg', sql`${t.consultationFeePaise} IS NULL OR ${t.consultationFeePaise} >= 0`)])
+  slotMinutes: integer('slot_minutes').default(15).notNull(), // WS6 T6
+  opdRoom: text('opd_room'), // WS6 T6
+  portalBookable: boolean('portal_bookable').default(true).notNull(), // WS6 T6
+}, (t) => [
+  check('providers_consultation_fee_nonneg', sql`${t.consultationFeePaise} IS NULL OR ${t.consultationFeePaise} >= 0`),
+  check('providers_slot_minutes_range', sql`${t.slotMinutes} BETWEEN 5 AND 60`), // WS6 T6
+])
 
 export const departmentKindEnum = pgEnum('department_kind', ['clinical', 'diagnostic', 'support', 'administrative'])
 
@@ -1124,7 +1133,7 @@ export const chargeLines = pgTable('charge_lines', {
 // Each raises SQLSTATE 55000 unless the transaction ran
 // `select set_config('hims.allow_document_purge', 'on', true)` (seed clear and test
 // fixtures only; never app code). After `db:push` on a fresh DB, apply migration B.
-export const documentSeriesEnum = pgEnum('document_series', ['invoice', 'receipt', 'credit_note', 'refund'])
+export const documentSeriesEnum = pgEnum('document_series', ['invoice', 'receipt', 'credit_note', 'refund', 'grn']) // WS5 T3: + 'grn' (2026-10-25-ws5-pharmacy-grns.sql)
 export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'finalised', 'cancelled', 'discarded'])
 export const paymentModeEnum = pgEnum('payment_mode', ['cash', 'upi', 'card', 'cheque', 'neft', 'other'])
 export const patientPaymentKindEnum = pgEnum('patient_payment_kind', ['advance', 'receipt'])
@@ -2246,10 +2255,11 @@ export const medicationDispenses = pgTable('medication_dispenses', {
   // (Postgres does not treat NULLs as equal) for the many dispenses that are
   // samples or in-office doses and are never billed.
   chargeId: integer('charge_id').references(() => charges.id).unique(),
-  batchNo: text('batch_no'), // WS2 T8 (snapshot text; stock by batch is WS5)
+  batchNo: text('batch_no'), // WS2 T8 (snapshot text; WS5 T5 fills it from the batch allocated)
   expiryMonth: text('expiry_month'), // WS2 T8 ('YYYY-MM')
   noChargeReason: text('no_charge_reason'), // WS2 T8 (a free dispense; never audited)
   unitMrpPaise: integer('unit_mrp_paise'), // WS2 T8 (MRP snapshot at dispense)
+  batchId: integer('batch_id').references((): AnyPgColumn => medicationBatches.id), // WS5 T2
 }, (t) => [ // WS2 T8
   check('medication_dispenses_expiry_month_format', sql`${t.expiryMonth} IS NULL OR ${t.expiryMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`), // WS2 T8
 ]) // WS2 T8
@@ -2558,6 +2568,11 @@ export const homeCollectionVisits = pgTable('home_collection_visits', {
   collectedByName: text('collected_by_name'),
   encounterId: integer('encounter_id').references(() => encounters.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  handoverOtpHash: text('handover_otp_hash'), // WS6 T11 (scrypt, never returned or logged)
+  handoverOtpExpiresAt: timestamp('handover_otp_expires_at'), // WS6 T11
+  handoverOtpAttempts: integer('handover_otp_attempts').default(0).notNull(), // WS6 T11
+  handoverVerifiedAt: timestamp('handover_verified_at'), // WS6 T11
+  handoverWaiverReason: text('handover_waiver_reason', { enum: ['no_phone', 'sms_unavailable', 'patient_declined'] }), // WS6 T11
 }, (t) => [
   uniqueIndex('home_collection_visits_patient_slot_unique').on(t.patientId, t.visitDate, t.windowId).where(sql`status = 'booked'`),
   index('home_collection_visits_date_window_idx').on(t.visitDate, t.windowId),
@@ -2565,6 +2580,7 @@ export const homeCollectionVisits = pgTable('home_collection_visits', {
   check('home_collection_visits_pin_format', sql`${t.pinCode} ~ '^[1-9][0-9]{5}$'`),
   check('home_collection_visits_cancel_reason', sql`${t.status} <> 'cancelled' OR ${t.cancelReason} IS NOT NULL`),
   check('home_collection_visits_collected_at', sql`${t.status} <> 'collected' OR ${t.collectedAt} IS NOT NULL`),
+  check('home_collection_visits_handover_waiver_reason', sql`${t.handoverWaiverReason} IS NULL OR ${t.handoverWaiverReason} IN ('no_phone', 'sms_unavailable', 'patient_declined')`), // WS6 T11
 ])
 
 // A released PDF lab report (one version per release; a re-release supersedes the previous one).
@@ -3145,3 +3161,78 @@ export const brandAssets = pgTable('brand_assets', {
 export type BrandSettingsRow = typeof brandSettings.$inferSelect
 export type BrandAssetRow = typeof brandAssets.$inferSelect
 // end WL T3
+// WS5 T2
+// Stock by batch (spec D1/D2). medication_inventory.quantity_on_hand stays the per-drug total,
+// kept equal to the sum of non-written-off batches by syncInventoryTotal in the same transaction.
+// Migration 2026-10-25-ws5-medication-batches.sql backfills one 'OPENING' batch (no expiry) per
+// drug with stock. grn_id gets its FK to pharmacy_grns in WS5 T3.
+export const medicationBatches = pgTable('medication_batches', {
+  id: serial('id').primaryKey(),
+  medicationId: integer('medication_id').notNull().references(() => medications.id),
+  batchNo: text('batch_no').notNull(),
+  expiryDate: date('expiry_date'),
+  mrpPerUnitPaise: integer('mrp_per_unit_paise').notNull(),
+  purchaseRatePaise: integer('purchase_rate_paise').default(0).notNull(),
+  quantityOnHand: integer('quantity_on_hand').default(0).notNull(),
+  grnId: integer('grn_id').references((): AnyPgColumn => pharmacyGrns.id), // WS5 T3
+  receivedAt: timestamp('received_at').defaultNow().notNull(),
+  writtenOffAt: timestamp('written_off_at'),
+  writeOffReason: text('write_off_reason'),
+}, (t) => [
+  unique('medication_batches_medication_batch_unique').on(t.medicationId, t.batchNo),
+  index('medication_batches_medication_expiry_idx').on(t.medicationId, t.expiryDate),
+  check('medication_batches_quantity_nonneg', sql`${t.quantityOnHand} >= 0`),
+  check('medication_batches_mrp_nonneg', sql`${t.mrpPerUnitPaise} >= 0`),
+])
+
+export type MedicationBatchRow = typeof medicationBatches.$inferSelect
+// end WS5 T2
+// WS5 T3
+// Goods received notes (spec §3). Numbered GRN/<FY>/<6 digits> through allocateDocumentNumber
+// (document_series 'grn'). Each line inserts or tops up a medication_batches row (grn_id = the GRN
+// that created the batch); line_count keeps the number of lines because a topped-up batch keeps
+// its first GRN. Migration 2026-10-25-ws5-pharmacy-grns.sql.
+export const pharmacyGrns = pgTable('pharmacy_grns', {
+  id: serial('id').primaryKey(),
+  grnNumber: text('grn_number').notNull(),
+  supplierName: text('supplier_name').notNull(),
+  supplierInvoiceNo: text('supplier_invoice_no').notNull(),
+  supplierInvoiceDate: date('supplier_invoice_date').notNull(),
+  receivedByName: text('received_by_name').notNull(),
+  receivedAt: timestamp('received_at').defaultNow().notNull(),
+  totalPaise: bigint('total_paise', { mode: 'number' }).notNull(),
+  lineCount: integer('line_count').notNull(),
+}, (t) => [
+  unique('pharmacy_grns_grn_number_unique').on(t.grnNumber),
+  index('pharmacy_grns_received_at_idx').on(t.receivedAt),
+  check('pharmacy_grns_total_nonneg', sql`${t.totalPaise} >= 0`),
+  check('pharmacy_grns_line_count_positive', sql`${t.lineCount} > 0`),
+])
+
+export type PharmacyGrnRow = typeof pharmacyGrns.$inferSelect
+// end WS5 T3
+// WS6 T6
+// Doctor working hours (spec D5): a weekly template of IST sessions (several per weekday allowed,
+// weekday 0 = Sunday) and leave days. Slots are computed on read (src/lib/scheduling/slots.ts),
+// never stored. Migration 2026-10-25-ws6-provider-schedules.sql.
+export const providerSchedules = pgTable('provider_schedules', {
+  id: serial('id').primaryKey(),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  weekday: integer('weekday').notNull(),
+  startTime: time('start_time').notNull(),
+  endTime: time('end_time').notNull(),
+}, (t) => [
+  index('provider_schedules_provider_weekday_idx').on(t.providerId, t.weekday),
+  check('provider_schedules_weekday_range', sql`${t.weekday} BETWEEN 0 AND 6`),
+  check('provider_schedules_end_after_start', sql`${t.endTime} > ${t.startTime}`),
+])
+
+export const providerLeave = pgTable('provider_leave', {
+  id: serial('id').primaryKey(),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  leaveDate: date('leave_date').notNull(),
+  reason: text('reason').notNull(),
+}, (t) => [
+  unique('provider_leave_provider_date_unique').on(t.providerId, t.leaveDate),
+])
+// end WS6 T6

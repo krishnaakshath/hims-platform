@@ -238,6 +238,17 @@ describe('listAllAssignments ordering', () => {
   })
 })
 
+// WS6 T9: the assignments page names the patient (name and UHID), never the chart id.
+describe('listAllAssignments patient', () => {
+  it('carries the patient\'s name and UHID', async () => {
+    const [p] = await listActiveProviders()
+    const a = await mk(p.id)
+    const [pt] = await getDb().select({ name: patients.name, uhid: patients.uhid }).from(patients).where(eq(patients.id, 'RD-0001'))
+    const row = (await listAllAssignments()).find((r) => r.id === a.id)
+    expect(row).toMatchObject({ patientId: 'RD-0001', patientName: pt.name.trim(), uhid: pt.uhid })
+  })
+})
+
 describe('notifyPatientOfScheduledAssignment', () => {
   // Unique per test so a stray confirmation from another process on the
   // shared DB can never be counted as ours.

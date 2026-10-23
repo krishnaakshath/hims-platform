@@ -16,6 +16,9 @@ const ENUMS = '2026-10-08-sp5-lab-enum-values.sql'
 const TABLES = '2026-10-08-sp5-lab-home-collection.sql'
 // WS1 T10 adds lab_requisitions.priority/clinical_notes/fasting_required in its own migration.
 const WS1_LAB_FIELDS = '2026-10-24-ws1-lab-order-fields.sql'
+// WS6 T11: the handover columns and check on home_collection_visits come from their own file.
+const WS6_HANDOVER = '2026-10-25-ws6-home-collection-handover.sql'
+const tablesAndLater = () => `${readMigration(TABLES)}\n${readMigration(WS1_LAB_FIELDS)}\n${readMigration(WS6_HANDOVER)}`
 
 const NEW_TABLES = [
   ['lab_service_area_pins', labServiceAreaPins], ['home_collection_windows', homeCollectionWindows], ['lab_requisitions', labRequisitions],
@@ -74,7 +77,15 @@ describe('SP5 lab LIS & home-collection schema', () => {
   })
 
   it.each(NEW_TABLES)('tables migration declares every %s column', (_n, t) => {
-    expect(missingColumns(t, readMigration(TABLES) + readMigration(WS1_LAB_FIELDS))).toEqual([])
+    expect(missingColumns(t, tablesAndLater())).toEqual([])
+  })
+
+  it('WS6 T11: the handover migration is idempotent and adds each handover column', () => {
+    const s = readMigration(WS6_HANDOVER)
+    expect(idempotencyProblems(s)).toEqual([])
+    for (const c of ['handover_otp_hash', 'handover_otp_expires_at', 'handover_otp_attempts', 'handover_verified_at', 'handover_waiver_reason']) {
+      expect(s).toMatch(new RegExp(`ALTER TABLE home_collection_visits ADD COLUMN IF NOT EXISTS ${c}\\b`))
+    }
   })
 
   it('declares every SP5 column on existing tables', () => {
@@ -88,7 +99,7 @@ describe('SP5 lab LIS & home-collection schema', () => {
   })
 
   it('every SP5 FK, unique, check and index name is in the SQL and fits 63 chars', () => {
-    const s = readMigration(TABLES) + readMigration(WS1_LAB_FIELDS)
+    const s = tablesAndLater()
     for (const t of SP5_TABLES) {
       const names = constraintNames(t)
       expect(names.length, getTableConfig(t).name).toBeGreaterThan(0)

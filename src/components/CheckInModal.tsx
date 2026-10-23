@@ -5,10 +5,21 @@ import { formatPaise, formatRupeesWhole } from '@/lib/money'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { useToast } from '@/components/ui/toast'
 import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
 
-interface ProviderOption { id: number; name: string }
+export interface CheckInDoctor { id: number; name: string; departmentId: number | null }
+export interface CheckInDepartment { id: number; name: string }
 interface RoomOption { id: number; ward: string; roomNumber: string; bedNumber: string }
+interface QueueRow { providerId: number; waiting: number; estimatedWaitMinutes: number | null; availability: 'available' | 'on_leave' | 'outside_hours' }
+
+/** "3 waiting · ~30 min", "No one waiting", "On leave" or "Outside hours". */
+function queueNote(q: QueueRow): string {
+  if (q.availability === 'on_leave') return 'On leave'
+  if (q.availability === 'outside_hours') return 'Outside hours'
+  if (q.waiting === 0) return 'No one waiting'
+  return q.estimatedWaitMinutes === null ? `${q.waiting} waiting` : `${q.waiting} waiting · ~${q.estimatedWaitMinutes} min`
+}
 
 // WS2 T9: the fee preview (GET /api/front-desk/check-in/fee-preview) and the automatic charge
 // outcomes the check-in returns.
@@ -46,8 +57,16 @@ function previewText(p: FeePreview): string | null {
 // the route still receives the chart id. After check-in the ticket shows the
 // token, name and UHID and links to the printable 80 mm slip
 // (/print/token/[encounterId]) instead of printing the whole page.
-export function CheckInModal({ providers, rooms, onClose, initialPatient = null }: { providers: ProviderOption[]; rooms: RoomOption[]; onClose: () => void; initialPatient?: PickedPatient | null }) {
+//
+// WS6 T9 (spec D6): the front desk picks the department, then one of its clinical doctors; each
+// doctor option carries the queue from GET /api/front-desk/queue-summary ("3 waiting · ~30 min",
+// "On leave", "Outside hours"; names alone if the summary cannot be loaded). Success also shows a
+// "Token 12 issued" toast linking to the slip. Inpatient check-in is otherwise unchanged.
+export function CheckInModal({ providers, departments, rooms, onClose, initialPatient = null }: { providers: CheckInDoctor[]; departments: CheckInDepartment[]; rooms: RoomOption[]; onClose: () => void; initialPatient?: PickedPatient | null }) {
   const router = useRouter()
+  const toast = useToast()
+  const [departmentId, setDepartmentId] = useState<number | ''>('')
+  const [queue, setQueue] = useState<Map<number, QueueRow>>(new Map())
   const [patient, setPatient] = useState<PickedPatient | null>(initialPatient)
   const patientId = patient?.id ?? ''
   const [providerId, setProviderId] = useState<number | ''>('')
@@ -58,6 +77,20 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
   const [roomId, setRoomId] = useState<number | ''>('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    fetch('/api/front-desk/queue-summary', { cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) return
+        const rows = ((await res.json()) as { providers?: unknown })?.providers
+        if (live && Array.isArray(rows)) setQueue(new Map((rows as QueueRow[]).map((r) => [r.providerId, r])))
+      })
+      .catch(() => { /* the doctors are still listed by name */ })
+    return () => { live = false }
+  }, [])
+
+  const departmentDoctors = departmentId === '' ? [] : providers.filter((p) => p.departmentId === departmentId)
   const [checkinResult, setCheckinResult] = useState<{
     token: number | null
     patient: PickedPatient
@@ -93,12 +126,13 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
     setSubmitting(false)
     if (res.ok) {
       const body = res.data
-      setCheckinResult({
-        token: typeof body?.opdToken === 'number' ? body.opdToken : typeof body?.queueTicketNumber === 'number' ? body.queueTicketNumber : null,
-        patient,
-        roomId: body?.roomId ?? null,
-        encounterId: typeof body?.encounterId === 'number' ? body.encounterId : null,
-        charges: Array.isArray(body?.charges) ? body.charges : [],
+      const token = typeof body?.opdToken === 'number' ? body.opdToken : typeof body?.queueTicketNumber === 'number' ? body.queueTicketNumber : null
+      const encounterId = typeof body?.encounterId === 'number' ? body.encounterId : null
+      setCheckinResult({ token, patient, roomId: body?.roomId ?? null, encounterId, charges: Array.isArray(body?.charges) ? body.charges : [] })
+      toast.show({
+        title: token !== null ? `Token ${token} issued` : 'Patient checked in',
+        description: providers.find((p) => p.id === providerId)?.name,
+        ...(encounterId !== null ? { action: { label: 'Print token slip', href: `/print/token/${encounterId}` } } : {}),
       })
       router.refresh()
       return
@@ -189,9 +223,22 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
             <label className="flex items-center gap-1.5"><input type="radio" name="visitType" checked={visitType === 'inpatient'} onChange={() => setVisitType('inpatient')} aria-label="Inpatient" /> Inpatient</label>
           </div>
 
-          <select value={providerId} onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))} aria-label="Assign to doctor" className="w-full rounded-md border border-border px-3 py-2 text-sm">
+          <select
+            value={departmentId}
+            onChange={(e) => { setDepartmentId(e.target.value === '' ? '' : Number(e.target.value)); setProviderId('') }}
+            aria-label="Department"
+            className="w-full rounded-md border border-border px-3 py-2 text-sm"
+          >
+            <option value="">Choose a department…</option>
+            {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+
+          <select value={providerId} onChange={(e) => setProviderId(e.target.value === '' ? '' : Number(e.target.value))} disabled={departmentId === ''} aria-label="Assign to doctor" className="w-full rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50">
             <option value="">Assign to doctor…</option>
-            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {departmentDoctors.map((p) => {
+              const q = queue.get(p.id)
+              return <option key={p.id} value={p.id}>{q ? `${p.name} — ${queueNote(q)}` : p.name}</option>
+            })}
           </select>
 
           <select value={urgency} onChange={(e) => setUrgency(e.target.value as typeof urgency)} aria-label="Urgency" className="w-full rounded-md border border-border px-3 py-2 text-sm">

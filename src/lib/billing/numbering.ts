@@ -1,8 +1,9 @@
 // Pure document numbering. Format INV/26-27/000123 (GST Rule 46: at most 16 characters, unique per FY).
-export const DOCUMENT_SERIES = ['invoice', 'receipt', 'credit_note', 'refund'] as const
+// WS5 T3: + 'grn' (pharmacy goods received notes).
+export const DOCUMENT_SERIES = ['invoice', 'receipt', 'credit_note', 'refund', 'grn'] as const
 export type DocumentSeries = (typeof DOCUMENT_SERIES)[number]
 
-export const SERIES_PREFIX: Record<DocumentSeries, string> = { invoice: 'INV', receipt: 'RCT', credit_note: 'CRN', refund: 'RFD' }
+export const SERIES_PREFIX: Record<DocumentSeries, string> = { invoice: 'INV', receipt: 'RCT', credit_note: 'CRN', refund: 'RFD', grn: 'GRN' }
 
 export const MAX_SERIES_VALUE = 999_999
 

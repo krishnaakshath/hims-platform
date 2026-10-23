@@ -7,7 +7,7 @@ import {
   createMedicationWithInventory,
 } from '@/lib/queries/medications'
 import { getDb } from '@/db/client'
-import { patients, medications, medicationInventory, medicationEpisodes } from '@/db/schema'
+import { patients, medications, medicationInventory, medicationEpisodes, medicationBatches } from '@/db/schema'
 
 const createdEpisodeIds: number[] = []
 const createdMedIds: number[] = []
@@ -15,6 +15,7 @@ afterEach(async () => {
   while (createdEpisodeIds.length > 0) await getDb().delete(medicationEpisodes).where(eq(medicationEpisodes.id, createdEpisodeIds.pop()!))
   while (createdMedIds.length > 0) {
     const id = createdMedIds.pop()!
+    await getDb().delete(medicationBatches).where(eq(medicationBatches.medicationId, id))
     await getDb().delete(medicationInventory).where(eq(medicationInventory.medicationId, id))
     await getDb().delete(medications).where(eq(medications.id, id))
   }
@@ -92,6 +93,24 @@ describe('createMedicationWithInventory', () => {
     const all = await listMedicationsWithInventory()
     const created = all.find((m) => m.id === result.medicationId)
     expect(created?.quantityOnHand).toBe(40) // innerJoin means an orphan catalog row would be invisible here
+  })
+
+  it('puts the initial quantity into an OPENING batch (WS5 T3), and none for zero stock', async () => {
+    const result = await createMedicationWithInventory({
+      name: `Zz Opening Drug ${Date.now()}`, genericName: null, medicationClass: 'Test Class',
+      commonDose: null, form: 'tablet', quantityOnHand: 30, reorderThreshold: 10, unit: 'tablets',
+    })
+    expect(result.ok).toBe(true)
+    createdMedIds.push(result.medicationId!)
+    const batches = await getDb().select().from(medicationBatches).where(eq(medicationBatches.medicationId, result.medicationId!))
+    expect(batches.map((b) => [b.batchNo, b.quantityOnHand, b.expiryDate, b.mrpPerUnitPaise, b.purchaseRatePaise, b.writtenOffAt])).toEqual([['OPENING', 30, null, 0, 0, null]])
+
+    const empty = await createMedicationWithInventory({
+      name: `Zz Empty Drug ${Date.now()}`, genericName: null, medicationClass: 'Test Class',
+      commonDose: null, form: 'tablet', quantityOnHand: 0, reorderThreshold: 10, unit: 'tablets',
+    })
+    createdMedIds.push(empty.medicationId!)
+    expect(await getDb().select().from(medicationBatches).where(eq(medicationBatches.medicationId, empty.medicationId!))).toEqual([])
   })
 
   it('rejects a case-insensitive duplicate name', async () => {

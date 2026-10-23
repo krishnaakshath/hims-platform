@@ -13,6 +13,9 @@ export const providerProfileSchema = z.object({
   registrationStateCode: z.string().nullable().optional(),
   registrationNumber: z.string().trim().regex(REGISTRATION_NUMBER_PATTERN, 'Invalid registration number').nullable().optional(),
   consultationFeePaise: z.number().int().min(0).max(MAX_CONSULTATION_FEE_PAISE).nullable().optional(),
+  // WS6 T6: OPD room (blank clears it) and whether the doctor is offered on public/portal booking.
+  opdRoom: z.string().trim().max(40).nullable().optional().transform((v) => (v === '' ? null : v)),
+  portalBookable: z.boolean().optional(),
 }).strict().superRefine((v, ctx) => {
   if (Object.keys(v).length === 0) ctx.addIssue({ code: 'custom', message: 'At least one field is required' })
   const state = v.registrationStateCode

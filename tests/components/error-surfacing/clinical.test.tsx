@@ -27,9 +27,10 @@ import { MedicationHistorySection } from '@/components/MedicationHistorySection'
 import { NoteForm } from '@/components/NoteForm'
 import { OrderLabTestModal } from '@/components/OrderLabTestModal'
 import { TransferAdmissionModal } from '@/components/TransferAdmissionModal'
+import { ToastProvider } from '@/components/ui/toast'
 
 const LEAK = 'duplicate key value violates unique constraint "x"'
-const med = { id: 1, name: 'Paracetamol', genericName: null, medicationClass: 'Analgesic', commonDose: '500mg', form: 'tablet' as const, quantityOnHand: 10, reorderThreshold: 2, unit: 'tab', mrpPerUnitPaise: 350, gstRateBp: null, hsn: null, effectiveGstRateBp: 500 /* WS2 T8 */ }
+const med = { id: 1, name: 'Paracetamol', genericName: null, medicationClass: 'Analgesic', commonDose: '500mg', form: 'tablet' as const, quantityOnHand: 10, reorderThreshold: 2, unit: 'tab', mrpPerUnitPaise: 350, gstRateBp: null, hsn: null, effectiveGstRateBp: 500 /* WS2 T8 */, batches: [], nearestExpiry: null, expiringSoonQty: 0, expiredQty: 0 }
 
 type Case = { name: string; ui: () => ReactElement; before?: () => Promise<void> | void; submit: RegExp; status?: number }
 const CASES: Case[] = [
@@ -45,7 +46,8 @@ const CASES: Case[] = [
     before: async () => { await pickPatient(); fireEvent.change(screen.getByLabelText('Expiry month'), { target: { value: '2099-12' } }) } },
   { name: 'EnterLabResultModal', ui: () => <EnterLabResultModal orderId={1} testName="CBC" defaultUnit="g/dL" defaultReferenceRange="12-16" category="lab" attachments={[]} onClose={vi.fn()} />, submit: /^Save result$/ },
   { name: 'DeletePatientDialog', ui: () => <DeletePatientDialog target={{ id: 'RD-1', name: 'P' }} onClose={vi.fn()} onDeleted={vi.fn()} />, submit: /delete/i },
-  { name: 'CheckInModal', ui: () => <CheckInModal providers={[{ id: 1, name: 'Dr A' }]} rooms={[]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} />, submit: /^Check In$/ },
+  // WS6 T9: department then doctor; the success toast needs a ToastProvider.
+  { name: 'CheckInModal', ui: () => <ToastProvider><CheckInModal providers={[{ id: 1, name: 'Dr A', departmentId: 1 }]} departments={[{ id: 1, name: 'General Medicine' }]} rooms={[]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} /></ToastProvider>, submit: /^Check In$/ },
   { name: 'NoteForm', ui: () => <NoteForm patientId="RD-1" canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: /new note/i })) }, submit: /^(Save|Create)/ },
   { name: 'CarePlanSection', ui: () => <CarePlanSection patientId="RD-1" plans={[]} canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: 'New Care Plan' })) }, submit: /^Save$/ },
   { name: 'BedBoard block', ui: () => <BedBoard rooms={[{ id: 5, ward: 'A', roomNumber: '1', bedNumber: 'B', status: 'available', blockedReason: null, occupantName: null, occupantPatientId: null, attendingProviderName: null, admittedAt: null }]} canManageFacilities canBlock canAdmit={false} />,

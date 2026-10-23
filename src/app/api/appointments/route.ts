@@ -7,7 +7,8 @@ import { logAudit } from '@/lib/audit'
 import { insertAppointmentIfFree, listAppointmentsInRange } from '@/lib/queries/appointments'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
 import { startOfIstDay } from '@/lib/india-time'
-import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
+import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError, outsideWorkingHoursResponse } from '@/lib/appointment-time'
+import { isOutsideWorkingHours } from '@/lib/queries/provider-schedules'
 
 const createAppointmentSchema = z.object({
   patientId: z.string().min(1),
@@ -16,6 +17,7 @@ const createAppointmentSchema = z.object({
   endsAt: appointmentInstantSchema,
   visitReason: visitReasonSchema,
   status: z.enum(['scheduled', 'completed', 'cancelled', 'no_show']).optional(),
+  outsideHoursConfirmed: z.boolean().optional(), // WS6 T7
 }).strict()
 
 export async function GET(request: NextRequest) {
@@ -58,6 +60,11 @@ export async function POST(request: NextRequest) {
   const endsAt = new Date(parsed.data.endsAt)
   if (isNaN(startsAt.getTime()) || isNaN(endsAt.getTime()) || endsAt <= startsAt) {
     return NextResponse.json({ error: 'endsAt must be a valid time after startsAt' }, { status: 400 })
+  }
+
+  // WS6 T7: a time outside the doctor's working hours is booked only when staff confirm it.
+  if (parsed.data.outsideHoursConfirmed !== true && await isOutsideWorkingHours(parsed.data.providerId, startsAt, endsAt)) {
+    return outsideWorkingHoursResponse()
   }
 
   // I7: lock the doctor's schedule, check and insert in one transaction.

@@ -46,7 +46,7 @@ describe('POST /api/home-collections/[id]/collect', () => {
     const wrong = await send({ sampleIds: [displaySampleId(OTHER)] })
     expect(wrong.status).toBe(409)
     expect(await wrong.json()).toEqual({ error: `Sample ${displaySampleId(OTHER)} does not belong to this visit. Check the tube label.` })
-    expect(collectHomeVisit).toHaveBeenCalledWith(77, [displaySampleId(OTHER)], expect.objectContaining({ role: 'collector', userId: 7 }))
+    expect(collectHomeVisit).toHaveBeenCalledWith(77, [displaySampleId(OTHER)], expect.objectContaining({ role: 'collector', userId: 7 }), expect.any(Date), {})
   })
 
   it('a duplicate tube is 400 before the query', async () => {
@@ -94,5 +94,46 @@ describe('POST /api/home-collections/[id]/collect', () => {
     role = 'admin'
     userId = null
     expect((await send({ sampleIds: [SID] })).status).toBe(200)
+  })
+
+  // WS6 T11: the visit-date guard and the handover proof.
+  it('a visit dated tomorrow (IST) is a 409 naming its day', async () => {
+    vi.mocked(collectHomeVisit).mockResolvedValue({ ok: false, error: 'not_due', visitDate: '2026-10-24' })
+    const res = await send({ sampleIds: [SID], otp: '123456' })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'This visit is on 24 Oct 2026. It can be collected on that day.', code: 'not_due' })
+  })
+
+  it('passes the code or the waiver to the query; OTP refusals are 409s with a code and never echo the code', async () => {
+    vi.mocked(collectHomeVisit).mockResolvedValueOnce({ ok: false, error: 'otp_required' })
+    const required = await send({ sampleIds: [SID] })
+    expect(required.status).toBe(409)
+    expect((await required.json()).code).toBe('otp_required')
+    expect(collectHomeVisit).toHaveBeenLastCalledWith(77, [SID], expect.anything(), expect.any(Date), {})
+
+    for (const error of ['otp_invalid', 'otp_expired', 'otp_locked'] as const) {
+      vi.mocked(collectHomeVisit).mockResolvedValueOnce({ ok: false, error })
+      const res = await send({ sampleIds: [SID], otp: ' 042917 ' })
+      expect(res.status).toBe(409)
+      const body = await res.json()
+      expect(body.code).toBe(error)
+      expect(JSON.stringify(body)).not.toContain('042917')
+    }
+    expect(collectHomeVisit).toHaveBeenLastCalledWith(77, [SID], expect.anything(), expect.any(Date), { otp: '042917' })
+
+    vi.mocked(collectHomeVisit).mockResolvedValueOnce({ ok: true, collectedOrderIds: [11], notCollectedOrderIds: [], encounterId: 5 })
+    expect((await send({ sampleIds: [SID], waiverReason: 'sms_unavailable' })).status).toBe(200)
+    expect(collectHomeVisit).toHaveBeenLastCalledWith(77, [SID], expect.anything(), expect.any(Date), { waiverReason: 'sms_unavailable' })
+  })
+
+  it('a malformed code, an unknown waiver, or both together are 400 before the query', async () => {
+    const bad = await send({ sampleIds: [SID], otp: '12345' })
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toEqual({ error: 'Enter the 6-digit handover code' })
+    expect((await send({ sampleIds: [SID], waiverReason: 'lost' })).status).toBe(400)
+    const both = await send({ sampleIds: [SID], otp: '123456', waiverReason: 'no_phone' })
+    expect(both.status).toBe(400)
+    expect(await both.json()).toEqual({ error: 'Enter the handover code or a reason, not both' })
+    expect(collectHomeVisit).not.toHaveBeenCalled()
   })
 })

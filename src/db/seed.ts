@@ -101,6 +101,7 @@ import {
   reviews,
   medications,
   medicationInventory,
+  medicationBatches,
   labTests,
   staffMembers,
   staffCredentials,
@@ -108,6 +109,8 @@ import {
   adverseEvents,
   drugAccountabilityEntries,
   regulatoryDocuments,
+  providerSchedules, // WS6 T6
+  providerLeave, // WS6 T6
 } from './schema'
 // Wave D: India demo data
 import {
@@ -625,6 +628,11 @@ async function seedMedications() {
     if (medsWithInventory.has(med.id)) continue
     const stock = MEDICATION_INVENTORY_SEED[med.name] ?? { quantityOnHand: 50, reorderThreshold: 10, unit: 'units' }
     await db.insert(medicationInventory).values({ medicationId: med.id, ...stock })
+    // WS5 T3: the seeded stock sits in an OPENING batch (as the batches migration backfills it).
+    if (stock.quantityOnHand > 0) {
+      await db.insert(medicationBatches).values({ medicationId: med.id, batchNo: 'OPENING', mrpPerUnitPaise: 0, quantityOnHand: stock.quantityOnHand })
+        .onConflictDoNothing({ target: [medicationBatches.medicationId, medicationBatches.batchNo] })
+    }
   }
 }
 
@@ -993,6 +1001,9 @@ async function clearExistingData() {
   // deleted before providers/users below.
   await db.delete(staffCredentials)
   await db.delete(staffMembers)
+  // WS6 T6: working hours and leave reference providers.
+  await db.delete(providerSchedules)
+  await db.delete(providerLeave)
   await db.delete(providers)
   // SP2: service_catalog references departments; room_categories is
   // referenced by rooms, which were already deleted above.

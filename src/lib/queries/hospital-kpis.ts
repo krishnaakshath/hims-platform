@@ -10,10 +10,12 @@ import { and, asc, count, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzl
 import { getDb } from '@/db/client'
 import {
   admissions, chargeLines, charges, encounterNotes, encounters, invoices, labOrders, labResults, labTests, medicationDispenses,
-  medicationInventory, patientPayments, patients, refunds, rooms,
+  medicationInventory, medicationBatches, patientPayments, patients, refunds, rooms,
 } from '@/db/schema'
 import { getOrSetCache } from '@/lib/cache'
 import { startOfIstDay, todayIsoIn } from '@/lib/india-time'
+import { addDaysIso } from '@/lib/follow-ups/rules' // WS5 T4
+import { EXPIRING_SOON_DAYS } from '@/lib/queries/medications' // WS5 T4
 import { listFollowUpWorklist } from '@/lib/queries/follow-up-recall'
 import { countWorklistBuckets, type WorklistBucket } from '@/lib/follow-ups/worklist'
 import { getRcmDashboard } from '@/lib/queries/rcm-worklist'
@@ -176,13 +178,18 @@ export async function countResultsToVerifyForProvider(providerId: number): Promi
 
 // ---------- Pharmacy ----------
 
-export interface PharmacyKpi { outOfStock: number; lowStock: number; dispensedToday: number; unbilledDispenses: number }
+export interface PharmacyKpi {
+  outOfStock: number; lowStock: number; dispensedToday: number; unbilledDispenses: number
+  // WS5 T4: live batches (not written off, stock left) expiring within 90 days of `today` / already expired.
+  expiringIn90Days: number; expiredBatches: number
+}
 
-/** Stock alerts (same rule as the pharmacy stock table: 0 = out, at or below reorder = low) and the day's dispensing. */
+/** Stock alerts (same rule as the pharmacy stock table: 0 = out, at or below reorder = low), expiry alerts and the day's dispensing. */
 export async function loadPharmacyKpis(today: string): Promise<PharmacyKpi> {
   const db = getDb()
   const { start, end } = istDay(today)
-  const [[stock], [disp], [unbilled]] = await Promise.all([
+  const soonEnd = addDaysIso(today, EXPIRING_SOON_DAYS)
+  const [[stock], [disp], [unbilled], [expiry]] = await Promise.all([
     db.select({
       out: sql<string>`count(*) filter (where ${medicationInventory.quantityOnHand} = 0)`,
       low: sql<string>`count(*) filter (where ${medicationInventory.quantityOnHand} > 0 and ${medicationInventory.quantityOnHand} <= ${medicationInventory.reorderThreshold})`,
@@ -190,8 +197,15 @@ export async function loadPharmacyKpis(today: string): Promise<PharmacyKpi> {
     db.select({ n: count() }).from(medicationDispenses).where(and(gte(medicationDispenses.dispensedAt, start), lt(medicationDispenses.dispensedAt, end))),
     // WS2 T8: not billed = no live charge line, no free-dispense reason, no pre-SP4 legacy bill.
     db.select({ n: count() }).from(medicationDispenses).where(dispenseNotBilledSql),
+    db.select({
+      soon: sql<string>`count(*) filter (where ${medicationBatches.expiryDate} >= ${today} and ${medicationBatches.expiryDate} <= ${soonEnd})`,
+      expired: sql<string>`count(*) filter (where ${medicationBatches.expiryDate} < ${today})`,
+    }).from(medicationBatches).where(and(isNull(medicationBatches.writtenOffAt), sql`${medicationBatches.quantityOnHand} > 0`)),
   ])
-  return { outOfStock: n(stock?.out), lowStock: n(stock?.low), dispensedToday: n(disp?.n), unbilledDispenses: n(unbilled?.n) }
+  return {
+    outOfStock: n(stock?.out), lowStock: n(stock?.low), dispensedToday: n(disp?.n), unbilledDispenses: n(unbilled?.n),
+    expiringIn90Days: n(expiry?.soon), expiredBatches: n(expiry?.expired),
+  }
 }
 
 // ---------- Follow-ups ----------

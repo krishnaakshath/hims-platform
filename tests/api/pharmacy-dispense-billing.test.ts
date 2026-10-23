@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
-  admissions, allergies, auditLog, billingSettings, chargeLines, encounters, medicationDispenses, medicationEpisodes, medicationInventory,
+  admissions, allergies, auditLog, billingSettings, chargeLines, encounters, medicationBatches, medicationDispenses, medicationEpisodes, medicationInventory,
   medications, patients, payers, prescriptions, providers,
 } from '@/db/schema'
 import type { Role } from '@/lib/auth'
@@ -99,6 +99,7 @@ afterAll(async () => {
   await db.delete(admissions).where(inArray(admissions.patientId, PIDS))
   await db.delete(encounters).where(inArray(encounters.patientId, PIDS))
   const ids = Object.values(med)
+  await db.delete(medicationBatches).where(inArray(medicationBatches.medicationId, ids)) // WS5: dispensing creates the OPENING batch
   await db.delete(medicationInventory).where(inArray(medicationInventory.medicationId, ids))
   await db.delete(medications).where(inArray(medications.id, ids))
   await db.delete(patients).where(inArray(patients.id, PIDS))

@@ -883,7 +883,7 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
       const b = must(await bookHomeCollection({ patientId: p.id, labOrderIds: r.orderIds, visitDate: day(-1), windowId: earlyWindow.id, address: addressOf(p), contactPhone: p.phone ?? syntheticMobile(2) }, sessions.frontdesk, istAt(day(-2), '17:05')), 'book home collection')
       if (collectorId !== null) must(await assignCollector(b.visit.id, collectorId, sessions.labs, istAt(day(-2), '17:10')), 'assign collector')
       const sampleIds = [...b.sampleIds.values()]
-      must(await collectHomeVisit(b.visit.id, sampleIds, sessions.collector, istAt(day(-1), '07:40')), 'collect at home')
+      must(await collectHomeVisit(b.visit.id, sampleIds, sessions.collector, istAt(day(-1), '07:40'), { waiverReason: 'sms_unavailable' }), 'collect at home')
       for (const sampleId of sampleIds) must(await receiveLabSample(sampleId, labs, istAt(day(-1), '10:00')), 'receive home sample')
       await result(r.orderIds[0], 'LDL 168', 'abnormal', istAt(day(-1), '14:00'), 'mg/dL', '<100')
     }

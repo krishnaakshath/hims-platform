@@ -55,12 +55,14 @@ describe('SP4 migration B (invoices and ledger)', () => {
 
   it('creates each enum type with every value', () => {
     const s = readMigration(MIGRATION)
-    expect(documentSeriesEnum.enumValues).toEqual(['invoice', 'receipt', 'credit_note', 'refund'])
+    // WS5 T3 appends 'grn' in its own migration (2026-10-25-ws5-pharmacy-grns.sql); SP4 created the first four.
+    expect(documentSeriesEnum.enumValues).toEqual(['invoice', 'receipt', 'credit_note', 'refund', 'grn'])
     expect(invoiceStatusEnum.enumValues).toEqual(['draft', 'finalised', 'cancelled', 'discarded'])
     expect(paymentModeEnum.enumValues).toEqual(['cash', 'upi', 'card', 'cheque', 'neft', 'other'])
     expect(patientPaymentKindEnum.enumValues).toEqual(['advance', 'receipt'])
     for (const e of [documentSeriesEnum, invoiceStatusEnum, paymentModeEnum, patientPaymentKindEnum]) {
-      expect(s, e.enumName).toContain(`CREATE TYPE ${e.enumName} AS ENUM (${e.enumValues.map((v) => `'${v}'`).join(', ')});`)
+      const values = e === documentSeriesEnum ? e.enumValues.filter((v) => v !== 'grn') : e.enumValues
+      expect(s, e.enumName).toContain(`CREATE TYPE ${e.enumName} AS ENUM (${values.map((v) => `'${v}'`).join(', ')});`)
     }
   })
 
