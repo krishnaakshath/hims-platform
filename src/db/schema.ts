@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, unique, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, unique, uuid, time, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
@@ -629,7 +629,13 @@ export const providers = pgTable('providers', {
   registrationNumber: text('registration_number'),
   consultationFeePaise: integer('consultation_fee_paise'),
   currency: text('currency').default('INR').notNull(),
-}, (t) => [check('providers_consultation_fee_nonneg', sql`${t.consultationFeePaise} IS NULL OR ${t.consultationFeePaise} >= 0`)])
+  slotMinutes: integer('slot_minutes').default(15).notNull(), // WS6 T6
+  opdRoom: text('opd_room'), // WS6 T6
+  portalBookable: boolean('portal_bookable').default(true).notNull(), // WS6 T6
+}, (t) => [
+  check('providers_consultation_fee_nonneg', sql`${t.consultationFeePaise} IS NULL OR ${t.consultationFeePaise} >= 0`),
+  check('providers_slot_minutes_range', sql`${t.slotMinutes} BETWEEN 5 AND 60`), // WS6 T6
+])
 
 export const departmentKindEnum = pgEnum('department_kind', ['clinical', 'diagnostic', 'support', 'administrative'])
 
@@ -2962,3 +2968,28 @@ export const pharmacyGrns = pgTable('pharmacy_grns', {
 
 export type PharmacyGrnRow = typeof pharmacyGrns.$inferSelect
 // end WS5 T3
+// WS6 T6
+// Doctor working hours (spec D5): a weekly template of IST sessions (several per weekday allowed,
+// weekday 0 = Sunday) and leave days. Slots are computed on read (src/lib/scheduling/slots.ts),
+// never stored. Migration 2026-10-25-ws6-provider-schedules.sql.
+export const providerSchedules = pgTable('provider_schedules', {
+  id: serial('id').primaryKey(),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  weekday: integer('weekday').notNull(),
+  startTime: time('start_time').notNull(),
+  endTime: time('end_time').notNull(),
+}, (t) => [
+  index('provider_schedules_provider_weekday_idx').on(t.providerId, t.weekday),
+  check('provider_schedules_weekday_range', sql`${t.weekday} BETWEEN 0 AND 6`),
+  check('provider_schedules_end_after_start', sql`${t.endTime} > ${t.startTime}`),
+])
+
+export const providerLeave = pgTable('provider_leave', {
+  id: serial('id').primaryKey(),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  leaveDate: date('leave_date').notNull(),
+  reason: text('reason').notNull(),
+}, (t) => [
+  unique('provider_leave_provider_date_unique').on(t.providerId, t.leaveDate),
+])
+// end WS6 T6

@@ -36,6 +36,8 @@ export async function updateProviderProfile(id: number, patch: ProviderProfileIn
   if (patch.registrationStateCode !== undefined) set.registrationStateCode = patch.registrationStateCode
   if (patch.registrationNumber !== undefined) set.registrationNumber = patch.registrationNumber
   if (patch.consultationFeePaise !== undefined) set.consultationFeePaise = patch.consultationFeePaise
+  if (patch.opdRoom !== undefined) set.opdRoom = patch.opdRoom // WS6 T6
+  if (patch.portalBookable !== undefined) set.portalBookable = patch.portalBookable // WS6 T6
   const [updated] = await getDb().update(providers).set(set).where(eq(providers.id, id)).returning()
   await invalidateCache(providersListCacheKey())
   return updated ?? null

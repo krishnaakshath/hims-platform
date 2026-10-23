@@ -106,6 +106,8 @@ import {
   adverseEvents,
   drugAccountabilityEntries,
   regulatoryDocuments,
+  providerSchedules, // WS6 T6
+  providerLeave, // WS6 T6
 } from './schema'
 // Wave D: India demo data
 import {
@@ -988,6 +990,9 @@ async function clearExistingData() {
   // deleted before providers/users below.
   await db.delete(staffCredentials)
   await db.delete(staffMembers)
+  // WS6 T6: working hours and leave reference providers.
+  await db.delete(providerSchedules)
+  await db.delete(providerLeave)
   await db.delete(providers)
   // SP2: service_catalog references departments; room_categories is
   // referenced by rooms, which were already deleted above.
