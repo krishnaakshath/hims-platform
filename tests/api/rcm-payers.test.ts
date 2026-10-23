@@ -18,6 +18,7 @@ import { PUT as putProfile } from '@/app/api/rcm/payers/[id]/route'
 import { PUT as putNetworks } from '@/app/api/rcm/payers/[id]/networks/route'
 import { PUT as putSettings } from '@/app/api/rcm/settings/route'
 import { createPayerWithProfile, upsertPayerProfile, updateHospitalIdentifiers } from '@/lib/queries/rcm-payers'
+import { revalidateTag } from 'next/cache'
 
 const send = (method: string, path: string, body: unknown) => new NextRequest(`http://localhost${path}`, { method, body: typeof body === 'string' ? body : JSON.stringify(body) })
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) })
@@ -45,6 +46,15 @@ describe('/api/rcm/payers and /api/rcm/settings', () => {
     expect(updateHospitalIdentifiers).not.toHaveBeenCalled()
     sessionRole = 'admin'
     expect((await putSettings(send('PUT', '/api/rcm/settings', body))).status).toBe(200)
+  })
+  it('a successful PUT /api/rcm/settings expires the brand cache (ROHINI/HFR are in the snapshot); a 403 does not', async () => {
+    const body = { rohiniId: '8900080123456', hfrId: 'IN2910000123' }
+    expect((await putSettings(send('PUT', '/api/rcm/settings', body))).status).toBe(403)
+    expect(revalidateTag).not.toHaveBeenCalled()
+    sessionRole = 'admin'
+    expect((await putSettings(send('PUT', '/api/rcm/settings', body))).status).toBe(200)
+    expect(revalidateTag).toHaveBeenCalledTimes(1)
+    expect(revalidateTag).toHaveBeenCalledWith('brand-settings', { expire: 0 })
   })
   it('a bad GSTIN is a 400 with the authored message; bad JSON and a bad id are 400s', async () => {
     const res = await putProfile(send('PUT', '/api/rcm/payers/3', { ...PROFILE, gstin: 'NOTAGSTIN' }), ctx('3'))

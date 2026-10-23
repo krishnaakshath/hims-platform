@@ -155,14 +155,15 @@ describe.skipIf(!process.env.DATABASE_URL)('brand settings queries (DB)', () => 
     expect((await auditRows()).length).toBe(before)
   })
 
-  it('getBrandAssetForServe is null before an upload and returns only blobUrl and sha256 after', async () => {
-    const { q } = await mods()
-    expect(await q.getBrandAssetForServe('logo_light')).toBeNull()
+  it('putBrandAsset stores one row per kind and a replacement overwrites it', async () => {
+    const { q, getDb, brandAssets, eq } = await mods()
+    const row = async () => (await getDb().select({ blobUrl: brandAssets.blobUrl, sha256: brandAssets.sha256 }).from(brandAssets).where(eq(brandAssets.kind, 'logo_light')))
+    expect(await row()).toEqual([])
     await q.putBrandAsset('logo_light', asset(), session)
-    expect(await q.getBrandAssetForServe('logo_light')).toEqual({ blobUrl: `local:branding/test-${RUN}.png`, sha256: 'b'.repeat(64) })
+    expect(await row()).toEqual([{ blobUrl: `local:branding/test-${RUN}.png`, sha256: 'b'.repeat(64) }])
     // Replacing the asset overwrites the row (kind is the key).
     await q.putBrandAsset('logo_light', { ...asset('d'.repeat(64)) }, session)
-    expect((await q.getBrandAssetForServe('logo_light'))?.sha256).toBe('d'.repeat(64))
+    expect((await row()).map((r) => r.sha256)).toEqual(['d'.repeat(64)])
   })
 
   it('putBrandAsset and deleteBrandAssets audit without blob URLs; inside a caller tx the caller audits', async () => {
@@ -179,7 +180,7 @@ describe.skipIf(!process.env.DATABASE_URL)('brand settings queries (DB)', () => 
       { action: 'branding: stored asset', details: 'kind=logo_dark source=upload bytes=1234 w=400 h=100' },
       { action: 'branding: removed asset', details: 'kinds=logo_dark,icon_32' },
     ])
-    expect(await q.getBrandAssetForServe('logo_dark')).toBeNull()
+    expect((await q.listBrandAssetRows()).some((r) => r.kind === 'logo_dark')).toBe(false)
   })
 
   it('recordOnboarding stamps the time and audits the action', async () => {

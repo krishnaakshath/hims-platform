@@ -213,13 +213,6 @@ export async function deleteBrandAssets(kinds: readonly BrandAssetKind[], sessio
   })
 }
 
-/** The stored PNG for the public asset route; null when no asset of this kind exists. */
-export async function getBrandAssetForServe(kind: BrandAssetKind): Promise<{ blobUrl: string; sha256: string } | null> {
-  const [row] = await getDb().select({ blobUrl: brandAssets.blobUrl, sha256: brandAssets.sha256 })
-    .from(brandAssets).where(eq(brandAssets.kind, kind)).limit(1)
-  return row ?? null
-}
-
 /** Onboarding checklist: the admin confirmed a test sign-in, or dismissed the card. */
 export async function recordOnboarding(action: 'test_signin_done' | 'dismiss', session: Session): Promise<void> {
   await getDb().transaction(async (tx) => {

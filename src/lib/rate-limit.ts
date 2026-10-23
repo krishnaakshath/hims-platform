@@ -444,7 +444,8 @@ export async function checkIntegrationTestRateLimit(staffName: string): Promise<
 // end SP8
 
 // WL T7: Settings > Branding uploads decode images with sharp, so each admin gets 10 uploads per
-// 10 minutes and the whole hospital 60 per hour (both buckets must allow). Fails closed like every
+// 10 minutes and the whole hospital 60 per hour (both buckets must allow; the shared bucket is only
+// charged for an upload the staff bucket allowed). Fails closed like every
 // limiter here: no Redis means getRedis() throws ServiceNotConfiguredError.
 let _brandUploadStaffLimiter: Ratelimit | null = null
 let _brandUploadGlobalLimiter: Ratelimit | null = null
@@ -460,8 +461,12 @@ function getBrandUploadLimiters(): [Ratelimit, Ratelimit] {
 
 export async function checkBrandUploadRateLimit(staffName: string): Promise<{ allowed: boolean }> {
   const [staff, global] = getBrandUploadLimiters()
-  const [a, b] = await Promise.all([staff.limit(staffName.toLowerCase()), global.limit('all')])
-  return { allowed: a.success && b.success }
+  // Staff bucket first, and the shared bucket only when it allows: one admin hammering the button
+  // must not spend the whole hospital's hourly quota with uploads that were refused anyway.
+  const a = await staff.limit(staffName.toLowerCase())
+  if (!a.success) return { allowed: false }
+  const b = await global.limit('all')
+  return { allowed: b.success }
 }
 
 // The global bucket's key is shared by every caller, so the test that saturates the per-staff

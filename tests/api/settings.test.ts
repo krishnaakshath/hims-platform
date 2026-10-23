@@ -6,6 +6,7 @@ import { getDb } from '@/db/client'
 import { appSettings } from '@/db/schema'
 import { PUT as updatePracticeInfo } from '@/app/api/settings/practice-info/route'
 import { getSettingsSummary, getAppSettings } from '@/lib/queries/settings'
+import { revalidateTag } from 'next/cache'
 
 const UNAUTHORIZED = () => NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -49,6 +50,17 @@ describe('PUT /api/settings/practice-info', () => {
   it('rejects an incomplete payload', async () => {
     const res = await updatePracticeInfo(req('http://localhost/api/settings/practice-info', { practiceName: 'x' }))
     expect(res.status).toBe(400)
+  })
+
+  it('a successful save expires the brand cache (the snapshot carries the practice name); a rejected one does not', async () => {
+    vi.mocked(revalidateTag).mockClear()
+    const bad = await updatePracticeInfo(req('http://localhost/api/settings/practice-info', { practiceName: 'x' }))
+    expect(bad.status).toBe(400)
+    expect(revalidateTag).not.toHaveBeenCalled()
+    const res = await updatePracticeInfo(req('http://localhost/api/settings/practice-info', { practiceName: 'IPMG Test', practiceSite: 'Pune', practiceTimezone: 'Asia/Kolkata' }))
+    expect(res.status).toBe(200)
+    expect(revalidateTag).toHaveBeenCalledTimes(1)
+    expect(revalidateTag).toHaveBeenCalledWith('brand-settings', { expire: 0 })
   })
 
   it('saves practice info and it is reflected in the settings summary', async () => {

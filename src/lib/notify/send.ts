@@ -92,7 +92,8 @@ function destinationFor(channel: DeliveryChannel, patientId: string, d: SendNoti
 function withDefaultHospitalName(vars: unknown, smsName: string): unknown {
   if (vars === null || typeof vars !== 'object' || Array.isArray(vars)) return vars
   const h = (vars as { hospitalName?: unknown }).hospitalName
-  return h === undefined || h === null || h === '' ? { ...vars, hospitalName: smsName } : vars
+  // Missing, blank or whitespace-only (or not a string at all) all mean "use the brand's SMS name".
+  return typeof h !== 'string' || h.trim() === '' ? { ...vars, hospitalName: smsName } : vars
 }
 
 function optedOut(channel: DeliveryChannel, p: PatientChannelPreferences): boolean {

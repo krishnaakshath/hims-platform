@@ -9,15 +9,16 @@ import { trialsEnabled } from '@/lib/features'
 import { getBrandOnboarding } from '@/lib/brand-server'
 import type { BrandOnboardingStatus } from '@/lib/brand-resolve'
 import { BrandOnboardingCard } from '@/components/BrandOnboardingCard'
+import { BRAND_SETTINGS_ROLES } from '@/lib/role-policy'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession()
   if (!session) redirect('/login')
   const badges = await getNavBadges(session)
 
-  // WL T11: first-run branding checklist, admins only; any failure renders nothing.
+  // WL T11: first-run branding checklist, for the roles that may edit branding; any failure renders nothing.
   let onboarding: BrandOnboardingStatus | null = null
-  if (session.role === 'admin') {
+  if (BRAND_SETTINGS_ROLES.includes(session.role)) {
     try {
       onboarding = await getBrandOnboarding()
     } catch {

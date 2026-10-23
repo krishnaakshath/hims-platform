@@ -149,6 +149,17 @@ describe.skipIf(!process.env.DATABASE_URL)('messages read the stored brand (DB)'
     expect(registry.sms.send.mock.calls[0][0].text).toMatch(/^SUNRISE HSP: You have a form to fill in\./)
   })
 
+  it('a blank or whitespace-only hospitalName var also defaults to the stored SMS name', async () => {
+    await storeSunrise()
+    const { sendNotification } = await import('@/lib/notify/send')
+    for (const hospitalName of ['', '   ', '\t\n']) {
+      const registry = fakeRegistry()
+      const r = await sendNotification({ patientId: 'RD-0042', templateKey: 'form_sent', destination: DESTINATION, vars: { hospitalName } }, { registry, store })
+      expect(r.attempts.map((a) => a.status)).toEqual(['sent', 'sent'])
+      expect(registry.sms.send.mock.calls[0][0].text).toMatch(/^SUNRISE HSP: You have a form to fill in\./)
+    }
+  })
+
   it('booking_confirmed with no stored brand: env name everywhere, no signature', async () => {
     const b = await reset()
     const { sendNotification } = await import('@/lib/notify/send')

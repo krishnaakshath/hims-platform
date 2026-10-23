@@ -85,6 +85,7 @@ import { NHCX_ELIGIBILITY_ROLES } from '@/lib/role-policy'
 import { POST as postNhcxEligibility } from '@/app/api/nhcx/eligibility/route'
 import { GET as getNhcxEligibility } from '@/app/api/nhcx/eligibility/[id]/route'
 import { INTEGRATION_SETTINGS_ROLES } from '@/lib/role-policy'
+import { BRAND_SETTINGS_ROLES } from '@/lib/role-policy' // WL final review
 import { GET as getNhcxPayload } from '@/app/api/rcm/nhcx/exchanges/[id]/payload/route'
 import { POST as postNhcxReview } from '@/app/api/rcm/nhcx/exchanges/[id]/review/route'
 import { POST as postIntegrationTest } from '@/app/api/settings/integrations/test/route'
@@ -1254,6 +1255,13 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // WS12 T6
   { name: 'POST /api/abdm/shares/simulate', call: () => postSimulateAbdmShare(send('POST', '/api/abdm/shares/simulate', NOT_JSON)), allowed: ABDM_SHARE_QUEUE_ROLES },
   // end WS12 T6
+  // WL final review: branding writes (BRAND_SETTINGS_ROLES).
+  { name: 'PUT /api/settings/branding', call: () => putBrandingSettings(send('PUT', '/api/settings/branding', NOT_JSON)), allowed: BRAND_SETTINGS_ROLES },
+  { name: 'POST /api/settings/branding/reset', call: () => postBrandingReset(send('POST', '/api/settings/branding/reset', NOT_JSON)), allowed: BRAND_SETTINGS_ROLES },
+  { name: 'POST /api/settings/branding/onboarding', call: () => postBrandingOnboarding(send('POST', '/api/settings/branding/onboarding', NOT_JSON)), allowed: BRAND_SETTINGS_ROLES },
+  // Multipart route: a non-multipart body is the 400 an allowed role gets, after the gate (the limiter is mocked above).
+  { name: 'POST /api/settings/branding/assets', call: () => postBrandingAsset(send('POST', '/api/settings/branding/assets', NOT_JSON)), allowed: BRAND_SETTINGS_ROLES },
+  // end WL final review
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {
