@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
-import { eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { getTableConfig } from 'drizzle-orm/pg-core'
 import { GET as listGrnsRoute, POST as postGrnRoute } from '@/app/api/pharmacy/grns/route'
 import { getDb } from '@/db/client'
-import { medications, medicationInventory, medicationBatches, pharmacyGrns, auditLog } from '@/db/schema'
+import { medications, medicationInventory, medicationBatches, pharmacyGrns, auditLog, documentCounters } from '@/db/schema'
 import { todayIsoIn } from '@/lib/india-time'
+import { financialYearOf } from '@/lib/billing/numbering'
+import { addDaysIso } from '@/lib/follow-ups/rules'
 import { readMigration, idempotencyProblems, missingColumns } from '../db/migration-sql'
 
 let sessionRole: 'admin' | 'pharmacy' | 'frontdesk' | 'billing' = 'pharmacy'
@@ -15,25 +17,34 @@ const MIGRATION = '2026-10-25-ws5-pharmacy-grns.sql'
 const FUTURE = '2099-12-31'
 
 const medIds: number[] = []
+const grnIds: number[] = []
 afterEach(async () => {
   sessionRole = 'pharmacy'
   const db = getDb()
-  if (medIds.length === 0) return
-  const batches = await db.select({ grnId: medicationBatches.grnId }).from(medicationBatches).where(inArray(medicationBatches.medicationId, medIds))
-  const grnIds = [...new Set(batches.map((b) => b.grnId).filter((g): g is number => g !== null))]
-  await db.delete(medicationBatches).where(inArray(medicationBatches.medicationId, medIds))
+  if (medIds.length > 0) {
+    // Batches first (they reference GRNs), then every GRN a test created, including GRNs whose
+    // lines only topped up an existing batch.
+    const batches = await db.select({ grnId: medicationBatches.grnId }).from(medicationBatches).where(inArray(medicationBatches.medicationId, medIds))
+    for (const b of batches) if (b.grnId !== null && !grnIds.includes(b.grnId)) grnIds.push(b.grnId)
+    await db.delete(medicationBatches).where(inArray(medicationBatches.medicationId, medIds))
+  }
   if (grnIds.length > 0) await db.delete(pharmacyGrns).where(inArray(pharmacyGrns.id, grnIds))
-  await db.delete(medicationInventory).where(inArray(medicationInventory.medicationId, medIds))
-  await db.delete(medications).where(inArray(medications.id, medIds))
+  if (medIds.length > 0) {
+    await db.delete(medicationInventory).where(inArray(medicationInventory.medicationId, medIds))
+    await db.delete(medications).where(inArray(medications.id, medIds))
+  }
   medIds.length = 0
+  grnIds.length = 0
 })
 
-async function seedMed(opening: number): Promise<number> {
+/** A drug with `opening` on hand. By default the stock sits in an OPENING batch; `batched: false`
+ *  leaves it unbatched, as a drug created before batches existed (or by the legacy paths) has it. */
+async function seedMed(opening: number, { batched = true }: { batched?: boolean } = {}): Promise<number> {
   const db = getDb()
   const [m] = await db.insert(medications).values({ name: `WS5 T3 grn ${Date.now()}-${Math.random()}`, medicationClass: 'Test', form: 'tablet' }).returning()
   medIds.push(m.id)
   await db.insert(medicationInventory).values({ medicationId: m.id, quantityOnHand: opening })
-  if (opening > 0) await db.insert(medicationBatches).values({ medicationId: m.id, batchNo: 'OPENING', mrpPerUnitPaise: 0, quantityOnHand: opening })
+  if (batched && opening > 0) await db.insert(medicationBatches).values({ medicationId: m.id, batchNo: 'OPENING', mrpPerUnitPaise: 0, quantityOnHand: opening })
   return m.id
 }
 
@@ -47,12 +58,20 @@ function body(lines: Line[], overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
-const post = (b: unknown) => postGrnRoute(new NextRequest('http://localhost/api/pharmacy/grns', { method: 'POST', body: JSON.stringify(b), headers: { 'Content-Type': 'application/json' } }))
+async function post(b: unknown): Promise<Response> {
+  const res = await postGrnRoute(new NextRequest('http://localhost/api/pharmacy/grns', { method: 'POST', body: JSON.stringify(b), headers: { 'Content-Type': 'application/json' } }))
+  if (res.status === 201) grnIds.push((await res.clone().json()).grnId)
+  return res
+}
 const list = () => listGrnsRoute(new NextRequest('http://localhost/api/pharmacy/grns?limit=50'))
 
 async function onHand(medicationId: number): Promise<number> {
   const [inv] = await getDb().select().from(medicationInventory).where(eq(medicationInventory.medicationId, medicationId))
   return inv.quantityOnHand
+}
+async function batchesOf(medicationId: number): Promise<[string, number][]> {
+  const rows = await getDb().select().from(medicationBatches).where(eq(medicationBatches.medicationId, medicationId))
+  return rows.filter((r) => r.writtenOffAt === null).map((r) => [r.batchNo, r.quantityOnHand] as [string, number]).sort()
 }
 async function grnCountFor(supplierInvoiceNo: string): Promise<number> {
   return (await getDb().select().from(pharmacyGrns).where(eq(pharmacyGrns.supplierInvoiceNo, supplierInvoiceNo))).length
@@ -162,6 +181,76 @@ describe('POST /api/pharmacy/grns', () => {
     expect((await post(body([{ medicationId: a, batchNo: 'B1', expiryDate: FUTURE, quantity: 10, mrpPerUnitPaise: 500, purchaseRatePaise: 400 }]))).status).toBe(201)
     const res = await post(body([{ medicationId: a, batchNo: 'B1', expiryDate: FUTURE, quantity: 10, mrpPerUnitPaise: 550, purchaseRatePaise: 400 }]))
     expect(res.status).toBe(409)
+  })
+
+  it('refuses an expiry strictly before today (IST) with 422', async () => {
+    const a = await seedMed(0)
+    const res = await post(body([{ medicationId: a, batchNo: 'OLD-2', expiryDate: addDaysIso(todayIsoIn(), -1), quantity: 10, mrpPerUnitPaise: 100, purchaseRatePaise: 80 }]))
+    expect(res.status).toBe(422)
+    expect((await res.json()).code).toBe('expired_on_receipt')
+    expect(await getDb().select().from(medicationBatches).where(eq(medicationBatches.medicationId, a))).toEqual([])
+  })
+
+  it('refuses a batch number that is on file but written off with 409, even with the same expiry and MRP', async () => {
+    const a = await seedMed(0)
+    expect((await post(body([{ medicationId: a, batchNo: 'B1', expiryDate: FUTURE, quantity: 10, mrpPerUnitPaise: 500, purchaseRatePaise: 400 }]))).status).toBe(201)
+    await getDb().update(medicationBatches).set({ writtenOffAt: new Date(), writeOffReason: 'damaged' })
+      .where(and(eq(medicationBatches.medicationId, a), eq(medicationBatches.batchNo, 'B1')))
+    await getDb().update(medicationInventory).set({ quantityOnHand: 0 }).where(eq(medicationInventory.medicationId, a))
+    const res = await post(body([{ medicationId: a, batchNo: 'B1', expiryDate: FUTURE, quantity: 10, mrpPerUnitPaise: 500, purchaseRatePaise: 400 }]))
+    expect(res.status).toBe(409)
+    expect((await res.json()).code).toBe('batch_conflict')
+    expect(await onHand(a)).toBe(0)
+  })
+
+  it('keeps unbatched on-hand stock: 50 on hand with no batch + a GRN of 100 = 150, with an OPENING batch of 50', async () => {
+    const a = await seedMed(50, { batched: false })
+    const res = await post(body([{ medicationId: a, batchNo: 'NEW-100', expiryDate: FUTURE, quantity: 100, mrpPerUnitPaise: 300, purchaseRatePaise: 200 }]))
+    expect(res.status).toBe(201)
+    expect(await onHand(a)).toBe(150)
+    expect(await batchesOf(a)).toEqual([['NEW-100', 100], ['OPENING', 50]])
+  })
+
+  it('after a legacy dispense lowered on-hand without touching batches, a GRN totals on-hand + received and takes the gap FEFO', async () => {
+    const a = await seedMed(40)
+    expect((await post(body([{ medicationId: a, batchNo: 'B1', expiryDate: '2099-06-30', quantity: 10, mrpPerUnitPaise: 500, purchaseRatePaise: 400 }]))).status).toBe(201)
+    expect(await onHand(a)).toBe(50)
+    // The base dispense path decrements medication_inventory only.
+    await getDb().update(medicationInventory).set({ quantityOnHand: 45 }).where(eq(medicationInventory.medicationId, a))
+    expect((await post(body([{ medicationId: a, batchNo: 'B2', expiryDate: FUTURE, quantity: 20, mrpPerUnitPaise: 500, purchaseRatePaise: 400 }]))).status).toBe(201)
+    expect(await onHand(a)).toBe(65)
+    // The 5-unit gap comes off the earliest-expiring batch (B1), not the no-expiry OPENING batch.
+    expect(await batchesOf(a)).toEqual([['B1', 5], ['B2', 20], ['OPENING', 40]])
+  })
+
+  it('refuses with 409 when unbatched stock would have to go into a written-off OPENING batch', async () => {
+    const a = await seedMed(20)
+    await getDb().update(medicationBatches).set({ writtenOffAt: new Date(), writeOffReason: 'damaged' }).where(eq(medicationBatches.medicationId, a))
+    const payload = body([{ medicationId: a, batchNo: 'B1', expiryDate: FUTURE, quantity: 10, mrpPerUnitPaise: 500, purchaseRatePaise: 400 }])
+    const res = await post(payload)
+    expect(res.status).toBe(409)
+    expect((await res.json()).code).toBe('opening_batch_written_off')
+    expect(await grnCountFor(payload.supplierInvoiceNo)).toBe(0)
+    expect(await onHand(a)).toBe(20)
+  })
+
+  it('maps an exhausted GRN number series to 409 series_exhausted and writes nothing', async () => {
+    const a = await seedMed(0)
+    const fy = financialYearOf(todayIsoIn())
+    const db = getDb()
+    await db.insert(documentCounters).values({ series: 'grn', financialYear: fy, lastValue: 0 }).onConflictDoNothing()
+    const where = and(eq(documentCounters.series, 'grn'), eq(documentCounters.financialYear, fy))
+    const [before] = await db.select().from(documentCounters).where(where)
+    await db.update(documentCounters).set({ lastValue: 999999 }).where(where)
+    try {
+      const payload = body([{ medicationId: a, batchNo: 'B1', expiryDate: FUTURE, quantity: 10, mrpPerUnitPaise: 500, purchaseRatePaise: 400 }])
+      const res = await post(payload)
+      expect(res.status).toBe(409)
+      expect((await res.json()).code).toBe('series_exhausted')
+      expect(await grnCountFor(payload.supplierInvoiceNo)).toBe(0)
+    } finally {
+      await db.update(documentCounters).set({ lastValue: before.lastValue }).where(where)
+    }
   })
 
   it('refuses an unknown medication with 422', async () => {

@@ -8,8 +8,8 @@ import type { Session } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { financialYearOf } from '@/lib/billing/numbering'
 import { todayIsoIn } from '@/lib/india-time'
-import { allocateDocumentNumber } from './document-numbers'
-import { syncInventoryTotal } from './medication-batches'
+import { allocateDocumentNumber, SeriesExhaustedError } from './document-numbers'
+import { OpeningBatchWrittenOffError, reconcileUnbatchedStock, syncInventoryTotal } from './medication-batches'
 
 export interface GrnLineInput {
   medicationId: number
@@ -27,7 +27,7 @@ export interface GrnInput {
   lines: GrnLineInput[]
 }
 
-export type GrnError = 'unknown_medication' | 'expired_on_receipt' | 'batch_conflict'
+export type GrnError = 'unknown_medication' | 'expired_on_receipt' | 'batch_conflict' | 'opening_batch_written_off' | 'series_exhausted'
 export type ReceiveGrnResult = { ok: true; grnId: number; grnNumber: string } | { ok: false; error: GrnError }
 
 export interface GrnListItem {
@@ -58,9 +58,14 @@ export async function receiveGrn(input: GrnInput, session: Session): Promise<Rec
 
   try {
     return await getDb().transaction(async (tx) => {
-      const medicationIds = [...new Set(input.lines.map((l) => l.medicationId))]
+      // Ascending ids: every GRN locks inventory rows in the same order, so two GRNs never deadlock.
+      const medicationIds = [...new Set(input.lines.map((l) => l.medicationId))].sort((a, b) => a - b)
       const known = await tx.select({ id: medications.id }).from(medications).where(inArray(medications.id, medicationIds))
       if (known.length !== medicationIds.length) throw new GrnRefusal('unknown_medication')
+
+      // Stock on hand with no batch behind it (or batches above it) is squared up first, so the
+      // syncInventoryTotal below neither drops nor inflates it (ruling R7).
+      for (const medicationId of medicationIds) await reconcileUnbatchedStock(tx, medicationId)
 
       const grnNumber = await allocateDocumentNumber(tx, 'grn', financialYearOf(today))
       const [grn] = await tx.insert(pharmacyGrns).values({
@@ -110,6 +115,8 @@ export async function receiveGrn(input: GrnInput, session: Session): Promise<Rec
     })
   } catch (err) {
     if (err instanceof GrnRefusal) return { ok: false, error: err.code }
+    if (err instanceof OpeningBatchWrittenOffError) return { ok: false, error: 'opening_batch_written_off' }
+    if (err instanceof SeriesExhaustedError) return { ok: false, error: 'series_exhausted' }
     throw err
   }
 }

@@ -98,6 +98,7 @@ import {
   reviews,
   medications,
   medicationInventory,
+  medicationBatches,
   labTests,
   staffMembers,
   staffCredentials,
@@ -622,6 +623,11 @@ async function seedMedications() {
     if (medsWithInventory.has(med.id)) continue
     const stock = MEDICATION_INVENTORY_SEED[med.name] ?? { quantityOnHand: 50, reorderThreshold: 10, unit: 'units' }
     await db.insert(medicationInventory).values({ medicationId: med.id, ...stock })
+    // WS5 T3: the seeded stock sits in an OPENING batch (as the batches migration backfills it).
+    if (stock.quantityOnHand > 0) {
+      await db.insert(medicationBatches).values({ medicationId: med.id, batchNo: 'OPENING', mrpPerUnitPaise: 0, quantityOnHand: stock.quantityOnHand })
+        .onConflictDoNothing({ target: [medicationBatches.medicationId, medicationBatches.batchNo] })
+    }
   }
 }
 

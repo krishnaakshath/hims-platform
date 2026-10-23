@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import pg from 'pg'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { getTableConfig } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import { medications, medicationInventory, medicationBatches, medicationDispenses } from '@/db/schema'
-import { listBatches, syncInventoryTotal } from '@/lib/queries/medication-batches'
+import { listBatches, syncInventoryTotal, reconcileUnbatchedStock, OpeningBatchWrittenOffError } from '@/lib/queries/medication-batches'
 import { readMigration, idempotencyProblems, missingColumns } from '../../db/migration-sql'
 
 const MIGRATION = '2026-10-25-ws5-medication-batches.sql'
@@ -161,5 +161,74 @@ describe('medication batch queries', () => {
     await db.transaction(async (tx) => { await syncInventoryTotal(tx, id) })
     const [after] = await db.select().from(medicationInventory).where(eq(medicationInventory.medicationId, id))
     expect(after.quantityOnHand).toBe(0)
+  })
+
+  async function liveBatches(id: number): Promise<[string, number][]> {
+    const rows = await getDb().select().from(medicationBatches).where(eq(medicationBatches.medicationId, id))
+    return rows.filter((r) => r.writtenOffAt === null).map((r) => [r.batchNo, r.quantityOnHand] as [string, number]).sort()
+  }
+  async function onHand(id: number): Promise<number> {
+    const [inv] = await getDb().select().from(medicationInventory).where(eq(medicationInventory.medicationId, id))
+    return inv.quantityOnHand
+  }
+  const reconcile = (id: number) => getDb().transaction(async (tx) => { await reconcileUnbatchedStock(tx, id) })
+
+  it('reconcileUnbatchedStock puts a surplus into a new OPENING batch (no expiry, MRP 0, rate 0)', async () => {
+    const id = await seedMed(30)
+    await getDb().insert(medicationBatches).values({ medicationId: id, batchNo: 'A', expiryDate: '2099-01-31', mrpPerUnitPaise: 100, quantityOnHand: 12 })
+    await reconcile(id)
+    expect(await liveBatches(id)).toEqual([['A', 12], ['OPENING', 18]])
+    const [opening] = await getDb().select().from(medicationBatches).where(and(eq(medicationBatches.medicationId, id), eq(medicationBatches.batchNo, 'OPENING')))
+    expect([opening.expiryDate, opening.mrpPerUnitPaise, opening.purchaseRatePaise]).toEqual([null, 0, 0])
+    expect(await onHand(id)).toBe(30)
+  })
+
+  it('reconcileUnbatchedStock adds a surplus to an existing OPENING batch', async () => {
+    const id = await seedMed(25)
+    await getDb().insert(medicationBatches).values({ medicationId: id, batchNo: 'OPENING', mrpPerUnitPaise: 0, quantityOnHand: 10 })
+    await reconcile(id)
+    expect(await liveBatches(id)).toEqual([['OPENING', 25]])
+  })
+
+  it('reconcileUnbatchedStock refuses to revive a written-off OPENING batch', async () => {
+    const id = await seedMed(8)
+    await getDb().insert(medicationBatches).values({ medicationId: id, batchNo: 'OPENING', mrpPerUnitPaise: 0, quantityOnHand: 3, writtenOffAt: new Date(), writeOffReason: 'damaged' })
+    await expect(reconcile(id)).rejects.toBeInstanceOf(OpeningBatchWrittenOffError)
+    const [opening] = await getDb().select().from(medicationBatches).where(eq(medicationBatches.medicationId, id))
+    expect([opening.quantityOnHand, opening.writtenOffAt !== null]).toEqual([3, true])
+  })
+
+  it('reconcileUnbatchedStock takes a deficit across two batches in FEFO order (expired first, no-expiry last)', async () => {
+    const id = await seedMed(9)
+    await getDb().insert(medicationBatches).values([
+      { medicationId: id, batchNo: 'OPENING', expiryDate: null, mrpPerUnitPaise: 0, quantityOnHand: 5 },
+      { medicationId: id, batchNo: 'LATE', expiryDate: '2099-06-30', mrpPerUnitPaise: 100, quantityOnHand: 6 },
+      { medicationId: id, batchNo: 'EXPIRED', expiryDate: '2020-01-31', mrpPerUnitPaise: 100, quantityOnHand: 4 },
+      { medicationId: id, batchNo: 'GONE', expiryDate: '2019-01-31', mrpPerUnitPaise: 100, quantityOnHand: 7, writtenOffAt: new Date(), writeOffReason: 'expired' },
+    ])
+    // Live sum 15, on hand 9: the 6-unit gap takes all 4 of EXPIRED, then 2 of LATE; OPENING and
+    // the written-off batch are untouched.
+    await reconcile(id)
+    expect(await liveBatches(id)).toEqual([['EXPIRED', 0], ['LATE', 4], ['OPENING', 5]])
+    const [gone] = await getDb().select().from(medicationBatches).where(and(eq(medicationBatches.medicationId, id), eq(medicationBatches.batchNo, 'GONE')))
+    expect(gone.quantityOnHand).toBe(7)
+    expect(await onHand(id)).toBe(9)
+  })
+
+  it('reconcileUnbatchedStock is a no-op when batches already match, and when there is no inventory row', async () => {
+    const id = await seedMed(11)
+    await getDb().insert(medicationBatches).values([
+      { medicationId: id, batchNo: 'A', expiryDate: '2099-01-31', mrpPerUnitPaise: 100, quantityOnHand: 4 },
+      { medicationId: id, batchNo: 'B', expiryDate: null, mrpPerUnitPaise: 100, quantityOnHand: 7 },
+    ])
+    await reconcile(id)
+    expect(await liveBatches(id)).toEqual([['A', 4], ['B', 7]])
+    expect(await onHand(id)).toBe(11)
+
+    const [bare] = await getDb().insert(medications).values({ name: `WS5 T3 bare ${Date.now()}`, medicationClass: 'Test', form: 'tablet' }).returning()
+    medIds.push(bare.id)
+    await reconcile(bare.id)
+    expect(await getDb().select().from(medicationInventory).where(eq(medicationInventory.medicationId, bare.id))).toEqual([])
+    expect(await liveBatches(bare.id)).toEqual([])
   })
 })

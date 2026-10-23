@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { POST as createMedicationRoute } from '@/app/api/pharmacy/medications/route'
 import { getDb } from '@/db/client'
-import { medications, medicationInventory } from '@/db/schema'
+import { medications, medicationInventory, medicationBatches } from '@/db/schema'
 import { listMedicationsWithInventory } from '@/lib/queries/medications'
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' = 'pharmacy'
@@ -13,6 +13,7 @@ afterEach(async () => {
   sessionRole = 'pharmacy'
   while (createdMedIds.length > 0) {
     const id = createdMedIds.pop()!
+    await getDb().delete(medicationBatches).where(eq(medicationBatches.medicationId, id))
     await getDb().delete(medicationInventory).where(eq(medicationInventory.medicationId, id))
     await getDb().delete(medications).where(eq(medications.id, id))
   }

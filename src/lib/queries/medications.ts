@@ -1,5 +1,5 @@
 import { getDb } from '@/db/client'
-import { medications, medicationInventory, medicationEpisodes } from '@/db/schema'
+import { medications, medicationInventory, medicationEpisodes, medicationBatches } from '@/db/schema'
 import { asc, desc, eq, sql } from 'drizzle-orm'
 
 export interface MedicationWithInventory {
@@ -94,6 +94,12 @@ export async function createMedicationWithInventory(input: CreateMedicationInput
         reorderThreshold: input.reorderThreshold,
         unit: input.unit,
       })
+      // WS5 T3: initial stock sits in an OPENING batch, so on-hand always equals its live batches.
+      if (input.quantityOnHand > 0) {
+        await tx.insert(medicationBatches).values({
+          medicationId: created.id, batchNo: 'OPENING', expiryDate: null, mrpPerUnitPaise: 0, purchaseRatePaise: 0, quantityOnHand: input.quantityOnHand,
+        })
+      }
 
       return { ok: true, medicationId: created.id }
     })

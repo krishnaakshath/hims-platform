@@ -31,6 +31,8 @@ const REFUSALS: Record<GrnError, { status: number; message: string }> = {
   unknown_medication: { status: 422, message: 'A line names a medication that is not in the catalog.' },
   expired_on_receipt: { status: 422, message: 'A batch expires today or earlier and cannot be received.' },
   batch_conflict: { status: 409, message: 'A batch number is already on file with a different expiry or MRP, or was written off.' },
+  opening_batch_written_off: { status: 409, message: 'A medication has stock on hand outside any batch, but its OPENING batch is written off. Correct the stock count first.' },
+  series_exhausted: { status: 409, message: 'The GRN number series for this financial year is full.' },
 }
 
 export async function GET(request: NextRequest) {
