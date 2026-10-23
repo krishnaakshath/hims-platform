@@ -169,6 +169,70 @@ describe('POST /api/pharmacy/dispense bills the dispense', () => {
     expect(line).toMatchObject({ admissionId: null, encounterId: null })
   })
 
+  // Final fix wave (item 1): a visit cancel detaches the visit's live pharmacy lines (the medicine
+  // was dispensed; the line is not voided) so they bill on their own as context-less ready lines.
+  describe('a visit cancel after a dispense on that visit', () => {
+    const admin = { role: 'admin' as const, name: 'TEST_WS2T8 Admin', userId: null }
+    const LATER = new Date('2099-07-01T09:00:00Z')
+    async function dispenseOnNewVisit() {
+      const [v] = await getDb().insert(encounters).values({ patientId: OPD, encounterType: 'opd', status: 'checked_in', encounterDate: '2026-10-21', providerId, checkedInByName: 'TEST_WS2T8' }).returning()
+      const episodeId = await episodeOn(OPD, v.id, med.priced, `${TAG} Dolo 650`)
+      const res = await dispense({ patientId: OPD, medicationId: med.priced, medicationEpisodeId: episodeId, quantity: 2, ...BATCH })
+      expect(res.status).toBe(201)
+      const [line] = await linesFor((await res.json()).id)
+      expect(line).toMatchObject({ encounterId: v.id, admissionId: null, status: 'captured' })
+      return { visitId: v.id, line }
+    }
+    const lineById = async (id: number) => (await getDb().select().from(chargeLines).where(eq(chargeLines.id, id)))[0]
+
+    it('the line stays live with no visit (encounter_id null), is audited as detached, and is invoice-ready', async () => {
+      const { transitionEncounter } = await import('@/lib/queries/encounters')
+      const { previewInvoiceReady, listUnbilledOrders } = await import('@/lib/queries/invoice-ready')
+      const { visitId, line } = await dispenseOnNewVisit()
+      const c = await transitionEncounter(visitId, 'cancelled', admin, { cancelReason: 'Left', now: LATER })
+      expect(c.ok).toBe(true)
+      const after = await lineById(line.id)
+      expect([after.status, after.encounterId, after.admissionId, after.invoiceId, after.voidReason]).toEqual(['captured', null, null, null, null])
+      const audits = (await getDb().select().from(auditLog).where(eq(auditLog.patientId, OPD))).map((a) => `${a.action}|${a.details}`)
+      expect(audits).toContain(`billing: pharmacy line detached|line=${line.id} cause=visit_cancelled`)
+      expect(await previewInvoiceReady({ patientId: OPD })).toMatchObject({ lines: 1, taxablePaise: after.taxablePaise, waitingLines: 0 })
+      expect((await listUnbilledOrders()).filter((o) => o.patientId === OPD)).toEqual([])
+    })
+
+    it('a line on a draft invoice leaves the draft and is detached', async () => {
+      const { transitionEncounter } = await import('@/lib/queries/encounters')
+      const { createDraftInvoice } = await import('@/lib/queries/invoices')
+      const { visitId, line } = await dispenseOnNewVisit()
+      const d = await createDraftInvoice([line.id], admin)
+      expect(d.ok).toBe(true)
+      expect((await transitionEncounter(visitId, 'cancelled', admin, { cancelReason: 'Left', now: LATER })).ok).toBe(true)
+      const after = await lineById(line.id)
+      expect([after.status, after.encounterId, after.invoiceId]).toEqual(['captured', null, null])
+    })
+
+    it('a line on a finalised invoice keeps the visit_billed refusal and nothing changes', async () => {
+      const { transitionEncounter } = await import('@/lib/queries/encounters')
+      const { createDraftInvoice, finaliseInvoice } = await import('@/lib/queries/invoices')
+      const db = getDb()
+      const [saved] = await db.select().from(billingSettings).where(eq(billingSettings.id, 1))
+      await db.update(billingSettings).set({ legalName: 'Test WS2T8 Hospital', stateCode: 'IN-KA', gstin: '29AAGCB7383J1Z4', placeOfSupplyMode: 'location_of_service' }).where(eq(billingSettings.id, 1))
+      try {
+        const { visitId, line } = await dispenseOnNewVisit()
+        const d = await createDraftInvoice([line.id], admin)
+        if (!d.ok) throw new Error(d.error)
+        const f = await finaliseInvoice(d.invoiceId, admin, new Date('2099-07-01T06:00:00Z'))
+        if (!f.ok) throw new Error(f.error)
+        expect(await transitionEncounter(visitId, 'cancelled', admin, { cancelReason: 'Left', now: LATER }))
+          .toEqual({ ok: false, error: 'visit_billed', invoiceNumber: f.invoiceNumber })
+        const after = await lineById(line.id)
+        expect([after.status, after.encounterId, after.invoiceId]).toEqual(['invoiced', visitId, d.invoiceId])
+      } finally {
+        await purgeBillingFixtures(PIDS)
+        if (saved) await db.update(billingSettings).set(saved).where(eq(billingSettings.id, 1))
+      }
+    })
+  })
+
   it('a medicine with no own GST rate or HSN uses the billing settings defaults', async () => {
     const [s] = await getDb().select().from(billingSettings).where(eq(billingSettings.id, 1))
     const res = await dispense({ patientId: OPD, medicationId: med.plain, quantity: 3, ...BATCH })

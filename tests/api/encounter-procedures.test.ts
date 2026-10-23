@@ -122,11 +122,14 @@ describe.skipIf(!process.env.DATABASE_URL)('procedure orders billed at order tim
   })
 
   async function purge() {
-    const { getDb, encounterProcedures, encounters, admissions, inArray } = await m()
+    const { getDb, encounterProcedures, encounters, admissions, encounterCoding, encounterCodingEvents, inArray } = await m()
     const { purgeBillingFixtures } = await import('../db/billing-fixtures')
     await purgeBillingFixtures([...PIDS])
     if (PIDS.length === 0) return
     const db = getDb()
+    const encIds = db.select({ id: encounters.id }).from(encounters).where(inArray(encounters.patientId, PIDS))
+    await db.delete(encounterCodingEvents).where(inArray(encounterCodingEvents.encounterId, encIds))
+    await db.delete(encounterCoding).where(inArray(encounterCoding.encounterId, encIds))
     await db.delete(encounterProcedures).where(inArray(encounterProcedures.patientId, PIDS))
     await db.delete(encounters).where(inArray(encounters.patientId, PIDS))
     await db.delete(admissions).where(inArray(admissions.patientId, PIDS))
@@ -238,6 +241,35 @@ describe.skipIf(!process.env.DATABASE_URL)('procedure orders billed at order tim
       expect(body.charge).toEqual({ ok: false, source: 'procedure', reason: 'blocked', rules: ['deposit_below_threshold'] })
       const procs = await proceduresOf(e.id)
       expect(procs.map((p) => [p.id, p.voidedAt])).toEqual([[body.procedureId, null]])
+      expect(await linesOf(pid)).toEqual([])
+    })
+
+    // Final fix wave (item 4): procedures bill admission-first, like lab orders and pharmacy.
+    it('an OPD visit during an active admission: the procedure line goes on the admission; the visit cancel still voids it', async () => {
+      const pid = await newPatient()
+      const { getDb, admissions, encounters, enc } = await m()
+      // An emergency admission: the stay's deposit rule does not apply (charge-rules exemption).
+      const [adm] = await getDb().insert(admissions).values({ patientId: pid, attendingProviderId: fx.prov, admissionType: 'emergency' } as never).returning()
+      const [ipd] = await getDb().insert(encounters).values({
+        patientId: pid, encounterType: 'ipd', admissionId: adm.id, encounterDate: DAY, providerId: fx.prov, departmentId: fx.dep, checkedInByName: doctor.name,
+      } as never).returning()
+      const e = await opdEncounter(pid)
+      const r = await orderAt(e)
+      const [line] = await linesOf(pid)
+      expect(r.charge).toMatchObject({ ok: true, lineId: line.id })
+      expect([line.encounterProcedureId, line.admissionId, line.encounterId]).toEqual([r.procedureId, adm.id, ipd.id])
+      const c = await enc.transitionEncounter(e.id, 'cancelled', doctor, { cancelReason: 'Left', now: LATER })
+      expect(c.ok).toBe(true)
+      const [after] = await linesOf(pid)
+      expect([after.status, after.voidReason]).toEqual(['void', 'Visit cancelled'])
+    })
+
+    it('an OPD visit during an elective admission below the deposit threshold: the stay\'s deposit rule blocks the line', async () => {
+      const pid = await newPatient()
+      const { getDb, admissions } = await m()
+      await getDb().insert(admissions).values({ patientId: pid, attendingProviderId: fx.prov }).returning()
+      const r = await orderAt(await opdEncounter(pid))
+      expect(r.charge).toEqual({ ok: false, source: 'procedure', reason: 'blocked', rules: ['deposit_below_threshold'] })
       expect(await linesOf(pid)).toEqual([])
     })
 
@@ -383,6 +415,59 @@ describe.skipIf(!process.env.DATABASE_URL)('procedure orders billed at order tim
       const [after] = await linesOf(pid)
       expect([after.status, after.invoiceId, after.voidReason]).toEqual(['invoiced', f.invoiceId, null])
       expect((await proceduresOf(e.id))[0].voidedAt).not.toBeNull()
+    })
+  })
+
+  // Final fix wave (item 3): SP6 coding removes or edits an ordered procedure after the visit is
+  // completed; its line follows (the doctor cancel's handling), and a billed service cannot change.
+  describe('SP6 coding void and edit of an ordered procedure', () => {
+    const coding = async () => import('@/lib/queries/coding')
+    async function completedWithProcedure() {
+      const pid = await newPatient()
+      const e = await opdEncounter(pid)
+      const r = await orderAt(e)
+      const { getDb, encounters, eq } = await m()
+      await getDb().update(encounters).set({ status: 'completed', completedAt: LATER }).where(eq(encounters.id, e.id))
+      const [line] = await linesOf(pid)
+      expect(line).toMatchObject({ encounterProcedureId: r.procedureId, status: 'captured' })
+      return { pid, e, procedureId: r.procedureId, line }
+    }
+    const auditsOf = async (pid: string) => {
+      const { getDb, auditLog, eq } = await m()
+      return (await getDb().select().from(auditLog).where(eq(auditLog.patientId, pid))).map((a) => `${a.action}|${a.details}`)
+    }
+
+    it('void: a captured line is voided (billing: voided), a draft invoice loses it', async () => {
+      const { pid, e, procedureId, line } = await completedWithProcedure()
+      const { inv } = await m()
+      expect((await inv.createDraftInvoice([line.id], billing)).ok).toBe(true)
+      expect(await (await coding()).voidEncounterProcedure(e.id, procedureId, doctor, LATER)).toEqual({ ok: true, value: { procedureId, billing: 'voided' } })
+      const [after] = await linesOf(pid)
+      expect([after.status, after.voidReason, after.invoiceId]).toEqual(['void', 'Procedure cancelled', null])
+      expect(await auditsOf(pid)).toContain(`billing: voided charge line|line=${line.id} procedure=${procedureId} cause=procedure_cancelled`)
+    })
+
+    it('void: a line on a finalised invoice is left, billing credit_note_needed is returned and audited', async () => {
+      const { pid, e, procedureId, line } = await completedWithProcedure()
+      const f = await finalise([line.id])
+      expect(await (await coding()).voidEncounterProcedure(e.id, procedureId, doctor, LATER)).toEqual({ ok: true, value: { procedureId, billing: 'credit_note_needed' } })
+      const [after] = await linesOf(pid)
+      expect([after.status, after.invoiceId]).toEqual(['invoiced', f.invoiceId])
+      expect((await proceduresOf(e.id))[0].voidedAt).not.toBeNull()
+      expect(await auditsOf(pid)).toContain(`billing: credit note needed|line=${line.id} procedure=${procedureId} cause=procedure_cancelled`)
+    })
+
+    it('edit: changing the service of a procedure with a live line is refused (service_change_billed); other edits pass', async () => {
+      const { pid, e, procedureId, line } = await completedWithProcedure()
+      const c = await coding()
+      expect(await c.updateEncounterProcedure(e.id, procedureId, { serviceId: fx.procB }, doctor, LATER)).toEqual({ ok: false, error: 'service_change_billed' })
+      expect((await proceduresOf(e.id))[0].serviceId).toBe(fx.procA)
+      expect((await c.updateEncounterProcedure(e.id, procedureId, { serviceId: fx.procA, sequence: 1 }, doctor, LATER)).ok).toBe(true)
+      // Once the line is void the service may change.
+      const { getDb, chargeLines, eq } = await m()
+      await getDb().update(chargeLines).set({ status: 'void', voidReason: 'test', voidedAt: LATER, voidedByName: 'TEST' }).where(eq(chargeLines.id, line.id))
+      expect((await c.updateEncounterProcedure(e.id, procedureId, { serviceId: fx.procB }, doctor, LATER)).ok).toBe(true)
+      expect((await linesOf(pid)).map((l) => l.status)).toEqual(['void'])
     })
   })
 

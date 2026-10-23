@@ -7,6 +7,7 @@ export type CodingWriteError =
   | 'code_required' | 'code_not_found' | 'code_invalid' | 'validation_failed' | 'no_user_account' | 'assignee_not_coder'
   | 'provider_not_found' | 'service_not_found' | 'performed_in_future' | 'sample_code'
   | 'code_not_current' // WS1 T4: workspace picks must be in the current, non-sample WHO ICD-10 version
+  | 'service_change_billed' // final fix wave: a billed procedure's service cannot change
 
 export type CodingWriteResult<T> = { ok: true; value: T } | { ok: false; error: CodingWriteError; issues?: CodingIssue[] }
 
@@ -18,6 +19,7 @@ export const CODING_ERROR_STATUS: Record<CodingWriteError, 400 | 404 | 409 | 422
   code_required: 400, code_not_found: 400, no_user_account: 400, assignee_not_coder: 400,
   provider_not_found: 400, service_not_found: 400, performed_in_future: 400, sample_code: 400,
   code_not_current: 422, // WS1 T4
+  service_change_billed: 409, // final fix wave
 }
 
 export const CODING_ERROR_MESSAGE: Record<CodingWriteError, string> = {
@@ -44,4 +46,5 @@ export const CODING_ERROR_MESSAGE: Record<CodingWriteError, string> = {
   performed_in_future: 'The procedure date cannot be in the future',
   sample_code: 'Sample code sets are fictional and cannot be used here; load a licensed code set',
   code_not_current: 'That code is not in the current WHO ICD-10 version', // WS1 T4
+  service_change_billed: 'This procedure is billed, so its service cannot change. Remove it and order the right one.', // final fix wave
 }

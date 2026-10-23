@@ -5,7 +5,8 @@
 //   1. the encounter's `encounter_coding` row, FOR UPDATE (lockEncounterCoding, created on
 //      first use with INSERT … ON CONFLICT DO NOTHING), always first;
 //   2. then the dependent row being changed (a diagnosis, procedure or coding query), FOR
-//      UPDATE, by ascending id when more than one.
+//      UPDATE, by ascending id when more than one;
+//   3. (final fix wave) a procedure void or service change then takes the patient billing lock, last.
 // Because every writer serialises on (1), a code edit and a status action on one encounter
 // can never interleave: an edit racing `finalise` either lands before it (and the finalise
 // then sees the reverted status and is refused) or after it (and is refused as `locked`).
@@ -34,6 +35,7 @@ import { isUniqueViolation } from '@/lib/db-errors'
 import { DEFAULT_TIMEZONE, istDateOf, todayIsoIn } from '@/lib/india-time'
 import { findCurrentCode, getCodesByIds, type CodeDetail } from './code-systems'
 import type { WriteExecutor } from './executor'
+import { procedureHasLiveLineInTx, voidProcedureLineInTx, type ProcedureCancelBilling } from './procedure-orders' // final fix wave (item 3)
 
 type Failure = { ok: false; error: CodingWriteError; issues?: CodingIssue[] }
 const fail = (error: CodingWriteError, issues?: CodingIssue[]): Failure => (issues ? { ok: false, error, issues } : { ok: false, error })
@@ -350,7 +352,7 @@ export async function addEncounterProcedure(
 const procedureLockColumns = {
   id: encounterProcedures.id, encounterId: encounterProcedures.encounterId, voidedAt: encounterProcedures.voidedAt,
   codingStatus: encounterProcedures.codingStatus, codeId: encounterProcedures.codeId, codeSystemKind: encounterProcedures.codeSystemKind,
-  code: encounterProcedures.code, performedOn: encounterProcedures.performedOn,
+  code: encounterProcedures.code, performedOn: encounterProcedures.performedOn, serviceId: encounterProcedures.serviceId,
 }
 
 async function lockProcedure(tx: WriteExecutor, encounterId: number, procedureId: number) {
@@ -370,6 +372,11 @@ export async function updateEncounterProcedure(
     if (actor === 'doctor' && row.codingStatus === 'coded') return fail('locked')
     const refs = await checkProcedureRefs(tx, input, now)
     if (refs) return refs
+    // Final fix wave (item 3): a procedure ordered from the workspace is billed by its service; a
+    // live line (captured or invoiced) fixes the service. The coder voids and re-orders instead.
+    // The billing lock is taken last, after the coding and procedure row locks.
+    if (input.serviceId !== undefined && input.serviceId !== row.serviceId
+      && await procedureHasLiveLineInTx(tx, procedureId, encounter.patientId)) return fail('service_change_billed')
 
     const patch: Partial<typeof encounterProcedures.$inferInsert> = {}
     if (input.description !== undefined) patch.description = input.description
@@ -404,7 +411,7 @@ export async function updateEncounterProcedure(
 
 export async function voidEncounterProcedure(
   encounterId: number, procedureId: number, session: Session, now: Date = new Date(),
-): Promise<CodingWriteResult<{ procedureId: number }>> {
+): Promise<CodingWriteResult<{ procedureId: number; billing: ProcedureCancelBilling }>> {
   return runCodingTransaction(async (tx) => {
     const g = await guardEntryWrite(tx, encounterId, session)
     if (!g.ok) return g
@@ -415,7 +422,9 @@ export async function voidEncounterProcedure(
     await finishEntryWrite(tx, g.value, session, now)
     await logAudit(session, 'coding: removed procedure', g.value.encounter.patientId,
       `encounter=${encounterId} procedure=${procedureId} code=${codeLabel(row.codeSystemKind, row.code)}`, tx)
-    return { ok: true, value: { procedureId } }
+    // Final fix wave (item 3): its line, as a doctor cancel handles it (billing lock last).
+    const billing = await voidProcedureLineInTx(tx, procedureId, g.value.encounter.patientId, session, now)
+    return { ok: true, value: { procedureId, billing } }
   })
 }
 
