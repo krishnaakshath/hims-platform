@@ -4,7 +4,7 @@ import { offsetDateTimeSchema } from '@/lib/follow-ups/validation'
 
 // Wave A (P0-03): an appointment instant must carry an explicit UTC offset
 // ("2026-11-03T09:00:00+05:30" or "...Z"). A naive "2026-11-03T09:00:00" is
-// parsed in the server's own zone (UTC on Vercel), silently moving a 09:00 IST
+// parsed in the server's own zone (UTC in the Docker container), silently moving a 09:00 IST
 // booking to 14:30 IST. Every appointment-writing route uses this schema and
 // the same fixed 400 as the SP3 follow-up booking route.
 export const appointmentInstantSchema = offsetDateTimeSchema

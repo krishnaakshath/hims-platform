@@ -43,20 +43,15 @@ beforeEach(async () => {
 afterEach(async () => { vi.unstubAllEnvs(); vi.restoreAllMocks(); await rm(dir, { recursive: true, force: true }) })
 
 describe('lab report release and storage', () => {
-  it('answers 503 storage_not_configured when no driver exists', async () => {
-    vi.stubEnv('NODE_ENV', 'production')
-    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
-    vi.stubEnv('BLOB_STORE_ID', '')
-    vi.stubEnv('BLOB_DRIVER', '')
+  it('answers 503 storage_not_configured when BLOB_DRIVER names no known driver', async () => {
+    vi.stubEnv('BLOB_DRIVER', 'no-such-driver')
     const res = await release(new NextRequest('http://localhost/api/lab-requisitions/7/report', { method: 'POST' }), idParams('7'))
     expect(res.status).toBe(503)
     expect(await res.json()).toEqual({ error: 'File storage is not set up. Ask your administrator.', code: 'storage_not_configured' })
   })
 
   it('releases with the local driver and streams the PDF back, audited', async () => {
-    vi.stubEnv('NODE_ENV', 'development')
-    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
-    vi.stubEnv('BLOB_STORE_ID', '')
+    vi.stubEnv('NODE_ENV', 'production')
     vi.stubEnv('BLOB_DRIVER', '')
     vi.stubEnv('BLOB_LOCAL_DIR', dir)
     const res = await release(new NextRequest('http://localhost/api/lab-requisitions/7/report', { method: 'POST' }), idParams('7'))

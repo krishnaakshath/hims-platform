@@ -1,26 +1,22 @@
-// npm run db:backup [-- --out <dir>]
+// docker compose exec app npm run db:backup -- --out /app/data/backups   (or: npm run docker:backup)
 //
 // Logical backup of DATABASE_URL with pg_dump (custom format, compressed),
 // plus a .sha256 next to it and a readability check with pg_restore --list.
 // The dump holds patient data (identity numbers stay AES-encrypted, so the
 // dump is useless without IDENTITY_ENCRYPTION_KEY, and vice versa): store it
-// encrypted, off the laptop, never in git. Procedure and retention:
+// encrypted, off the host, never in git. Procedure and retention:
 // docs/OPERATIONS.md.
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { describeDatabaseUrl, isPooledNeonUrl } from '../../src/db/url'
+import { describeDatabaseUrl } from '../../src/db/url'
 import { INSTALL_HELP, backupFileName, findPgTool, pgEnvFromUrl } from './pg-tools'
 
 function main(): number {
   const url = process.env.DATABASE_URL
   if (!url) {
     console.error('DATABASE_URL is not set.')
-    return 1
-  }
-  if (isPooledNeonUrl(url)) {
-    console.error('DATABASE_URL is the Neon pooled endpoint; pg_dump needs the direct one: DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:backup')
     return 1
   }
   const dump = findPgTool('pg_dump')

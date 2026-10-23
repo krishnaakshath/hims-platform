@@ -5,7 +5,6 @@
 // the transaction, which rebuilds the snapshot and refuses with `stale` if anything changed.
 import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
-import { get } from '@vercel/blob'
 import { getDb } from '@/db/client'
 import {
   admissions, claimDispatches, claimDocuments, claimEvents, claimInvoices, claimSubmissions, claims, codeSystems, codes, departments, diagnoses,
@@ -16,8 +15,7 @@ import type { Session } from '@/lib/auth'
 import { isUniqueViolation } from '@/lib/db-errors'
 import { daysBetweenIso } from '@/lib/rcm/sla'
 import { istDateOf } from '@/lib/india-time'
-import { putPrivateBlob } from '@/lib/blob-store'
-import { requireBlobStore } from '@/lib/service-config'
+import { putPrivateBlob, readPrivateBlob } from '@/lib/blob-store'
 import type { SubmissionChannel, SubmissionKind } from '@/lib/rcm/constants'
 import { nextClaimStatus, type ClaimStatus } from '@/lib/rcm/claim-status'
 import { renderClaimCopyPdf } from '@/lib/rcm/claim-pdf'
@@ -311,15 +309,8 @@ export async function getSubmissionCopy(submissionId: number, copy: 'rcm' | 'ins
 }
 
 async function fetchPrivateBytes(url: string): Promise<Uint8Array | null> {
-  requireBlobStore()
-  try {
-    const blob = await get(url, { access: 'private' })
-    if (!blob || blob.statusCode !== 200 || !blob.stream) return null
-    return new Uint8Array(await new Response(blob.stream).arrayBuffer())
-  } catch (err) {
-    console.warn(`[rcm] copy read failed (${err instanceof Error ? err.name : 'UnknownError'})`)
-    return null
-  }
+  const found = await readPrivateBlob(url)
+  return found ? found.bytes : null
 }
 
 /** Recomputes the snapshot hash and both copy hashes against the stored ones (ruling 3). */

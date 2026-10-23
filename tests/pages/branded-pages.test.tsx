@@ -9,10 +9,8 @@ import type { ReactElement } from 'react'
 // appears and the old product name never does.
 
 function mockDeps() {
-  vi.doMock('next/font/google', () => ({
-    Geist: () => ({ variable: 'font-geist-sans' }),
-    Geist_Mono: () => ({ variable: 'font-geist-mono' }),
-  }))
+  vi.doMock('geist/font/sans', () => ({ GeistSans: { variable: 'font-geist-sans' } }))
+  vi.doMock('geist/font/mono', () => ({ GeistMono: { variable: 'font-geist-mono' } }))
   vi.doMock('next/navigation', () => ({
     useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
     usePathname: () => '/',
@@ -46,7 +44,7 @@ async function setup(env: Record<string, string>) {
 }
 
 afterEach(() => {
-  for (const m of ['next/font/google', 'next/navigation', '@/lib/auth', '@/lib/audit', '@/lib/queries/prescriptions', '@/lib/queries/patients', '@/lib/queries/settings', '@/lib/queries/providers', '@/lib/queries/appointments']) vi.doUnmock(m)
+  for (const m of ['geist/font/sans', 'geist/font/mono', 'next/navigation', '@/lib/auth', '@/lib/audit', '@/lib/queries/prescriptions', '@/lib/queries/patients', '@/lib/queries/settings', '@/lib/queries/providers', '@/lib/queries/appointments']) vi.doUnmock(m)
   vi.unstubAllEnvs()
   vi.resetModules()
 })

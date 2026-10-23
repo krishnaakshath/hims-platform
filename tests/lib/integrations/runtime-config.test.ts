@@ -22,7 +22,6 @@ const FULL_NHCX: Record<string, string | undefined> = {
 describe('runtime flags', () => {
   it('mocks are off in production even with the flag', () => {
     expect(mocksEnabled({ ABDM_USE_MOCKS: '1', NODE_ENV: 'production' })).toBe(false)
-    expect(mocksEnabled({ ABDM_USE_MOCKS: '1', VERCEL_ENV: 'production', NODE_ENV: 'development' })).toBe(false)
     expect(mocksEnabled({ ABDM_USE_MOCKS: '1', NODE_ENV: 'development' })).toBe(true)
     expect(mocksEnabled({ NODE_ENV: 'development' })).toBe(false)
     expect(mocksEnabled({ ABDM_USE_MOCKS: 'true', NODE_ENV: 'development' })).toBe(true)
@@ -36,13 +35,13 @@ describe('runtime flags', () => {
     expect(mocksEnabled({ ...prod, DEMO_FEATURES: 'false', ALLOW_DEMO_MOCKS: 'true' })).toBe(false)
     expect(mocksEnabled({ ...prod, DEMO_FEATURES: 'true', ALLOW_DEMO_MOCKS: '1' })).toBe(false)
     expect(mocksEnabled({ ...prod, DEMO_FEATURES: 'true', ALLOW_DEMO_MOCKS: 'true' })).toBe(true)
-    expect(mocksEnabled({ ABDM_USE_MOCKS: '1', VERCEL_ENV: 'production', DEMO_FEATURES: '1', ALLOW_DEMO_MOCKS: 'true' })).toBe(true)
+    expect(mocksEnabled({ ABDM_USE_MOCKS: '1', NODE_ENV: 'production', DEMO_FEATURES: '1', ALLOW_DEMO_MOCKS: 'true' })).toBe(true)
     expect(mocksEnabled({ DEMO_FEATURES: 'true', ALLOW_DEMO_MOCKS: 'true', NODE_ENV: 'production' })).toBe(false)
   })
-  it('production is NODE_ENV or VERCEL_ENV production', () => {
+  it('production is NODE_ENV production (no hosting-platform variables)', () => {
     expect(isProductionRuntime({ NODE_ENV: 'production' })).toBe(true)
-    expect(isProductionRuntime({ VERCEL_ENV: 'production' })).toBe(true)
-    expect(isProductionRuntime({ VERCEL_ENV: 'preview', NODE_ENV: 'test' })).toBe(false)
+    expect(isProductionRuntime({ VERCEL_ENV: 'production', NODE_ENV: 'test' })).toBe(false)
+    expect(isProductionRuntime({ NODE_ENV: 'test' })).toBe(false)
   })
 })
 

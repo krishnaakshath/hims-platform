@@ -125,11 +125,11 @@ async function patientFacts(tx: WriteExecutor, patientId: string): Promise<{ gen
 }
 
 /**
- * True in a production deployment (NODE_ENV or VERCEL_ENV is "production"), where the fictional
+ * True in a production deployment (NODE_ENV is "production"), where the fictional
  * SAMPLE- code sets must never land on a live record (ruling 1; the seed guard uses the same test).
  */
 export function refusesSampleCodes(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.NODE_ENV === 'production' || env.VERCEL_ENV === 'production'
+  return env.NODE_ENV === 'production'
 }
 
 /** Looks up a code and runs the write-time checks; errors refuse, warnings are returned. */

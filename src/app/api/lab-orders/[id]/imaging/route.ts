@@ -2,8 +2,8 @@ import { todayIsoIn } from '@/lib/india-time'
 import { NextRequest, NextResponse } from 'next/server'
 import { parseId } from '@/lib/http'
 import { z } from 'zod'
-import { put } from '@vercel/blob'
-import { requireBlobStore, withServiceGuard } from '@/lib/service-config'
+import { withServiceGuard } from '@/lib/service-config'
+import { putPrivateBlob, safeBlobSegment } from '@/lib/blob-store'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getDb } from '@/db/client'
@@ -88,8 +88,7 @@ export const POST = withServiceGuard('imaging upload', async function POST(reque
   // Blob before DB, matching POST /api/documents -- an orphaned blob is
   // invisible and cheap; a row pointing at bytes that were never stored is
   // a broken link in a chart.
-  requireBlobStore()
-  const blob = await put(`imaging/${orderId}-${crypto.randomUUID()}-${file.name}`, file, { access: 'private', contentType: file.type })
+  const blob = await putPrivateBlob(`imaging/${orderId}-${crypto.randomUUID()}-${safeBlobSegment(file.name)}`, new Uint8Array(await file.arrayBuffer()), file.type)
 
   const created = await createDocument({
     name,

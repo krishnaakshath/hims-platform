@@ -8,7 +8,7 @@ import { checkBookingRequestRateLimit } from '@/lib/rate-limit'
 import { createBookingRequest } from '@/lib/queries/booking-requests'
 import { withServiceGuard } from '@/lib/service-config'
 
-// Vercel/most proxies set the client IP as the first entry in
+// Reverse proxies (Caddy/nginx in front of the container) set the client IP as the first entry in
 // x-forwarded-for; NextRequest no longer exposes `.ip` directly.
 function getClientIp(request: NextRequest): string {
   const forwardedFor = request.headers.get('x-forwarded-for')

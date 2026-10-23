@@ -289,8 +289,8 @@ function newLogErrors() {
     && !/Fast Refresh|Compiled|Compiling|MaxListenersExceededWarning|DeprecationWarning/.test(l)).map((l) => l.trim()).filter(Boolean).slice(0, 8)
 }
 
-// Log lines that come from a backing service this local run deliberately lacks (no Vercel Blob
-// token): reported separately, not as defects.
+// Log lines that come from a backing service this local run may lack (the file store
+// unavailable): reported separately, not as defects.
 const ENV_LOG = /\[blob-store\]/
 async function settleLog() { await new Promise((r) => setTimeout(r, 40)) }
 

@@ -23,7 +23,7 @@ import { notifyFollowUpSafely } from '@/lib/follow-ups/notifier'
 import { logAudit } from '@/lib/audit'
 import { brand } from '@/lib/brand'
 
-const BLOB_URL = 'https://store.private.blob.vercel-storage.com/lab-reports/5/LR-2099-000007-x.pdf'
+const BLOB_URL = 'local:lab-reports/5/LR-2099-000007-x.pdf'
 const REPORT = {
   id: 41, reportNumber: 'LR-2099-000007', requisitionId: 5, patientId: 'RD-0001', version: 2, orderIds: [8, 9], testSummary: 'HbA1c, TSH',
   blobUrl: BLOB_URL, byteSize: 1200, sha256: 'ab', releasedByName: 'TEST_SP5_probe', releasedByUserId: 3, releasedAt: new Date('2099-08-01T05:00:00Z'), supersededAt: null,

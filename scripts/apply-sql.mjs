@@ -1,4 +1,4 @@
-// Usage: node --env-file=.env.local scripts/apply-sql.mjs <file.sql>
+// Usage: DATABASE_URL=postgres://... node scripts/apply-sql.mjs <file.sql>   (or inside the image: docker compose run --rm migrate node scripts/apply-sql.mjs <file.sql>)
 import dns from 'node:dns'
 import fs from 'node:fs'
 import pg from 'pg'

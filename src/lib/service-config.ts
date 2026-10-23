@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { getBlobDriver } from '@/lib/blob-store'
 import { serviceUnavailableBody, type Service } from '@/lib/http/service-message'
 
 // The backing services a request can depend on, and what a route answers when
@@ -16,7 +15,7 @@ export type { Service }
 
 export const SERVICE_UNAVAILABLE_MESSAGE = 'Service temporarily unavailable'
 
-const SERVICE_LABEL: Record<Service, string> = { database: 'DATABASE_URL', redis: 'REDIS', blob: 'BLOB_READ_WRITE_TOKEN' }
+const SERVICE_LABEL: Record<Service, string> = { database: 'DATABASE_URL', redis: 'REDIS', blob: 'BLOB_DRIVER' }
 
 export class ServiceNotConfiguredError extends Error {
   constructor(public service: Service) {
@@ -44,19 +43,6 @@ export function databaseUnavailableCode(e: unknown): string | null {
     cur = err.cause
   }
   return null
-}
-
-/**
- * The private file store (Vercel Blob): a read-write token, or a store id for
- * OIDC auth on Vercel. Without either, every stored-file read and write fails.
- */
-export function isBlobConfigured(env: Record<string, string | undefined> = process.env): boolean {
-  return (env.BLOB_READ_WRITE_TOKEN ?? '').trim() !== '' || (env.BLOB_STORE_ID ?? '').trim() !== ''
-}
-
-/** Throws ServiceNotConfiguredError('blob') before any stored-file read or write when there is no store. */
-export function requireBlobStore(): void {
-  if (!getBlobDriver()) throw new ServiceNotConfiguredError('blob')
 }
 
 /** 503 for a missing service. Only a missing file store carries a `code` (the UI explains it); the rest keep the generic body. */

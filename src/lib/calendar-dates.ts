@@ -1,7 +1,7 @@
 // Calendar arithmetic on Asia/Kolkata days (Wave A). A "day" Date is the
 // instant its IST day starts (00:00 IST = 18:30Z the previous UTC day). IST is
 // a fixed UTC+05:30 with no DST, so everything here is pure arithmetic on the
-// UTC instant -- the server's (UTC on Vercel) or browser's zone never matters.
+// UTC instant -- the server's (UTC in the Docker container) or browser's zone never matters.
 import { istDateOf, startOfIstDay, todayIsoIn } from '@/lib/india-time'
 
 export type CalendarView = 'day' | 'week' | 'month'

@@ -2,27 +2,18 @@
 // the operations scripts (scripts/db/*). Nothing here ever returns the
 // password or user name.
 
-// A database on this machine (local Postgres for development/CI) has no TLS;
-// every hosted database (Neon etc.) does.
+// A database on this machine has no TLS: loopback (host development and the
+// test runner against the published port) and `postgres`, this repo's own
+// docker-compose.yml service reached by its in-network name from the `app`,
+// `migrate`, `seed`, `codes` and `test` containers (127.0.0.1 there is the
+// container's own loopback). Any other host keeps TLS on.
 export function isLocalDatabaseUrl(url: string | undefined): boolean {
-  return /^postgres(ql)?:\/\/[^@/]*@(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\//.test(url ?? '')
+  return /^postgres(ql)?:\/\/[^@/]*@(localhost|127\.0\.0\.1|\[::1\]|postgres)(:\d+)?\//.test(url ?? '')
 }
 
 /** pg `ssl` option for a connection string: off locally, TLS everywhere else. */
 export function sslFor(url: string | undefined): false | { rejectUnauthorized: false } {
   return isLocalDatabaseUrl(url) ? false : { rejectUnauthorized: false }
-}
-
-// Neon's pooled endpoint (PgBouncer, transaction mode) has "-pooler" in the
-// first host label. Session-level advisory locks and multi-statement files
-// with their own BEGIN/COMMIT are not safe through it, so migrations and
-// dumps use the direct endpoint (DATABASE_URL_UNPOOLED on Vercel).
-export function isPooledNeonUrl(url: string | undefined): boolean {
-  try {
-    return new URL(url ?? '').hostname.split('.')[0].endsWith('-pooler')
-  } catch {
-    return false
-  }
 }
 
 /** "host:port/dbname" for log lines; never the credentials. */

@@ -6,9 +6,9 @@ import { DEMO_FEATURES_ENV, demoFeaturesEnabled } from '@/lib/demo-features'
 
 type Env = Record<string, string | undefined>
 
-/** Same rule as src/db/seed.ts: NODE_ENV or VERCEL_ENV is production. */
+/** Same rule as src/db/seed.ts: NODE_ENV is production. */
 export function isProductionRuntime(env: Env = process.env): boolean {
-  return env.NODE_ENV === 'production' || env.VERCEL_ENV === 'production'
+  return env.NODE_ENV === 'production'
 }
 
 /**
