@@ -11,11 +11,12 @@
 //
 // Reads and price quotes happen before the transaction; the requisition, its orders, one audit
 // row per order and the order lines are written in ONE transaction (lock order: the new
-// requisition/lab_orders rows, then the patient billing lock inside the seam). The local-patient
+// requisition/lab_orders rows, then the patient billing lock inside the seam; final fix wave: the
+// originating visit FOR SHARE before all of them). The local-patient
 // notice is the route's job, after commit.
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { admissions, chargeLines, encounters, labOrders, labRequisitions, labTests, patients, providers, type LabOrderRow, type LabRequisitionRow } from '@/db/schema'
+import { chargeLines, encounters, labOrders, labRequisitions, labTests, patients, providers, type LabOrderRow, type LabRequisitionRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { autoBillTo } from '@/lib/billing/visit-charges'
@@ -23,8 +24,8 @@ import { istDateOf } from '@/lib/india-time'
 import { quoteFromResolution, type LabQuote, type LabQuoteStatus } from '@/lib/labs/catalog'
 import type { CreateLabRequisitionRequest, LabOrderPriority } from '@/lib/labs/validation'
 import type { LabOrderStatus } from '@/lib/labs/status'
-import { captureAutoChargeInTx, type AutoChargeOutcome } from '@/lib/queries/auto-charge'
-import { loadChargeContext, type ChargeContext, type ChargeContextRef } from '@/lib/queries/charge-capture'
+import { admissionFirstChargeContext, captureAutoChargeInTx, type AutoChargeOutcome } from '@/lib/queries/auto-charge'
+import type { ChargeContext, ChargeContextRef } from '@/lib/queries/charge-capture'
 import { getEncounterById } from '@/lib/queries/encounters'
 import { isLocalPatientPin } from '@/lib/queries/lab-setup'
 import { loadPricingContext } from '@/lib/queries/tariff'
@@ -34,6 +35,14 @@ import type { WriteExecutor } from '@/lib/queries/executor'
 export interface CreateLabRequisitionInput extends CreateLabRequisitionRequest {
   patientId: string
   orderedByProviderId: number
+  /**
+   * Final fix wave (item 2): what to do when the originating visit is closed (completed or
+   * cancelled) under its share lock in the order transaction. 'refuse': the visit was named by the
+   * caller, so the order is refused with visit_closed. 'drop': the visit was inferred (the open OPD
+   * visit today), so the order goes ahead with no visit (never block the clinical act). Omitted:
+   * no check (the demo seed back-dates orders onto past visits).
+   */
+  closedVisit?: 'refuse' | 'drop'
 }
 
 export type QuotedLine = { orderId: number; labTestId: number; quotedPricePaise: number | null; quoteStatus: LabQuoteStatus }
@@ -42,25 +51,13 @@ export type CreateLabRequisitionResult =
   // includesLabTest: at least one ordered test is a lab test (not imaging); the home-collection
   // notice is sent only then (Task 8 ruling). charges: one outcome per order, in `lines` order (WS2 T10).
   | { ok: true; requisition: LabRequisitionRow; lines: QuotedLine[]; charges: AutoChargeOutcome[]; patientIsLocal: boolean; includesLabTest: boolean }
-  | { ok: false; error: 'patient_not_found' | 'test_not_found' | 'encounter_not_found' | 'encounter_mismatch' | 'test_unmapped' | 'test_inactive' | 'test_unpriced' }
-
-/** WS2 T10: the patient's active admission (the newest, should there be more than one). */
-async function activeAdmissionId(executor: WriteExecutor, patientId: string): Promise<number | null> {
-  const [a] = await executor.select({ id: admissions.id }).from(admissions)
-    .where(and(eq(admissions.patientId, patientId), eq(admissions.status, 'admitted')))
-    .orderBy(desc(admissions.admittedAt), desc(admissions.id)).limit(1)
-  return a?.id ?? null
-}
+  | { ok: false; error: 'patient_not_found' | 'test_not_found' | 'encounter_not_found' | 'encounter_mismatch' | 'test_unmapped' | 'test_inactive' | 'test_unpriced' | 'visit_closed' }
 
 /** WS2 T10: what a lab order of this patient is billed to: the active admission, else the visit, else nothing. */
 export async function labOrderChargeContext(
   executor: WriteExecutor, patientId: string, originatingEncounterId: number | null,
 ): Promise<{ ref: ChargeContextRef; ctx: ChargeContext } | null> {
-  const admissionId = await activeAdmissionId(executor, patientId)
-  const ref: ChargeContextRef | null = admissionId !== null ? { admissionId } : originatingEncounterId !== null ? { encounterId: originatingEncounterId } : null
-  if (ref === null) return null
-  const ctx = await loadChargeContext(executor, ref)
-  return ctx ? { ref, ctx } : null
+  return admissionFirstChargeContext(executor, patientId, originatingEncounterId)
 }
 
 /** WS2 T10: who a new lab order of this patient (from this visit) would be billed to. */
@@ -108,8 +105,8 @@ export async function createLabRequisition(input: CreateLabRequisitionInput, ses
 
   // 2. Quotes (SP2 resolver: payer > department > base, on the IST order date), with the inputs
   // the order's line will be priced with (WS2 T10).
-  const charge = await labOrderChargeContext(db, input.patientId, input.originatingEncounterId)
-  const ctx = charge?.ctx ?? null
+  const quoteCharge = await labOrderChargeContext(db, input.patientId, input.originatingEncounterId)
+  const ctx = quoteCharge?.ctx ?? null
   const payerId = ctx && autoBillTo(ctx) === 'payer' ? ctx.primaryPayerId : null
   const quotes = new Map<number, LabQuote>()
   for (const labTestId of input.labTestIds) {
@@ -140,13 +137,27 @@ export async function createLabRequisition(input: CreateLabRequisitionInput, ses
   const fastingRequired = input.fastingRequired ?? testRows.some((t) => t.fastingRequired)
 
   // 3. One transaction: requisition, one order per test (input order), one audit and one line per order.
-  const { requisition, lines, charges } = await db.transaction(async (tx) => {
+  const written = await db.transaction(async (tx) => {
+    // Final fix wave (item 2): the originating visit FOR SHARE first (before the order rows and the
+    // billing lock; the visit cancel takes it FOR UPDATE before the visit's orders), so an order and
+    // a visit cancel serialise: the cancel then sees and cancels this order, or the order sees the
+    // closed visit here.
+    let originatingEncounterId = input.originatingEncounterId
+    let charge = quoteCharge
+    if (originatingEncounterId !== null) {
+      const [v] = await tx.select({ status: encounters.status }).from(encounters).where(eq(encounters.id, originatingEncounterId)).for('share')
+      if (input.closedVisit !== undefined && (!v || v.status === 'completed' || v.status === 'cancelled')) {
+        if (input.closedVisit === 'refuse') return { closed: true as const }
+        originatingEncounterId = null
+        if (charge !== null && 'encounterId' in charge.ref) charge = null
+      }
+    }
     const [req] = await tx
       .insert(labRequisitions)
       .values({
         patientId: input.patientId,
         orderedByProviderId: input.orderedByProviderId,
-        originatingEncounterId: input.originatingEncounterId,
+        originatingEncounterId,
         followUpRequested: input.followUp !== null,
         followUpIntervalValue: input.followUp?.interval.value ?? null,
         followUpIntervalUnit: input.followUp?.interval.unit ?? null,
@@ -197,8 +208,10 @@ export async function createLabRequisition(input: CreateLabRequisitionInput, ses
       out.push(line)
       outcomes.push(outcome)
     }
-    return { requisition: req, lines: out, charges: outcomes }
+    return { closed: false as const, requisition: req, lines: out, charges: outcomes }
   })
+  if (written.closed) return { ok: false, error: 'visit_closed' }
+  const { requisition, lines, charges } = written
 
   // 4. Local patient (Ruling 3: the registered SP1 PIN against the active service-area list).
   const patientIsLocal = await isLocalPatientPin(patient.pinCode)

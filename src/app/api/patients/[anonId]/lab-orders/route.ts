@@ -9,6 +9,7 @@ import { HOME_COLLECTION_BOOKING_ROLES, LAB_ORDER_ROLES, WORKSPACE_READ_ROLES } 
 import { createLabRequisitionSchema } from '@/lib/labs/validation'
 import { createLabRequisition, labOrderBillTo, listEncounterLabOrders, openOpdEncounterFor } from '@/lib/queries/lab-requisitions'
 import { getEncounterById } from '@/lib/queries/encounters' // WS2 T10
+import { checkEncounterWriter } from '@/lib/encounters/ownership' // final fix wave (item 2)
 import { logAudit } from '@/lib/audit' // WS2 T10
 import { DEFAULT_TIMEZONE, todayIsoIn } from '@/lib/india-time' // WS2 T10
 import { z } from 'zod' // WS2 T10
@@ -67,9 +68,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     // WS2 T10: an order placed outside a visit page belongs to the patient's open OPD visit with
     // the ordering doctor today, if there is one (the order is then billed to that visit).
-    const originatingEncounterId = parsed.data.originatingEncounterId
+    // Final fix wave (item 2): a visit named in the body is written by its doctor (or admin) only,
+    // and must be open; the query re-checks it under a share lock (refused if it closed since). An
+    // inferred visit that closed meanwhile is dropped instead: the order goes ahead with no visit.
+    const namedVisitId = parsed.data.originatingEncounterId
+    if (namedVisitId !== null) {
+      const check = await checkEncounterWriter(session, namedVisitId)
+      if (!check.ok) return NextResponse.json(check.body, { status: check.status })
+    }
+    const originatingEncounterId = namedVisitId
       ?? await openOpdEncounterFor(anonId, orderedByProviderId, todayIsoIn(DEFAULT_TIMEZONE))
-    result = await createLabRequisition({ ...parsed.data, originatingEncounterId, patientId: anonId, orderedByProviderId }, session)
+    result = await createLabRequisition({
+      ...parsed.data, originatingEncounterId, patientId: anonId, orderedByProviderId, closedVisit: namedVisitId !== null ? 'refuse' : 'drop',
+    }, session)
   } catch (err) {
     return labServerError('lab requisition create', err, 'Could not order the tests')
   }
@@ -78,6 +89,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (result.error === 'test_unpriced') return errorResponse(422, 'This test has no price. Map it to a tariff service first.', 'test_unpriced')
     if (result.error === 'test_inactive') return errorResponse(422, 'This test is not active.', 'test_inactive')
     if (result.error === 'encounter_mismatch') return errorResponse(409, 'That visit belongs to a different patient.')
+    if (result.error === 'visit_closed') return NextResponse.json({ error: 'Visit is closed', code: 'visit_closed' }, { status: 409 })
     return errorResponse(404, NOT_FOUND_MESSAGE[result.error])
   }
 

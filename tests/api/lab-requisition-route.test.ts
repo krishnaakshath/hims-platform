@@ -11,11 +11,13 @@ vi.mock('@/lib/queries/notifications', () => ({ notifyPatientSafely: vi.fn() }))
 vi.mock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 4, name: 'Dr. Probe' }]) }))
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 4, name: 'Dr. Probe' })) }))
 vi.mock('@/lib/brand', () => ({ brand: { name: 'Probe Hospital' } }))
+vi.mock('@/lib/encounters/ownership', () => ({ checkEncounterWriter: vi.fn() })) // final fix wave (item 2)
 
 import { POST } from '@/app/api/patients/[anonId]/lab-orders/route'
 import { createLabRequisition, openOpdEncounterFor } from '@/lib/queries/lab-requisitions'
 import { notifyPatientSafely } from '@/lib/queries/notifications'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
+import { checkEncounterWriter } from '@/lib/encounters/ownership'
 
 const ctx = { params: Promise.resolve({ anonId: 'RD-0001' }) }
 const send = (body: unknown) =>
@@ -29,6 +31,7 @@ beforeEach(() => {
   vi.mocked(openOpdEncounterFor).mockReset().mockResolvedValue(null)
   vi.mocked(notifyPatientSafely).mockReset().mockResolvedValue('logged')
   vi.mocked(resolveDoctorQueueProvider).mockClear()
+  vi.mocked(checkEncounterWriter).mockReset().mockResolvedValue({ ok: true, encounter: {} as never, actingProviderId: 4 })
 })
 
 describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
@@ -75,7 +78,7 @@ describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
   it('keeps accepting the legacy { labTestId } body', async () => {
     expect((await POST(send({ labTestId: 5 }), ctx)).status).toBe(201)
     expect(createLabRequisition).toHaveBeenCalledWith(
-      { labTestIds: [5], followUp: null, originatingEncounterId: null, priority: 'routine', clinicalNotes: null, fastingRequired: null, patientId: 'RD-0001', orderedByProviderId: 4 },
+      { labTestIds: [5], followUp: null, originatingEncounterId: null, priority: 'routine', clinicalNotes: null, fastingRequired: null, patientId: 'RD-0001', orderedByProviderId: 4, closedVisit: 'drop' },
       expect.objectContaining({ role: 'pi' }),
     )
   })
@@ -83,10 +86,30 @@ describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
   it('passes the follow-up request and encounter through', async () => {
     await POST(send({ labTestIds: [1, 3], followUp: { interval: { value: 2, unit: 'weeks' }, reason: 'Review' }, originatingEncounterId: 9 }), ctx)
     expect(createLabRequisition).toHaveBeenCalledWith(
-      { labTestIds: [1, 3], followUp: { interval: { value: 2, unit: 'weeks' }, reason: 'Review' }, originatingEncounterId: 9, priority: 'routine', clinicalNotes: null, fastingRequired: null, patientId: 'RD-0001', orderedByProviderId: 4 },
+      { labTestIds: [1, 3], followUp: { interval: { value: 2, unit: 'weeks' }, reason: 'Review' }, originatingEncounterId: 9, priority: 'routine', clinicalNotes: null, fastingRequired: null, patientId: 'RD-0001', orderedByProviderId: 4, closedVisit: 'refuse' },
       expect.anything(),
     )
+    expect(checkEncounterWriter).toHaveBeenCalledWith(expect.objectContaining({ role: 'pi' }), 9)
     expect(openOpdEncounterFor).not.toHaveBeenCalled()
+  })
+
+  // Final fix wave (item 2): a named visit passes the encounter-writer check first.
+  it('a named visit: the writer check refusal is returned as is and nothing is ordered; visit_closed from the query is 409', async () => {
+    for (const refusal of [
+      { ok: false as const, status: 403 as const, body: { error: 'Forbidden', code: 'not_owner' as const } },
+      { ok: false as const, status: 409 as const, body: { error: 'Visit is closed', code: 'visit_closed' as const } },
+      { ok: false as const, status: 404 as const, body: { error: 'Not found' } },
+    ]) {
+      vi.mocked(checkEncounterWriter).mockResolvedValueOnce(refusal)
+      const res = await POST(send({ labTestIds: [1], originatingEncounterId: 9 }), ctx)
+      expect(res.status).toBe(refusal.status)
+      expect(await res.json()).toEqual(refusal.body)
+    }
+    expect(createLabRequisition).not.toHaveBeenCalled()
+    vi.mocked(createLabRequisition).mockResolvedValueOnce({ ok: false, error: 'visit_closed' })
+    const closed = await POST(send({ labTestIds: [1], originatingEncounterId: 9 }), ctx)
+    expect(closed.status).toBe(409)
+    expect(await closed.json()).toEqual({ error: 'Visit is closed', code: 'visit_closed' })
   })
 
   // WS2 T10
@@ -95,7 +118,7 @@ describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
     await POST(send({ labTestIds: [1], priority: 'stat', clinicalNotes: ' Chest pain ', fastingRequired: true }), ctx)
     expect(openOpdEncounterFor).toHaveBeenCalledWith('RD-0001', 4, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/))
     expect(createLabRequisition).toHaveBeenCalledWith(
-      { labTestIds: [1], followUp: null, originatingEncounterId: 77, priority: 'stat', clinicalNotes: 'Chest pain', fastingRequired: true, patientId: 'RD-0001', orderedByProviderId: 4 },
+      { labTestIds: [1], followUp: null, originatingEncounterId: 77, priority: 'stat', clinicalNotes: 'Chest pain', fastingRequired: true, patientId: 'RD-0001', orderedByProviderId: 4, closedVisit: 'drop' },
       expect.anything(),
     )
   })

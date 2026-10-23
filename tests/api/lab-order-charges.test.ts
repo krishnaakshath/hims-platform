@@ -449,6 +449,46 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
       expect((await linesOf(pid))[0].encounterId).toBe(mine.id)
     })
 
+    // Final fix wave (item 2): a visit named in the body is the ordering doctor's own open visit.
+    it('a named visit: another doctor\'s is 403 not_owner, a cancelled one 409 visit_closed, the own open one 201', async () => {
+      routeProviderId = fx.prov
+      role = 'pi'
+      const pid = await newPatient()
+      const others = await opdEncounter(pid, { encounterDate: await today(), providerId: fx.prov2 })
+      const cancelled = await opdEncounter(pid, { encounterDate: await today(), status: 'cancelled' })
+      const own = await opdEncounter(pid, { encounterDate: await today() })
+      const denied = await post(pid, { labTestIds: [fx.tA], originatingEncounterId: others.id })
+      expect(denied.status).toBe(403)
+      expect(await denied.json()).toEqual({ error: 'Forbidden', code: 'not_owner' })
+      const closed = await post(pid, { labTestIds: [fx.tA], originatingEncounterId: cancelled.id })
+      expect(closed.status).toBe(409)
+      expect(await closed.json()).toEqual({ error: 'Visit is closed', code: 'visit_closed' })
+      const missing = await post(pid, { labTestIds: [fx.tA], originatingEncounterId: 2147483000 })
+      expect(missing.status).toBe(404)
+      const { getDb, labRequisitions, eq } = await m()
+      expect(await getDb().select().from(labRequisitions).where(eq(labRequisitions.patientId, pid))).toEqual([])
+      expect(await linesOf(pid)).toEqual([])
+      const ok = await post(pid, { labTestIds: [fx.tA], originatingEncounterId: own.id })
+      expect(ok.status).toBe(201)
+      const [rq] = await getDb().select().from(labRequisitions).where(eq(labRequisitions.id, (await ok.json()).requisitionId))
+      expect(rq.originatingEncounterId).toBe(own.id)
+      expect((await linesOf(pid)).map((l) => l.encounterId)).toEqual([own.id])
+    })
+
+    it('in the order transaction: a named visit closed since the check is refused; an inferred one is dropped (order with no visit)', async () => {
+      const pid = await newPatient()
+      const e = await opdEncounter(pid, { status: 'cancelled' })
+      const { req, getDb, labRequisitions, eq } = await m()
+      const base = { patientId: pid, orderedByProviderId: fx.prov, labTestIds: [fx.tA], followUp: null, originatingEncounterId: e.id, priority: 'routine' as const, clinicalNotes: null, fastingRequired: null }
+      expect(await req.createLabRequisition({ ...base, closedVisit: 'refuse' }, doctor, NOW)).toEqual({ ok: false, error: 'visit_closed' })
+      expect(await getDb().select().from(labRequisitions).where(eq(labRequisitions.patientId, pid))).toEqual([])
+      const dropped = await req.createLabRequisition({ ...base, closedVisit: 'drop' }, doctor, NOW)
+      if (!dropped.ok) throw new Error(dropped.error)
+      expect(dropped.requisition.originatingEncounterId).toBeNull()
+      expect(dropped.charges).toEqual([{ ok: false, source: 'lab_order', reason: 'no_context' }])
+      expect(await linesOf(pid)).toEqual([])
+    })
+
     it('no visit and no stay: 201 with no_context outcomes; a completed visit today is not used', async () => {
       routeProviderId = fx.prov
       const pid = await newPatient()
