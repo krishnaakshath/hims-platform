@@ -2959,3 +2959,45 @@ export const portalSubmissions = pgTable('portal_submissions', {
 ])
 export type PortalSubmissionRow = typeof portalSubmissions.$inferSelect
 // end WS7 T9
+// WS8 T14
+// The DPDP data-principal request register (spec D18). One row per access, correction, erasure or
+// grievance request, due 30 days after receipt. `patient_id` becomes NULL when an erasure deletes
+// the chart (deletePatient clears it in the same transaction), so the register entry survives the
+// chart. `export_blob_url` is the private-store URL of the prepared export bundle; it never leaves
+// the server. `note` and `decision_note` are staff free text; they never reach the audit log.
+// Migration: scripts/migrations/2026-10-26-ws8-data-principal-requests.sql.
+export const DATA_PRINCIPAL_REQUEST_KINDS = ['access', 'correction', 'erasure', 'grievance'] as const
+export const DATA_PRINCIPAL_REQUEST_VIA = ['email', 'portal_message', 'letter', 'in_person'] as const
+export const DATA_PRINCIPAL_REQUEST_STATUSES = ['received', 'in_progress', 'completed', 'rejected'] as const
+export const DATA_PRINCIPAL_CHECKLIST_KEYS = ['identity_verified', 'scope_confirmed', 'export_prepared', 'export_delivered', 'erasure_reviewed', 'response_sent'] as const
+export type DataPrincipalChecklistKey = (typeof DATA_PRINCIPAL_CHECKLIST_KEYS)[number]
+export type DataPrincipalChecklist = Partial<Record<DataPrincipalChecklistKey, boolean>>
+export const dataPrincipalRequests = pgTable('data_principal_requests', {
+  id: serial('id').primaryKey(),
+  reference: text('reference').notNull().unique(),
+  patientId: text('patient_id').references(() => patients.id),
+  kind: text('kind', { enum: DATA_PRINCIPAL_REQUEST_KINDS }).notNull(),
+  receivedVia: text('received_via', { enum: DATA_PRINCIPAL_REQUEST_VIA }).notNull(),
+  receivedAt: date('received_at').notNull(),
+  dueBy: date('due_by').notNull(),
+  status: text('status', { enum: DATA_PRINCIPAL_REQUEST_STATUSES }).default('received').notNull(),
+  checklist: jsonb('checklist').$type<DataPrincipalChecklist>().default({}).notNull(),
+  exportBlobUrl: text('export_blob_url'),
+  note: text('note'),
+  decisionNote: text('decision_note'),
+  handledByName: text('handled_by_name'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  closedAt: timestamp('closed_at'),
+}, (t) => [
+  index('data_principal_requests_patient_idx').on(t.patientId),
+  index('data_principal_requests_open_due_idx').on(t.dueBy).where(sql`closed_at IS NULL`),
+  check('data_principal_requests_reference_format', sql`${t.reference} ~ '^DPR-[0-9]{4}-[0-9]{6,}$'`),
+  check('data_principal_requests_kind_valid', sql`${t.kind} IN ('access', 'correction', 'erasure', 'grievance')`),
+  check('data_principal_requests_via_valid', sql`${t.receivedVia} IN ('email', 'portal_message', 'letter', 'in_person')`),
+  check('data_principal_requests_status_valid', sql`${t.status} IN ('received', 'in_progress', 'completed', 'rejected')`),
+  check('data_principal_requests_closed', sql`(${t.status} IN ('completed', 'rejected')) = (${t.closedAt} IS NOT NULL)`),
+  check('data_principal_requests_due_after_receipt', sql`${t.dueBy} >= ${t.receivedAt}`),
+  check('data_principal_requests_checklist_object', sql`jsonb_typeof(${t.checklist}) = 'object'`),
+])
+export type DataPrincipalRequestRow = typeof dataPrincipalRequests.$inferSelect
+// end WS8 T14

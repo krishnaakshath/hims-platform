@@ -399,4 +399,7 @@ export const PAGE_GATES: PageGateCase[] = [
   // WS7 T2: the empty form builder ("Create New Form") -- CLINICAL_ROLES, same gate as /forms/[templateId].
   { route: '/forms/new', load: () => import('@/app/(dashboard)/forms/new/page'), props: { searchParams: Promise.resolve({ folderId: '1' }) }, allowed: [...CLINICAL_ROLES] },  // WS7 T9: LeftNav /front-desk/portal-submissions -- PORTAL_SUBMISSION_REVIEW_ROLES.
   { route: '/front-desk/portal-submissions', load: () => import('@/app/(dashboard)/front-desk/portal-submissions/page'), allowed: ['admin', 'frontdesk', 'rcm'] },
+  // WS8 T14: LeftNav /governance/data-requests (DPDP register) and one request -- admin only.
+  { route: '/governance/data-requests', load: () => import('@/app/(dashboard)/governance/data-requests/page'), allowed: ['admin'] },
+  { route: '/governance/data-requests/[id]', load: () => import('@/app/(dashboard)/governance/data-requests/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin'] },
 ]

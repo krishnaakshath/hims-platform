@@ -25,6 +25,7 @@ import { QrCode, Plug } from 'lucide-react' // SP8
 import { REPORTS_ROLES } from '@/lib/role-policy' // Wave I
 import { PORTAL_SUBMISSION_REVIEW_ROLES } from '@/lib/role-policy' // WS7 T9
 import { Inbox } from 'lucide-react' // WS7 T9
+import { ShieldCheck } from 'lucide-react' // WS8 T14
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -169,6 +170,8 @@ export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; role
   { href: '/price-lookup', label: 'Price Lookup', icon: Calculator, roles: [...TARIFF_LOOKUP_ROLES] },
   // Wave B P1-01: own account (MFA, capabilities) -- every staff role.
   { href: '/account', label: 'My Account', icon: UserCircle2, roles: [...ACCOUNT_ROLES] },
+  // WS8 T14: DPDP data-principal requests and the retention schedule -- admin only.
+  { href: '/governance/data-requests', label: 'Data requests', icon: ShieldCheck, roles: ['admin'] as Role[] }, // WS8
 ]
 
 function isActive(pathname: string | null, href: string): boolean {

@@ -167,8 +167,15 @@ expectations:
   privacy flow exist, but the seeded text is a **draft, not reviewed by legal
   counsel**. Replace it before real patients rely on it.
 
-Not provided today: ABDM/ABHA integration, a data-principal erasure or
-data-export workflow, retention schedules, breach-notification tooling, and
+Data-principal requests: admins log access, correction, erasure and grievance
+requests under **Data requests** (due 30 days after receipt, with a fulfilment
+checklist). An access request can be answered with an export bundle (the
+chart's FHIR Bundle plus a manifest), downloaded through an audited route. An
+erasure deletes the chart only when nothing must be kept; otherwise it archives
+the chart and removes its contact details, and financial and medico-legal
+records are never deleted. The retention periods are code defaults shown on
+that page, **pending legal review**. Still not provided: ABDM/ABHA
+integration, breach-notification tooling, a patient-facing request form, and
 any third-party audit or certification. Plan for those separately.
 
 

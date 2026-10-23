@@ -624,6 +624,13 @@ import { GET as exportAuditLog } from '@/app/api/audit-log/export/route'
 import { POST as postArchivePatient } from '@/app/api/patients/[anonId]/archive/route'
 import { POST as postRestorePatient } from '@/app/api/patients/[anonId]/restore/route'
 // end WS8 T13
+// WS8 T14
+import { GET as listDataRequests, POST as postDataRequest } from '@/app/api/governance/data-requests/route'
+import { GET as getDataRequest, PATCH as patchDataRequest } from '@/app/api/governance/data-requests/[id]/route'
+import { POST as postDataRequestExport } from '@/app/api/governance/data-requests/[id]/export/route'
+import { GET as downloadDataRequestExport } from '@/app/api/governance/data-requests/[id]/export/download/route'
+import { POST as postDataRequestErase } from '@/app/api/governance/data-requests/[id]/erase/route'
+// end WS8 T14
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1103,6 +1110,15 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/patients/[anonId]/archive', call: () => settle(() => postArchivePatient(send('POST', `/api/patients/${BOGUS_PATIENT}/archive`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin'] },
   { name: 'POST /api/patients/[anonId]/restore', call: () => settle(() => postRestorePatient(send('POST', `/api/patients/${BOGUS_PATIENT}/restore`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin'] },
   // end WS8 T13
+  // WS8 T14: the DPDP data-principal request register -- admin only on every route.
+  { name: 'GET /api/governance/data-requests', call: () => settle(() => listDataRequests()), allowed: ['admin'] },
+  { name: 'POST /api/governance/data-requests', call: () => settle(() => postDataRequest(send('POST', '/api/governance/data-requests', NOT_JSON))), allowed: ['admin'] },
+  { name: 'GET /api/governance/data-requests/[id]', call: () => settle(() => getDataRequest(get(`/api/governance/data-requests/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  { name: 'PATCH /api/governance/data-requests/[id]', call: () => settle(() => patchDataRequest(send('PATCH', `/api/governance/data-requests/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  { name: 'POST /api/governance/data-requests/[id]/export', call: () => settle(() => postDataRequestExport(send('POST', `/api/governance/data-requests/${BOGUS_ID}/export`), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  { name: 'GET /api/governance/data-requests/[id]/export/download', call: () => settle(() => downloadDataRequestExport(get(`/api/governance/data-requests/${BOGUS_ID}/export/download`), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  { name: 'POST /api/governance/data-requests/[id]/erase', call: () => settle(() => postDataRequestErase(send('POST', `/api/governance/data-requests/${BOGUS_ID}/erase`, NOT_JSON), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  // end WS8 T14
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

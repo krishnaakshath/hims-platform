@@ -23,6 +23,7 @@ import {
   admissionCoverage, coverageVerifications, // WS12 T1
   abhaLinkOverrides, // WS12 T5
   portalSubmissions, // WS7 T9
+  dataPrincipalRequests, // WS8 T14
   bookingRequests, // Wave J
   payers,
 } from '@/db/schema'
@@ -793,6 +794,9 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   await db.delete(adverseEvents).where(eq(adverseEvents.patientId, anonId))
   await db.delete(drugAccountabilityEntries).where(eq(drugAccountabilityEntries.patientId, anonId))
   await db.delete(signatures).where(eq(signatures.patientId, anonId))
+
+  // WS8 T14: a DPDP request register entry outlives the chart an erasure deletes; only its link goes.
+  await db.update(dataPrincipalRequests).set({ patientId: null }).where(eq(dataPrincipalRequests.patientId, anonId))
 
   await db.delete(patients).where(eq(patients.id, anonId))
   if (audit) await logAudit(audit.session, audit.action ?? 'deleted patient record', anonId, null, db)
