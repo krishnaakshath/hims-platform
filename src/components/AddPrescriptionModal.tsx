@@ -52,8 +52,15 @@ export function AddPrescriptionModal({
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState<{ id: number } | null>(null)
 
+  // A conflict belongs to the drug it was returned for.
+  function clearConflict() {
+    setConflicts([])
+    setOverrideReason('')
+  }
+
   function pickCatalogMedication(id: number | '') {
     setMedicationId(id)
+    clearConflict()
     if (id === '') return
     const match = catalog.find((c) => c.id === id)
     if (match) {
@@ -66,6 +73,7 @@ export function AddPrescriptionModal({
   function toggleOffCatalog(checked: boolean) {
     setOffCatalog(checked)
     setMedicationId('')
+    clearConflict()
     if (checked) {
       setName('')
       setMedicationClass('')

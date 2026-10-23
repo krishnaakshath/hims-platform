@@ -73,7 +73,7 @@ export function RxBuilder({ encounterId, patientAllergies, allergyStatus, canWri
     return () => { timers.forEach(clearTimeout) }
   }, [])
   function onQuery(key: number, q: string) {
-    patch(key, { query: q, drug: null, results: [] })
+    patch(key, { query: q, drug: null, results: [], serverConflicts: [], overrideReason: '' })
     clearTimeout(searchTimers.current.get(key))
     if (q.trim().length < 2) return
     searchTimers.current.set(key, setTimeout(async () => {
@@ -82,7 +82,7 @@ export function RxBuilder({ encounterId, patientAllergies, allergyStatus, canWri
     }, 200))
   }
   function choose(key: number, drug: Drug) {
-    patch(key, { drug, query: drug.name, results: [], dose: drug.commonDose ?? '' })
+    patch(key, { drug, query: drug.name, results: [], dose: drug.commonDose ?? '', serverConflicts: [], overrideReason: '' })
   }
 
   if (!canWrite) {

@@ -48,4 +48,28 @@ describe('AddPrescriptionModal (WS1 T7)', () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toMatchObject({ allergyOverrideReason: 'Tolerated before' })
     expect(await screen.findByText('Prescription saved.')).toBeInTheDocument()
   })
+
+  it('changing the medication after a 422 clears the conflict and sends no override reason', async () => {
+    const fetchMock = setup()
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(conflictBody), { status: 422 }))
+    fireEvent.click(save())
+    await screen.findByText(/Penicillin \(severe\)/)
+    fireEvent.change(screen.getByLabelText('Allergy override reason'), { target: { value: 'Stale reason' } })
+    fireEvent.change(screen.getByLabelText('Medication'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Medication'), { target: { value: '7' } })
+    expect(screen.queryByText(/Allergy conflict/)).not.toBeInTheDocument()
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ id: 9 }), { status: 201 }))
+    fireEvent.click(save())
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).not.toHaveProperty('allergyOverrideReason')
+  })
+
+  it('toggling off-catalogue clears the conflict', async () => {
+    const fetchMock = setup()
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(conflictBody), { status: 422 }))
+    fireEvent.click(save())
+    await screen.findByText(/Penicillin \(severe\)/)
+    fireEvent.click(screen.getByRole('checkbox', { name: /not in our catalog/i }))
+    expect(screen.queryByText(/Allergy conflict/)).not.toBeInTheDocument()
+  })
 })
