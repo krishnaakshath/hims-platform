@@ -2,9 +2,9 @@
 // Reads only; the routes that call this audit the read. Insurer references and document URLs
 // stay in the facts for the server; callers decide what leaves (never logged).
 import { randomUUID } from 'node:crypto'
-import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { coverageVerifications, nhcxEligibilityChecks, patientPolicies, payerProfiles, type CoverageVerificationRow } from '@/db/schema'
+import { coverageVerifications, encounters, nhcxEligibilityChecks, patientPolicies, payerProfiles, type CoverageVerificationRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { putPrivateBlob } from '@/lib/blob-store'
@@ -12,12 +12,13 @@ import { formatCalendarDate, startOfIstDay, todayIsoIn } from '@/lib/india-time'
 import { rcmFail, rcmOk, policyNotInForceMessage, type RcmWriteResult } from '@/lib/rcm/errors'
 import { sha256Hex } from '@/lib/rcm/hash'
 import type { ManualVerificationInput } from '@/lib/insurance/validation'
-import type { EligibilityStatus, NhcxResponseSummary } from '@/lib/nhcx/constants'
+import type { EligibilityContext, EligibilityPurpose, EligibilityStatus, NhcxResponseSummary } from '@/lib/nhcx/constants'
+import { readNhcxConfig } from '@/lib/integrations/config'
 import {
   COVERAGE_FRESH_HOURS, MANUAL_VERIFICATION_MAX_DAYS, effectiveLimits, evaluateCoverage, manualValidUntilBounds,
   type CoverageContext, type CoverageLimits, type CoveragePolicyFacts, type CoverageVerdict, type CoverageVerificationFacts,
 } from '@/lib/insurance/coverage'
-import { payersOnNhcx } from './nhcx-eligibility'
+import { payersOnNhcx, requestEligibility, type EligibilityDeps } from './nhcx-eligibility'
 import { listPatientPolicies, type PolicyView } from './rcm-policies'
 import type { WriteExecutor } from './executor'
 
@@ -78,9 +79,11 @@ async function coverageOf(executor: WriteExecutor, p: PolicyView, onNhcx: boolea
  * `context`, its current verification, the last five verifications and a pending NHCX check
  * newer than the latest verification. `primary` is null when no policy is active.
  */
-export async function getCoverageSummary(patientId: string, context: CoverageContext, now: Date = new Date(), executor: WriteExecutor = getDb()): Promise<CoverageSummary> {
-  const views = await listPatientPolicies(patientId, executor)
+export async function getCoverageSummary(patientId: string, context: CoverageContext, now: Date = new Date(), given?: WriteExecutor): Promise<CoverageSummary> {
+  const views = await listPatientPolicies(patientId, given)
   if (views.length === 0) return { primary: null, policies: [] }
+  // Resolved only once there is a policy: a patient without one costs a single query.
+  const executor = given ?? getDb()
   const payerIds = [...new Set(views.flatMap((p) => (p.tpa ? [p.insurer.payerId, p.tpa.payerId] : [p.insurer.payerId])))]
   const codes = await executor.select({ payerId: payerProfiles.payerId, code: payerProfiles.nhcxParticipantCode })
     .from(payerProfiles).where(inArray(payerProfiles.payerId, payerIds))
@@ -202,3 +205,68 @@ export async function getVerificationDocumentBlob(verificationId: number): Promi
   if (!row?.url || !row.contentType) return null
   return { url: row.url, contentType: row.contentType, extension: DOCUMENT_EXTENSION[row.contentType] ?? 'bin', patientId: row.patientId, policyId: row.policyId }
 }
+
+// ---- WS12 T4: the automatic NHCX check after a parent action commits (R5) ----
+
+export type EligibilitySkipReason = 'nhcx_not_configured' | 'not_on_nhcx' | 'already_verified' | 'no_doctor' | 'not_ready'
+export type MaybeEligibilityResult = { started: true; checkId: number } | { started: false; reason: EligibilitySkipReason; message: string }
+
+export const ELIGIBILITY_SKIP_MESSAGE: Record<Exclude<EligibilitySkipReason, 'not_ready'>, string> = {
+  nhcx_not_configured: 'NHCX not configured: record a manual verification',
+  not_on_nhcx: 'This insurer is not on NHCX: confirm cover with the insurer or TPA, then record a manual verification',
+  already_verified: 'A current verification is on record: no new check was needed',
+  no_doctor: 'No NHCX check started: no treating doctor is known yet. Run the check from the Insurance tab once a doctor is chosen',
+}
+const NOT_STARTED_MESSAGE = 'The NHCX check could not be started: run it from the Insurance tab or record a manual verification'
+
+/** The doctor of the patient's latest non-cancelled encounter (R5), or null when there is none. */
+export async function defaultEligibilityProviderId(patientId: string): Promise<number | null> {
+  const [row] = await getDb().select({ providerId: encounters.providerId }).from(encounters)
+    .where(and(eq(encounters.patientId, patientId), ne(encounters.status, 'cancelled')))
+    .orderBy(desc(encounters.encounterDate), desc(encounters.checkedInAt), desc(encounters.id)).limit(1)
+  return row?.providerId ?? null
+}
+
+/**
+ * R5: start an NHCX eligibility check for a policy when it can help: NHCX available (configured
+ * or the labelled mock), the policy's payer on NHCX, no current active verification and a known
+ * doctor. Call it AFTER the parent transaction commits. It never throws: a business reason comes
+ * back as `{ started: false, reason, message }` (`not_ready` carries requestEligibility's message,
+ * e.g. the missing ROHINI/HFR copy); an unexpected error is logged by class name only and reported
+ * as `not_ready`. The send itself happens after the check is written (requestEligibility).
+ */
+export async function maybeStartEligibility(
+  i: { policyId: number; context: EligibilityContext; providerId: number | null; purpose?: EligibilityPurpose },
+  session: Session,
+  now: Date = new Date(),
+  deps: Omit<EligibilityDeps, 'now'> = {},
+): Promise<MaybeEligibilityResult> {
+  const skip = (reason: EligibilitySkipReason, message: string): MaybeEligibilityResult => ({ started: false, reason, message })
+  try {
+    if (readNhcxConfig().state === 'not_configured') return skip('nhcx_not_configured', ELIGIBILITY_SKIP_MESSAGE.nhcx_not_configured)
+    const db = getDb()
+    const [policy] = await db.select({ id: patientPolicies.id, insurerPayerId: patientPolicies.insurerPayerId, tpaPayerId: patientPolicies.tpaPayerId })
+      .from(patientPolicies).where(eq(patientPolicies.id, i.policyId)).limit(1)
+    if (!policy) return skip('not_ready', 'Policy not found')
+    const payerIds = policy.tpaPayerId ? [policy.insurerPayerId, policy.tpaPayerId] : [policy.insurerPayerId]
+    const codes = await db.select({ payerId: payerProfiles.payerId, code: payerProfiles.nhcxParticipantCode }).from(payerProfiles).where(inArray(payerProfiles.payerId, payerIds))
+    const onNhcx = payersOnNhcx(
+      [{ id: policy.id, insurer: { payerId: policy.insurerPayerId }, tpa: policy.tpaPayerId ? { payerId: policy.tpaPayerId } : null }],
+      new Map(codes.map((c) => [c.payerId, c.code])),
+    )[policy.id]
+    if (!onNhcx) return skip('not_on_nhcx', ELIGIBILITY_SKIP_MESSAGE.not_on_nhcx)
+    const current = await currentVerification(db, policy.id, now)
+    if (current?.result === 'active') return skip('already_verified', ELIGIBILITY_SKIP_MESSAGE.already_verified)
+    if (i.providerId === null) return skip('no_doctor', ELIGIBILITY_SKIP_MESSAGE.no_doctor)
+    const r = await requestEligibility(
+      { policyId: policy.id, purpose: i.purpose ?? 'validation', context: i.context, providerId: i.providerId },
+      session, { ...deps, now: () => now },
+    )
+    if (!r.ok) return skip('not_ready', r.message ?? NOT_STARTED_MESSAGE)
+    return { started: true, checkId: r.value.checkId }
+  } catch (err) {
+    console.error(`[coverage] auto eligibility check failed (${err instanceof Error ? err.name : 'unknown'})`)
+    return skip('not_ready', NOT_STARTED_MESSAGE)
+  }
+}
+
