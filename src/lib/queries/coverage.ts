@@ -1,12 +1,20 @@
 // WS12 coverage: what is known about each of a patient's policies right now (R1, R2, R7).
 // Reads only; the routes that call this audit the read. Insurer references and document URLs
 // stay in the facts for the server; callers decide what leaves (never logged).
+import { randomUUID } from 'node:crypto'
 import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { coverageVerifications, nhcxEligibilityChecks, payerProfiles, type CoverageVerificationRow } from '@/db/schema'
+import { coverageVerifications, nhcxEligibilityChecks, patientPolicies, payerProfiles, type CoverageVerificationRow } from '@/db/schema'
+import { logAudit } from '@/lib/audit'
+import type { Session } from '@/lib/auth'
+import { putPrivateBlob } from '@/lib/blob-store'
+import { formatCalendarDate, startOfIstDay, todayIsoIn } from '@/lib/india-time'
+import { rcmFail, rcmOk, policyNotInForceMessage, type RcmWriteResult } from '@/lib/rcm/errors'
+import { sha256Hex } from '@/lib/rcm/hash'
+import type { ManualVerificationInput } from '@/lib/insurance/validation'
 import type { EligibilityStatus, NhcxResponseSummary } from '@/lib/nhcx/constants'
 import {
-  COVERAGE_FRESH_HOURS, effectiveLimits, evaluateCoverage,
+  COVERAGE_FRESH_HOURS, MANUAL_VERIFICATION_MAX_DAYS, effectiveLimits, evaluateCoverage, manualValidUntilBounds,
   type CoverageContext, type CoverageLimits, type CoveragePolicyFacts, type CoverageVerdict, type CoverageVerificationFacts,
 } from '@/lib/insurance/coverage'
 import { payersOnNhcx } from './nhcx-eligibility'
@@ -119,4 +127,78 @@ export async function recordNhcxVerificationTx(
     reportedValidTo: c?.benefitPeriodEnd && /^\d{4}-\d{2}-\d{2}$/.test(c.benefitPeriodEnd) ? c.benefitPeriodEnd : null,
   }).onConflictDoNothing({ target: coverageVerifications.nhcxCheckId }).returning({ id: coverageVerifications.id })
   return row?.id ?? null
+}
+
+// ---- WS12 T3: manual verification (R1, R2) ----
+
+const DOCUMENT_EXTENSION: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' }
+const DAY_MS = 24 * 3_600_000
+
+/**
+ * R1/R2: a verification staff confirmed with the insurer or TPA themselves. The patient comes
+ * from the policy. `validUntil` must lie in [today, min(today + 30, policy valid_to)] (IST);
+ * the row is current until the end of that IST day. `verifiedOn` today is stamped `now`; an
+ * earlier day is stamped at midday IST of that day. An optional PDF/JPEG/PNG is hashed and put
+ * in the private blob store before the transaction (a failed put writes nothing; no store
+ * throws ServiceNotConfiguredError). The insurer reference and blob URL are stored, never
+ * logged, returned or audited.
+ */
+export async function recordManualVerification(
+  policyId: number,
+  input: ManualVerificationInput,
+  file: { bytes: Uint8Array; contentType: string } | null,
+  session: Session,
+  now: Date = new Date(),
+): Promise<RcmWriteResult<{ verificationId: number }>> {
+  const [policy] = await getDb().select({ patientId: patientPolicies.patientId, validFrom: patientPolicies.validFrom, validTo: patientPolicies.validTo })
+    .from(patientPolicies).where(eq(patientPolicies.id, policyId)).limit(1)
+  if (!policy) return rcmFail('policy_not_found')
+  const today = todayIsoIn(undefined, now)
+  if (input.verifiedOn > today) return rcmFail('amounts_invalid', 'The verification date cannot be in the future')
+  if (input.validUntil < today) return rcmFail('amounts_invalid', 'Valid until cannot be before today')
+  if (policy.validTo < today) {
+    return rcmFail('policy_not_in_force', policyNotInForceMessage(formatCalendarDate(today), formatCalendarDate(policy.validFrom), formatCalendarDate(policy.validTo)))
+  }
+  const { maxIso } = manualValidUntilBounds(today, policy.validTo)
+  if (input.validUntil > maxIso) {
+    return rcmFail('policy_not_in_force', input.validUntil > policy.validTo
+      ? `Valid until cannot be after the policy ends (${formatCalendarDate(policy.validTo)})`
+      : `Valid until can be at most ${MANUAL_VERIFICATION_MAX_DAYS} days from today (${formatCalendarDate(maxIso)})`)
+  }
+
+  let document: { url: string; sha256: string; contentType: string } | null = null
+  if (file) {
+    const ext = DOCUMENT_EXTENSION[file.contentType]
+    if (!ext) return rcmFail('upload_invalid')
+    const sha256 = sha256Hex(file.bytes)
+    const { url } = await putPrivateBlob(`insurance/verifications/${policyId}/${randomUUID()}.${ext}`, file.bytes, file.contentType)
+    document = { url, sha256, contentType: file.contentType }
+  }
+
+  const verifiedAt = input.verifiedOn === today ? now : new Date(startOfIstDay(input.verifiedOn).getTime() + DAY_MS / 2)
+  const validUntil = new Date(startOfIstDay(input.validUntil).getTime() + DAY_MS)
+  return getDb().transaction(async (tx) => {
+    const [row] = await tx.insert(coverageVerifications).values({
+      patientId: policy.patientId, policyId, source: 'manual', result: input.result, context: 'manual', method: input.method,
+      insurerReference: input.reference,
+      documentBlobUrl: document?.url ?? null, documentSha256: document?.sha256 ?? null, documentContentType: document?.contentType ?? null,
+      verifiedByName: session.name, verifiedByUserId: session.userId, verifiedAt, validUntil,
+      sumInsuredPaise: input.sumInsuredPaise ?? null, balancePaise: input.balancePaise ?? null, copayBp: input.copayBp ?? null,
+      roomRentLimitPaise: input.roomRentLimitPaise ?? null, icuLimitPaise: input.icuLimitPaise ?? null,
+      note: input.note || null,
+    }).returning({ id: coverageVerifications.id })
+    await logAudit(session, 'insurance: recorded manual verification', policy.patientId,
+      `policy=${policyId} verification=${row.id} result=${input.result} method=${input.method} document=${document ? 'yes' : 'no'}`, tx)
+    return rcmOk({ verificationId: row.id })
+  })
+}
+
+/** Server-side only: a verification's stored document (never returned in JSON), or null when it has none. */
+export async function getVerificationDocumentBlob(verificationId: number): Promise<{ url: string; contentType: string; extension: string; patientId: string; policyId: number } | null> {
+  const [row] = await getDb().select({
+    url: coverageVerifications.documentBlobUrl, contentType: coverageVerifications.documentContentType,
+    patientId: coverageVerifications.patientId, policyId: coverageVerifications.policyId,
+  }).from(coverageVerifications).where(eq(coverageVerifications.id, verificationId)).limit(1)
+  if (!row?.url || !row.contentType) return null
+  return { url: row.url, contentType: row.contentType, extension: DOCUMENT_EXTENSION[row.contentType] ?? 'bin', patientId: row.patientId, policyId: row.policyId }
 }

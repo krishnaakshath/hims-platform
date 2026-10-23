@@ -38,19 +38,26 @@ export const MULTIPART_MESSAGE = 'Send the file as multipart form data'
 /**
  * The uploaded `file` plus every other string field, or a 400. Called only after the role gate.
  * The file must be a PDF, JPEG or PNG of at most RCM_UPLOAD_MAX_BYTES (ruling 15).
+ * With `fileOptional` (WS12 manual verification), a form without a file (or with an empty,
+ * unnamed file part) gives `file: null`; a file that is sent is checked the same way.
  */
-export async function readUpload(request: Request): Promise<{ ok: true; file: File; fields: Record<string, string> } | { ok: false; response: NextResponse }> {
+export async function readUpload(request: Request): Promise<{ ok: true; file: File; fields: Record<string, string> } | { ok: false; response: NextResponse }>
+export async function readUpload(request: Request, opts: { fileOptional: true }): Promise<{ ok: true; file: File | null; fields: Record<string, string> } | { ok: false; response: NextResponse }>
+export async function readUpload(request: Request, opts?: { fileOptional: true }): Promise<{ ok: true; file: File | null; fields: Record<string, string> } | { ok: false; response: NextResponse }> {
   let form: FormData
   try {
     form = await request.formData()
   } catch {
     return { ok: false, response: rcmError(400, MULTIPART_MESSAGE) }
   }
-  const file = form.get('file')
-  if (!(file instanceof File) || !(RCM_UPLOAD_TYPES as readonly string[]).includes(file.type) || file.size === 0 || file.size > RCM_UPLOAD_MAX_BYTES) {
+  const raw = form.get('file')
+  const absent = raw === null || (raw instanceof File && raw.size === 0 && raw.name === '')
+  const file = opts?.fileOptional === true && absent ? null : raw
+  const optionalAndAbsent = file === null && opts?.fileOptional === true
+  if (!optionalAndAbsent && (!(file instanceof File) || !(RCM_UPLOAD_TYPES as readonly string[]).includes(file.type) || file.size === 0 || file.size > RCM_UPLOAD_MAX_BYTES)) {
     return { ok: false, response: rcmError(400, RCM_ERROR_MESSAGE.upload_invalid) }
   }
   const fields: Record<string, string> = {}
   for (const [k, v] of form.entries()) if (k !== 'file' && typeof v === 'string') fields[k] = v
-  return { ok: true, file, fields }
+  return { ok: true, file: file instanceof File ? file : null, fields }
 }
