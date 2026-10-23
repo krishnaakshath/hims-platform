@@ -2,6 +2,7 @@ import { and, eq, lt, or, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { departments, doctorAssignments, encounters, patients, providers, rooms } from '@/db/schema'
 import { estimateWaitMinutes } from '@/lib/front-desk/wait-estimate'
+import { providerAvailability } from './front-desk-queue'
 
 // Wave C print slips (P1-14 OPD token slip, registration slip / UHID card).
 // Explicit minimal projections: the patient's name, UHID and chart id only --
@@ -21,7 +22,7 @@ export interface TokenSlip {
   roomLabel: string | null
   /** OPD patients of the same doctor and day checked in before this one and still waiting. */
   waitingAhead: number
-  /** estimateWaitMinutes(waitingAhead, slot length); null for a non-OPD visit. */
+  /** estimateWaitMinutes(waitingAhead, slot length); null for a non-OPD visit, a visit no longer waiting, or a doctor on leave / outside hours. */
   estimatedWaitMinutes: number | null
 }
 
@@ -32,6 +33,7 @@ export async function getTokenSlip(encounterId: number): Promise<TokenSlip | nul
       opdToken: encounters.opdToken,
       encounterType: encounters.encounterType,
       encounterDate: encounters.encounterDate,
+      status: encounters.status,
       checkedInAt: encounters.checkedInAt,
       patientId: patients.id,
       patientName: patients.name,
@@ -54,8 +56,10 @@ export async function getTokenSlip(encounterId: number): Promise<TokenSlip | nul
     .where(eq(encounters.id, encounterId))
   if (!row) return null
   const isOpd = row.encounterType === 'opd'
+  // The wait is only meaningful for a visit that is still waiting, with a doctor who is available.
+  const waiting = isOpd && row.status === 'checked_in'
   let waitingAhead = 0
-  if (isOpd) {
+  if (waiting) {
     const [ahead] = await getDb()
       .select({ count: sql<number>`count(*)::int` })
       .from(encounters)
@@ -68,6 +72,7 @@ export async function getTokenSlip(encounterId: number): Promise<TokenSlip | nul
       ))
     waitingAhead = ahead?.count ?? 0
   }
+  const availability = waiting ? (await providerAvailability([row.providerId])).get(row.providerId) : undefined
   return {
     encounterId: row.encounterId,
     opdToken: row.opdToken,
@@ -80,7 +85,7 @@ export async function getTokenSlip(encounterId: number): Promise<TokenSlip | nul
     room: row.ward && row.roomNumber && row.bedNumber ? { ward: row.ward, roomNumber: row.roomNumber, bedNumber: row.bedNumber } : null,
     roomLabel: (isOpd ? row.opdRoom : row.roomNumber) ?? null,
     waitingAhead,
-    estimatedWaitMinutes: isOpd ? estimateWaitMinutes(waitingAhead, row.slotMinutes) : null,
+    estimatedWaitMinutes: waiting && availability === 'available' ? estimateWaitMinutes(waitingAhead, row.slotMinutes) : null,
   }
 }
 

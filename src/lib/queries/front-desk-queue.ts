@@ -10,7 +10,7 @@ import { departments, encounters, providerLeave, providerSchedules, providers } 
 import { istDateOf } from '@/lib/india-time'
 import { withinWorkingHours, type Weekday, type WeeklySession } from '@/lib/scheduling/slots'
 import { estimateWaitMinutes } from '@/lib/front-desk/wait-estimate'
-import type { ClinicalDoctor } from './providers'
+import { clinicalDoctorCondition, type ClinicalDoctor } from './providers'
 
 export type DoctorAvailability = 'available' | 'on_leave' | 'outside_hours'
 
@@ -27,6 +27,36 @@ export interface ProviderQueueSummary {
 /** Postgres `time` comes back as HH:MM:SS; sessions are HH:MM. */
 const hhmm = (t: string) => t.slice(0, 5)
 
+/** The one availability rule (summary and token slip): two queries for any number of doctors. */
+export async function providerAvailability(ids: number[], now: Date = new Date()): Promise<Map<number, DoctorAvailability>> {
+  const result = new Map<number, DoctorAvailability>()
+  if (ids.length === 0) return result
+  const db = getDb()
+  const today = istDateOf(now)
+  const [sessionRows, leaveRows] = await Promise.all([
+    db.select({ providerId: providerSchedules.providerId, weekday: providerSchedules.weekday, startTime: providerSchedules.startTime, endTime: providerSchedules.endTime })
+      .from(providerSchedules).where(inArray(providerSchedules.providerId, ids)),
+    db.select({ providerId: providerLeave.providerId }).from(providerLeave)
+      .where(and(inArray(providerLeave.providerId, ids), eq(providerLeave.leaveDate, today))),
+  ])
+  const sessionsOf = new Map<number, WeeklySession[]>()
+  for (const r of sessionRows) {
+    const list = sessionsOf.get(r.providerId) ?? []
+    list.push({ weekday: r.weekday as Weekday, start: hhmm(r.startTime), end: hhmm(r.endTime) })
+    sessionsOf.set(r.providerId, list)
+  }
+  const onLeave = new Set(leaveRows.map((r) => r.providerId))
+  for (const id of ids) {
+    const sessions = sessionsOf.get(id) ?? []
+    result.set(id, onLeave.has(id)
+      ? 'on_leave'
+      : sessions.length > 0 && !withinWorkingHours({ startsAt: now, endsAt: now, sessions, onLeave: false })
+        ? 'outside_hours'
+        : 'available')
+  }
+  return result
+}
+
 export async function getFrontDeskQueueSummary(now: Date = new Date()): Promise<ProviderQueueSummary[]> {
   const db = getDb()
   const today = istDateOf(now)
@@ -34,16 +64,13 @@ export async function getFrontDeskQueueSummary(now: Date = new Date()): Promise<
     .select({ id: providers.id, departmentId: providers.departmentId, slotMinutes: providers.slotMinutes })
     .from(providers)
     .innerJoin(departments, eq(providers.departmentId, departments.id))
-    .where(and(eq(providers.isActive, true), eq(departments.isActive, true), eq(departments.kind, 'clinical')))
+    .where(clinicalDoctorCondition)
     .orderBy(providers.id)
   if (doctors.length === 0) return []
   const ids = doctors.map((d) => d.id)
 
-  const [sessionRows, leaveRows, countRows] = await Promise.all([
-    db.select({ providerId: providerSchedules.providerId, weekday: providerSchedules.weekday, startTime: providerSchedules.startTime, endTime: providerSchedules.endTime })
-      .from(providerSchedules).where(inArray(providerSchedules.providerId, ids)),
-    db.select({ providerId: providerLeave.providerId }).from(providerLeave)
-      .where(and(inArray(providerLeave.providerId, ids), eq(providerLeave.leaveDate, today))),
+  const [availabilityOf, countRows] = await Promise.all([
+    providerAvailability(ids, now),
     db.select({ providerId: encounters.providerId, status: encounters.status, count: sql<number>`count(*)::int` })
       .from(encounters)
       .where(and(
@@ -54,24 +81,11 @@ export async function getFrontDeskQueueSummary(now: Date = new Date()): Promise<
       ))
       .groupBy(encounters.providerId, encounters.status),
   ])
-
-  const sessionsOf = new Map<number, WeeklySession[]>()
-  for (const r of sessionRows) {
-    const list = sessionsOf.get(r.providerId) ?? []
-    list.push({ weekday: r.weekday as Weekday, start: hhmm(r.startTime), end: hhmm(r.endTime) })
-    sessionsOf.set(r.providerId, list)
-  }
-  const onLeave = new Set(leaveRows.map((r) => r.providerId))
   const count = (providerId: number, status: 'checked_in' | 'in_consultation') =>
     countRows.find((r) => r.providerId === providerId && r.status === status)?.count ?? 0
 
   return doctors.map((d) => {
-    const sessions = sessionsOf.get(d.id) ?? []
-    const availability: DoctorAvailability = onLeave.has(d.id)
-      ? 'on_leave'
-      : sessions.length > 0 && !withinWorkingHours({ startsAt: now, endsAt: now, sessions, onLeave: false })
-        ? 'outside_hours'
-        : 'available'
+    const availability = availabilityOf.get(d.id) ?? 'available'
     const waiting = count(d.id, 'checked_in')
     return {
       providerId: d.id,

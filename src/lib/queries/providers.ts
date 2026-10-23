@@ -97,12 +97,15 @@ export interface ClinicalDoctor {
   opdRoom: string | null
 }
 
+/** The one definition of "a clinical doctor": active, in an active clinical department. Needs the departments join. */
+export const clinicalDoctorCondition = and(eq(providers.isActive, true), eq(departments.isActive, true), eq(departments.kind, 'clinical'))
+
 export async function listClinicalDoctors(): Promise<ClinicalDoctor[]> {
   const rows = await getDb()
     .select({ id: providers.id, name: providers.name, departmentId: departments.id, departmentName: departments.name, opdRoom: providers.opdRoom })
     .from(providers)
     .innerJoin(departments, eq(providers.departmentId, departments.id))
-    .where(and(eq(providers.isActive, true), eq(departments.isActive, true), eq(departments.kind, 'clinical')))
+    .where(clinicalDoctorCondition)
     .orderBy(departments.name, providers.name, providers.id)
   return rows
 }
