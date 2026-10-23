@@ -4,6 +4,7 @@ import { sendJson } from '@/lib/client-fetch'
 import { useRouter } from 'next/navigation'
 import { SAMPLE_CONTAINERS, SAMPLE_CONTAINER_LABEL, SAMPLE_TYPES, SAMPLE_TYPE_LABEL } from '@/lib/labs/catalog'
 import type { LabTestSetupRow } from '@/lib/queries/lab-setup'
+import { LabAnalytesEditor } from '@/components/settings/LabAnalytesEditor' // WS4 T8
 
 const SELECT = 'rounded-md border border-border px-2 py-1 text-xs'
 
@@ -17,6 +18,7 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<number | null>(null)
+  const [analytesFor, setAnalytesFor] = useState<LabTestSetupRow | null>(null) // WS4 T8
 
   async function save(t: LabTestSetupRow, field: Field, raw: string) {
     setError(null)
@@ -35,6 +37,7 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
   return (
     <div className="space-y-3">
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+      {analytesFor && <LabAnalytesEditor labTestId={analytesFor.id} testName={analytesFor.name} onClose={() => setAnalytesFor(null)} />}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -52,6 +55,10 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
                   <span className="font-medium text-foreground">{t.name}</span>
                   <span className="ml-2 font-mono text-xs text-muted-foreground">{t.code}</span>
                   {t.category === 'imaging' && <span className="ml-2 text-xs text-muted-foreground">Imaging</span>}
+                  {/* WS4 T8: analytes and reference ranges (setup roles only). */}
+                  {isAdmin && t.category === 'lab' && (
+                    <button type="button" className="ml-2 text-xs text-primary hover:underline" aria-label={`Analytes for ${t.name}`} onClick={() => setAnalytesFor(t)}>Analytes</button>
+                  )}
                 </td>
                 {isAdmin ? (
                   <>

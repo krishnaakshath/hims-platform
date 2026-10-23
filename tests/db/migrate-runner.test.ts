@@ -91,13 +91,22 @@ describe.skipIf(!enabled)('db:migrate against a scratch database', () => {
     await onScratch(async (c) => {
       const r = await c.query(`SELECT cl.relname AS child, fcl.relname AS parent
         FROM pg_constraint co JOIN pg_class cl ON cl.oid = co.conrelid JOIN pg_class fcl ON fcl.oid = co.confrelid
-        WHERE co.contype = 'f' AND co.confdeltype = 'c' ORDER BY 1`)
+        WHERE co.contype = 'f' AND co.confdeltype = 'c' ORDER BY 1, 2`)
       expect(r.rows).toEqual([
         // WS3 T5: billing's dues clearances are snapshots of one admission's dues at a moment
         // (no clinical content, no ledger effect), meaningless once the admission is gone.
         { child: 'admission_dues_clearances', parent: 'admissions' },
         { child: 'coding_query_responses', parent: 'coding_queries' },
         { child: 'follow_up_contact_attempts', parent: 'follow_up_orders' },
+        // WS4 T8: an analyte's reference ranges are part of its definition; an analyte's
+        // definitions belong to their lab test (a test with orders, or an analyte with result
+        // values, stays protected by NO ACTION FKs); the per-analyte result values are detail
+        // rows of the one summary lab result and of its order.
+        { child: 'lab_analyte_ranges', parent: 'lab_test_analytes' },
+        { child: 'lab_result_values', parent: 'lab_orders' },
+        { child: 'lab_result_values', parent: 'lab_results' },
+        { child: 'lab_test_analytes', parent: 'lab_tests' },
+        // end WS4 T8
         // Foundations T8: one row of per-channel on/off switches per patient (no clinical or
         // financial content, no history), meaningless once the patient is gone. The notice
         // history itself (notification_log) stays NO ACTION.

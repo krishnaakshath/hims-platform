@@ -189,3 +189,65 @@ export const notificationPreferenceSchema = z
   .object({ optOut: z.boolean().optional(), sms: z.boolean().optional(), whatsapp: z.boolean().optional(), email: z.boolean().optional() })
   .strict()
   .refine((v) => Object.keys(v).length > 0, 'Nothing to change')
+
+// ── WS4 T8: analyte definitions (Settings → Lab setup → Analytes) ───────────
+
+// numeric(14,4) holds |x| < 1e10.
+const rangeBound = z.number().finite().gt(-1e10).lt(1e10).nullable()
+const optionList = z.array(z.string().trim().min(1).max(40)).max(20).nullable()
+
+const analyteRangeSchema = z
+  .object({
+    sex: z.enum(['any', 'male', 'female']),
+    ageMinDays: z.number().int().min(0).max(54_750),
+    ageMaxDays: z.number().int().min(1).max(54_750).nullable(),
+    normalLow: rangeBound,
+    normalHigh: rangeBound,
+    criticalLow: rangeBound,
+    criticalHigh: rangeBound,
+    displayText: z.string().trim().min(1).max(60).nullable(),
+  })
+  .strict()
+  .refine((r) => r.ageMaxDays === null || r.ageMaxDays > r.ageMinDays, { path: ['ageMaxDays'], message: 'The age band must end after it starts' })
+  .refine((r) => {
+    // criticalLow ≤ normalLow ≤ normalHigh ≤ criticalHigh, wherever present.
+    const present = [r.criticalLow, r.normalLow, r.normalHigh, r.criticalHigh].filter((v): v is number => v !== null)
+    return present.every((v, i) => i === 0 || present[i - 1] <= v)
+  }, { message: 'Range limits must run critical low, normal low, normal high, critical high' })
+
+const bandsOverlap = (a: { ageMinDays: number; ageMaxDays: number | null }, b: { ageMinDays: number; ageMaxDays: number | null }) =>
+  (a.ageMaxDays === null || b.ageMinDays < a.ageMaxDays) && (b.ageMaxDays === null || a.ageMinDays < b.ageMaxDays)
+
+const analyteDefinitionSchema = z
+  .object({
+    code: z.string().regex(/^[A-Z][A-Z0-9_]{0,15}$/, 'Analyte codes are capital letters, digits or _ (up to 16)'),
+    name: z.string().trim().min(1).max(80),
+    unit: z.string().trim().min(1).max(20).nullable(),
+    valueType: z.enum(['numeric', 'option', 'text']),
+    decimals: z.number().int().min(0).max(4).nullable(),
+    loincCode: z.string().trim().min(1).max(20).nullable(),
+    options: optionList,
+    abnormalOptions: optionList,
+    criticalOptions: optionList,
+    ranges: z.array(analyteRangeSchema).max(12),
+  })
+  .strict()
+  .refine((a) => a.valueType !== 'option' || (a.options !== null && a.options.length > 0), { path: ['options'], message: 'A choice analyte needs its choices' })
+  .refine((a) => [...(a.abnormalOptions ?? []), ...(a.criticalOptions ?? [])].every((o) => (a.options ?? []).includes(o)), {
+    path: ['abnormalOptions'], message: 'Abnormal and critical choices must be among the choices',
+  })
+  .refine((a) => a.valueType === 'numeric' || a.ranges.every((r) => [r.normalLow, r.normalHigh, r.criticalLow, r.criticalHigh].every((v) => v === null)), {
+    path: ['ranges'], message: 'Only numeric analytes have numeric limits',
+  })
+  .refine((a) => a.ranges.every((r, i) => a.ranges.every((o, j) => j <= i || o.sex !== r.sex || !bandsOverlap(r, o))), {
+    path: ['ranges'], message: 'Two ranges for the same sex overlap in age',
+  })
+
+export const analyteDefinitionsSchema = z
+  .array(analyteDefinitionSchema)
+  .max(40)
+  .refine((defs) => new Set(defs.map((d) => d.code)).size === defs.length, 'Each analyte code may appear only once')
+export type AnalyteDefinitionInput = z.infer<typeof analyteDefinitionSchema>
+
+export const labTestAnalytesRequestSchema = z.object({ analytes: analyteDefinitionsSchema }).strict()
+// end WS4 T8

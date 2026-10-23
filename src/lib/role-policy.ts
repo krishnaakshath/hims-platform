@@ -287,3 +287,7 @@ export const ADMISSION_ROLES: readonly Role[] = ['frontdesk', 'admin', 'crc', 'p
 // BILLING_AUTHORITY_ROLES (admin, billing).
 export const DUES_VIEW_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'frontdesk', 'pi']
 // end WS3 T5
+// WS4 T8: a test's analytes and ranges -- read by setup and result entry; edited by setup only.
+export const LAB_ANALYTE_READ_ROLES: readonly Role[] = [...new Set([...LAB_SETUP_ROLES, ...LAB_RESULT_ENTRY_ROLES])]
+export const LAB_ANALYTE_EDIT_ROLES: readonly Role[] = LAB_SETUP_ROLES
+// end WS4 T8

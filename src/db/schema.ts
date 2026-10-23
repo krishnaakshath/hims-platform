@@ -1,6 +1,7 @@
 import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, unique, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 import { smallint } from 'drizzle-orm/pg-core' // WS1 T2
+import { numeric } from 'drizzle-orm/pg-core' // WS4 T8
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
@@ -3111,3 +3112,86 @@ export const admissionDuesClearances = pgTable('admission_dues_clearances', {
 ])
 export type AdmissionDuesClearanceRow = typeof admissionDuesClearances.$inferSelect
 // end WS3 T5
+// WS4 T8: lab analytes, age/sex reference ranges and per-analyte result values (spec 3.3 items
+// 17-22, §4; scripts/migrations/2026-10-24-ws4-lab-analytes.sql). Pure flagging rules live in
+// src/lib/labs/analytes.ts. Cascades (pinned in tests/db/migrate-runner.test.ts):
+//   lab_test_analytes -> lab_tests: catalogue detail of the test. The app never deletes a lab test
+//     (it is deactivated); a test with orders cannot be deleted (lab_orders is NO ACTION), and an
+//     analyte with results cannot be deleted (lab_result_values.analyte_id is NO ACTION), so the
+//     cascade only ever removes the definitions of an unused test.
+//   lab_analyte_ranges -> lab_test_analytes: the ranges are part of the definition.
+//   lab_result_values -> lab_results / lab_orders: the per-analyte detail of the one summary result.
+export const LAB_ANALYTE_VALUE_TYPES = ['numeric', 'option', 'text'] as const
+export const LAB_ANALYTE_RANGE_SEXES = ['any', 'male', 'female'] as const
+export const LAB_RESULT_INTERPRETATIONS = ['N', 'L', 'H', 'LL', 'HH', 'A', 'AA'] as const
+export const LAB_RESULT_FLAG_SOURCES = ['auto', 'manual'] as const
+const rangeBound = (name: string) => numeric(name, { precision: 14, scale: 4, mode: 'number' })
+
+export const labTestAnalytes = pgTable('lab_test_analytes', {
+  id: serial('id').primaryKey(),
+  labTestId: integer('lab_test_id').notNull().references(() => labTests.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  unit: text('unit'),
+  valueType: text('value_type', { enum: LAB_ANALYTE_VALUE_TYPES }).default('numeric').notNull(),
+  decimals: integer('decimals'),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  loincCode: text('loinc_code'),
+  options: jsonb('options').$type<string[]>(),
+  abnormalOptions: jsonb('abnormal_options').$type<string[]>(),
+  criticalOptions: jsonb('critical_options').$type<string[]>(),
+  isActive: boolean('is_active').default(true).notNull(),
+}, (t) => [
+  uniqueIndex('lab_test_analytes_test_code_unique').on(t.labTestId, t.code),
+  check('lab_test_analytes_value_type_valid', sql`${t.valueType} IN ('numeric', 'option', 'text')`),
+  check('lab_test_analytes_decimals_range', sql`${t.decimals} IS NULL OR ${t.decimals} BETWEEN 0 AND 4`),
+])
+export type LabTestAnalyteRow = typeof labTestAnalytes.$inferSelect
+
+export const labAnalyteRanges = pgTable('lab_analyte_ranges', {
+  id: serial('id').primaryKey(),
+  analyteId: integer('analyte_id').notNull().references(() => labTestAnalytes.id, { onDelete: 'cascade' }),
+  sex: text('sex', { enum: LAB_ANALYTE_RANGE_SEXES }).default('any').notNull(),
+  // Age band in days, [min, max); max null = no upper limit.
+  ageMinDays: integer('age_min_days').default(0).notNull(),
+  ageMaxDays: integer('age_max_days'),
+  normalLow: rangeBound('normal_low'),
+  normalHigh: rangeBound('normal_high'),
+  criticalLow: rangeBound('critical_low'),
+  criticalHigh: rangeBound('critical_high'),
+  displayText: text('display_text'),
+}, (t) => [
+  index('lab_analyte_ranges_analyte_idx').on(t.analyteId),
+  check('lab_analyte_ranges_sex_valid', sql`${t.sex} IN ('any', 'male', 'female')`),
+  check('lab_analyte_ranges_age_band', sql`${t.ageMinDays} >= 0 AND (${t.ageMaxDays} IS NULL OR ${t.ageMaxDays} > ${t.ageMinDays})`),
+  check('lab_analyte_ranges_bounds_ordered', sql`(${t.criticalLow} IS NULL OR ${t.normalLow} IS NULL OR ${t.criticalLow} <= ${t.normalLow})
+    AND (${t.normalLow} IS NULL OR ${t.normalHigh} IS NULL OR ${t.normalLow} <= ${t.normalHigh})
+    AND (${t.normalHigh} IS NULL OR ${t.criticalHigh} IS NULL OR ${t.normalHigh} <= ${t.criticalHigh})
+    AND (${t.criticalLow} IS NULL OR ${t.criticalHigh} IS NULL OR ${t.criticalLow} <= ${t.criticalHigh})`),
+])
+export type LabAnalyteRangeRow = typeof labAnalyteRanges.$inferSelect
+
+export const labResultValues = pgTable('lab_result_values', {
+  id: serial('id').primaryKey(),
+  labResultId: integer('lab_result_id').notNull().references(() => labResults.id, { onDelete: 'cascade' }),
+  labOrderId: integer('lab_order_id').notNull().references(() => labOrders.id, { onDelete: 'cascade' }),
+  analyteId: integer('analyte_id').notNull().references(() => labTestAnalytes.id),
+  valueText: text('value_text').notNull(),
+  valueNumeric: rangeBound('value_numeric'),
+  // Snapshots at entry: a later edit of the definition never rewrites a reported value.
+  unit: text('unit'),
+  referenceRangeText: text('reference_range_text'),
+  flag: labResultFlagEnum('flag').default('normal').notNull(),
+  interpretation: text('interpretation', { enum: LAB_RESULT_INTERPRETATIONS }),
+  flagSource: text('flag_source', { enum: LAB_RESULT_FLAG_SOURCES }).default('auto').notNull(),
+  flagReason: text('flag_reason'),
+}, (t) => [
+  uniqueIndex('lab_result_values_result_analyte_unique').on(t.labResultId, t.analyteId),
+  index('lab_result_values_order_idx').on(t.labOrderId),
+  index('lab_result_values_analyte_idx').on(t.analyteId),
+  check('lab_result_values_interpretation_valid', sql`${t.interpretation} IS NULL OR ${t.interpretation} IN ('N', 'L', 'H', 'LL', 'HH', 'A', 'AA')`),
+  check('lab_result_values_flag_source_valid', sql`${t.flagSource} IN ('auto', 'manual')`),
+  check('lab_result_values_flag_reason_length', sql`${t.flagReason} IS NULL OR char_length(${t.flagReason}) <= 500`),
+])
+export type LabResultValueRow = typeof labResultValues.$inferSelect
+// end WS4 T8

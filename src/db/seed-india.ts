@@ -43,6 +43,10 @@ import { raiseCodingQuery } from '../lib/queries/coding-queries'
 import { nextUhid } from '../lib/queries/uhid'
 import { checkInVisit } from '../lib/queries/encounters'
 import { admitPatient } from '../lib/queries/admit-patient' // WS3 T2
+// WS4 T8
+import { labAnalyteRanges, labTestAnalytes } from './schema'
+import { LAB_ANALYTE_SEED } from './seed-india-data'
+// end WS4 T8
 import { captureChargeLine } from '../lib/queries/charge-capture'
 import { voidChargeLine } from '../lib/queries/charge-capture' // WS2 T9
 import type { AutoChargeOutcome } from '../lib/queries/auto-charge' // WS2 T9
@@ -228,6 +232,25 @@ async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Prom
   return new Map(rows.map((r) => [r.code, r.id]))
 }
 
+// WS4 T8: demo analytes and reference ranges (spec 3.3 item 21), matched by lab test code. A test
+// that already has analytes is left alone, so a re-run never overwrites the laboratory director's
+// edits from Settings -> Lab setup; analyte rows survive a reset (lab tests are not cleared).
+async function seedLabAnalytes(db: Db, labTestIds: Map<string, number>): Promise<void> {
+  for (const [testCode, defs] of Object.entries(LAB_ANALYTE_SEED)) {
+    const labTestId = labTestIds.get(testCode)
+    if (labTestId === undefined) continue
+    const [has] = await db.select({ id: labTestAnalytes.id }).from(labTestAnalytes).where(eq(labTestAnalytes.labTestId, labTestId)).limit(1)
+    if (has) continue
+    for (const [i, d] of defs.entries()) {
+      const { ranges, ...def } = d
+      const [row] = await db.insert(labTestAnalytes).values({ labTestId, ...def, sortOrder: i })
+        .onConflictDoNothing().returning({ id: labTestAnalytes.id })
+      if (row && ranges.length > 0) await db.insert(labAnalyteRanges).values(ranges.map((r) => ({ analyteId: row.id, ...r })))
+    }
+  }
+}
+// end WS4 T8
+
 /** Fills the hospital's legal details and the room-rent service only where they are still blank. */
 async function seedBillingSettings(db: Db, serviceIds: Map<string, number>): Promise<void> {
   await db.insert(billingSettings).values({ id: 1 }).onConflictDoNothing()
@@ -304,6 +327,7 @@ export async function seedIndiaReference(actor: Session): Promise<IndiaRefs> {
   const serviceIds = await upsertServices(db, deptIds)
   await seedTariffs(db, { deptIds, payerIds, roomCategoryIds, serviceIds })
   const labTestIds = await seedLabTestMapping(db, serviceIds)
+  await seedLabAnalytes(db, labTestIds) // WS4 T8
   await seedBillingSettings(db, serviceIds)
   const providerIds = await upsertDoctors(db, deptIds)
   await seedSampleCodeSets(db, actor)

@@ -658,6 +658,10 @@ import { GET as getAdmissionVitals, POST as postAdmissionVitals } from '@/app/ap
 import { GET as getMedicationRound } from '@/app/api/inpatient/medication-round/route'
 import { CLINICAL_ROLES as WS3T7_CLINICAL_ROLES } from '@/lib/role-policy'
 // end WS3 T7
+// WS4 T8
+import { GET as getLabTestAnalytes, PUT as putLabTestAnalytes } from '@/app/api/lab-tests/[id]/analytes/route'
+import { LAB_ANALYTE_READ_ROLES, LAB_ANALYTE_EDIT_ROLES } from '@/lib/role-policy'
+// end WS4 T8
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1176,6 +1180,11 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/inpatient/admissions/[id]/vitals', call: () => postAdmissionVitals(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/vitals`, {}), ctx({ id: BOGUS_ID })), allowed: [...VITALS_ROLES] },
   { name: 'GET /api/inpatient/medication-round', call: () => getMedicationRound(get('/api/inpatient/medication-round?date=bad')), allowed: [...WS3T7_CLINICAL_ROLES] },
   // end WS3 T7
+  // WS4 T8: a lab test's analytes -- GET LAB_SETUP_ROLES + LAB_RESULT_ENTRY_ROLES (an unknown test is the 404 an
+  // allowed role gets); PUT LAB_SETUP_ROLES (an empty body is the 400 an allowed role gets).
+  { name: 'GET /api/lab-tests/[id]/analytes', call: () => getLabTestAnalytes(get(`/api/lab-tests/${BOGUS_ID}/analytes`), ctx({ id: BOGUS_ID })), allowed: [...LAB_ANALYTE_READ_ROLES] },
+  { name: 'PUT /api/lab-tests/[id]/analytes', call: () => putLabTestAnalytes(send('PUT', `/api/lab-tests/${BOGUS_ID}/analytes`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_ANALYTE_EDIT_ROLES] },
+  // end WS4 T8
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1363,6 +1372,9 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // WS3 T7
   { name: 'POST /api/inpatient/admissions/[id]/vitals', call: () => postAdmissionVitals(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/vitals`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: VITALS_ROLES },
   // end WS3 T7
+  // WS4 T8
+  { name: 'PUT /api/lab-tests/[id]/analytes', call: () => putLabTestAnalytes(send('PUT', `/api/lab-tests/${BOGUS_ID}/analytes`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_ANALYTE_EDIT_ROLES },
+  // end WS4 T8
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

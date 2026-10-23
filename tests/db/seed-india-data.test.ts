@@ -5,6 +5,9 @@ import {
   INDIA_LAB_TESTS, EXISTING_LAB_TEST_SERVICE_MAP, PLACES, SERVICE_AREA_PINS, HERO_IDENTITIES, FILLER_PROFILES, addressFor,
   demoEmail, DEMO_USERS, SYNTHETIC_AADHAAR_PREFIX, PAYER_PROFILE_SEED, PAYER_NETWORK_SEED,
 } from '@/db/seed-india-data'
+import { LAB_ANALYTE_SEED } from '@/db/seed-india-data' // WS4 T8
+import { analyteDefinitionsSchema } from '@/lib/labs/validation' // WS4 T8
+import { DEMO_REFERENCE_RANGE_NOTE } from '@/lib/labs/analytes' // WS4 T8
 import { payerProfileSchema } from '@/lib/rcm/validation'
 import { INSURER_SIDE_KINDS } from '@/lib/rcm/constants'
 import { isValidAadhaar } from '@/lib/india/aadhaar'
@@ -169,5 +172,49 @@ describe('patients', () => {
     const roles = new Set(DEMO_USERS.map((u) => u.role))
     for (const r of ['admin', 'crc', 'pi', 'frontdesk', 'pharmacy', 'billing', 'labs', 'collector', 'coder']) expect(roles.has(r as never)).toBe(true)
     expect(new Set(DEMO_USERS.map((u) => u.local)).size).toBe(DEMO_USERS.length)
+  })
+})
+
+// WS4 T8: demo analyte definitions and reference ranges (spec 3.3 item 21).
+describe('lab analytes (WS4 T8)', () => {
+  const catalogueCodes = new Set(['CBC-DIFF', 'TSH', 'LIPID', 'HBA1C', ...INDIA_LAB_TESTS.map((t) => t.code)])
+  const range = (test: string, code: string, sex: 'any' | 'male' | 'female' = 'any') =>
+    LAB_ANALYTE_SEED[test].find((a) => a.code === code)!.ranges.find((r) => r.sex === sex)!
+
+  it('covers the briefed tests, each a catalogue test, and passes the editor schema', () => {
+    expect(Object.keys(LAB_ANALYTE_SEED).sort()).toEqual(['CBC-DIFF', 'CRP', 'DENGUE-NS1', 'FBS', 'HBA1C', 'KFT', 'LFT', 'LIPID', 'TSH'])
+    for (const [test, defs] of Object.entries(LAB_ANALYTE_SEED)) {
+      expect(catalogueCodes.has(test), test).toBe(true)
+      const parsed = analyteDefinitionsSchema.safeParse(defs)
+      expect(parsed.success, `${test}: ${parsed.success ? '' : JSON.stringify(parsed.error.issues[0])}`).toBe(true)
+    }
+    // R7: the fever panel (Task 13) is not seeded here.
+    expect(Object.keys(LAB_ANALYTE_SEED)).not.toContain('FEVER-PANEL')
+  })
+
+  it('CBC carries the thirteen analytes, sex-specific Hb/RBC/HCT and the briefed critical limits', () => {
+    expect(LAB_ANALYTE_SEED['CBC-DIFF'].map((a) => a.code)).toEqual(['HGB', 'WBC', 'NEUT', 'LYMPH', 'MONO', 'EOS', 'BASO', 'PLT', 'RBC', 'HCT', 'MCV', 'MCH', 'MCHC'])
+    for (const c of ['HGB', 'RBC', 'HCT']) {
+      const sexes = LAB_ANALYTE_SEED['CBC-DIFF'].find((a) => a.code === c)!.ranges.map((r) => r.sex).sort()
+      expect(sexes, c).toEqual(['female', 'male'])
+    }
+    expect(range('CBC-DIFF', 'HGB', 'female')).toMatchObject({ criticalLow: 7, criticalHigh: 20 })
+    expect(range('CBC-DIFF', 'HGB', 'male')).toMatchObject({ criticalLow: 7, criticalHigh: 20 })
+    expect(range('CBC-DIFF', 'PLT')).toMatchObject({ criticalLow: 50, criticalHigh: 1000 })
+    expect(range('CBC-DIFF', 'WBC')).toMatchObject({ criticalLow: 2, criticalHigh: 30 })
+  })
+
+  it('KFT potassium and sodium and FBS glucose carry the briefed critical limits', () => {
+    expect(range('KFT', 'K')).toMatchObject({ criticalLow: 2.8, criticalHigh: 6.2 })
+    expect(range('KFT', 'NA')).toMatchObject({ criticalLow: 120, criticalHigh: 160 })
+    expect(range('FBS', 'GLU')).toMatchObject({ criticalLow: 50, criticalHigh: 400 })
+  })
+
+  it('Dengue NS1 is an option analyte with Positive abnormal', () => {
+    expect(LAB_ANALYTE_SEED['DENGUE-NS1']).toEqual([expect.objectContaining({ valueType: 'option', options: ['Negative', 'Positive'], abnormalOptions: ['Positive'] })])
+  })
+
+  it('the demo note is the exact sentence the setup UI shows', () => {
+    expect(DEMO_REFERENCE_RANGE_NOTE).toBe('Demo reference ranges: the laboratory director must review before clinical use')
   })
 })
