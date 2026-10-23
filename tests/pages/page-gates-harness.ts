@@ -398,4 +398,7 @@ export const PAGE_GATES: PageGateCase[] = [
   // end Foundations T11
   // WS1 T3: the consultation workspace -- WORKSPACE_READ_ROLES; labs goes to its worklist.
   { route: '/encounters/[id]', load: () => import('@/app/(dashboard)/encounters/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'pi', 'crc'], deniedRedirect: { labs: '/labs' } },
+  // WS3 T7: LeftNav /inpatient/nursing (Nursing station) -- CLINICAL_ROLES.
+  { route: '/inpatient/nursing', load: () => import('@/app/(dashboard)/inpatient/nursing/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'pi'] },
+  // end WS3 T7
 ]
