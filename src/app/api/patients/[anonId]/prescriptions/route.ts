@@ -8,22 +8,35 @@ import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
 import { createPrescription } from '@/lib/queries/prescriptions'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { resolveSessionProvider } from '@/lib/provider-identity'
+import { parseDosePattern, prescribedQuantity } from '@/lib/prescriptions/dose-pattern'
+import { getDb } from '@/db/client'
+import { medications } from '@/db/schema'
+import { eq } from 'drizzle-orm'
 
 const createPrescriptionSchema = z.object({
   medicationId: z.number().int().positive().nullable().optional(),
   name: z.string().trim().min(1).max(200),
   medicationClass: z.string().trim().min(1).max(100),
-  dose: z.string().trim().min(1).max(100).nullable().optional(),
+  // WS1 T6: dose is mandatory on every new prescription (spec ruling 8); legacy rows stay nullable.
+  dose: z.string().trim().min(1).max(100),
+  // WS1 T6: an Indian dose pattern ('1-0-1'); when sent it overrides frequencyPerDay.
+  dosePattern: z.string().trim().max(20).optional(),
   // `frequencyPerDay <= 6` and `durationDays <= 365` are structural sanity
   // bounds on an integer field, NOT dosing-safety validation (spec §1,
   // out of scope) -- they exist so a typo'd "300 times daily" is rejected
   // as malformed input, without the app claiming it validated a regimen.
-  frequencyPerDay: z.number().int().min(1).max(6),
+  frequencyPerDay: z.number().int().min(1).max(6).optional(),
   durationDays: z.number().int().min(1).max(365),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   instructions: z.string().trim().max(500).nullable().optional(),
   onBehalfOfProviderId: z.number().int().positive().optional(),
-}).strict()
+}).strict().superRefine((b, ctx) => { // WS1 T6
+  if (b.dosePattern !== undefined && b.dosePattern !== '') {
+    if (!parseDosePattern(b.dosePattern)) ctx.addIssue({ code: 'custom', path: ['dosePattern'], message: 'Use a pattern like 1-0-1' })
+  } else if (b.frequencyPerDay === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['frequencyPerDay'], message: 'Give a dose pattern or a frequency' })
+  }
+})
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
   const session = await requireSession()
@@ -70,13 +83,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'Could not resolve your provider identity. Ask an admin to link your account to a provider in the Staff Directory.' }, { status: 403 })
   }
 
+  // WS1 T6: the pattern, when given, sets frequencyPerDay; the quantity needs the catalogue form.
+  const pattern = parsed.data.dosePattern ? parseDosePattern(parsed.data.dosePattern) : null
+  const frequencyPerDay = pattern?.perDay ?? parsed.data.frequencyPerDay!
+  const medicationId = parsed.data.medicationId ?? null
+  const [catalogRow] = medicationId === null ? [] : await getDb().select({ form: medications.form }).from(medications).where(eq(medications.id, medicationId))
+
   const created = await createPrescription({
     patientId: anonId,
-    medicationId: parsed.data.medicationId ?? null,
+    medicationId,
     name: parsed.data.name,
     medicationClass: parsed.data.medicationClass,
-    dose: parsed.data.dose ?? null,
-    frequencyPerDay: parsed.data.frequencyPerDay,
+    dose: parsed.data.dose,
+    frequencyPerDay,
+    dosePattern: pattern?.label ?? null,
+    quantityPrescribed: prescribedQuantity({ pattern, frequencyPerDay, durationDays: parsed.data.durationDays, form: catalogRow?.form ?? 'other', isSos: false }),
     durationDays: parsed.data.durationDays,
     startDate: parsed.data.startDate,
     instructions: parsed.data.instructions ?? null,

@@ -125,7 +125,7 @@ describe('MedicationAdministrationPanel', () => {
 describe('MedicationHistorySection', () => {
   it('shows a failed stop in an alert', async () => {
     mockFetch(500, { error: LEAK })
-    const episode = { id: 1, patientId: 'RD-1', name: 'X', medicationClass: 'Y', dose: null, startDate: '2026-01-01', stopDate: null, status: 'active', medicationId: null, frequencyPerDay: null, durationDays: null, instructions: null, prescribedByProviderId: null, enteredByName: null, prescribedAt: null } as const
+    const episode = { id: 1, patientId: 'RD-1', name: 'X', medicationClass: 'Y', dose: null, startDate: '2026-01-01', stopDate: null, status: 'active', medicationId: null, frequencyPerDay: null, durationDays: null, instructions: null, prescribedByProviderId: null, enteredByName: null, prescribedAt: null, prescriptionId: null, dosePattern: null, route: null, foodTiming: null, isSos: false, quantityPrescribed: null, allergyOverrideReason: null } as const
     render(<MedicationHistorySection patientId="RD-1" episodes={[episode]} prescriberById={{}} catalog={[]} specialties={[]} activeProviders={[]} needsOnBehalfOf={false} diagnosisCodes={[]} canPrescribe />)
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)

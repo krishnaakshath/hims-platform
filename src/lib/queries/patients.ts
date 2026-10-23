@@ -7,6 +7,7 @@ import {
   adverseEvents, drugAccountabilityEntries, signatures,
   // SP3
   encounters, followUpOrders,
+  prescriptions, // WS1 T6
   // SP4
   chargeLines, invoices, patientPayments, refunds,
   // SP5
@@ -650,6 +651,9 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // class in this function, alongside care_plans below.)
   await db.delete(medicationDispenses).where(eq(medicationDispenses.patientId, anonId))
   await db.delete(medicationEpisodes).where(eq(medicationEpisodes.patientId, anonId))
+  // WS1 T6: prescription headers, after their episodes (prescription_id) and before encounters.
+  await db.delete(prescriptions).where(eq(prescriptions.patientId, anonId))
+  // end WS1 T6
   await db.delete(diagnoses).where(eq(diagnoses.patientId, anonId))
   // form_submission_consents.form_submission_id references form_submissions
   // with no ON DELETE action, so this patient's consent rows must go before

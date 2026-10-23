@@ -256,6 +256,52 @@ describe('POST /api/patients/[anonId]/prescriptions', () => {
     expect(res.status).toBe(400)
   })
 
+  // WS1 T6: dose is mandatory on every new prescription (spec ruling 8).
+  it.each([{ dose: undefined }, { dose: null }, { dose: '   ' }])('rejects a prescription without a dose %j', async (overrides) => {
+    sessionRole = 'pi'
+    sessionUserId = kunamUserId
+    const before = await episodeCount(patientAId)
+    const payload = validPayload(overrides) as Record<string, unknown>
+    if (overrides.dose === undefined) delete payload.dose
+    const res = await createPrescriptionRoute(postRequest(payload) as never, { params: Promise.resolve({ anonId: patientAId }) })
+    expect(res.status).toBe(400)
+    expect(await episodeCount(patientAId)).toBe(before)
+  })
+
+  it('a dosePattern overrides frequencyPerDay and is stored (WS1 T6)', async () => {
+    sessionRole = 'pi'
+    sessionUserId = kunamUserId
+    const res = await createPrescriptionRoute(postRequest(validPayload({ dosePattern: '1-0-1', frequencyPerDay: 1 })) as never, { params: Promise.resolve({ anonId: patientAId }) })
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    trackedEpisodeIds.push(body.id)
+    expect(body.frequencyPerDay).toBe(2)
+    expect(body.dosePattern).toBe('1-0-1')
+  })
+
+  it('a dosePattern alone (no frequencyPerDay) is enough (WS1 T6)', async () => {
+    sessionRole = 'pi'
+    sessionUserId = kunamUserId
+    const payload = validPayload({ dosePattern: '1-1-1' }) as Record<string, unknown>
+    delete payload.frequencyPerDay
+    const res = await createPrescriptionRoute(postRequest(payload) as never, { params: Promise.resolve({ anonId: patientAId }) })
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    trackedEpisodeIds.push(body.id)
+    expect(body.frequencyPerDay).toBe(3)
+  })
+
+  it('rejects an invalid dosePattern, and neither pattern nor frequencyPerDay (WS1 T6)', async () => {
+    sessionRole = 'pi'
+    sessionUserId = kunamUserId
+    const bad = await createPrescriptionRoute(postRequest(validPayload({ dosePattern: '3-0-1' })) as never, { params: Promise.resolve({ anonId: patientAId }) })
+    expect(bad.status).toBe(400)
+    const payload = validPayload() as Record<string, unknown>
+    delete payload.frequencyPerDay
+    const neither = await createPrescriptionRoute(postRequest(payload) as never, { params: Promise.resolve({ anonId: patientAId }) })
+    expect(neither.status).toBe(400)
+  })
+
   it('the off-catalog path works: medicationId omitted, free-text name/medicationClass', async () => {
     sessionRole = 'pi'
     sessionUserId = kunamUserId

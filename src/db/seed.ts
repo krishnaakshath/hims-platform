@@ -14,6 +14,7 @@ import {
   patients,
   diagnoses,
   medicationEpisodes,
+  prescriptions, // WS1 T6
   patientTrialScreenings,
   screeningCriteriaResults,
   users,
@@ -914,6 +915,7 @@ async function clearExistingData() {
   await db.delete(screeningCriteriaResults)
   await db.delete(patientTrialScreenings)
   await db.delete(medicationEpisodes)
+  await db.delete(prescriptions) // WS1 T6: after its episodes, before encounters/patients
   await db.delete(diagnoses)
   await db.delete(formSubmissionScores)
   await db.delete(formChartDiscrepancies)

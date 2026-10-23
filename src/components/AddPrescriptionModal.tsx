@@ -68,6 +68,7 @@ export function AddPrescriptionModal({
     !submitting &&
     name.trim().length > 0 &&
     medicationClass.trim().length > 0 &&
+    dose.trim().length > 0 && // WS1 T6: dose is mandatory
     frequencyPerDay >= 1 && frequencyPerDay <= 6 &&
     durationDays >= 1 && durationDays <= 365 &&
     startDate.length > 0 &&
@@ -80,7 +81,7 @@ export function AddPrescriptionModal({
       medicationId: medicationId === '' ? null : medicationId,
       name,
       medicationClass,
-      dose: dose.trim() === '' ? null : dose,
+      dose: dose.trim(),
       frequencyPerDay,
       durationDays,
       startDate,
@@ -190,7 +191,7 @@ export function AddPrescriptionModal({
               <input
                 value={dose}
                 onChange={(e) => setDose(e.target.value)}
-                placeholder="Dose (optional)"
+                placeholder="Dose (e.g. 500 mg)"
                 aria-label="Dose"
                 className="w-full rounded-md border border-border px-3 py-2 text-sm"
               />
