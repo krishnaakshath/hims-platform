@@ -11,6 +11,7 @@ import {
   countPendingPortalSubmissions, createPortalSubmission, decidePortalSubmission, listPendingPortalSubmissions, listPortalSubmissionsForPatient,
 } from '@/lib/queries/portal-submissions'
 import { listPortalPolicies, getPortalAbhaStatus } from '@/lib/queries/patient-portal-records'
+import { deleteDocument } from '@/lib/queries/documents'
 import { readMigration, idempotencyProblems } from '../../db/migration-sql'
 import { withTempBlobDir } from '../../helpers/temp-blob-dir'
 
@@ -66,6 +67,17 @@ describe('portal_submissions migration', () => {
     expect(idempotencyProblems(s)).toEqual([])
     for (const n of ['portal_submissions_kind_valid', 'portal_submissions_status_valid', 'portal_submissions_one_pending_per_kind', 'REFERENCES documents(id)']) expect(s).toContain(n)
   })
+
+  it('the card document reference is ON DELETE SET NULL (follow-up migration); the only DROP is the guarded FK re-creation', () => {
+    const s = readMigration('2026-10-26-ws7-submission-doc-fk.sql')
+    const problems = idempotencyProblems(s)
+    expect(problems.filter((p) => !p.startsWith('DROP is not allowed'))).toEqual([])
+    expect(problems.filter((p) => p.startsWith('DROP is not allowed'))).toHaveLength(1)
+    expect(s).toMatch(/confdeltype <> 'n'[\s\S]*?DROP CONSTRAINT portal_submissions_document_id_documents_id_fk/)
+    expect(s).toContain('REFERENCES documents(id) ON DELETE SET NULL')
+    // Sorts after the migration that creates the table.
+    expect('2026-10-26-ws7-submission-doc-fk.sql' > '2026-10-26-ws7-portal-submissions.sql').toBe(true)
+  })
 })
 
 describe('createPortalSubmission', () => {
@@ -111,6 +123,29 @@ describe('decidePortalSubmission', () => {
     expect(audits[0].details).toBe(`submission=${r.id} kind=policy policy=${policy.id}`)
     // Decided once only.
     expect(await decidePortalSubmission(r.id, { decision: 'reject', reason: 'Too late now' }, DESK)).toMatchObject({ ok: false, error: 'already_decided', status: 409 })
+  })
+
+  it('deleting the card document of an approved submission succeeds and leaves the submission without a card', async () => {
+    const r = await createPortalSubmission(A, { kind: 'policy', payload: policyPayload }, card)
+    if (!r.ok) throw new Error('setup')
+    expect(await decidePortalSubmission(r.id, { decision: 'approve', insurerPayerId: insurerId }, DESK)).toMatchObject({ ok: true })
+    const [before] = await getDb().select().from(portalSubmissions).where(eq(portalSubmissions.id, r.id))
+    expect(await deleteDocument(before.documentId!)).not.toBeNull()
+    const [after] = await getDb().select().from(portalSubmissions).where(eq(portalSubmissions.id, r.id))
+    expect(after).toMatchObject({ status: 'approved', documentId: null })
+    expect((await listPortalSubmissionsForPatient(A)).map((x) => x.status)).toEqual(['approved'])
+  })
+
+  it('a pending submission whose card document was deleted lists without a card and can still be decided', async () => {
+    const r = await createPortalSubmission(A, { kind: 'policy', payload: policyPayload }, card)
+    if (!r.ok) throw new Error('setup')
+    const [row] = await getDb().select().from(portalSubmissions).where(eq(portalSubmissions.id, r.id))
+    await deleteDocument(row.documentId!)
+    const listed = (await listPendingPortalSubmissions('frontdesk')).find((x) => x.id === r.id)
+    expect(listed).toMatchObject({ hasCard: false, documentId: null })
+    expect(await decidePortalSubmission(r.id, { decision: 'approve', insurerPayerId: insurerId }, DESK)).toMatchObject({ ok: true })
+    const [policy] = await getDb().select().from(patientPolicies).where(eq(patientPolicies.patientId, A))
+    expect(policy.cardFrontBlobUrl).toBeNull()
   })
 
   it('a second approved policy is secondary when an active primary exists', async () => {

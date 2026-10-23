@@ -2943,7 +2943,7 @@ export const portalSubmissions = pgTable('portal_submissions', {
   patientId: text('patient_id').notNull().references(() => patients.id),
   kind: text('kind', { enum: ['policy', 'abha'] }).notNull(),
   payload: jsonb('payload').$type<PortalSubmissionPolicyPayload | PortalSubmissionAbhaPayload>().notNull(),
-  documentId: integer('document_id').references(() => documents.id),
+  documentId: integer('document_id').references(() => documents.id, { onDelete: 'set null' }), // 2026-10-26-ws7-submission-doc-fk.sql
   status: text('status', { enum: ['pending', 'approved', 'rejected'] }).default('pending').notNull(),
   submittedAt: timestamp('submitted_at').defaultNow().notNull(),
   reviewedByName: text('reviewed_by_name'),
