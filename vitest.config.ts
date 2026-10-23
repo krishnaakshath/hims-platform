@@ -27,6 +27,8 @@ export default defineConfig({
     // pool's cold TCP+TLS connect cost. Vitest's 5000ms default was tuned
     // for the old driver's behavior and clips real multi-query tests now.
     testTimeout: 15000,
+    // Trials code is exercised by the suite; the flag defaults off in prod.
+    env: { ENABLE_TRIALS: 'true' },
   },
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
