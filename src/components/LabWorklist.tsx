@@ -17,6 +17,8 @@ import { formatDateTimeIn, formatIsoDate } from '@/lib/india-time'
 import { LAB_COLLECT_ROLES, LAB_LABEL_ROLES, LAB_ORDER_ROLES, LAB_RECEIVE_ROLES, LAB_REPORT_READ_ROLES, LAB_REPORT_RELEASE_ROLES, LAB_RESULT_ENTRY_ROLES, LAB_VERIFY_ROLES } from '@/lib/role-policy'
 import { ReleaseReportButton, type ReleasedReport } from '@/components/labs/ReleaseReportButton'
 // end SP5
+import type { AnalyteDef } from '@/lib/labs/analytes' // WS4 T9
+import type { AnalyteResultRow } from '@/lib/queries/lab-result-values' // WS4 T9
 
 export interface WorklistOrder {
   id: number
@@ -44,11 +46,14 @@ export interface WorklistOrder {
   receivedAt: Date | null
   verifiedAt: Date | null
   patientUhid: string | null
-  result: { value: string; unit: string | null; referenceRange?: string | null; notes?: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
+  result: { value: string; unit: string | null; referenceRange?: string | null; notes?: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null; analytes?: AnalyteResultRow[] } | null
   // end SP5
   // WS1 T10: from the requisition (listWorklist sorts stat, then urgent, first).
   priority?: 'routine' | 'urgent' | 'stat'
   fastingRequired?: boolean
+  // WS4 T9: choose each analyte's reference range in the entry form.
+  patientSex?: 'male' | 'female' | null
+  ageDays?: number
 }
 
 export interface LabTestOption {
@@ -174,6 +179,14 @@ function LabRow({
               {' · '}by {o.result.resultedByName}{o.result.amendedAt ? ' (amended)' : ''}
             </p>
           )}
+          {/* WS4 T9: the flagged analytes of a per-analyte result, so the verifier sees them at a glance. */}
+          {o.result && (o.result.analytes ?? []).some((a) => a.flag !== 'normal') && (
+            <p className="text-xs text-foreground">
+              {(o.result.analytes ?? []).filter((a) => a.flag !== 'normal').map((a, i) => (
+                <span key={a.analyteId}>{i > 0 && ' · '}{a.name} {a.value}{a.unit ? ` ${a.unit}` : ''} <span className={FLAG_CLASS[a.flag]}>({FLAG_LABEL[a.flag]})</span></span>
+              ))}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <PriorityChip priority={o.priority} />
@@ -242,7 +255,8 @@ function Section({ title, count, empty, children }: { title: string; count: numb
 }
 
 // `stage` (Wave E P1-15): show only that worklist section (a labs-home tile or the doctor's Verify link).
-export function LabWorklist({ orders, labTests, role, stage = null }: { orders: WorklistOrder[]; labTests: LabTestOption[]; role: Role; stage?: LabStage | null }) {
+// `analytesByTest` (WS4 T9): each test's active analytes; a test listed there is entered per analyte.
+export function LabWorklist({ orders, labTests, role, stage = null, analytesByTest = {} }: { orders: WorklistOrder[]; labTests: LabTestOption[]; role: Role; stage?: LabStage | null; analytesByTest?: Record<number, AnalyteDef[]> }) {
   const router = useRouter()
   const [busyId, setBusyId] = useState<number | null>(null)
   const [rowError, setRowError] = useState<RowError | null>(null)
@@ -407,6 +421,9 @@ export function LabWorklist({ orders, labTests, role, stage = null }: { orders: 
           // Amend: prefill the current result so a correction never blanks a field.
           initial={resultFor.status === 'resulted' && resultFor.result ? resultFor.result : null}
           onClose={() => setResultFor(null)}
+          analytes={analytesByTest[resultFor.testId] ?? []}
+          patientSex={resultFor.patientSex ?? null}
+          ageDays={resultFor.ageDays ?? 0}
         />
       )}
 

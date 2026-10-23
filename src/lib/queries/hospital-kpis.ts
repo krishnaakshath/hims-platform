@@ -12,7 +12,7 @@ import {
   admissions, chargeLines, charges, encounterNotes, encounters, invoices, labOrders, labResults, labTests, medicationDispenses,
   medicationInventory, patientPayments, patients, refunds, rooms,
 } from '@/db/schema'
-import { getOrSetCache } from '@/lib/cache'
+import { getOrSetCache, invalidateCache } from '@/lib/cache'
 import { startOfIstDay, todayIsoIn } from '@/lib/india-time'
 import { listFollowUpWorklist } from '@/lib/queries/follow-up-recall'
 import { countWorklistBuckets, type WorklistBucket } from '@/lib/follow-ups/worklist'
@@ -305,6 +305,13 @@ export const getCollectionsToday = (today = todayIsoIn()) =>
   getOrSetCache(hospitalKpiCacheKey('collections', today), KPI_TTL_SECONDS, () => loadCollectionsToday(today))
 export const getBillingQueue = () => getOrSetCache(hospitalKpiCacheKey('billing-queue'), KPI_TTL_SECONDS, () => loadBillingQueue())
 export const getLabKpis = (today = todayIsoIn()) => getOrSetCache(hospitalKpiCacheKey('labs', today), KPI_TTL_SECONDS, () => loadLabKpis(today))
+// WS4 T9 (spec 3.5 item 26, lane ruling R6): every result write (and, from Task 12, every verify,
+// notify and acknowledge) drops today's lab KPI entry so the tiles never lag a critical value.
+// Never throws (invalidateCache logs a failure); call it after the write has committed.
+export async function invalidateLabKpis(now: Date = new Date()): Promise<void> {
+  await invalidateCache(hospitalKpiCacheKey('labs', todayIsoIn(undefined, now)))
+}
+// end WS4 T9
 export const getPharmacyKpis = (today = todayIsoIn()) =>
   getOrSetCache(hospitalKpiCacheKey('pharmacy', today), KPI_TTL_SECONDS, () => loadPharmacyKpis(today))
 export const getFollowUpBuckets = (providerId: number | null = null, today = todayIsoIn()) =>

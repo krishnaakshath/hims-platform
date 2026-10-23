@@ -53,6 +53,11 @@ export async function listAnalytesForTests(labTestIds: number[]): Promise<Map<nu
   return load(getDb(), [...new Set(labTestIds)], false)
 }
 
+/** WS4 T9: a test's active analytes on the caller's executor (result entry reads them in its transaction). */
+export async function loadActiveAnalytesForTest(ex: Pick<WriteExecutor, 'select'>, labTestId: number): Promise<AnalyteRecord[]> {
+  return (await load(ex, [labTestId], false)).get(labTestId) ?? []
+}
+
 /** The setup editor's load: null for an unknown test. */
 export async function getLabTestWithAnalytes(labTestId: number): Promise<{ test: { id: number; name: string; code: string }; analytes: AnalyteRecord[] } | null> {
   const [test] = await getDb().select({ id: labTests.id, name: labTests.name, code: labTests.code }).from(labTests).where(eq(labTests.id, labTestId)).limit(1)

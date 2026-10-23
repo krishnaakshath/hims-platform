@@ -843,6 +843,20 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   async function result(orderId: number, value: string, flag: 'normal' | 'abnormal' | 'critical', at: Date, unit?: string, referenceRange?: string, notes?: string) {
     must(await recordLabResult(orderId, { value, flag, ...(unit ? { unit } : {}), ...(referenceRange ? { referenceRange } : {}), ...(notes ? { notes } : {}) }, { kind: 'staff', session: labs }, { now: at }), 'lab result')
   }
+  // WS4 T9: a test with analytes is entered one value per analyte; flags are computed from the
+  // patient's age/sex range exactly as at the bench (spec 3.3 items 18-20).
+  async function analyteResult(orderId: number, testCode: string, values: Record<string, string>, at: Date, notes?: string) {
+    const defs = await db.select({ id: labTestAnalytes.id, code: labTestAnalytes.code }).from(labTestAnalytes)
+      .where(and(eq(labTestAnalytes.labTestId, t(testCode)), eq(labTestAnalytes.isActive, true)))
+    const idOf = new Map(defs.map((d) => [d.code, d.id]))
+    const analytes = Object.entries(values).map(([code, value]) => {
+      const analyteId = idOf.get(code)
+      if (analyteId === undefined) throw new Error(`Seed step failed: lab result (${testCode} has no analyte ${code})`)
+      return { analyteId, value }
+    })
+    must(await recordLabResult(orderId, { analytes, ...(notes ? { notes } : {}) }, { kind: 'staff', session: labs }, { now: at }), 'lab result')
+  }
+  // end WS4 T9
   const fakeRelease = (at: Date) => ({
     render: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]),
     putBlob: async (path: string) => ({ url: `seed-demo://${path}` }),
@@ -856,8 +870,12 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     const r = await requisition(v.patientId, v.doctor.name, ['CBC-DIFF', 'LFT'], istAt(day(-5), '09:30'), v.encounterId)
     labOrderCount += r.orderIds.length
     for (const id of r.orderIds) await collectAndReceive(id, istAt(day(-5), '09:45'))
-    await result(r.orderIds[0], '7.8', 'normal', istAt(day(-5), '13:00'), 'x10^3/µL', '4.0-11.0')
-    await result(r.orderIds[1], 'ALT 86', 'abnormal', istAt(day(-5), '13:10'), 'U/L', '7-56', 'Mildly raised transaminases')
+    await analyteResult(r.orderIds[0], 'CBC-DIFF', {
+      HGB: '14.2', WBC: '7.8', NEUT: '62', LYMPH: '28', MONO: '6', EOS: '3', BASO: '1', PLT: '265', RBC: '4.9', HCT: '43.0', MCV: '88.0', MCH: '29.0', MCHC: '33.0',
+    }, istAt(day(-5), '13:00'))
+    await analyteResult(r.orderIds[1], 'LFT', {
+      TBIL: '0.9', DBIL: '0.2', AST: '64', ALT: '86', ALP: '112', TP: '7.1', ALB: '4.2',
+    }, istAt(day(-5), '13:10'), 'Mildly raised transaminases')
     for (const id of r.orderIds) must(await verifyLabResult(id, pathologist, istAt(day(-5), '15:00')), 'verify')
     must(await releaseLabReport(r.requisitionId, pathologist, fakeRelease(istAt(day(-5), '15:30'))), 'release report')
   }
@@ -866,9 +884,11 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     const r = await requisition(pid(12), 'Dr. Ananya Rao', ['DENGUE-NS1', 'CBC-DIFF'], istAt(day(-3), '11:00'))
     labOrderCount += r.orderIds.length
     for (const id of r.orderIds) await collectAndReceive(id, istAt(day(-3), '11:15'))
-    await result(r.orderIds[0], 'Positive', 'abnormal', istAt(day(-3), '16:00'), undefined, 'Negative')
+    await analyteResult(r.orderIds[0], 'DENGUE-NS1', { NS1: 'Positive' }, istAt(day(-3), '16:00'))
     must(await verifyLabResult(r.orderIds[0], pathologist, istAt(day(-3), '17:00')), 'verify')
-    await result(r.orderIds[1], 'Platelets 38', 'critical', earlier(60), 'x10^3/µL', '150-450', 'Critical value phoned to the ward')
+    await analyteResult(r.orderIds[1], 'CBC-DIFF', {
+      HGB: '13.6', WBC: '3.1', NEUT: '48', LYMPH: '42', MONO: '7', EOS: '2', BASO: '1', PLT: '38', RBC: '4.8', HCT: '44.0', MCV: '90.0', MCH: '29.5', MCHC: '33.0',
+    }, earlier(60), 'Critical value phoned to the ward')
   }
   // R3: received at the bench, awaiting result.
   {
@@ -927,7 +947,7 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
       const sampleIds = [...b.sampleIds.values()]
       must(await collectHomeVisit(b.visit.id, sampleIds, sessions.collector, istAt(day(-1), '07:40')), 'collect at home')
       for (const sampleId of sampleIds) must(await receiveLabSample(sampleId, labs, istAt(day(-1), '10:00')), 'receive home sample')
-      await result(r.orderIds[0], 'LDL 168', 'abnormal', istAt(day(-1), '14:00'), 'mg/dL', '<100')
+      await analyteResult(r.orderIds[0], 'LIPID', { CHOL: '238', TG: '172', HDL: '38', LDL: '168', VLDL: '34' }, istAt(day(-1), '14:00'))
     }
     // H3: home visit cancelled at the patient's request, the test then cancelled.
     {

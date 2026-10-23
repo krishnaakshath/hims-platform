@@ -19,16 +19,52 @@ const optionalText = (max: number) => z.string().trim().max(max).optional()
 
 // ── Results, cancel, receive ────────────────────────────────────────────────
 
-export const labResultSchema = z
+const LAB_RESULT_FLAGS = ['normal', 'abnormal', 'critical'] as const
+
+const singleValueResultSchema = z
   .object({
     value: z.string().trim().min(1).max(200),
     unit: optionalText(40),
     referenceRange: optionalText(120),
-    flag: z.enum(['normal', 'abnormal', 'critical']),
+    flag: z.enum(LAB_RESULT_FLAGS),
     notes: optionalText(1000),
   })
   .strict()
+export type SingleValueResultRequest = z.infer<typeof singleValueResultSchema>
+
+// WS4 T9 (spec 3.3 items 18-19): a test with analytes is entered one value per analyte. A flag
+// override raises the automatic flag (never lowers it) or supplies one where there is none.
+export const ANALYTE_VALUE_MAX = 60
+export const FLAG_REASON_MIN = 5
+export const FLAG_REASON_MAX = 200
+export const ANALYTE_RESULTS_MAX = 40
+const analyteResultEntrySchema = z
+  .object({
+    analyteId: positiveInt,
+    value: z.string().trim().min(1).max(ANALYTE_VALUE_MAX),
+    flagOverride: z
+      .object({ flag: z.enum(LAB_RESULT_FLAGS), reason: z.string().trim().min(FLAG_REASON_MIN).max(FLAG_REASON_MAX) })
+      .strict()
+      .optional(),
+  })
+  .strict()
+
+export const analyteResultSchema = z
+  .object({
+    analytes: z
+      .array(analyteResultEntrySchema)
+      .min(1)
+      .max(ANALYTE_RESULTS_MAX)
+      .refine((a) => new Set(a.map((e) => e.analyteId)).size === a.length, 'Each analyte may appear only once'),
+    notes: optionalText(1000),
+  })
+  .strict()
+export type AnalyteResultRequest = z.infer<typeof analyteResultSchema>
+
+export const labResultSchema = z.union([singleValueResultSchema, analyteResultSchema])
 export type LabResultRequest = z.infer<typeof labResultSchema>
+export const isAnalyteResultRequest = (r: LabResultRequest): r is AnalyteResultRequest => 'analytes' in r
+// end WS4 T9
 
 export const labOrderCancelSchema = z.object({ reason: z.string().trim().min(1).max(300) }).strict()
 

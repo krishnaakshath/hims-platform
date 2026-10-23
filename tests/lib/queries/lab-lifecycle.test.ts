@@ -193,11 +193,11 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
     const staff = { kind: 'staff' as const, session: S }
     expect(await recordLabResult(c.id, RESULT, staff, { now: NOW })).toEqual({ ok: false, error: 'invalid_status' })
     await receiveLabSample(c.sampleId, S, NOW)
-    expect(await recordLabResult(c.id, RESULT, staff, { now: NOW })).toEqual({ ok: true, patientId: P, amended: false })
+    expect(await recordLabResult(c.id, RESULT, staff, { now: NOW })).toEqual({ ok: true, patientId: P, amended: false, flag: 'normal' })
     const [r1] = await getDb().select().from(labResults).where(eq(labResults.labOrderId, c.id))
     expect(r1).toMatchObject({ value: '5.4', resultedByName: PROBE, resultedByUserId: null, amendedAt: null })
     expect((await getLabOrder(c.id))?.status).toBe('resulted')
-    expect(await recordLabResult(c.id, { ...RESULT, value: '5.6' }, staff, { now: NOW3 })).toEqual({ ok: true, patientId: P, amended: true })
+    expect(await recordLabResult(c.id, { ...RESULT, value: '5.6' }, staff, { now: NOW3 })).toEqual({ ok: true, patientId: P, amended: true, flag: 'normal' })
     const [r2] = await getDb().select().from(labResults).where(eq(labResults.labOrderId, c.id))
     expect(r2.value).toBe('5.6')
     expect(r2.amendedAt?.getTime()).toBe(NOW3.getTime())
@@ -208,7 +208,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
 
   it('LIS result on a collected order stamps receipt and results it', async () => {
     const c = await collected()
-    expect(await recordLabResult(c.id, RESULT, { kind: 'lis' }, { expectedPatientId: P, now: NOW })).toEqual({ ok: true, patientId: P, amended: false })
+    expect(await recordLabResult(c.id, RESULT, { kind: 'lis' }, { expectedPatientId: P, now: NOW })).toEqual({ ok: true, patientId: P, amended: false, flag: 'normal' })
     const o = await getLabOrder(c.id)
     expect(o).toMatchObject({ status: 'resulted', receivedByName: 'System (LIS API)' })
     expect(o?.receivedAt?.getTime()).toBe(NOW.getTime())
@@ -217,7 +217,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
     const lis = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, 'LIS integration'), eq(auditLog.action, `accepted LIS lab result for order ${c.id}`)))
     expect(lis).toHaveLength(1)
     // A later LIS message amends; an order not yet collected is refused.
-    expect(await recordLabResult(c.id, { ...RESULT, value: '5.5' }, { kind: 'lis' }, { now: NOW3 })).toEqual({ ok: true, patientId: P, amended: true })
+    expect(await recordLabResult(c.id, { ...RESULT, value: '5.5' }, { kind: 'lis' }, { now: NOW3 })).toEqual({ ok: true, patientId: P, amended: true, flag: 'normal' })
     const o2 = await makeOrder()
     expect(await recordLabResult(o2.id, RESULT, { kind: 'lis' }, { now: NOW })).toEqual({ ok: false, error: 'invalid_status' })
   })

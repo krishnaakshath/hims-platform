@@ -39,6 +39,22 @@ export function labTransitionError(error: LabTransitionError) {
   return errorResponse(409, LAB_TRANSITION_CONFLICT[error])
 }
 
+// WS4 T9: per-analyte result entry refusals (422 with a stable code; never echoes input).
+export const ANALYTE_ENTRY_MESSAGES = {
+  analytes_required: 'This test is entered one value per analyte.',
+  analyte_unknown: 'A value was sent for an analyte this test does not have.',
+  analyte_missing: 'Enter a value for every analyte of this test.',
+  flag_required: 'Choose a flag, with a reason, for each value the system cannot flag automatically.',
+  flag_below_computed: 'A flag can be raised but never lowered below the automatic flag. Correct the value by amendment instead.',
+  invalid_numeric: 'Enter a number for each numeric analyte.',
+} as const
+export type AnalyteEntryErrorCode = keyof typeof ANALYTE_ENTRY_MESSAGES
+
+export function analyteEntryError(code: AnalyteEntryErrorCode, analyteId?: number) {
+  return NextResponse.json({ error: ANALYTE_ENTRY_MESSAGES[code], code, ...(analyteId !== undefined ? { analyteId } : {}) }, { status: 422 })
+}
+// end WS4 T9
+
 /**
  * A thrown error: a missing blob store or unreachable database is a 503 (one [config] log
  * line); a deadlock / serialization failure (nothing was written) is a 409 asking to

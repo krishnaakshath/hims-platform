@@ -179,3 +179,20 @@ describe('LabWorklist priority chip', () => {
     expect(screen.getAllByText('Fasting')).toHaveLength(1)
   })
 })
+
+// WS4 T9: a test with analytes opens the per-analyte form, with the order's sex and age choosing ranges.
+describe('LabWorklist per-analyte entry', () => {
+  it('passes the test\'s analytes, the patient sex and age to the result form', () => {
+    const hgb = {
+      id: 11, code: 'HGB', name: 'Haemoglobin', unit: 'g/dL', valueType: 'numeric' as const, decimals: 1, options: null, abnormalOptions: null, criticalOptions: null,
+      ranges: [{ sex: 'female' as const, ageMinDays: 6570, ageMaxDays: null, normalLow: 12, normalHigh: 15.5, criticalLow: 7, criticalHigh: 20, displayText: null }],
+    }
+    const o = order({ status: 'received', testId: 42, testName: 'CBC', sampleId: 'L26100800440', patientSex: 'female', ageDays: 30 * 365 })
+    render(<LabWorklist orders={[o]} labTests={[]} role="labs" analytesByTest={{ 42: [hgb] }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Enter result' }))
+    expect(screen.queryByLabelText('Result value')).toBeNull()
+    expect(screen.getByText('12.0-15.5 g/dL')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Value for Haemoglobin'), { target: { value: '6.5' } })
+    expect(screen.getByText('Critical low')).toBeInTheDocument()
+  })
+})

@@ -49,7 +49,7 @@ describe('POST /api/lab-orders/[id]/result', () => {
   })
 
   it('labs records a staff result through recordLabResult', async () => {
-    vi.mocked(recordLabResult).mockResolvedValue({ ok: true, patientId: 'RD-1', amended: false })
+    vi.mocked(recordLabResult).mockResolvedValue({ ok: true, patientId: 'RD-1', amended: false, flag: 'normal' })
     const res = await RESULT(send(RESULT_BODY), ctx('4'))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })

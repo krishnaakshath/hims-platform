@@ -20,16 +20,21 @@
 // locks an encounter.
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { chargeLines, homeCollectionVisits, labOrders, labResults, type LabOrderRow } from '@/db/schema'
+import { chargeLines, homeCollectionVisits, labOrders, labResults, patients, type LabOrderRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { istDateOf } from '@/lib/india-time'
 import { formatSampleId, parseSampleId } from '@/lib/labs/sample-id'
 import { canTransitionLabOrder, type LabOrderStatus } from '@/lib/labs/status'
-import type { LabResultRequest } from '@/lib/labs/validation'
+import { isAnalyteResultRequest, type LabResultRequest } from '@/lib/labs/validation'
 import { logIntegrationEvent } from '@/lib/patient-portal-audit'
 import type { WriteExecutor } from '@/lib/queries/executor'
 import { lockPatientBilling } from '@/lib/queries/charge-capture' // WS2 T10
+// WS4 T9
+import type { LabResultFlag } from '@/lib/labs/analytes'
+import { loadActiveAnalytesForTest } from '@/lib/queries/lab-analytes'
+import { evaluateAnalyteEntries, writeAnalyteResults, type AnalyteEntryError } from '@/lib/queries/lab-result-values'
+// end WS4 T9
 
 export type LabActor = { kind: 'staff'; session: Session } | { kind: 'lis' }
 
@@ -143,14 +148,20 @@ export async function receiveLabSample(sampleIdInput: string, session: Session, 
 // ── Result entry / amendment (staff or LIS) ────────────────────────────────
 
 export type RecordLabResultResult =
-  | { ok: true; patientId: string; amended: boolean }
+  | { ok: true; patientId: string; amended: boolean; flag: LabResultFlag }
   | { ok: false; error: 'not_found' | 'patient_mismatch' | 'invalid_status' }
+  | { ok: false; error: AnalyteEntryError; analyteId?: number } // WS4 T9
 
 /**
  * Staff: `received` → insert, `resulted` → amend. LIS: additionally `collected`, which first
  * stamps receipt as the LIS (Ruling 4). Anything else (incl. verified/reported: corrections after
  * verification are out of scope) is `invalid_status`. `expectedPatientId` (the webhook's patient
  * binding) is checked before any write.
+ *
+ * WS4 T9: a test with active analytes takes a per-analyte body only (a single value is
+ * `analytes_required`, so the LIS webhook is refused too); the summary row is derived from the
+ * values (spec 3.3 item 18). A per-analyte body to a test without analytes is `analyte_unknown`.
+ * Every refusal is decided before the first write.
  */
 export async function recordLabResult(
   orderId: number,
@@ -159,7 +170,7 @@ export async function recordLabResult(
   opts: { expectedPatientId?: string; now?: Date } = {},
 ): Promise<RecordLabResultResult> {
   const now = opts.now ?? new Date()
-  return getDb().transaction(async (tx) => {
+  return getDb().transaction(async (tx): Promise<RecordLabResultResult> => {
     const order = await lockOrder(tx, orderId)
     if (!order) return { ok: false, error: 'not_found' } as const
     if (opts.expectedPatientId !== undefined && order.patientId !== opts.expectedPatientId) return { ok: false, error: 'patient_mismatch' } as const
@@ -171,29 +182,52 @@ export async function recordLabResult(
     if (lisReceipt && !canTransitionLabOrder('collected', 'received')) return { ok: false, error: 'invalid_status' } as const
     if (!amended && !canTransitionLabOrder(fromStatus, 'resulted')) return { ok: false, error: 'invalid_status' } as const
 
+    // WS4 T9: per-analyte tests. Age on the collection date, else the result date (IST).
+    const defs = await loadActiveAnalytesForTest(tx, order.labTestId)
+    const perAnalyte = isAnalyteResultRequest(input)
+    if (defs.length > 0 && !perAnalyte) return { ok: false, error: 'analytes_required' } as const
+    if (defs.length === 0 && perAnalyte) return { ok: false, error: 'analyte_unknown' } as const
+    let analyteInput: { patient: { dob: string; gender: string | null }; onDate: string } | null = null
+    let summary: { value: string; unit: string | null; referenceRange: string | null; flag: LabResultFlag }
+    if (perAnalyte) {
+      const [patient] = await tx.select({ dob: patients.dob, gender: patients.gender }).from(patients).where(eq(patients.id, order.patientId))
+      analyteInput = { patient: { dob: patient.dob, gender: patient.gender }, onDate: istDateOf(order.collectedAt ?? now) }
+      const ev = evaluateAnalyteEntries({ ...analyteInput, defs, entries: input.analytes })
+      if (!ev.ok) return ev
+      summary = ev.summary
+    } else {
+      summary = { value: input.value, unit: input.unit ?? null, referenceRange: input.referenceRange ?? null, flag: input.flag }
+    }
+    // end WS4 T9
+
     const resultedByName = lis ? LIS_ACTOR_NAME : actor.session.name
     const resultedByUserId = lis ? null : actor.session.userId
     const fields = {
-      value: input.value,
-      unit: input.unit ?? null,
-      referenceRange: input.referenceRange ?? null,
-      flag: input.flag,
+      value: summary.value,
+      unit: summary.unit,
+      referenceRange: summary.referenceRange,
+      flag: summary.flag,
       notes: input.notes ?? null,
       resultedByName,
       resultedByUserId,
     }
 
+    let labResultId: number
     if (amended) {
       // A legacy `resulted` order should always have its row; upsert covers one that does not.
-      await tx
+      const [row] = await tx
         .insert(labResults)
         .values({ labOrderId: orderId, ...fields, resultedAt: now, amendedAt: now })
         .onConflictDoUpdate({ target: labResults.labOrderId, set: { ...fields, amendedAt: now } })
+        .returning({ id: labResults.id })
+      labResultId = row.id
     } else {
-      await tx
+      const [row] = await tx
         .insert(labResults)
         .values({ labOrderId: orderId, ...fields, resultedAt: now })
         .onConflictDoUpdate({ target: labResults.labOrderId, set: { ...fields, resultedAt: now, amendedAt: null } })
+        .returning({ id: labResults.id })
+      labResultId = row.id
       await tx
         .update(labOrders)
         .set({
@@ -204,9 +238,15 @@ export async function recordLabResult(
         .where(eq(labOrders.id, orderId))
     }
 
+    // WS4 T9: the values (already validated above, so this cannot refuse).
+    if (perAnalyte && analyteInput) {
+      const written = await writeAnalyteResults(tx, { orderId, labResultId, ...analyteInput, defs, entries: input.analytes })
+      if (!written.ok) throw new Error('analyte entries changed between validation and write')
+    }
+
     if (lis) await logIntegrationEvent(`accepted LIS lab result for order ${orderId}`, order.patientId, undefined, tx)
     else await logAudit(actor.session, amended ? 'amended lab result' : 'entered lab result', order.patientId, `order=${orderId}`, tx)
-    return { ok: true, patientId: order.patientId, amended } as const
+    return { ok: true, patientId: order.patientId, amended, flag: summary.flag } as const
   })
 }
 
