@@ -61,6 +61,13 @@ export function collectorVisitError(error: 'not_found' | 'not_assigned' | 'not_d
   if (error === 'not_due') return notDueResponse(visitDate)
   return errorResponse(409, NOT_COLLECTABLE_MESSAGE)
 }
+
+/** Ruling R24: one door receipt per visit, within the amount due. */
+export function doorPaymentRefusalResponse(error: 'already_paid' | 'amount_exceeds_due') {
+  return error === 'already_paid'
+    ? errorResponse(409, 'A payment for this visit has already been recorded.', 'already_paid')
+    : errorResponse(422, 'The amount is more than is due for this visit.', 'amount_exceeds_due')
+}
 // end WS6 T12
 
 type VisitNotice =

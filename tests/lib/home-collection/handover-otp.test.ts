@@ -222,6 +222,9 @@ describe.skipIf(!process.env.DATABASE_URL)('handover code and visit-date guard (
     // Locked: even the right code is refused now, and nothing else changed.
     expect(await collectHomeVisit(visit.id, [sampleId], COL, later(60_000), { otp })).toEqual({ ok: false, error: 'otp_locked' })
     expect(await visitRow(visit.id)).toMatchObject({ status: 'booked', handoverOtpAttempts: 5, handoverVerifiedAt: null })
+    // Ruling R24: a locked code cannot be side-stepped with a waiver.
+    expect(await collectHomeVisit(visit.id, [sampleId], COL, later(60_000), { waiverReason: 'sms_unavailable' })).toEqual({ ok: false, error: 'otp_locked' })
+    expect(await visitRow(visit.id)).toMatchObject({ status: 'booked', handoverWaiverReason: null })
     const [order] = await getDb().select().from(labOrders).where(eq(labOrders.homeCollectionVisitId, visit.id))
     expect(order.status).toBe('scheduled')
 

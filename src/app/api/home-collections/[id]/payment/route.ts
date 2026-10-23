@@ -3,20 +3,21 @@
 // QR with createUpiRequest (the money is recorded only when confirmed with the payer's UTR, see
 // ./confirm). COLLECTOR_ROUTE_ROLES, and only for a visit the session may act on today (IST):
 // assertCollectorVisit (Ruling R4) gives 403 not assigned, 404 not found, 409 not due / not collectable.
-// Both writes carry the note `Home collection visit #<id>`.
+// Both writes carry the note `Home collection visit #<id>`. Ruling R24: under the patient billing
+// lock, a visit with a door receipt already is 409 already_paid, and an amount above the visit's
+// due (the quotes of its scheduled tests) is 422 amount_exceeds_due.
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { todayIsoIn } from '@/lib/india-time'
-import { assertCollectorVisit } from '@/lib/queries/home-collections'
-import { recordPayment } from '@/lib/queries/patient-ledger'
+import { assertCollectorVisit, checkDoorPayment, takeDoorCashPayment } from '@/lib/queries/home-collections'
 import { createUpiRequest } from '@/lib/payments/manual-upi'
 import { UPI_NOT_CONFIGURED_MESSAGE } from '@/lib/payments/provider'
 import { doorPaymentNote } from '@/lib/home-collection/rules'
 import { errorResponse, invalidBody, labServerError, parseId, readJsonBody } from '@/lib/labs/route-responses'
-import { INVALID_VISIT_ID, collectorVisitError, forbidden } from '@/lib/home-collection/route-responses'
+import { INVALID_VISIT_ID, collectorVisitError, doorPaymentRefusalResponse, forbidden } from '@/lib/home-collection/route-responses'
 
 const doorPaymentSchema = z.object({
   mode: z.enum(['cash', 'upi']),
@@ -42,15 +43,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const note = doorPaymentNote(visitId)
 
     if (mode === 'cash') {
-      const r = await recordPayment({ patientId: guard.patientId, kind: 'receipt', mode: 'cash', reference: note, amountPaise }, session)
+      const r = await takeDoorCashPayment(visitId, guard.patientId, amountPaise, session)
       if (!r.ok) {
+        if (r.error === 'already_paid' || r.error === 'amount_exceeds_due') return doorPaymentRefusalResponse(r.error)
         if (r.error === 'series_exhausted') return errorResponse(409, 'The receipt number series for this financial year is full')
-        return errorResponse(404, 'Patient not found')
+        return errorResponse(409, 'This payment could not be recorded')
       }
       await logAudit(session, 'took home collection payment', guard.patientId, `visit=${visitId} mode=cash receipt=${r.receiptNumber} amount=${amountPaise}`)
       return NextResponse.json({ receiptNumber: r.receiptNumber }, { status: 201 })
     }
 
+    const refusal = await checkDoorPayment(visitId, guard.patientId, amountPaise)
+    if (refusal) return doorPaymentRefusalResponse(refusal)
     const r = await createUpiRequest({ patientId: guard.patientId, amountPaise, note, kind: 'receipt' }, session)
     if (!r.ok) {
       if (r.error === 'not_configured') return errorResponse(503, UPI_NOT_CONFIGURED_MESSAGE)

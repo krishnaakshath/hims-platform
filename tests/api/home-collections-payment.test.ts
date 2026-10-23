@@ -11,7 +11,9 @@ vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => session) }))
 import { POST as PAY } from '@/app/api/home-collections/[id]/payment/route'
 import { POST as CONFIRM } from '@/app/api/home-collections/[id]/payment/confirm/route'
 import { getDb } from '@/db/client'
-import { auditLog, homeCollectionVisits, homeCollectionWindows, patientPayments, patients, paymentRequests, users } from '@/db/schema'
+import {
+  auditLog, departments, homeCollectionVisits, homeCollectionWindows, labOrders, labTests, patientPayments, patients, paymentRequests, providers, users,
+} from '@/db/schema'
 import { addDaysIso } from '@/lib/follow-ups/rules'
 import { todayIsoIn } from '@/lib/india-time'
 
@@ -19,7 +21,7 @@ const RUN = `${Date.now()}`
 const TAG = RUN.slice(-6)
 const PROBE_COL = `TEST_WS6_PAY_COL-${RUN}`
 const PROBE_COL2 = `TEST_WS6_PAY_COL2-${RUN}`
-const P = Array.from({ length: 12 }, (_, i) => `TEST-WS6-PAY-${RUN}-${i}`)
+const P = Array.from({ length: 16 }, (_, i) => `TEST-WS6-PAY-${RUN}-${i}`)
 let nextP = 0
 const fresh = () => P[nextP++]
 /** Random 12-digit UTRs (not derived from RUN, which appears in names and audit rows). */
@@ -28,6 +30,11 @@ const UTR = randomUtr()
 const UTR2 = randomUtr()
 
 let windowId = 0
+let labTestId = 0
+let providerId = 0
+let departmentId = 0
+/** Each visit carries one scheduled test quoted at this much (the amount due), unless overridden. */
+const DUE = 50000
 let colUser = 0
 let colUser2 = 0
 let COL: Session
@@ -39,12 +46,15 @@ const post = (handler: typeof PAY, path: string, id: number | string, body: unkn
 const pay = (id: number | string, body: unknown) => post(PAY, 'payment', id, body)
 const confirm = (id: number | string, body: unknown) => post(CONFIRM, 'payment/confirm', id, body)
 
-async function visitFor(patientId: string, over: Partial<typeof homeCollectionVisits.$inferInsert> = {}) {
+async function visitFor(patientId: string, over: Partial<typeof homeCollectionVisits.$inferInsert> = {}, duePaise: number = DUE) {
   const [v] = await getDb().insert(homeCollectionVisits).values({
     patientId, visitDate: TODAY, windowId, windowLabel: `TEST-WS6-${TAG}-w`, windowStart: '10:00', windowEnd: '12:00',
     addressLine1: '12 Test Road', city: 'Test City', stateCode: 'IN-KA', pinCode: '990001',
     contactPhone: '+919845013210', bookedByName: PROBE_COL, collectorUserId: colUser, ...over,
   }).returning()
+  await getDb().insert(labOrders).values({
+    patientId, labTestId, orderedByProviderId: providerId, status: 'scheduled', homeCollectionVisitId: v.id, quotedPricePaise: duePaise, quoteStatus: 'quoted',
+  })
   return v
 }
 const paymentsOf = (patientId: string) => getDb().select().from(patientPayments).where(eq(patientPayments.patientId, patientId))
@@ -61,6 +71,12 @@ describe.skipIf(!process.env.DATABASE_URL)('home collection payment at the door 
     })))
     const [w] = await db.insert(homeCollectionWindows).values({ label: `TEST-WS6-${TAG}-w`, startTime: '10:00', endTime: '12:00', capacity: 50 }).returning()
     windowId = w.id
+    const [dept] = await db.insert(departments).values({ code: `TW6P${TAG}`, name: `TEST_WS6 Pay ${RUN}` }).returning()
+    departmentId = dept.id
+    const [pr] = await db.insert(providers).values({ name: `TEST_WS6 Dr Pay ${RUN}`, specialty: 'Pathology', colorTag: '#000000', departmentId }).returning()
+    providerId = pr.id
+    const [t] = await db.insert(labTests).values({ name: `TEST_WS6 pay lab ${RUN}`, code: `TEST-WS6-PAY-${RUN}`, container: 'edta_lavender', sampleType: 'blood' }).returning()
+    labTestId = t.id
     const us = await db.insert(users).values([
       { name: PROBE_COL, email: `test-ws6-pay-col-${RUN}@example.invalid`, role: 'collector' },
       { name: PROBE_COL2, email: `test-ws6-pay-col2-${RUN}@example.invalid`, role: 'collector' },
@@ -80,7 +96,11 @@ describe.skipIf(!process.env.DATABASE_URL)('home collection payment at the door 
       await tx.delete(paymentRequests).where(inArray(paymentRequests.patientId, P))
       await tx.delete(patientPayments).where(inArray(patientPayments.patientId, P))
     })
+    await db.delete(labOrders).where(inArray(labOrders.patientId, P))
     await db.delete(homeCollectionVisits).where(inArray(homeCollectionVisits.patientId, P))
+    await db.delete(labTests).where(eq(labTests.id, labTestId))
+    await db.delete(providers).where(eq(providers.id, providerId))
+    await db.delete(departments).where(eq(departments.id, departmentId))
     await db.delete(homeCollectionWindows).where(eq(homeCollectionWindows.id, windowId))
     await db.delete(auditLog).where(inArray(auditLog.userName, [PROBE_COL, PROBE_COL2]))
     await db.delete(users).where(inArray(users.id, [colUser, colUser2]))
@@ -133,11 +153,16 @@ describe.skipIf(!process.env.DATABASE_URL)('home collection payment at the door 
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ receiptNumber: receipt.receiptNumber, mode: 'upi', amountPaise: 30000 })
 
-    // A second QR for the same visit, confirmed with the UTR already used.
-    const again = await (await pay(visit.id, { mode: 'upi', amountPaise: 30000 })).json()
-    const dup = await confirm(visit.id, { requestId: again.requestId, utr: UTR })
+    // The visit is paid now: another QR is refused (Ruling R24).
+    const again = await pay(visit.id, { mode: 'upi', amountPaise: 30000 })
+    expect([again.status, await again.json()]).toEqual([409, { error: 'A payment for this visit has already been recorded.', code: 'already_paid' }])
+    // The same UTR typed against another visit's QR is the existing duplicate-UTR 409, and posts nothing.
+    const other = await visitFor(fresh())
+    const otherQr = await (await pay(other.id, { mode: 'upi', amountPaise: 30000 })).json()
+    const dup = await confirm(other.id, { requestId: otherQr.requestId, utr: UTR })
     expect([dup.status, await dup.json()]).toEqual([409, { error: 'This UTR has already been recorded' }])
     expect(await paymentsOf(visit.patientId)).toHaveLength(1)
+    expect(await paymentsOf(other.patientId)).toHaveLength(0)
 
     const audits = await getDb().select().from(auditLog).where(eq(auditLog.patientId, visit.patientId))
     expect(JSON.stringify(audits)).not.toContain(UTR)
@@ -204,5 +229,42 @@ describe.skipIf(!process.env.DATABASE_URL)('home collection payment at the door 
       expect((await pay(1, '{not json')).status).toBe(403)
       expect((await confirm(1, '{not json')).status).toBe(403)
     }
+  })
+
+  // Ruling R24
+  it('a second cash post for the visit is 409 already_paid and still one receipt', async () => {
+    const visit = await visitFor(fresh())
+    expect((await pay(visit.id, { mode: 'cash', amountPaise: DUE })).status).toBe(201)
+    const again = await pay(visit.id, { mode: 'cash', amountPaise: 100 })
+    expect([again.status, await again.json()]).toEqual([409, { error: 'A payment for this visit has already been recorded.', code: 'already_paid' }])
+    expect(await paymentsOf(visit.patientId)).toHaveLength(1)
+  })
+
+  it('two concurrent cash posts for one visit: exactly one receipt', async () => {
+    const visit = await visitFor(fresh())
+    const rs = await Promise.all([pay(visit.id, { mode: 'cash', amountPaise: DUE }), pay(visit.id, { mode: 'cash', amountPaise: DUE })])
+    expect(rs.map((r) => r.status).sort()).toEqual([201, 409])
+    expect(await paymentsOf(visit.patientId)).toHaveLength(1)
+  })
+
+  it('an amount above the amount due is 422 amount_exceeds_due, for cash and UPI', async () => {
+    const visit = await visitFor(fresh(), {}, 20000)
+    for (const mode of ['cash', 'upi'] as const) {
+      const res = await pay(visit.id, { mode, amountPaise: 20001 })
+      expect([res.status, await res.json()]).toEqual([422, { error: 'The amount is more than is due for this visit.', code: 'amount_exceeds_due' }])
+    }
+    expect(await paymentsOf(visit.patientId)).toHaveLength(0)
+    expect(await getDb().select().from(paymentRequests).where(eq(paymentRequests.patientId, visit.patientId))).toHaveLength(0)
+    expect((await pay(visit.id, { mode: 'cash', amountPaise: 20000 })).status).toBe(201)
+  })
+
+  it("a request for this patient but not raised for this visit's door note cannot be confirmed (404)", async () => {
+    const visit = await visitFor(fresh())
+    const [req] = await getDb().insert(paymentRequests).values({
+      patientId: visit.patientId, amountPaise: 10000, vpa: 'hospital.test@ybl', note: 'Hospital payment #1', createdBy: PROBE_COL,
+    }).returning()
+    const res = await confirm(visit.id, { requestId: req.id, utr: UTR2 })
+    expect([res.status, await res.json()]).toEqual([404, { error: 'Payment request not found' }])
+    expect(await paymentsOf(visit.patientId)).toHaveLength(0)
   })
 })

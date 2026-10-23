@@ -1,7 +1,8 @@
 // WS6 T12: POST /api/home-collections/[id]/payment/confirm -- record a door UPI payment with the
 // payer's UTR through confirmUpiRequest (one receipt; a UTR already recorded is a 409 on the
 // existing path). COLLECTOR_ROUTE_ROLES, behind the same door guard as the payment route, and the
-// request must be one raised for this visit's patient (otherwise 404, as if it did not exist).
+// request must be one raised for this visit (its patient and the visit's door note; otherwise 404,
+// as if it did not exist), and the visit must not already have a door receipt (409 already_paid).
 // The UTR is never returned, logged or audited.
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -9,11 +10,12 @@ import { requireSession } from '@/lib/auth'
 import { COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { todayIsoIn } from '@/lib/india-time'
-import { assertCollectorVisit, upiRequestPatientId } from '@/lib/queries/home-collections'
+import { assertCollectorVisit, checkDoorPayment, upiRequestOwner } from '@/lib/queries/home-collections'
+import { doorPaymentNote } from '@/lib/home-collection/rules'
 import { confirmUpiRequest } from '@/lib/payments/manual-upi'
 import { UTR_PATTERN, normaliseUtr } from '@/lib/payments/provider'
 import { errorResponse, invalidBody, labServerError, parseId, readJsonBody } from '@/lib/labs/route-responses'
-import { INVALID_VISIT_ID, collectorVisitError, forbidden } from '@/lib/home-collection/route-responses'
+import { INVALID_VISIT_ID, collectorVisitError, doorPaymentRefusalResponse, forbidden } from '@/lib/home-collection/route-responses'
 
 const UTR_MESSAGE = 'Enter the 12-digit UTR (UPI reference) from the payer\'s app'
 const confirmSchema = z.object({
@@ -38,7 +40,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const guard = await assertCollectorVisit(visitId, session, todayIsoIn())
     if (!guard.ok) return collectorVisitError(guard.error, guard.visitDate)
-    if ((await upiRequestPatientId(parsed.data.requestId)) !== guard.patientId) return errorResponse(404, REQUEST_NOT_FOUND)
+    const owner = await upiRequestOwner(parsed.data.requestId)
+    if (!owner || owner.patientId !== guard.patientId || owner.note !== doorPaymentNote(visitId)) return errorResponse(404, REQUEST_NOT_FOUND)
+    const refusal = await checkDoorPayment(visitId, guard.patientId, null)
+    if (refusal) return doorPaymentRefusalResponse(refusal)
 
     const r = await confirmUpiRequest({ requestId: parsed.data.requestId, utr: parsed.data.utr }, session)
     if (!r.ok) {

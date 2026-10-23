@@ -21,7 +21,7 @@ import { and, asc, count, eq, inArray, ne, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import {
-  encounters, homeCollectionVisits, homeCollectionWindows, labOrders, labTests, patients, paymentRequests, providers, users,
+  encounters, homeCollectionVisits, homeCollectionWindows, labOrders, labTests, patientPayments, patients, paymentRequests, providers, users,
   type HomeCollectionVisitRow,
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
@@ -39,6 +39,9 @@ import type { SampleContainer, SampleType } from '@/lib/labs/catalog'
 import type { BookHomeCollectionRequest } from '@/lib/labs/validation'
 import type { WriteExecutor } from '@/lib/queries/executor'
 import { ensureSampleIds } from '@/lib/queries/lab-lifecycle'
+import { lockPatientBilling } from '@/lib/queries/charge-capture'
+import { insertPaymentInTx, withSeriesGuard } from '@/lib/queries/patient-ledger'
+import { doorPaymentNote } from '@/lib/home-collection/rules'
 import { getActiveServicePins, isLocalPatientPin } from '@/lib/queries/lab-setup'
 
 export type { HomeCollectionVisitRow }
@@ -739,6 +742,8 @@ export async function collectHomeVisit(
       }
       handoverSet = { handoverVerifiedAt: now, handoverOtpHash: null, handoverOtpExpiresAt: null }
     } else if (handover.waiverReason !== undefined) {
+      // Ruling R24: a locked code cannot be side-stepped with a waiver; send a new code instead.
+      if (visit.otpAttempts >= HANDOVER_OTP_MAX_ATTEMPTS) return { ok: false, error: 'otp_locked' }
       handoverSet = { handoverWaiverReason: handover.waiverReason }
     } else {
       return { ok: false, error: 'otp_required' }
@@ -834,9 +839,54 @@ export async function assertCollectorVisit(visitId: number, session: Session, to
 }
 // end WS6 T11
 
-// WS6 T12: a UPI request confirmed at the door must be one raised for this visit's patient.
-export async function upiRequestPatientId(requestId: number): Promise<string | null> {
-  const [row] = await getDb().select({ patientId: paymentRequests.patientId }).from(paymentRequests).where(eq(paymentRequests.id, requestId)).limit(1)
-  return row?.patientId ?? null
+// WS6 T12: a UPI request confirmed at the door must be one raised for this visit (its patient
+// and the visit's door note).
+export async function upiRequestOwner(requestId: number): Promise<{ patientId: string; note: string } | null> {
+  const [row] = await getDb().select({ patientId: paymentRequests.patientId, note: paymentRequests.note })
+    .from(paymentRequests).where(eq(paymentRequests.id, requestId)).limit(1)
+  return row ?? null
+}
+
+// Ruling R24: one door receipt per visit, never above what the visit's tests are quoted at.
+export type DoorPaymentRefusal = 'already_paid' | 'amount_exceeds_due'
+
+/**
+ * Run under lockPatientBilling. `already_paid` when a receipt for this visit's door note exists
+ * (a cash receipt whose reference is the note, or a confirmed UPI request with the note);
+ * `amount_exceeds_due` when the amount is above the sum of the quotes of the visit's scheduled tests.
+ */
+async function doorPaymentRefusal(tx: WriteExecutor, visitId: number, patientId: string, amountPaise: number | null): Promise<DoorPaymentRefusal | null> {
+  const note = doorPaymentNote(visitId)
+  const [cash] = await tx.select({ id: patientPayments.id }).from(patientPayments)
+    .where(and(eq(patientPayments.patientId, patientId), eq(patientPayments.mode, 'cash'), eq(patientPayments.reference, note))).limit(1)
+  if (cash) return 'already_paid'
+  const [upi] = await tx.select({ id: paymentRequests.id }).from(paymentRequests)
+    .where(and(eq(paymentRequests.patientId, patientId), eq(paymentRequests.note, note), eq(paymentRequests.status, 'confirmed'))).limit(1)
+  if (upi) return 'already_paid'
+  if (amountPaise === null) return null
+  const [due] = await tx.select({ paise: sql<string | null>`sum(${labOrders.quotedPricePaise})` }).from(labOrders)
+    .where(and(eq(labOrders.homeCollectionVisitId, visitId), eq(labOrders.status, 'scheduled')))
+  return amountPaise > Number(due?.paise ?? 0) ? 'amount_exceeds_due' : null
+}
+
+/** Check (under the patient billing lock) before a UPI QR is shown, or before one is confirmed (amount null). */
+export async function checkDoorPayment(visitId: number, patientId: string, amountPaise: number | null): Promise<DoorPaymentRefusal | null> {
+  return getDb().transaction(async (tx) => {
+    await lockPatientBilling(tx, patientId)
+    return doorPaymentRefusal(tx, visitId, patientId, amountPaise)
+  })
+}
+
+/** Cash at the door: the checks and the ledger write in ONE transaction under the patient billing lock. */
+export async function takeDoorCashPayment(
+  visitId: number, patientId: string, amountPaise: number, session: Session, now = new Date(),
+): Promise<{ ok: true; receiptNumber: string } | { ok: false; error: DoorPaymentRefusal | 'series_exhausted' | 'admission_mismatch' | 'invoice_not_payable' }> {
+  return withSeriesGuard(() => getDb().transaction(async (tx) => {
+    await lockPatientBilling(tx, patientId)
+    const refusal = await doorPaymentRefusal(tx, visitId, patientId, amountPaise)
+    if (refusal) return { ok: false as const, error: refusal }
+    const r = await insertPaymentInTx(tx, { patientId, kind: 'receipt', mode: 'cash', reference: doorPaymentNote(visitId), amountPaise }, session, now)
+    return r.ok ? { ok: true as const, receiptNumber: r.receiptNumber } : r
+  }))
 }
 // end WS6 T12
