@@ -6,6 +6,9 @@ import { getDb } from '@/db/client'
 import { appSettings, billingSettings, brandAssets, brandSettings, type BrandSettingsRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
+import { envBrand } from '@/lib/brand'
+import { deriveAccentPalette, parseHex, type AccentPalette } from '@/lib/brand-color'
+import { brandAssetPath } from '@/lib/brand-resolve'
 import {
   BRAND_ASSET_KINDS, BRAND_EDITABLE_KEYS, type BrandAssetKind, type BrandSettingsInput, type BrandSnapshot,
 } from '@/lib/brand-snapshot'
@@ -92,17 +95,75 @@ export async function updateBrandSettings(
  * migration inserts (revision 0, onboarding cleared) without an audit row.
  */
 export async function resetBrandSettings(session: Session | null): Promise<{ revision: number }> {
+  const r = await reset(session, null)
+  if (!r.ok) throw new Error('unguarded reset cannot conflict')
+  return { revision: r.revision }
+}
+
+/**
+ * WL T6: the admin reset, guarded by the revision the admin confirmed against. A stale revision
+ * changes nothing (assets included) and writes no audit row.
+ */
+export async function resetBrandSettingsAt(
+  expectedRevision: number, session: Session,
+): Promise<{ ok: true; revision: number } | { ok: false; error: 'revision_conflict' }> {
+  return reset(session, expectedRevision)
+}
+
+async function reset(
+  session: Session | null, expectedRevision: number | null,
+): Promise<{ ok: true; revision: number } | { ok: false; error: 'revision_conflict' }> {
   return getDb().transaction(async (tx) => {
     await tx.insert(brandSettings).values({ id: 1 }).onConflictDoNothing()
-    await tx.select({ id: brandSettings.id }).from(brandSettings).where(eq(brandSettings.id, 1)).for('update')
+    const [current] = await tx.select({ revision: brandSettings.revision }).from(brandSettings).where(eq(brandSettings.id, 1)).for('update')
+    if (expectedRevision !== null && current.revision !== expectedRevision) return { ok: false as const, error: 'revision_conflict' as const }
     await tx.delete(brandAssets)
     const set = session
       ? { ...CLEARED, revision: sql`${brandSettings.revision} + 1`, updatedAt: new Date(), updatedByName: session.name }
       : { ...CLEARED, revision: 0, onboardingTestSigninAt: null, onboardingDismissedAt: null, updatedAt: new Date(), updatedByName: null }
     const [row] = await tx.update(brandSettings).set(set).where(eq(brandSettings.id, 1)).returning({ revision: brandSettings.revision })
     if (session) await logAudit(session, 'branding: reset to defaults', null, null, tx)
-    return { revision: row.revision }
+    return { ok: true as const, revision: row.revision }
   })
+}
+
+/** WL T6: what the Settings > Branding screen and `GET /api/settings/branding` show. No blob URLs. */
+export interface BrandingAdminPayload {
+  settings: BrandSettingsInput
+  revision: number
+  assets: { kind: BrandAssetKind; path: string; width: number; height: number; source: 'upload' | 'derived' }[]
+  /** The env layer (BRAND_* or built-in) each field falls back to when its stored value is null. */
+  defaults: { name: string; tagline: string; supportEmail: string | null; accentColor: string | null; portalName: string; legalName: string }
+  /** Read-only identity from Billing settings, shown on prints. */
+  linked: { legalName: string | null; address: string | null; gstin: string | null; rohiniId: string | null; hfrId: string | null }
+  /** The WCAG-adjusted palette of the stored accent, or null when none is stored. */
+  palette: AccentPalette | null
+}
+
+/**
+ * WL T6: the admin payload, read uncached so the screen always shows the row it will save against.
+ * Assets become content-addressed `/branding/...` paths; the blob URL never leaves this function.
+ */
+export async function getBrandingAdminPayload(): Promise<BrandingAdminPayload> {
+  const snap = await loadBrandSnapshot()
+  const s = snap.settings
+  const accent = s.accentColor ? parseHex(s.accentColor) : null
+  return {
+    settings: editable(s),
+    revision: s.revision,
+    assets: snap.assets.map((a) => ({
+      kind: a.kind, path: brandAssetPath(a.kind, a.sha256), width: a.width, height: a.height, source: a.source,
+    })),
+    defaults: {
+      name: envBrand.name, tagline: envBrand.tagline, supportEmail: envBrand.supportEmail, accentColor: envBrand.primaryColor,
+      portalName: envBrand.portalName, legalName: envBrand.legalName,
+    },
+    linked: {
+      legalName: snap.billing?.legalName ?? null, address: snap.billing?.address ?? null, gstin: snap.billing?.gstin ?? null,
+      rohiniId: snap.billing?.rohiniId ?? null, hfrId: snap.billing?.hfrId ?? null,
+    },
+    palette: accent ? deriveAccentPalette(accent) : null,
+  }
 }
 
 export interface BrandAssetInput {

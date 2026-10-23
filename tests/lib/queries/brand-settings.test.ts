@@ -111,6 +111,39 @@ describe.skipIf(!process.env.DATABASE_URL)('brand settings queries (DB)', () => 
     expect((await auditRows()).slice(before)).toEqual([{ action: 'branding: reset to defaults', details: null }])
   })
 
+  // WL T6: the admin reset carries the revision it was confirmed against.
+  it('resetBrandSettingsAt with a stale revision changes nothing and writes no audit row', async () => {
+    const { q, getDb, brandAssets } = await mods()
+    await q.updateBrandSettings(blank({ displayName: 'Sunrise' }), 0, session)
+    await q.putBrandAsset('logo_light', asset(), session)
+    const before = (await auditRows()).length
+    expect(await q.resetBrandSettingsAt(0, session)).toEqual({ ok: false, error: 'revision_conflict' })
+    const s = await q.getBrandSettings()
+    expect([s.displayName, s.revision]).toEqual(['Sunrise', 1])
+    expect((await getDb().select().from(brandAssets)).length).toBe(1)
+    expect((await auditRows()).length).toBe(before)
+  })
+
+  it('resetBrandSettingsAt with the current revision resets, advances the revision and audits', async () => {
+    const { q } = await mods()
+    await q.updateBrandSettings(blank({ displayName: 'Sunrise' }), 0, session)
+    const before = (await auditRows()).length
+    expect(await q.resetBrandSettingsAt(1, session)).toEqual({ ok: true, revision: 2 })
+    expect((await q.getBrandSettings()).displayName).toBeNull()
+    expect((await auditRows()).slice(before)).toEqual([{ action: 'branding: reset to defaults', details: null }])
+  })
+
+  // WL T6: the admin screen payload never carries a blob URL.
+  it('getBrandingAdminPayload maps assets to hash paths and carries no blob URL', async () => {
+    const { q } = await mods()
+    await q.putBrandAsset('logo_light', asset(), session)
+    const p = await q.getBrandingAdminPayload()
+    expect(JSON.stringify(p)).not.toMatch(/blob_?url|local:/i)
+    expect(p.assets).toEqual([{ kind: 'logo_light', path: `/branding/logo-light-${'b'.repeat(16)}.png`, width: 400, height: 100, source: 'upload' }])
+    expect(p.revision).toBe(0)
+    expect(p.palette).toBeNull()
+  })
+
   it('resetBrandSettings(null) restores the pristine singleton without an audit row', async () => {
     const { q } = await mods()
     await q.updateBrandSettings(blank({ displayName: 'Sunrise' }), 0, session)

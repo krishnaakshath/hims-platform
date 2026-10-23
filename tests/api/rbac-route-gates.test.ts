@@ -609,6 +609,11 @@ import { POST as postPolicyVerification } from '@/app/api/rcm/policies/[id]/veri
 import { GET as getVerificationDocument } from '@/app/api/rcm/verification-documents/[id]/route'
 import { COVERAGE_VERIFY_ROLES } from '@/lib/role-policy'
 // end WS12 T3
+// WL T6
+import { GET as getBrandingSettings, PUT as putBrandingSettings } from '@/app/api/settings/branding/route'
+import { POST as postBrandingReset } from '@/app/api/settings/branding/reset/route'
+import { POST as postBrandingOnboarding } from '@/app/api/settings/branding/onboarding/route'
+// end WL T6
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1075,6 +1080,12 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/rcm/policies/[id]/verifications', call: () => settle(() => postPolicyVerification(send('POST', `/api/rcm/policies/${BOGUS_ID}/verifications`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_VERIFY_ROLES] },
   { name: 'GET /api/rcm/verification-documents/[id]', call: () => settle(() => getVerificationDocument(get(`/api/rcm/verification-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_READ_ROLES] },
   // end WS12 T3
+  // WL T6: admin branding settings ({} is a 400 after the gate for admin; GET reads the singleton).
+  { name: 'GET /api/settings/branding', call: () => settle(() => getBrandingSettings()), allowed: ['admin'] },
+  { name: 'PUT /api/settings/branding', call: () => settle(() => putBrandingSettings(send('PUT', '/api/settings/branding'))), allowed: ['admin'] },
+  { name: 'POST /api/settings/branding/reset', call: () => settle(() => postBrandingReset(send('POST', '/api/settings/branding/reset'))), allowed: ['admin'] },
+  { name: 'POST /api/settings/branding/onboarding', call: () => settle(() => postBrandingOnboarding(send('POST', '/api/settings/branding/onboarding'))), allowed: ['admin'] },
+  // end WL T6
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

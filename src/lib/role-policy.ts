@@ -262,3 +262,6 @@ export const COVERAGE_READ_ROLES: readonly Role[] = POLICY_READ_ROLES
 export const COVERAGE_VERIFY_ROLES: readonly Role[] = POLICY_WRITE_ROLES
 export const ADMISSION_COVERAGE_ROLES: readonly Role[] = ['admin', 'frontdesk', 'crc', 'rcm']
 // end WS12 T1
+// WL T6: Settings > Branding (read, save, reset, logo upload, onboarding). Admin only (spec D17).
+export const BRAND_SETTINGS_ROLES: readonly Role[] = MASTER_DATA_ADMIN_ROLES
+// end WL T6
