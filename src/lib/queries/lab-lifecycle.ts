@@ -40,6 +40,7 @@ import { labTests, serviceCatalog } from '@/db/schema'
 import { verificationDenial } from '@/lib/labs/verification'
 import { resolveVerifierDepartmentId } from '@/lib/queries/lab-signoffs'
 // end WS4 T11
+import { criticalAlertStatusInTx, criticalSummaryText, raiseOrWithdrawCriticalAlert } from '@/lib/queries/lab-critical' // WS4 T12
 
 export type LabActor = { kind: 'staff'; session: Session } | { kind: 'lis' }
 
@@ -194,12 +195,15 @@ export async function recordLabResult(
     if (defs.length === 0 && perAnalyte) return { ok: false, error: 'analyte_unknown' } as const
     let analyteInput: { patient: { dob: string; gender: string | null }; onDate: string } | null = null
     let summary: { value: string; unit: string | null; referenceRange: string | null; flag: LabResultFlag }
+    let analyteFlags: { name: string; value: string; unit: string | null; flag: LabResultFlag }[] = [] // WS4 T12
     if (perAnalyte) {
       const [patient] = await tx.select({ dob: patients.dob, gender: patients.gender }).from(patients).where(eq(patients.id, order.patientId))
       analyteInput = { patient: { dob: patient.dob, gender: patient.gender }, onDate: istDateOf(order.collectedAt ?? now) }
       const ev = evaluateAnalyteEntries({ ...analyteInput, defs, entries: input.analytes })
       if (!ev.ok) return ev
       summary = ev.summary
+      const nameOf = new Map(defs.map((d) => [d.id, d.name])) // WS4 T12: the alert summary
+      analyteFlags = ev.rows.map((r) => ({ name: nameOf.get(r.analyteId) ?? '', value: r.valueText, unit: r.unit ?? null, flag: r.flag as LabResultFlag }))
     } else {
       summary = { value: input.value, unit: input.unit ?? null, referenceRange: input.referenceRange ?? null, flag: input.flag }
     }
@@ -249,6 +253,14 @@ export async function recordLabResult(
       if (!written.ok) throw new Error('analyte entries changed between validation and write')
     }
 
+    // WS4 T12 (spec 3.5 item 23): raise, refresh or withdraw the order's critical alert.
+    const [test] = await tx.select({ name: labTests.name }).from(labTests).where(eq(labTests.id, order.labTestId))
+    await raiseOrWithdrawCriticalAlert(tx, {
+      orderId, patientId: order.patientId, flag: summary.flag,
+      summary: criticalSummaryText({ testName: test?.name ?? 'Result', value: summary.value, unit: summary.unit, analytes: analyteFlags }),
+    }, now)
+    // end WS4 T12
+
     if (lis) await logIntegrationEvent(`accepted LIS lab result for order ${orderId}`, order.patientId, undefined, tx)
     else await logAudit(actor.session, amended ? 'amended lab result' : 'entered lab result', order.patientId, `order=${orderId}`, tx)
     return { ok: true, patientId: order.patientId, amended, flag: summary.flag } as const
@@ -259,12 +271,13 @@ export async function recordLabResult(
 
 export type VerifyLabResultResult =
   | { ok: true; order: LabOrderRow }
-  | { ok: false; error: 'not_found' | 'invalid_status' | 'self_verification' | 'not_linked' | 'wrong_department' }
+  | { ok: false; error: 'not_found' | 'invalid_status' | 'self_verification' | 'not_linked' | 'wrong_department' | 'critical_not_notified' }
 
 /**
  * WS4 T11 (spec 3.4): the verifier must resolve through their staff link to a provider whose
  * department is the department of the test's tariff service, and must not be the person who
  * entered the result. `admin` has no implicit right (an unlinked admin is `not_linked`).
+ * WS4 T12: while the order's critical alert is still `open` (no call logged) it is `critical_not_notified`.
  */
 export async function verifyLabResult(orderId: number, session: Session, now = new Date()): Promise<VerifyLabResultResult> {
   const verifierDepartmentId = await resolveVerifierDepartmentId(session) // WS4 T11 (no lock held)
@@ -284,6 +297,8 @@ export async function verifyLabResult(orderId: number, session: Session, now = n
     })
     if (denial === 'not_resulted') return { ok: false, error: 'invalid_status' } as const
     if (denial !== null) return { ok: false, error: denial } as const
+    // WS4 T12 (spec 3.5 item 24): a critical result is verified only after the call is logged.
+    if ((await criticalAlertStatusInTx(tx, orderId)) === 'open') return { ok: false, error: 'critical_not_notified' } as const
 
     const [updated] = await tx
       .update(labOrders)

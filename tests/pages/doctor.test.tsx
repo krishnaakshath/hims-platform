@@ -26,6 +26,12 @@ vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.f
 // SP6: the "Coding queries for you" card; empty by default so no test reaches the DB.
 vi.mock('@/lib/queries/referrals', () => ({ listOpenReferralsToProvider: vi.fn(async () => []), providerDepartmentId: vi.fn(async () => null) })) // WS1 T4
 vi.mock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider: vi.fn(async () => []) }))
+// WS4 T12: the critical banner. Top-level, so it holds across vi.resetModules in every test below.
+const criticalHoist = vi.hoisted(() => ({ alerts: [] as unknown[], ackIds: [] as number[] }))
+vi.mock('@/lib/queries/lab-critical', () => ({
+  listOpenCriticalAlerts: vi.fn(async () => criticalHoist.alerts),
+  acknowledgeableCriticalOrderIds: vi.fn(async () => criticalHoist.ackIds),
+}))
 // Wave E P1-02/P1-03: the doctor's own workload; empty by default (no DB).
 const EMPTY_WORKLOAD = { encountersToday: [], inpatients: [], resultsToReview: [], labsAwaitingResult: 0, followUps: [], unsignedNotes: 0, draftNotes: [] }
 vi.mock('@/lib/queries/hospital-kpis', () => ({ getDoctorWorkload: vi.fn(async () => EMPTY_WORKLOAD) }))
@@ -343,5 +349,37 @@ describe('PI dashboard (/doctor)', () => {
     render(jsx)
     expect(listOpenCodingQueriesForProvider).not.toHaveBeenCalled()
     expect(screen.queryByRole('heading', { name: /coding queries for you/i })).toBeNull()
+  })
+})
+
+// WS4 T12 (spec 3.5 item 25): the doctor home lists open/notified critical alerts on this doctor's
+// orders with the call log and Acknowledge (only where the staff link owns the order).
+describe('PI dashboard critical banner (WS4 T12)', () => {
+  it('shows the alert, its call log and Acknowledge; never Log call', async () => {
+    vi.resetModules()
+    criticalHoist.alerts = [{
+      orderId: 31, patientId: 'RD-0031', patientName: 'Lakshmi Iyer', uhid: 'UH000031', testName: 'Complete Blood Count', summary: 'Platelets 38 ×10³/µL',
+      status: 'notified', raisedAt: '2026-10-24T04:30:00.000Z', notifiedAt: '2026-10-24T05:12:00.000Z', notifiedByName: 'Meenakshi Sundar', notifiedToName: 'Dr Rao',
+      notifyChannel: 'phone', readBack: true, acknowledgedAt: null, acknowledgedByName: null, orderedByProviderId: 1,
+    }]
+    criticalHoist.ackIds = [31]
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam', userId: 5 })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 1, name: 'Dr. R. Kunam' }]) }))
+    vi.doMock('@/lib/queries/doctor-assignments', () => ({ listPendingAssignmentsForProvider: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(async () => []) }))
+    vi.doMock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 1, name: 'Dr. R. Kunam' })) }))
+    vi.doMock('@/lib/queries/hospital-kpis', () => ({ getDoctorWorkload: vi.fn(async () => EMPTY_WORKLOAD) }))
+    const { default: Page } = await import('@/app/(dashboard)/doctor/page')
+    const { render, screen, cleanup } = await import('@testing-library/react')
+    render(await Page())
+    expect(screen.getByText(/CRITICAL · Platelets 38 ×10³\/µL · Lakshmi Iyer \(UH000031\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Notified Dr Rao at 10:42 am by Meenakshi Sundar \(phone, read back\)/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Acknowledge critical Complete Blood Count' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /log the call/i })).toBeNull()
+    cleanup()
+    criticalHoist.alerts = []
+    criticalHoist.ackIds = []
   })
 })

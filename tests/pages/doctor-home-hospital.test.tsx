@@ -25,6 +25,7 @@ vi.mock('@/lib/queries/doctor-assignments', () => ({ listPendingAssignmentsForPr
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 3, name: 'Dr. A Rao' })) }))
 vi.mock('@/lib/queries/referrals', () => ({ listOpenReferralsToProvider: h.listOpenReferralsToProvider, providerDepartmentId: vi.fn(async () => 12) })) // WS1 T4
 vi.mock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider: vi.fn(async () => []) }))
+vi.mock('@/lib/queries/lab-critical', () => ({ listOpenCriticalAlerts: vi.fn(async () => []), acknowledgeableCriticalOrderIds: vi.fn(async () => []) })) // WS4 T12
 vi.mock('@/lib/queries/appointments', () => ({
   listAppointmentsInRange: vi.fn(async () => [
     { id: 501, patientId: 'RD-0501', patientName: 'Meena Iyer', providerId: 3, providerName: 'Dr. A Rao', providerColorTag: 'chart-1', startsAt: new Date(), endsAt: new Date(Date.now() + 1_800_000), visitReason: 'Fever', status: 'scheduled', notes: null },

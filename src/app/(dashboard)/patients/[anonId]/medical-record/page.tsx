@@ -26,6 +26,11 @@ import { listLabTests } from '@/lib/queries/lab-tests'
 import { listFormSubmissions } from '@/lib/queries/form-submissions'
 import { listCarePlansForPatient } from '@/lib/queries/care-plans'
 import { resolveSessionProvider } from '@/lib/provider-identity'
+// WS4 T12: the patient's critical-result banner on the lab section.
+import { acknowledgeableCriticalOrderIds, listOpenCriticalAlerts } from '@/lib/queries/lab-critical'
+import { resolveVerifierDepartmentId } from '@/lib/queries/lab-signoffs'
+import { LAB_CRITICAL_ACK_ROLES, LAB_CRITICAL_NOTIFY_ROLES } from '@/lib/role-policy'
+// end WS4 T12
 // SP6
 import { CODE_PROPOSE_ROLES, CODING_QUERY_RESPOND_ROLES } from '@/lib/role-policy'
 import { listEncounterCodingForPatient } from '@/lib/queries/coding-workspace'
@@ -100,6 +105,13 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
   const sessionProvider = await resolveSessionProvider(session)
   const [labOrders, labTests] = await Promise.all([listOrdersForPatient(anonId), listLabTests()])
   const labReports = LAB_REPORT_READ_ROLES.includes(session.role) ? await listReportsForPatient(anonId) : null // SP5
+  // WS4 T12: a pi logs a call only when it may verify (linked to a department; the route re-checks the order's).
+  const [criticalAlerts, criticalAckIds, verifierDepartmentId] = await Promise.all([
+    listOpenCriticalAlerts({ patientId: anonId }),
+    LAB_CRITICAL_ACK_ROLES.includes(session.role) ? acknowledgeableCriticalOrderIds(session, { patientId: anonId }) : Promise.resolve([]),
+    session.role === 'pi' ? resolveVerifierDepartmentId(session) : Promise.resolve(null),
+  ])
+  const canNotifyCritical = LAB_CRITICAL_NOTIFY_ROLES.includes(session.role) && (session.role !== 'pi' || verifierDepartmentId !== null)
   const screeningSubmissions = (await listFormSubmissions({ patientId: anonId, status: 'completed' })).filter((s) => s.bandLabel !== null)
   const carePlans = await listCarePlansForPatient(anonId)
   // SP6: the patient's recent visits with their coding; doctors propose, doctors/admin reply, crc reads.
@@ -345,7 +357,7 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
       </section>
 
       <section className={SECTION}>
-        <LabResultsSection patientId={anonId} orders={labOrders} labTests={labTests} canOrder={canOrderLabs} />
+        <LabResultsSection patientId={anonId} orders={labOrders} labTests={labTests} canOrder={canOrderLabs} critical={{ alerts: criticalAlerts, canNotify: canNotifyCritical, acknowledgeOrderIds: criticalAckIds }} />
         {labReports && <div className="mt-4"><LabReportList reports={labReports} /></div>}
       </section>
     </div>

@@ -37,6 +37,10 @@ import { Share2 } from 'lucide-react'
 import { listOpenReferralsToProvider, providerDepartmentId } from '@/lib/queries/referrals'
 // end WS1 T4
 import { AcknowledgeResultButton } from '@/components/labs/AcknowledgeResultButton' // WS4 T11
+// WS4 T12: open/notified critical alerts on this doctor's orders or admitted patients.
+import { acknowledgeableCriticalOrderIds, listOpenCriticalAlerts } from '@/lib/queries/lab-critical'
+import { CriticalResultBanner } from '@/components/labs/CriticalResultBanner'
+// end WS4 T12
 
 // Wave E: a compact titled list card for the doctor's own work queues.
 function DoctorList({ title, icon: Icon, count, empty, href, linkLabel, children }: {
@@ -126,6 +130,11 @@ export default async function DoctorPortalPage() {
   // WS4 T11: verification is the reporting department's; the doctor reviews and acknowledges.
   const resultsToReview = workload?.resultsToReview ?? []
   const criticalToReview = resultsToReview.filter((r) => r.flag === 'critical').length
+  // WS4 T12: listed for the matched provider row; Acknowledge only where the staff link owns the order
+  // (the route checks the same under the order lock).
+  const [criticalAlerts, criticalAckIds] = providerMatch
+    ? await Promise.all([listOpenCriticalAlerts({ providerId: providerMatch.id }), acknowledgeableCriticalOrderIds(session)])
+    : [[], []]
 
   await logAudit(session, 'viewed My Patients (doctor portal)', null)
 
@@ -164,6 +173,8 @@ export default async function DoctorPortalPage() {
           </div>
         </div>
       </div>
+
+      <CriticalResultBanner alerts={criticalAlerts} canNotify={false} canAcknowledge={(a) => criticalAckIds.includes(a.orderId)} /> {/* WS4 T12 */}
 
       {/* Main EMR Grid - 3 Columns for high density */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">

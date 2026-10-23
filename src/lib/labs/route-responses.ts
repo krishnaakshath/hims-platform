@@ -82,6 +82,27 @@ export function signOffError(kind: 'acknowledge' | 'cosign', error: 'not_found' 
 }
 // end WS4 T11
 
+// WS4 T12: critical-value call log and acknowledgement (fixed messages; never echo the called name or note).
+export const CRITICAL_MESSAGES = {
+  critical_not_notified: 'This is a critical result. Log the call to the doctor before verifying it.',
+  no_alert: 'There is no critical alert on this order.',
+  not_open: 'The call for this critical result has already been logged.',
+  read_back_required: 'A critical result given by phone must be read back by the person receiving it.',
+  not_owner: 'Only the ordering doctor or the attending doctor of the current admission can acknowledge this critical result.',
+  already_acknowledged: 'This critical result has already been acknowledged.',
+  withdrawn: 'This critical alert was withdrawn when the result was amended.',
+} as const
+
+export function criticalError(error: 'not_found' | 'not_open' | 'read_back_required' | 'not_owner' | 'already_acknowledged' | 'withdrawn' | 'critical_not_notified') {
+  switch (error) {
+    case 'not_found': return errorResponse(404, CRITICAL_MESSAGES.no_alert, 'not_found')
+    case 'read_back_required': return errorResponse(422, CRITICAL_MESSAGES.read_back_required, 'read_back_required')
+    case 'not_owner': return errorResponse(403, CRITICAL_MESSAGES.not_owner, 'not_owner')
+    default: return errorResponse(409, CRITICAL_MESSAGES[error], error)
+  }
+}
+// end WS4 T12
+
 /**
  * A thrown error: a missing blob store or unreachable database is a 503 (one [config] log
  * line); a deadlock / serialization failure (nothing was written) is a 409 asking to

@@ -23,6 +23,7 @@ import type { Role } from '@/lib/auth'
 import { dispenseNotBilledSql } from '@/lib/queries/medication-dispenses' // WS2 T8
 import { previewInvoiceReady } from '@/lib/queries/invoice-ready' // WS2 T12
 import { labResultSignoffs } from '@/db/schema' // WS4 T11
+import { labCriticalAlerts } from '@/db/schema' // WS4 T12
 
 const KPI_TTL_SECONDS = 20
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -138,13 +139,15 @@ export interface LabKpi {
   criticalToday: number
   /** Median minutes from sample collection to result entry, for results entered on the day. */
   medianTatMinutes: number | null
+  /** WS4 T12 (spec 3.5 item 26): critical alerts not yet acknowledged (open + notified). */
+  criticalOpen: number
 }
 
 /** Lab bench stages (same buckets as the worklist sections) and the day's result/TAT figures. */
 export async function loadLabKpis(today: string): Promise<LabKpi> {
   const db = getDb()
   const { start, end } = istDay(today)
-  const [stageRows, [crit], [day]] = await Promise.all([
+  const [stageRows, [crit], [day], [alerts]] = await Promise.all([
     db.select({ status: labOrders.status, n: count() }).from(labOrders).groupBy(labOrders.status),
     db.select({ n: count() }).from(labOrders).innerJoin(labResults, eq(labResults.labOrderId, labOrders.id))
       .where(and(eq(labOrders.status, 'resulted'), eq(labResults.flag, 'critical'))),
@@ -154,6 +157,7 @@ export async function loadLabKpis(today: string): Promise<LabKpi> {
       median: sql<string | null>`percentile_cont(0.5) within group (order by extract(epoch from (${labResults.resultedAt} - ${labOrders.collectedAt})) / 60) filter (where ${labOrders.collectedAt} is not null)`,
     }).from(labResults).innerJoin(labOrders, eq(labOrders.id, labResults.labOrderId))
       .where(and(gte(labResults.resultedAt, start), lt(labResults.resultedAt, end))),
+    db.select({ n: count() }).from(labCriticalAlerts).where(inArray(labCriticalAlerts.status, ['open', 'notified'])), // WS4 T12
   ])
   const by = Object.fromEntries(stageRows.map((r) => [r.status, n(r.n)])) as Partial<Record<string, number>>
   return {
@@ -166,6 +170,7 @@ export async function loadLabKpis(today: string): Promise<LabKpi> {
     resultedToday: n(day?.n),
     criticalToday: n(day?.critical),
     medianTatMinutes: day?.median === null || day?.median === undefined ? null : Math.round(Number(day.median)),
+    criticalOpen: n(alerts?.n), // WS4 T12
   }
 }
 

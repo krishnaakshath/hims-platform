@@ -9,7 +9,7 @@ const FULL: HospitalSnapshot = {
   opd: { date: '2026-10-08', tokens: 42, waiting: 7, inConsultation: 3, completed: 30, cancelled: 2 },
   ipd: { admitted: 18, beds: 30, occupied: 18, available: 8, dirty: 2, blocked: 2, occupancyPct: 64, wards: [] },
   followUps: { due: 5, overdue: 4, upcoming: 9, scheduled: 3, missed: 1, capped: false },
-  labs: { awaitingCollection: 6, inTransit: 2, atBench: 4, toVerify: 3, toReport: 1, criticalUnverified: 1, resultedToday: 11, criticalToday: 2, medianTatMinutes: 95 },
+  labs: { awaitingCollection: 6, inTransit: 2, atBench: 4, toVerify: 3, toReport: 1, criticalUnverified: 1, resultedToday: 11, criticalToday: 2, medianTatMinutes: 95, criticalOpen: 0 },
   collections: { date: '2026-10-08', receiptCount: 12, collectedPaise: 12345600, refundedPaise: 50000, netPaise: 12295600 },
   billing: { draftInvoices: 4, uninvoicedLines: 17, uninvoicedPaise: 2500000, pharmacyDraftCharges: 2, pendingApprovalCharges: 3, readyLines: 5, readyPaise: 1200000, waitingLines: 12 },
   claims: { outstandingPaise: 98765400, aging: [{ label: '0-30', paise: 1 }, { label: '91-180', paise: 300000 }, { label: '181+', paise: 200000 }], preauthsOverdue: 2, queried: 3 },

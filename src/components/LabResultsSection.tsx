@@ -11,6 +11,12 @@ import { formatDateTimeIn, formatIsoDate, istDateOf } from '@/lib/india-time'
 import type { LabQuoteStatus } from '@/lib/labs/catalog'
 // end SP5
 import type { AnalyteResultRow } from '@/lib/queries/lab-result-values' // WS4 T10
+// WS4 T12
+import type { CriticalAlertRow } from '@/lib/queries/lab-critical'
+import { CriticalResultBanner } from '@/components/labs/CriticalResultBanner'
+/** The patient's open/notified critical alerts and what this viewer may do with them (server-computed). */
+export interface LabCriticalProps { alerts: CriticalAlertRow[]; canNotify: boolean; acknowledgeOrderIds: number[] }
+// end WS4 T12
 
 export interface PatientLabOrder {
   id: number
@@ -138,7 +144,7 @@ const isPreResult = (s: LabOrderStatus): s is PreResultStatus => (PRE_RESULT_STA
 // Statuses in which an order carries a result.
 const HAS_RESULT_STATUSES: readonly LabOrderStatus[] = ['resulted', 'verified', 'reported']
 
-export function LabResultsSection({ patientId, orders, labTests, canOrder }: { patientId: string; orders: PatientLabOrder[]; labTests: LabTestOption[]; canOrder: boolean }) {
+export function LabResultsSection({ patientId, orders, labTests, canOrder, critical }: { patientId: string; orders: PatientLabOrder[]; labTests: LabTestOption[]; canOrder: boolean; critical?: LabCriticalProps }) {
   const [ordering, setOrdering] = useState(false)
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set()) // WS4 T10
   const toggle = (id: number) => setExpanded((prev) => {
@@ -171,6 +177,9 @@ export function LabResultsSection({ patientId, orders, labTests, canOrder }: { p
         <h2 className="border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Lab Results</h2>
         {canOrder && <Button size="sm" onClick={() => setOrdering(true)}>Order labs</Button>}
       </div>
+      {critical && ( // WS4 T12
+        <CriticalResultBanner alerts={critical.alerts} canNotify={critical.canNotify} canAcknowledge={(a) => critical.acknowledgeOrderIds.includes(a.orderId)} />
+      )}
 
       {resulted.length === 0 ? (
         <p className="text-sm text-muted-foreground">No lab results recorded.</p>

@@ -879,7 +879,9 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     for (const id of r.orderIds) must(await verifyLabResult(id, pathologist, istAt(day(-5), '15:00')), 'verify')
     must(await releaseLabReport(r.requisitionId, pathologist, fakeRelease(istAt(day(-5), '15:30'))), 'release report')
   }
-  // R2: critical result entered today, awaiting verification (dengue inpatient).
+  // R2: critical result entered today, awaiting verification (dengue inpatient). WS4 T12: the result
+  // write raises the order's critical alert, left `open` (call not yet logged) so the demo shows the
+  // banner, the Critical tile and the verify gate.
   {
     const r = await requisition(pid(12), 'Dr. Ananya Rao', ['DENGUE-NS1', 'CBC-DIFF'], istAt(day(-3), '11:00'))
     labOrderCount += r.orderIds.length
@@ -888,7 +890,7 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     must(await verifyLabResult(r.orderIds[0], pathologist, istAt(day(-3), '17:00')), 'verify')
     await analyteResult(r.orderIds[1], 'CBC-DIFF', {
       HGB: '13.6', WBC: '3.1', NEUT: '48', LYMPH: '42', MONO: '7', EOS: '2', BASO: '1', PLT: '38', RBC: '4.8', HCT: '44.0', MCV: '90.0', MCH: '29.5', MCHC: '33.0',
-    }, earlier(60), 'Critical value phoned to the ward')
+    }, earlier(60), 'Platelet count confirmed on peripheral smear')
   }
   // R3: received at the bench, awaiting result.
   {

@@ -3220,3 +3220,43 @@ export const labResultSignoffs = pgTable('lab_result_signoffs', {
 ])
 export type LabResultSignoffRow = typeof labResultSignoffs.$inferSelect
 // end WS4 T11
+// WS4 T12: critical-value alerts (spec 3.5, §4; scripts/migrations/2026-10-24-ws4-critical-alerts.sql).
+// One alert per lab order (unique lab_order_id), raised inside the result transaction when the
+// summary flag becomes critical and withdrawn when an amendment removes it. Lifecycle
+// open -> notified -> acknowledged (or withdrawn). lab_order_id and patient_id CASCADE (pinned in
+// tests/db/migrate-runner.test.ts): an alert is detail of its order. The user ids stay NO ACTION
+// (the seed's clear step deletes these rows before users).
+export const LAB_CRITICAL_ALERT_STATUSES = ['open', 'notified', 'acknowledged', 'withdrawn'] as const
+export const LAB_CRITICAL_NOTIFY_CHANNELS = ['phone', 'in_person', 'in_app'] as const
+
+export const labCriticalAlerts = pgTable('lab_critical_alerts', {
+  id: serial('id').primaryKey(),
+  labOrderId: integer('lab_order_id').notNull().references(() => labOrders.id, { onDelete: 'cascade' }),
+  patientId: text('patient_id').notNull().references(() => patients.id, { onDelete: 'cascade' }),
+  summary: text('summary').notNull(),
+  status: text('status', { enum: LAB_CRITICAL_ALERT_STATUSES }).default('open').notNull(),
+  raisedAt: timestamp('raised_at').defaultNow().notNull(),
+  notifiedAt: timestamp('notified_at'),
+  notifiedByName: text('notified_by_name'),
+  notifiedByUserId: integer('notified_by_user_id').references(() => users.id),
+  notifiedToName: text('notified_to_name'),
+  notifyChannel: text('notify_channel', { enum: LAB_CRITICAL_NOTIFY_CHANNELS }),
+  readBack: boolean('read_back'),
+  acknowledgedAt: timestamp('acknowledged_at'),
+  acknowledgedByName: text('acknowledged_by_name'),
+  acknowledgedByUserId: integer('acknowledged_by_user_id').references(() => users.id),
+  ackNote: text('ack_note'),
+  withdrawnAt: timestamp('withdrawn_at'),
+}, (t) => [
+  uniqueIndex('lab_critical_alerts_lab_order_unique').on(t.labOrderId),
+  index('lab_critical_alerts_patient_idx').on(t.patientId),
+  index('lab_critical_alerts_status_idx').on(t.status),
+  check('lab_critical_alerts_status_valid', sql`${t.status} IN ('open', 'notified', 'acknowledged', 'withdrawn')`),
+  check('lab_critical_alerts_channel_valid', sql`${t.notifyChannel} IS NULL OR ${t.notifyChannel} IN ('phone', 'in_person', 'in_app')`),
+  check('lab_critical_alerts_summary_length', sql`char_length(${t.summary}) BETWEEN 1 AND 500`),
+  check('lab_critical_alerts_notified_to_length', sql`${t.notifiedToName} IS NULL OR char_length(${t.notifiedToName}) <= 120`),
+  check('lab_critical_alerts_ack_note_length', sql`${t.ackNote} IS NULL OR char_length(${t.ackNote}) <= 300`),
+  check('lab_critical_alerts_phone_read_back', sql`${t.notifyChannel} IS DISTINCT FROM 'phone' OR ${t.readBack} = true`),
+])
+export type LabCriticalAlertRow = typeof labCriticalAlerts.$inferSelect
+// end WS4 T12

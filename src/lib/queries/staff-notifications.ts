@@ -7,9 +7,10 @@ import { and, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
   bookingRequests, chargeLines, doctorAssignments, encounterCoding, followUpOrders, homeCollectionVisits,
-  labOrders, labReports, labResults, labTests, medicationInventory, medications, notificationDeliveries, notificationLog,
+  labOrders, labReports, labTests, medicationInventory, medications, notificationDeliveries, notificationLog,
   patients, providers, staffNotificationReads,
 } from '@/db/schema'
+import { labCriticalAlerts } from '@/db/schema' // WS4 T12
 import type { Session } from '@/lib/auth'
 import { formatCalendarDate, startOfIstDay, todayIsoIn } from '@/lib/india-time'
 import { addDaysIso, MISSED_GRACE_DAYS } from '@/lib/follow-ups/rules'
@@ -34,22 +35,25 @@ const NOTICE_LABEL: Record<string, string> = {
 }
 
 const SOURCES: Record<FeedSource, (c: Ctx) => Promise<StaffNotification[]>> = {
+  // WS4 T12 (spec 3.5 item 25): unacknowledged critical alerts (open or notified) only; the item
+  // leaves the feed when the doctor acknowledges (or an amendment withdraws it). Keyed by alert id.
   async lab_critical(c) {
     const rows = await getDb()
-      .select({ id: labResults.id, resultedAt: labResults.resultedAt, test: labTests.name, orderId: labOrders.id, sampleId: labOrders.sampleId, patientId: patients.id, name: patients.name, uhid: patients.uhid })
-      .from(labResults)
-      .innerJoin(labOrders, eq(labOrders.id, labResults.labOrderId))
+      .select({ id: labCriticalAlerts.id, raisedAt: labCriticalAlerts.raisedAt, test: labTests.name, orderId: labOrders.id, sampleId: labOrders.sampleId, patientId: patients.id, name: patients.name, uhid: patients.uhid })
+      .from(labCriticalAlerts)
+      .innerJoin(labOrders, eq(labOrders.id, labCriticalAlerts.labOrderId))
       .innerJoin(labTests, eq(labTests.id, labOrders.labTestId))
-      .innerJoin(patients, eq(patients.id, labOrders.patientId))
-      .where(and(eq(labResults.flag, 'critical'), gte(labResults.resultedAt, c.since)))
-      .orderBy(desc(labResults.resultedAt), desc(labResults.id))
+      .innerJoin(patients, eq(patients.id, labCriticalAlerts.patientId))
+      .where(inArray(labCriticalAlerts.status, ['open', 'notified']))
+      .orderBy(desc(labCriticalAlerts.raisedAt), desc(labCriticalAlerts.id))
       .limit(FEED_SOURCE_LIMIT)
     return rows.map((r) => ({
       key: `lab_critical:${r.id}`, kind: 'lab_critical', severity: 'critical', title: 'Critical lab result',
       detail: c.names ? `${r.test} · ${patientLabel(r.name, r.uhid)}` : `${r.test} · sample ${r.sampleId ?? `order ${r.orderId}`}`,
-      href: sourceHref('lab_critical', c.session.role, r.patientId), occurredAt: iso(r.resultedAt),
+      href: sourceHref('lab_critical', c.session.role, r.patientId), occurredAt: iso(r.raisedAt),
     }))
   },
+  // end WS4 T12
 
   async lab_report(c) {
     const rows = await getDb()

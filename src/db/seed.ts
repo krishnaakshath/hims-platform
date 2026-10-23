@@ -10,6 +10,7 @@ import { todayIsoIn } from '../lib/india-time'
 import { encounterVitals, encounterConsults } from './schema' // WS1 T2
 import { referrals } from './schema' // WS1 T4
 import { labResultSignoffs } from './schema' // WS4 T11
+import { labCriticalAlerts } from './schema' // WS4 T12
 import {
   // SP6
   codingQueryResponses, codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures, serviceProcedureCodes,
@@ -958,6 +959,7 @@ async function clearExistingData() {
   await db.delete(patientNotificationPreferences)
   await db.delete(labReports)
   await db.delete(labResultSignoffs) // WS4 T11: cascades from lab_orders but also references providers/users
+  await db.delete(labCriticalAlerts) // WS4 T12: cascades from lab_orders/patients but also references users
   await db.delete(labResults)
   await db.delete(labOrders)
   await db.delete(homeCollectionVisits)

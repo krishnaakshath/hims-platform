@@ -90,6 +90,7 @@ describe('a pi reaches the whole chart', () => {
     // SP5: released lab reports (LAB_REPORT_READ_ROLES) under Lab Results.
     const listReportsForPatient = vi.fn(async () => [{ id: 41, reportNumber: 'LR-2099-000007', version: 1, releasedAt: new Date('2099-08-01T05:00:00Z'), testSummary: 'HbA1c', supersededAt: null }])
     vi.doMock('@/lib/queries/lab-reports', () => ({ listReportsForPatient }))
+    vi.doMock('@/lib/queries/lab-critical', () => ({ listOpenCriticalAlerts: vi.fn(async () => []), acknowledgeableCriticalOrderIds: vi.fn(async () => []) })) // WS4 T12
 
     const { default: MedicalRecordPage } = await import('@/app/(dashboard)/patients/[anonId]/medical-record/page')
     const jsx = await MedicalRecordPage({ params: Promise.resolve({ anonId: 'RD-TEST' }) } as never)
@@ -140,6 +141,7 @@ describe('a pi reaches the whole chart', () => {
     const listEncounterCodingForPatient = vi.fn(async () => encounters)
     vi.doMock('@/lib/queries/coding-workspace', () => ({ listEncounterCodingForPatient }))
     vi.doMock('@/lib/queries/lab-reports', () => ({ listReportsForPatient: vi.fn(async () => []) })) // SP5
+    vi.doMock('@/lib/queries/lab-critical', () => ({ listOpenCriticalAlerts: vi.fn(async () => []), acknowledgeableCriticalOrderIds: vi.fn(async () => []) })) // WS4 T12
     const { default: MedicalRecordPage } = await import('@/app/(dashboard)/patients/[anonId]/medical-record/page')
     const jsx = await MedicalRecordPage({ params: Promise.resolve({ anonId: 'RD-TEST' }) } as never)
     const { render, screen, cleanup } = await import('@testing-library/react')

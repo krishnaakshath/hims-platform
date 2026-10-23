@@ -297,3 +297,9 @@ export const LAB_ANALYTE_EDIT_ROLES: readonly Role[] = LAB_SETUP_ROLES
 // the session's linked provider to be the ordering doctor or the attending of the active admission.
 export const LAB_SIGNOFF_ROLES: readonly Role[] = ['pi', 'admin']
 // end WS4 T11
+// WS4 T12: critical-value calls (spec 3.4 / 3.5). Logging the call: the lab, admin, and a pi only
+// when that pi may verify the order (same department rule as verification, checked in the route).
+// Acknowledging: the route then requires the ordering doctor or the attending of the admission.
+export const LAB_CRITICAL_NOTIFY_ROLES: readonly Role[] = ['admin', 'labs', 'pi']
+export const LAB_CRITICAL_ACK_ROLES: readonly Role[] = ['admin', 'pi']
+// end WS4 T12

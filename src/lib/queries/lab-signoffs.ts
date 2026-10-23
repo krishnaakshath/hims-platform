@@ -11,6 +11,7 @@ import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import type { LabOrderStatus } from '@/lib/labs/status'
 import { resolveSessionProvider } from '@/lib/provider-identity'
+import type { WriteExecutor } from '@/lib/queries/executor' // WS4 T12
 
 /** The department of the provider this session is linked to (staff link only), or null. */
 export async function resolveVerifierDepartmentId(session: Session): Promise<number | null> {
@@ -30,6 +31,22 @@ export const SIGNOFF_STATUSES: Record<LabSignoffKind, readonly LabOrderStatus[]>
 export function sameSignatureName(typed: string, sessionName: string): boolean {
   const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-IN')
   return norm(typed) !== '' && norm(typed) === norm(sessionName)
+}
+
+/**
+ * WS4 T12 (shared with the critical-value acknowledgement): the provider owns an order's result
+ * when it is the ordering provider or the attending of the patient's active admission.
+ */
+export async function isResultOwnerInTx(
+  ex: Pick<WriteExecutor, 'select'>,
+  providerId: number,
+  order: { patientId: string; orderedByProviderId: number },
+): Promise<boolean> {
+  if (providerId === order.orderedByProviderId) return true
+  const [adm] = await ex.select({ id: admissions.id }).from(admissions)
+    .where(and(eq(admissions.patientId, order.patientId), eq(admissions.status, 'admitted'), eq(admissions.attendingProviderId, providerId)))
+    .limit(1)
+  return adm !== undefined
 }
 
 export type SignOffError = 'not_found' | 'not_verified' | 'not_owner' | 'name_mismatch' | 'already_signed'
@@ -55,14 +72,7 @@ export async function signOffLabResult(
     if (!order) return { ok: false, error: 'not_found' } as const
     if (!SIGNOFF_STATUSES[kind].includes(order.status)) return { ok: false, error: 'not_verified' } as const
     if (!provider) return { ok: false, error: 'not_owner' } as const
-    let owner = provider.id === order.orderedByProviderId
-    if (!owner) {
-      const [adm] = await tx.select({ id: admissions.id }).from(admissions)
-        .where(and(eq(admissions.patientId, order.patientId), eq(admissions.status, 'admitted'), eq(admissions.attendingProviderId, provider.id)))
-        .limit(1)
-      owner = adm !== undefined
-    }
-    if (!owner) return { ok: false, error: 'not_owner' } as const
+    if (!(await isResultOwnerInTx(tx, provider.id, order))) return { ok: false, error: 'not_owner' } as const
     if (kind === 'cosign' && !sameSignatureName(i.typedName ?? '', session.name)) return { ok: false, error: 'name_mismatch' } as const
 
     const inserted = await tx.insert(labResultSignoffs)

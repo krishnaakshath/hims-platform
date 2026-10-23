@@ -667,6 +667,11 @@ import { POST as postLabAcknowledge } from '@/app/api/lab-orders/[id]/acknowledg
 import { POST as postLabCosign } from '@/app/api/lab-orders/[id]/cosign/route'
 import { LAB_SIGNOFF_ROLES } from '@/lib/role-policy'
 // end WS4 T11
+// WS4 T12
+import { POST as postLabCriticalNotify } from '@/app/api/lab-orders/[id]/critical/notify/route'
+import { POST as postLabCriticalAck } from '@/app/api/lab-orders/[id]/critical/acknowledge/route'
+import { LAB_CRITICAL_ACK_ROLES, LAB_CRITICAL_NOTIFY_ROLES } from '@/lib/role-policy'
+// end WS4 T12
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1195,6 +1200,11 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/lab-orders/[id]/acknowledge', call: () => postLabAcknowledge(send('POST', `/api/lab-orders/${BOGUS_ID}/acknowledge`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_SIGNOFF_ROLES] },
   { name: 'POST /api/lab-orders/[id]/cosign', call: () => postLabCosign(send('POST', `/api/lab-orders/${BOGUS_ID}/cosign`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_SIGNOFF_ROLES] },
   // end WS4 T11
+  // WS4 T12: critical-value call log (`{}` fails the strict body: 400) and acknowledgement (empty body allowed; the
+  // unknown order is the 404 an allowed role gets).
+  { name: 'POST /api/lab-orders/[id]/critical/notify', call: () => postLabCriticalNotify(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/notify`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_CRITICAL_NOTIFY_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/critical/acknowledge', call: () => postLabCriticalAck(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/acknowledge`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_CRITICAL_ACK_ROLES] },
+  // end WS4 T12
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1389,6 +1399,10 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/lab-orders/[id]/acknowledge', call: () => postLabAcknowledge(send('POST', `/api/lab-orders/${BOGUS_ID}/acknowledge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SIGNOFF_ROLES },
   { name: 'POST /api/lab-orders/[id]/cosign', call: () => postLabCosign(send('POST', `/api/lab-orders/${BOGUS_ID}/cosign`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SIGNOFF_ROLES },
   // end WS4 T11
+  // WS4 T12
+  { name: 'POST /api/lab-orders/[id]/critical/notify', call: () => postLabCriticalNotify(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/notify`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_CRITICAL_NOTIFY_ROLES },
+  { name: 'POST /api/lab-orders/[id]/critical/acknowledge', call: () => postLabCriticalAck(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/acknowledge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_CRITICAL_ACK_ROLES },
+  // end WS4 T12
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {
