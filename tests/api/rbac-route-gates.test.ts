@@ -639,6 +639,9 @@ import { INVOICE_READY_ROLES as WS2T12_INVOICE_READY_ROLES } from '@/lib/role-po
 import { POST as postInpatientAdmission } from '@/app/api/inpatient/admissions/route'
 import { ADMISSION_ROLES } from '@/lib/role-policy'
 // end WS3 T2
+// WS3 T3
+import { GET as getAdmissionFormContext } from '@/app/api/inpatient/admissions/form-context/route'
+// end WS3 T3
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -896,7 +899,7 @@ export const API_GATES: ApiGateCase[] = [
   // end SP6
   // SP6 code systems: code search (no PHI) for CODE_LOOKUP_ROLES, the version list for CODING_ROLES,
   // import / set current for CODE_SYSTEM_ADMIN_ROLES. Allowed roles' bodies fail validation before any write.
-  { name: 'GET /api/coding/codes', call: () => settle(() => getCodes(get('/api/coding/codes'))), allowed: [...CODE_LOOKUP_ROLES] },
+  { name: 'GET /api/coding/codes', call: () => settle(() => getCodes(get('/api/coding/codes'))), allowed: [...CODE_LOOKUP_ROLES] }, // WS3 T3: CODE_LOOKUP_ROLES now includes frontdesk
   { name: 'GET /api/coding/code-systems', call: () => settle(() => listCodeSystemsRoute()), allowed: [...CODING_ROLES] },
   { name: 'POST /api/coding/code-systems/import', call: () => settle(() => postCodeImport(send('POST', '/api/coding/code-systems/import'))), allowed: [...CODE_SYSTEM_ADMIN_ROLES] },
   { name: 'PATCH /api/coding/code-systems/[id]', call: () => settle(() => patchCodeSystem(send('PATCH', `/api/coding/code-systems/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...CODE_SYSTEM_ADMIN_ROLES] },
@@ -1137,6 +1140,9 @@ export const API_GATES: ApiGateCase[] = [
   // WS3 T2: the admission form -- ADMISSION_ROLES (a pi's ownership check runs after the body parse); an empty body is the 400 an allowed role gets.
   { name: 'POST /api/inpatient/admissions', call: () => postInpatientAdmission(send('POST', '/api/inpatient/admissions', {})), allowed: [...ADMISSION_ROLES] },
   // end WS3 T2
+  // WS3 T3: the admission dialog's form context -- ADMISSION_ROLES; no patientId is the 400 an allowed role gets.
+  { name: 'GET /api/inpatient/admissions/form-context', call: () => getAdmissionFormContext(get('/api/inpatient/admissions/form-context')), allowed: [...ADMISSION_ROLES] },
+  // end WS3 T3
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

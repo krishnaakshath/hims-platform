@@ -3,7 +3,6 @@ import { requireSessionOrRedirect } from '@/lib/auth'
 import { REGISTRATION_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { listActiveProviders } from '@/lib/queries/providers'
-import { listAvailableRooms } from '@/lib/queries/rooms'
 import { CheckInButton } from '@/components/CheckInButton'
 import { AddPatientButton } from '@/components/AddPatientButton'
 import { getPickedPatient } from '@/lib/queries/search' // Wave C
@@ -22,9 +21,8 @@ export default async function FrontDeskCheckInPage({ searchParams }: { searchPar
 
   const requested = (await searchParams)?.patient
   const preselectId = typeof requested === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(requested) ? requested : null
-  const [providers, rooms, initialPatient] = await Promise.all([
+  const [providers, initialPatient] = await Promise.all([
     listActiveProviders(),
-    listAvailableRooms(),
     preselectId ? getPickedPatient(preselectId) : Promise.resolve(null),
   ])
   await logAudit(session, 'viewed front desk check-in', null)
@@ -33,7 +31,7 @@ export default async function FrontDeskCheckInPage({ searchParams }: { searchPar
     <div>
       <h1 className="mb-6 text-2xl font-bold text-foreground">Check-In</h1>
       <div className="flex gap-3">
-        <CheckInButton providers={providers} rooms={rooms} initialPatient={initialPatient} />
+        <CheckInButton providers={providers} initialPatient={initialPatient} />
         {/* Check-In only accepts an existing patient ID -- a genuine
             walk-in with no chart yet needs to be registered first. Same
             POST /api/patients gate (admin/frontdesk), surfaced right here

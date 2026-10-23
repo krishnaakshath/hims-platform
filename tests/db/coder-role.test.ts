@@ -35,7 +35,7 @@ describe('SP6 coder role', () => {
     expect([...CODING_ENTRY_ROLES]).toEqual(['admin', 'coder', 'pi'])
     expect([...CODE_PROPOSE_ROLES]).toEqual(['pi'])
     expect([...CODING_QUERY_RESPOND_ROLES]).toEqual(['admin', 'pi', 'coder'])
-    expect([...CODE_LOOKUP_ROLES]).toEqual(['admin', 'coder', 'pi', 'crc', 'billing', 'rcm']) // SP7: + rcm
+    expect([...CODE_LOOKUP_ROLES]).toEqual(['admin', 'coder', 'pi', 'crc', 'billing', 'rcm', 'frontdesk']) // SP7: + rcm; WS3 T3: + frontdesk
     expect([...CODE_SYSTEM_ADMIN_ROLES]).toEqual(['admin'])
   })
 })

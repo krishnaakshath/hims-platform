@@ -5,6 +5,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
+import { AdmitPatientModal } from '@/components/inpatient/AdmitPatientModal'
 
 export interface BoardRoom {
   id: number
@@ -38,12 +40,18 @@ const STATUS_LABELS: Record<BoardRoom['status'], string> = {
 // rows grouped by area (here, ward) with color-coded cells, and a fixed
 // bottom legend mapping every color to its label -- status is never shown
 // by color alone.
-export function BedBoard({ rooms, canManageFacilities, canBlock, canAdmit }: { rooms: BoardRoom[]; canManageFacilities: boolean; canBlock: boolean; canAdmit: boolean }) {
+// WS3 T3: `canAdmit` (ADMISSION_ROLES) adds "Admit here" on a free bed: pick the patient, then the
+// admission dialog opens with that bed preselected. `providers` are the attending choices.
+export function BedBoard({ rooms, providers = [], canManageFacilities, canBlock, canAdmit }: {
+  rooms: BoardRoom[]; providers?: { id: number; name: string }[]; canManageFacilities: boolean; canBlock: boolean; canAdmit: boolean
+}) {
   const router = useRouter()
   const [selected, setSelected] = useState<BoardRoom | null>(null)
   const [blockReason, setBlockReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [admitPatient, setAdmitPatient] = useState<PickedPatient | null>(null)
+  const [admitting, setAdmitting] = useState<{ patient: PickedPatient; roomId: number } | null>(null)
 
   const wards = Array.from(new Set(rooms.map((r) => r.ward))).sort()
 
@@ -70,7 +78,7 @@ export function BedBoard({ rooms, canManageFacilities, canBlock, canAdmit }: { r
             {rooms.filter((r) => r.ward === ward).map((r) => (
               <button
                 key={r.id}
-                onClick={() => { setSelected(r); setBlockReason(''); setError(null) }}
+                onClick={() => { setSelected(r); setBlockReason(''); setError(null); setAdmitPatient(null) }}
                 className={`rounded-lg border p-3 text-left text-xs transition-colors hover:opacity-80 ${STATUS_STYLES[r.status]}`}
               >
                 <p className="font-semibold">Room {r.roomNumber} · Bed {r.bedNumber}</p>
@@ -122,6 +130,18 @@ export function BedBoard({ rooms, canManageFacilities, canBlock, canAdmit }: { r
                 <Button onClick={() => callAction(`/api/inpatient/rooms/${selected.id}/mark-clean`)} disabled={busy}>Mark clean</Button>
               )}
 
+              {selected.status === 'available' && canAdmit && (
+                <div className="space-y-2">
+                  <PatientPicker value={admitPatient} onChange={setAdmitPatient} label="Patient to admit" />
+                  <Button
+                    onClick={() => { if (admitPatient) { setAdmitting({ patient: admitPatient, roomId: selected.id }); setSelected(null) } }}
+                    disabled={!admitPatient}
+                  >
+                    Admit here
+                  </Button>
+                </div>
+              )}
+
               {selected.status === 'available' && canBlock && (
                 <div className="space-y-2">
                   <input value={blockReason} onChange={(e) => setBlockReason(e.target.value)} placeholder="Reason for blocking, e.g. Plumbing repair" aria-label="Block reason" className="w-full rounded-md border border-border px-2 py-1.5 text-sm" />
@@ -145,6 +165,10 @@ export function BedBoard({ rooms, canManageFacilities, canBlock, canAdmit }: { r
           </DialogContent>
         )}
       </Dialog>
+
+      {admitting && (
+        <AdmitPatientModal patient={admitting.patient} initialRoomId={admitting.roomId} providers={providers} onClose={() => setAdmitting(null)} />
+      )}
     </div>
   )
 }

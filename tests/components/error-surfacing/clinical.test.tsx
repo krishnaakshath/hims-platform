@@ -45,7 +45,7 @@ const CASES: Case[] = [
     before: async () => { await pickPatient(); fireEvent.change(screen.getByLabelText('Expiry month'), { target: { value: '2099-12' } }) } },
   { name: 'EnterLabResultModal', ui: () => <EnterLabResultModal orderId={1} testName="CBC" defaultUnit="g/dL" defaultReferenceRange="12-16" category="lab" attachments={[]} onClose={vi.fn()} />, submit: /^Save result$/ },
   { name: 'DeletePatientDialog', ui: () => <DeletePatientDialog target={{ id: 'RD-1', name: 'P' }} onClose={vi.fn()} onDeleted={vi.fn()} />, submit: /delete/i },
-  { name: 'CheckInModal', ui: () => <CheckInModal providers={[{ id: 1, name: 'Dr A' }]} rooms={[]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} />, submit: /^Check In$/ },
+  { name: 'CheckInModal', ui: () => <CheckInModal providers={[{ id: 1, name: 'Dr A' }]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} />, submit: /^Check In$/ },
   { name: 'NoteForm', ui: () => <NoteForm patientId="RD-1" canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: /new note/i })) }, submit: /^(Save|Create)/ },
   { name: 'CarePlanSection', ui: () => <CarePlanSection patientId="RD-1" plans={[]} canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: 'New Care Plan' })) }, submit: /^Save$/ },
   { name: 'BedBoard block', ui: () => <BedBoard rooms={[{ id: 5, ward: 'A', roomNumber: '1', bedNumber: 'B', status: 'available', blockedReason: null, occupantName: null, occupantPatientId: null, attendingProviderName: null, admittedAt: null }]} canManageFacilities canBlock canAdmit={false} />,

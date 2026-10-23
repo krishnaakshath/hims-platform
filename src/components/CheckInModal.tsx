@@ -6,9 +6,9 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
+import { AdmitPatientModal } from '@/components/inpatient/AdmitPatientModal'
 
 interface ProviderOption { id: number; name: string }
-interface RoomOption { id: number; ward: string; roomNumber: string; bedNumber: string }
 
 // WS2 T9: the fee preview (GET /api/front-desk/check-in/fee-preview) and the automatic charge
 // outcomes the check-in returns.
@@ -46,7 +46,9 @@ function previewText(p: FeePreview): string | null {
 // the route still receives the chart id. After check-in the ticket shows the
 // token, name and UHID and links to the printable 80 mm slip
 // (/print/token/[encounterId]) instead of printing the whole page.
-export function CheckInModal({ providers, rooms, onClose, initialPatient = null }: { providers: ProviderOption[]; rooms: RoomOption[]; onClose: () => void; initialPatient?: PickedPatient | null }) {
+// WS3 T3: "Inpatient" no longer checks in: with a patient picked it opens the admission dialog
+// (AdmitPatientModal, spec 3.1 item 1), which chooses the bed itself.
+export function CheckInModal({ providers, onClose, initialPatient = null }: { providers: ProviderOption[]; onClose: () => void; initialPatient?: PickedPatient | null }) {
   const router = useRouter()
   const [patient, setPatient] = useState<PickedPatient | null>(initialPatient)
   const patientId = patient?.id ?? ''
@@ -55,13 +57,11 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
   const [urgency, setUrgency] = useState<'routine' | 'urgent' | 'emergency'>('routine')
   const [reason, setReason] = useState('')
   const reasonHintId = useId()
-  const [roomId, setRoomId] = useState<number | ''>('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [checkinResult, setCheckinResult] = useState<{
     token: number | null
     patient: PickedPatient
-    roomId: number | null
     encounterId: number | null
     charges: ChargeOutcome[]
   } | null>(null)
@@ -82,13 +82,12 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
     if (!patient) return
     setSubmitting(true)
     setError(null)
-    const res = await sendJson<{ queueTicketNumber?: number | null; opdToken?: number | null; encounterId?: number | null; patientId?: string; roomId?: number | null; charges?: ChargeOutcome[] }>('/api/front-desk/check-in', 'POST', {
+    const res = await sendJson<{ queueTicketNumber?: number | null; opdToken?: number | null; encounterId?: number | null; patientId?: string; charges?: ChargeOutcome[] }>('/api/front-desk/check-in', 'POST', {
       patientId,
       providerId,
-      visitType,
+      visitType: 'outpatient',
       urgency,
       reason,
-      ...(visitType === 'inpatient' && roomId !== '' ? { roomId } : {}),
     })
     setSubmitting(false)
     if (res.ok) {
@@ -96,7 +95,6 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
       setCheckinResult({
         token: typeof body?.opdToken === 'number' ? body.opdToken : typeof body?.queueTicketNumber === 'number' ? body.queueTicketNumber : null,
         patient,
-        roomId: body?.roomId ?? null,
         encounterId: typeof body?.encounterId === 'number' ? body.encounterId : null,
         charges: Array.isArray(body?.charges) ? body.charges : [],
       })
@@ -106,10 +104,13 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
     setError(res.error)
   }
 
-  const canSubmit = Boolean(patientId) && providerId !== '' && Boolean(reason) && (visitType === 'outpatient' || roomId !== '' || rooms.length === 0) && !submitting
+  const canSubmit = Boolean(patientId) && providerId !== '' && Boolean(reason) && visitType === 'outpatient' && !submitting
+
+  if (visitType === 'inpatient' && patient) {
+    return <AdmitPatientModal patient={patient} providers={providers} onClose={onClose} />
+  }
 
   if (checkinResult !== null) {
-    const room = rooms.find((r) => r.id === checkinResult.roomId)
     // WS2 T9: what to collect now: the new self-pay lines this check-in captured.
     const collectPaise = checkinResult.charges.reduce((sum, c) => (c.ok && !c.existing && c.billTo === 'self' ? sum + c.taxablePaise : sum), 0)
     return (
@@ -125,14 +126,6 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
             <p className="text-sm text-muted-foreground">Patient</p>
             <p className="text-lg font-semibold text-foreground">{checkinResult.patient.name}</p>
             <p className="font-mono text-xs text-muted-foreground">{checkinResult.patient.uhid ? `UHID ${checkinResult.patient.uhid}` : `Chart ID ${checkinResult.patient.id}`}</p>
-            {room && (
-              <>
-                <p className="text-sm text-muted-foreground">Room</p>
-                <p className="text-lg font-semibold text-foreground">
-                  {room.ward} — Room {room.roomNumber}, Bed {room.bedNumber}
-                </p>
-              </>
-            )}
           </div>
           {checkinResult.charges.length > 0 && (
             <div className="space-y-1 rounded-md border p-3 text-sm" aria-label="Charges">
@@ -201,13 +194,7 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
           </select>
 
           {visitType === 'inpatient' && (
-            <select value={roomId} onChange={(e) => setRoomId(e.target.value === '' ? '' : Number(e.target.value))} aria-label="Room" className="w-full rounded-md border border-border px-3 py-2 text-sm">
-              <option value="">Select a room…</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>{r.ward} — Room {r.roomNumber}, Bed {r.bedNumber}</option>)}
-            </select>
-          )}
-          {visitType === 'inpatient' && rooms.length === 0 && (
-            <p className="text-sm text-warning">No rooms are currently available. You can still complete this check-in and assign a room once one frees up.</p>
+            <p className="text-sm text-muted-foreground">Pick the patient to open the admission form.</p>
           )}
 
           <div className="space-y-1">
@@ -215,9 +202,6 @@ export function CheckInModal({ providers, rooms, onClose, initialPatient = null 
             <p id={reasonHintId} className="text-xs text-muted-foreground">Shown to the patient in their visit confirmation — keep it brief and non-clinical.</p>
           </div>
           {/* WS2 T9: the fee before submit */}
-          {visitType === 'inpatient' && patientId && providerId !== '' && (
-            <p className="text-sm text-muted-foreground">{NOTE_LABEL.inpatient}</p>
-          )}
           {visitType === 'outpatient' && preview && (previewText(preview) || preview.note) && (
             <div className="space-y-0.5 text-sm" aria-live="polite">
               {previewText(preview) && <p className="font-medium text-foreground">{previewText(preview)}</p>}

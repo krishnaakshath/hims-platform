@@ -133,7 +133,7 @@ export const CODING_ENTRY_ROLES: readonly Role[] = ['admin', 'coder', 'pi']
 // completed visits only), so admin codes from the coding workspace, not the chart.
 export const CODE_PROPOSE_ROLES: readonly Role[] = ['pi']
 export const CODING_QUERY_RESPOND_ROLES: readonly Role[] = ['admin', 'pi', 'coder']
-export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc', 'billing', 'rcm'] // SP7: + rcm (pre-auth diagnosis/procedure search)
+export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc', 'billing', 'rcm', 'frontdesk'] // SP7: + rcm (pre-auth diagnosis/procedure search); WS3 T3: + frontdesk (admission diagnosis picker, spec 3.1 item 3)
 export const CODE_SYSTEM_ADMIN_ROLES: readonly Role[] = ['admin']
 // end SP6
 

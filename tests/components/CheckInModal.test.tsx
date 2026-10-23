@@ -9,19 +9,37 @@ const ASHA = { id: 'RD-0001', name: 'Asha Rao', uhid: 'UH00000042' }
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 
 const PROVIDERS = [{ id: 1, name: 'Dr. R. Kunam' }]
-const ROOMS = [{ id: 1, ward: 'Ward A', roomNumber: '101', bedNumber: 'A' }]
 
 describe('CheckInModal', () => {
   it('does not show a room picker for an outpatient visit', () => {
-    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
+    render(<CheckInModal providers={PROVIDERS} onClose={vi.fn()} />)
     fireEvent.click(screen.getByLabelText(/outpatient/i))
     expect(screen.queryByLabelText(/room/i)).not.toBeInTheDocument()
   })
 
-  it('shows a room picker for an inpatient visit', () => {
-    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
+  // WS3 T3: Inpatient no longer checks in -- it opens the admission dialog (spec 3.1 item 1).
+  it('Inpatient opens the admission dialog for the picked patient, with no room select', async () => {
+    const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(url.startsWith('/api/inpatient/admissions/form-context') ? {
+      patient: { id: 'RD-0001', name: 'Asha Rao', uhid: 'UH00000042', gender: 'female', ageYears: 34 },
+      beds: [{ id: 5, label: 'Ward A 101-A', ward: 'Ward A', genderRestriction: null, roomCategoryName: null, tariffPaise: null, conflict: null }],
+      policies: [], preauths: [], openOpdEncounter: null, activeAdmissionId: null, depositThresholdPaise: 0,
+    } : {}), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CheckInModal providers={PROVIDERS} initialPatient={ASHA} onClose={vi.fn()} />)
     fireEvent.click(screen.getByLabelText(/inpatient/i))
-    expect(screen.getByLabelText(/room/i)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Admit patient' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Room' })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([u]) => u === '/api/inpatient/admissions/form-context?patientId=RD-0001')).toBe(true)
+    expect(fetchMock.mock.calls.some(([u]) => u === '/api/front-desk/check-in')).toBe(false)
+    vi.unstubAllGlobals()
+  })
+
+  it('Inpatient without a patient asks for the patient first and cannot check in', () => {
+    render(<CheckInModal providers={PROVIDERS} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByLabelText(/inpatient/i))
+    expect(screen.getByText(/pick the patient to open the admission form/i)).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Room' })).not.toBeInTheDocument()
+    expect(screen.getByText('Check In')).toBeDisabled()
   })
 
   it('finds the patient by UHID/name/mobile in the picker and checks in by chart id', async () => {
@@ -32,7 +50,7 @@ describe('CheckInModal', () => {
     ))
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
+    render(<CheckInModal providers={PROVIDERS} onClose={vi.fn()} />)
     expect(screen.queryByPlaceholderText(/RD-0001/)).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('combobox', { name: /patient/i }), { target: { value: 'UH0000' } })
     fireEvent.click(await screen.findByRole('option', { name: /asha rao/i }))
@@ -50,66 +68,41 @@ describe('CheckInModal', () => {
   })
 
   it('cannot submit until a patient is picked', () => {
-    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
+    render(<CheckInModal providers={PROVIDERS} onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Follow-up' } })
     expect(screen.getByText('Check In')).toBeDisabled()
   })
 
   it('starts with a preselected patient (quick path from the patient page)', () => {
-    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} initialPatient={ASHA} onClose={vi.fn()} />)
+    render(<CheckInModal providers={PROVIDERS} initialPatient={ASHA} onClose={vi.fn()} />)
     expect(screen.getByText('Asha Rao')).toBeInTheDocument()
     expect(screen.getByText(/UH00000042/)).toBeInTheDocument()
   })
 
-  it('allows submitting an inpatient check-in with no room selected when no rooms exist', () => {
-    render(<CheckInModal providers={PROVIDERS} rooms={[]} initialPatient={ASHA} onClose={vi.fn()} />)
-    fireEvent.click(screen.getByLabelText(/inpatient/i))
-    fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: '1' } })
-    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Admission' } })
-
-    expect(screen.getByText('Check In')).not.toBeDisabled()
-  })
-
-  it('disables submit for an inpatient visit when rooms exist but none is selected', () => {
-    render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} initialPatient={ASHA} onClose={vi.fn()} />)
-    fireEvent.click(screen.getByLabelText(/inpatient/i))
-    fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: '1' } })
-    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Admission' } })
-
-    expect(screen.getByText('Check In')).toBeDisabled()
-  })
-
   describe('check-in ticket', () => {
-    async function checkInSuccessfully(overrides?: { roomId?: number; providerId?: number }) {
+    async function checkInSuccessfully(overrides?: { providerId?: number }) {
       const patientId = ASHA.id
       const providerId = overrides?.providerId ?? 1
-      const roomId = overrides?.roomId
 
       const apiResponse = {
         id: 1,
         queueTicketNumber: 42,
         patientId,
         providerId,
-        visitType: roomId ? 'inpatient' : 'outpatient',
+        visitType: 'outpatient',
         urgency: 'routine',
         reason: 'Follow-up',
-        roomId: roomId ?? null,
         encounterId: 9,
         opdToken: 42,
       }
       const fetchMock = vi.fn<(url: string) => Promise<Response>>(async () => new Response(JSON.stringify(apiResponse), { status: 201 }))
       vi.stubGlobal('fetch', fetchMock)
 
-      render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} initialPatient={ASHA} onClose={vi.fn()} />)
+      render(<CheckInModal providers={PROVIDERS} initialPatient={ASHA} onClose={vi.fn()} />)
 
       fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: String(providerId) } })
       fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Follow-up' } })
-
-      if (roomId) {
-        fireEvent.click(screen.getByLabelText(/inpatient/i))
-        fireEvent.change(screen.getByLabelText(/room/i), { target: { value: String(roomId) } })
-      }
 
       fireEvent.click(screen.getByText('Check In'))
       // WS2 T9: the fee preview is fetched too; count the check-in POST only.
@@ -127,11 +120,6 @@ describe('CheckInModal', () => {
       await checkInSuccessfully()
       await waitFor(() => expect(screen.getByText('Asha Rao')).toBeInTheDocument())
       expect(screen.getByText(/UH00000042/)).toBeInTheDocument()
-    })
-
-    it('shows the assigned room on the ticket for inpatient visits', async () => {
-      await checkInSuccessfully({ roomId: 1 })
-      await waitFor(() => expect(screen.getByText(/Ward A.*101.*A/)).toBeInTheDocument())
     })
 
     it('links to the printable token slip instead of printing the whole page', async () => {
@@ -161,7 +149,7 @@ describe('CheckInModal', () => {
       return fetchMock
     }
     function fill() {
-      render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} initialPatient={ASHA} onClose={vi.fn()} />)
+      render(<CheckInModal providers={PROVIDERS} initialPatient={ASHA} onClose={vi.fn()} />)
       fireEvent.change(screen.getByLabelText(/assign to doctor/i), { target: { value: '1' } })
       fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Fever' } })
     }
@@ -175,12 +163,10 @@ describe('CheckInModal', () => {
       vi.unstubAllGlobals()
     })
 
-    it('says when the department has no consultation rate, and shows no fee for an inpatient', async () => {
+    it('says when the department has no consultation rate', async () => {
       stub({ registration: null, consultation: null, note: 'no_rate' })
       fill()
       expect(await screen.findByText(/no consultation rate is set/i)).toBeInTheDocument()
-      fireEvent.click(screen.getByLabelText(/inpatient/i))
-      expect(await screen.findByText(/inpatient charges are added by billing/i)).toBeInTheDocument()
       vi.unstubAllGlobals()
     })
 
@@ -214,7 +200,7 @@ describe('CheckInModal', () => {
   describe('Reason field (patient-facing)', () => {
     const HINT = 'Shown to the patient in their visit confirmation — keep it brief and non-clinical.'
     it('shows a visible hint wired to the input via aria-describedby', () => {
-      render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
+      render(<CheckInModal providers={PROVIDERS} onClose={vi.fn()} />)
       const hint = screen.getByText(HINT)
       expect(hint).toBeVisible()
       const input = screen.getByLabelText(/reason/i)
@@ -222,7 +208,7 @@ describe('CheckInModal', () => {
       expect(hint.id).not.toBe('')
     })
     it('caps the reason at 140 characters', () => {
-      render(<CheckInModal providers={PROVIDERS} rooms={ROOMS} onClose={vi.fn()} />)
+      render(<CheckInModal providers={PROVIDERS} onClose={vi.fn()} />)
       expect(screen.getByLabelText(/reason/i)).toHaveAttribute('maxLength', '140')
     })
   })
