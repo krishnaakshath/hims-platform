@@ -3,7 +3,7 @@ import { requireSession } from '@/lib/auth'
 import { readJsonBody } from '@/lib/http'
 import { CLINICAL_WRITE_ROLES } from '@/lib/role-policy'
 import { checkEncounterWriter, parseEncounterId } from '@/lib/encounters/ownership'
-import { DIAGNOSIS_MISSING_BODY, encounterResponse } from '@/lib/encounters/encounter-projection'
+import { DIAGNOSIS_MISSING_BODY, VISIT_HAS_PERFORMED_ORDERS_BODY, encounterResponse, visitBilledBody } from '@/lib/encounters/encounter-projection'
 import { completeEncounter, completeEncounterSchema } from '@/lib/queries/encounter-workspace'
 import { RETRY_MESSAGE, isRetryableConflict, pgErrorCode } from '@/lib/db-errors'
 
@@ -35,9 +35,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (result.error === 'not_found') return NextResponse.json({ error: 'Not found' }, { status: 404 })
       if (result.error === 'not_owner') return NextResponse.json({ error: 'Forbidden', code: 'not_owner' }, { status: 403 })
       if (result.error === 'diagnosis_missing') return NextResponse.json(DIAGNOSIS_MISSING_BODY, { status: 409 })
+      if (result.error === 'visit_billed') return NextResponse.json(visitBilledBody(result.invoiceNumber), { status: 409 }) // WS2 T14
+      if (result.error === 'visit_has_performed_orders') return NextResponse.json(VISIT_HAS_PERFORMED_ORDERS_BODY, { status: 409 }) // WS2 T14
       return NextResponse.json({ error: 'Visit is closed', code: 'visit_closed' }, { status: 409 })
     }
-    return NextResponse.json({ encounter: encounterResponse(result.encounter), warnings: result.warnings })
+    // WS2 T14: `charges` is the consultation outcome (captured now, already on the bill, or why not).
+    return NextResponse.json({ encounter: encounterResponse(result.encounter), warnings: result.warnings, charges: result.charges })
   } catch (err) {
     if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     console.error(`[encounters] complete failed (code ${pgErrorCode(err) ?? 'unknown'})`)

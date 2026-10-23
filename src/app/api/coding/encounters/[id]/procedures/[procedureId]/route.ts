@@ -50,7 +50,8 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
   try {
     const r = await voidEncounterProcedure(id.encounterId, id.procedureId, session)
     if (!r.ok) return codingErrorResponse(r.error, r.issues)
-    return NextResponse.json({ ok: true })
+    // billing: what happened to its line (voided, none, or credit_note_needed when invoiced).
+    return NextResponse.json({ ok: true, billing: r.value.billing })
   } catch (err) {
     return codingServerError('remove procedure', err)
   }

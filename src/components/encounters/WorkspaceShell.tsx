@@ -1,8 +1,5 @@
 'use client'
 import { createContext, useContext, useState, type ReactNode } from 'react'
-import { AddPrescriptionModal } from '@/components/AddPrescriptionModal'
-import { OrderLabTestModal, type LabTestOption } from '@/components/OrderLabTestModal'
-import type { MedicationWithInventory } from '@/lib/queries/medications'
 
 export const WORKSPACE_TABS = [
   { key: 'vitals', label: 'Vitals' },
@@ -52,26 +49,5 @@ export function WorkspaceShell({ panels, footer, initialTab = 'vitals' }: { pane
       {footer && <div className="sticky bottom-0 z-10 rounded-lg border border-border bg-card px-5 py-3 shadow-md">{footer}</div>}
     </div>
     </SelectTabContext.Provider>
-  )
-}
-
-// Until T14 the Rx and Orders tabs open the existing chart dialogs, unchanged.
-export function WorkspaceRxLauncher(props: { patientId: string; catalog: MedicationWithInventory[]; activeProviders: { id: number; name: string; specialty: string }[]; needsOnBehalfOf: boolean; diagnosisCodes: string[] }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground">Add prescription</button>
-      {open && <AddPrescriptionModal {...props} onClose={() => setOpen(false)} />}
-    </>
-  )
-}
-
-export function WorkspaceOrdersLauncher({ patientId, labTests }: { patientId: string; labTests: LabTestOption[] }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground">Order test</button>
-      {open && <OrderLabTestModal patientId={patientId} labTests={labTests} onClose={() => setOpen(false)} />}
-    </>
   )
 }

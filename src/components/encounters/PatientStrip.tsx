@@ -3,6 +3,7 @@ import type { WorkspaceView } from '@/lib/queries/encounter-workspace'
 import { ENCOUNTER_STATUS_LABEL, ENCOUNTER_TYPE_LABEL, VISIT_TYPE_LABEL, genderLabel } from '@/lib/encounters/register'
 import { formatPhoneForDisplay } from '@/lib/patient-directory'
 import { formatIsoDate } from '@/lib/india-time'
+import { formatPaise } from '@/lib/money'
 import { AllergyEditor } from './AllergyEditor'
 import { StartEncounterButton } from './StartEncounterButton'
 
@@ -14,7 +15,11 @@ const ALERT_TEXT: Record<WorkspaceView['patient']['alerts'][number], string> = {
 // WS1 T3: who the patient is and which visit this is, always on top of the workspace. Shows the
 // UHID, never the chart id. "Start consultation" appears only on a checked-in visit the viewer may
 // write; it POSTs (the page itself never starts a visit).
-export function PatientStrip({ view, canEditAllergies }: { view: Pick<WorkspaceView, 'encounter' | 'patient' | 'canWrite'>; canEditAllergies: boolean }) {
+export function PatientStrip({ view, canEditAllergies, visitCharges }: {
+  view: Pick<WorkspaceView, 'encounter' | 'patient' | 'canWrite'>; canEditAllergies: boolean
+  /** WS2 T14: the visit's live charge lines (GST-inclusive estimate). */
+  visitCharges?: { totalPaise: number; lines: number }
+}) {
   const { encounter: e, patient: p } = view
   const ageSex = [p.ageYears !== null ? `${p.ageYears} y` : null, p.sex ? genderLabel(p.sex) : null].filter(Boolean).join(' / ')
   return (
@@ -35,6 +40,11 @@ export function PatientStrip({ view, canEditAllergies }: { view: Pick<WorkspaceV
           </p>
           <p className="text-muted-foreground">{[e.departmentName, e.providerName, formatIsoDate(e.encounterDate)].filter(Boolean).join(' · ')}</p>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary">{ENCOUNTER_STATUS_LABEL[e.status]}</p>
+          {visitCharges && (
+            <p className="rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs font-medium text-foreground">
+              {`Visit charges ${formatPaise(visitCharges.totalPaise)} (${visitCharges.lines} ${visitCharges.lines === 1 ? 'line' : 'lines'})`}
+            </p>
+          )}
           {e.status === 'checked_in' && view.canWrite && <StartEncounterButton encounterId={e.id} label="Start consultation" />}
         </div>
       </div>

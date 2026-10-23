@@ -5,6 +5,8 @@ import { sendJson } from '@/lib/client-fetch'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { EncounterStatus } from '@/lib/encounters/status'
+import { formatPaise } from '@/lib/money'
+import type { AutoChargeOutcome } from '@/lib/queries/auto-charge'
 import { useSelectWorkspaceTab } from './WorkspaceShell'
 
 type Warning = 'no_vitals' | 'unsigned_notes'
@@ -12,6 +14,22 @@ const WARNING_TEXT: Record<Warning, string> = {
   no_vitals: 'No vitals were recorded for this visit.',
   unsigned_notes: 'A note from this visit is still unsigned.',
 }
+// WS2 T14: the consultation outcome of the completion (spec ruling 6: never blocks the visit).
+const CONSULTATION_NOT_BILLED: Record<Extract<AutoChargeOutcome, { ok: false }>['reason'], string> = {
+  no_service: 'this department has no consultation service',
+  price_unresolved: 'no rate for it today',
+  blocked: 'a billing rule blocked it',
+  no_context: 'no visit to bill',
+  context_cancelled: 'the visit is cancelled',
+}
+
+function consultationText(charges: AutoChargeOutcome[] | undefined): string | null {
+  const c = charges?.find((o) => o.source === 'consultation')
+  if (!c) return null
+  if (c.ok) return `Consultation ${formatPaise(c.taxablePaise)} on the bill.`
+  return `Consultation not billed: ${CONSULTATION_NOT_BILLED[c.reason]}. Billing can add it on Charge Capture.`
+}
+
 const REASON_MIN = 5
 const REASON_MAX = 300
 
@@ -31,16 +49,16 @@ export function CompleteVisitBar({ encounterId, status, canComplete }: { encount
   const [error, setError] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
   const [reason, setReason] = useState('')
-  const [done, setDone] = useState<{ warnings: Warning[] } | null>(null)
+  const [done, setDone] = useState<{ warnings: Warning[]; consultation: string | null } | null>(null)
 
   async function complete(noDiagnosisReason?: string) {
     setSubmitting(true)
     setError(null)
-    const res = await sendJson<{ warnings: Warning[] }>(`/api/encounters/${encounterId}/complete`, 'POST', noDiagnosisReason === undefined ? {} : { noDiagnosisReason })
+    const res = await sendJson<{ warnings: Warning[]; charges?: AutoChargeOutcome[] }>(`/api/encounters/${encounterId}/complete`, 'POST', noDiagnosisReason === undefined ? {} : { noDiagnosisReason })
     setSubmitting(false)
     if (res.ok) {
       setAsking(false)
-      setDone({ warnings: res.data.warnings ?? [] })
+      setDone({ warnings: res.data.warnings ?? [], consultation: consultationText(res.data.charges) })
       router.refresh()
       return
     }
@@ -55,6 +73,7 @@ export function CompleteVisitBar({ encounterId, status, canComplete }: { encount
       {done ? (
         <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           <span className="font-semibold text-success">Visit completed.</span>
+          {done.consultation && <span className="text-foreground">{done.consultation}</span>}
           {done.warnings.map((w) => <span key={w} className="text-warning-foreground">{WARNING_TEXT[w]}</span>)}
           {done.warnings.includes('unsigned_notes') && (
             <Button size="sm" variant="outline" onClick={() => selectTab('notes')}>Sign note</Button>

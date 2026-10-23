@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   getWorkspace: vi.fn(),
   push: vi.fn(),
   refresh: vi.fn(),
+  chargeLines: vi.fn(async (): Promise<unknown[]> => []),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -19,18 +20,16 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: h.role, name: 'Dr. A Rao', userId: null })) }))
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
-vi.mock('@/lib/queries/encounter-workspace', () => ({
-  getWorkspace: h.getWorkspace,
-  patientDiagnosisCodes: vi.fn(async () => []),
-}))
-vi.mock('@/lib/queries/medications', () => ({ listMedicationsWithInventory: vi.fn(async () => []) }))
+vi.mock('@/lib/queries/encounter-workspace', () => ({ getWorkspace: h.getWorkspace }))
 vi.mock('@/lib/queries/providers', () => ({ listAllProviders: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/lab-tests', () => ({ listLabTests: vi.fn(async () => []) }))
 // WS1 T4
 vi.mock('@/lib/queries/encounter-diagnoses', () => ({ listEncounterDiagnoses: vi.fn(async () => []), listProblemList: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/referrals', () => ({ listEncounterReferrals: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/departments', () => ({ listDepartments: vi.fn(async () => []) }))
-vi.mock('@/lib/provider-identity', () => ({ resolveSessionProvider: vi.fn(async () => ({ id: 3, name: 'Dr. A Rao' })) }))
+// WS1 T5 / WS2 T14: the visit's notes and its charge lines (header chip).
+vi.mock('@/lib/queries/encounter-notes', () => ({ listNotesForEncounter: vi.fn(async () => []) }))
+vi.mock('@/lib/queries/charge-capture', () => ({ listChargeLinesForContext: h.chargeLines }))
 
 import EncounterWorkspacePage from '@/app/(dashboard)/encounters/[id]/page'
 
@@ -56,6 +55,10 @@ describe('/encounters/[id] workspace page', () => {
     h.push.mockClear()
     h.getWorkspace.mockReset()
     h.getWorkspace.mockImplementation(async () => makeView())
+    h.chargeLines.mockReset()
+    h.chargeLines.mockImplementation(async () => [])
+    // The real panels load their lists on mount (orders, procedures).
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ orders: [], billTo: 'self', procedures: [], options: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
   })
 
   it('renders the patient strip with the UHID (never the chart id), the unknown-allergy alert and six tabs', async () => {
@@ -90,13 +93,47 @@ describe('/encounters/[id] workspace page', () => {
     expect(h.push).not.toHaveBeenCalled()
   })
 
-  it('switches tabs: the Rx tab offers the existing prescription dialog', async () => {
+  // WS2 T14: every tab mounts its real panel (no launcher dialogs).
+  it('all six tabs mount their real panels: Rx builder, lab orders and procedures with the visit, visit notes', async () => {
     render(await EncounterWorkspacePage(props()))
+    const panel = (key: string) => document.getElementById(`ws-panel-${key}`)!
+    expect(within(panel('vitals')).getByRole('heading', { name: 'Recorded this visit' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'History' }))
+    expect(within(panel('history')).getByRole('heading', { name: 'Previous visits' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Diagnosis' }))
+    expect(within(panel('diagnosis')).getByRole('heading', { name: 'Diagnoses this visit' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'Rx' }))
     expect(screen.getByRole('tab', { name: 'Rx' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('button', { name: /add prescription/i })).toBeInTheDocument()
+    expect(within(panel('rx')).getByRole('combobox', { name: 'Drug search' })).toBeInTheDocument()
+    expect(within(panel('rx')).getByRole('button', { name: 'Save prescription' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /add prescription/i })).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: 'Orders' }))
-    expect(screen.getByRole('button', { name: /order test/i })).toBeInTheDocument()
+    expect(within(panel('orders')).getByRole('heading', { name: 'Order tests' })).toBeInTheDocument()
+    expect(within(panel('orders')).getByRole('heading', { name: 'Order a procedure' })).toBeInTheDocument()
+    expect(await within(panel('orders')).findByText('No tests ordered from this visit.')).toBeInTheDocument()
+    const urls = vi.mocked(fetch).mock.calls.map((c) => String(c[0]))
+    expect(urls).toContain('/api/patients/RD-0042/lab-orders?encounterId=41')
+    expect(urls).toContain('/api/encounters/41/procedures')
+    expect(screen.queryByRole('button', { name: 'Order test' })).toBeNull() // the old launcher
+    fireEvent.click(screen.getByRole('tab', { name: 'Notes' }))
+    expect(within(panel('notes')).getByRole('button', { name: 'New Note' })).toBeInTheDocument()
+  })
+
+  it('header chip: the visit charges (live lines, GST-inclusive estimate) and their count', async () => {
+    h.chargeLines.mockImplementation(async () => [
+      { id: 1, status: 'captured', taxablePaise: 60000, gstRateBp: 0 },
+      { id: 2, status: 'invoiced', taxablePaise: 4680, gstRateBp: 1200 },
+      { id: 3, status: 'void', taxablePaise: 99999, gstRateBp: 0 },
+    ])
+    render(await EncounterWorkspacePage(props()))
+    expect(h.chargeLines).toHaveBeenCalledWith({ encounterId: 41 })
+    // 600.00 + 46.80 + 5.62 GST (2.81 CGST + 2.81 SGST) = 652.42; the void line is left out.
+    expect(screen.getByText('Visit charges ₹652.42 (2 lines)')).toBeInTheDocument()
+  })
+
+  it('header chip: no lines yet reads "Visit charges ₹0.00 (0 lines)"', async () => {
+    render(await EncounterWorkspacePage(props()))
+    expect(screen.getByText('Visit charges ₹0.00 (0 lines)')).toBeInTheDocument()
   })
 
   it('read-only viewer (another doctor) gets no write controls', async () => {
@@ -104,7 +141,11 @@ describe('/encounters/[id] workspace page', () => {
     render(await EncounterWorkspacePage(props()))
     expect(screen.queryByRole('button', { name: /start consultation/i })).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: 'Rx' }))
-    expect(screen.queryByRole('button', { name: /add prescription/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save prescription' })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Orders' }))
+    expect(screen.queryByRole('heading', { name: 'Order tests' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Order a procedure' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Orders from this visit' })).toBeInTheDocument()
   })
 
   it('redirects labs to its worklist and frontdesk home, before any query', async () => {

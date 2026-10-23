@@ -18,6 +18,7 @@ import { ageOnDate, todayIsoIn } from '@/lib/india-time'
 import type { PatientRow } from '@/components/PatientsTable'
 import { getConsult, listVitals, priorConsults, type PriorConsult } from './encounter-clinical'
 import { getEncounterById, transitionEncounter } from './encounters'
+import type { AutoChargeOutcome } from './auto-charge' // WS2 T14
 import { listActiveAllergies } from './allergies'
 import { liveDiagnosis } from './diagnoses'
 
@@ -154,12 +155,6 @@ export async function providerDepartmentName(providerId: number): Promise<string
   return row?.name ?? null
 }
 
-/** Coded diagnosis values on the patient's chart (drug suggestions in the Rx dialog). */
-export async function patientDiagnosisCodes(patientId: string): Promise<string[]> {
-  const rows = await getDb().select({ code: diagnoses.code }).from(diagnoses).where(and(eq(diagnoses.patientId, patientId), liveDiagnosis))
-  return rows.map((r) => r.code).filter((c) => c !== '')
-}
-
 const RECENT_PATIENT_LIMIT = 200
 
 /**
@@ -213,8 +208,9 @@ export const completeEncounterSchema = z.object({ noDiagnosisReason: z.string().
 
 export type CompleteEncounterWarning = 'no_vitals' | 'unsigned_notes'
 export type CompleteEncounterResult =
-  | { ok: true; encounter: EncounterRow; warnings: CompleteEncounterWarning[] }
-  | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' | 'diagnosis_missing' }
+  | { ok: true; encounter: EncounterRow; warnings: CompleteEncounterWarning[]; charges: AutoChargeOutcome[] } // WS2 T14: charges
+  | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' | 'diagnosis_missing' | 'visit_has_performed_orders' }
+  | { ok: false; error: 'visit_billed'; invoiceNumber: string } // WS2 T14
 
 /** Stores the no-diagnosis reason while the visit is still open; false when it has closed meanwhile. */
 async function recordNoDiagnosisReason(encounter: EncounterRow, reason: string, session: Session): Promise<boolean> {
@@ -275,8 +271,24 @@ export async function completeEncounter(
 
   const result = await transitionEncounter(encounterId, 'completed', session, { actingProviderId: opts.actingProviderId })
   if (!result.ok) {
-    // Any other refusal (admission_active today, more later) means this visit cannot complete now.
-    return { ok: false, error: result.error === 'not_found' || result.error === 'not_owner' ? result.error : 'invalid_transition' }
+    // WS2 T14: every refusal mapped explicitly. visit_billed and visit_has_performed_orders are
+    // cancel refusals today; they pass through (with the invoice number) should completion ever
+    // raise them. admission_active means this visit cannot complete now.
+    switch (result.error) {
+      case 'not_found':
+      case 'not_owner':
+      case 'visit_has_performed_orders':
+        return { ok: false, error: result.error }
+      case 'visit_billed':
+        return { ok: false, error: 'visit_billed', invoiceNumber: result.invoiceNumber }
+      case 'invalid_transition':
+      case 'admission_active':
+        return { ok: false, error: 'invalid_transition' }
+      default: {
+        const unmapped: never = result
+        return unmapped
+      }
+    }
   }
-  return { ok: true, encounter: result.encounter, warnings: await completionWarnings(encounterId) }
+  return { ok: true, encounter: result.encounter, warnings: await completionWarnings(encounterId), charges: result.charges ?? [] }
 }

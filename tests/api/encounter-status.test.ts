@@ -34,7 +34,7 @@ beforeEach(() => {
   vi.mocked(transitionEncounter).mockReset()
   vi.mocked(transitionEncounter).mockResolvedValue({ ok: true, encounter: ENCOUNTER as never })
   vi.mocked(resolveDoctorQueueProvider).mockReset().mockResolvedValue({ id: 4, name: 'Dr. K' })
-  vi.mocked(completeEncounter).mockReset().mockResolvedValue({ ok: true, encounter: ENCOUNTER as never, warnings: ['no_vitals'] })
+  vi.mocked(completeEncounter).mockReset().mockResolvedValue({ ok: true, encounter: ENCOUNTER as never, warnings: ['no_vitals'], charges: [] })
 })
 
 describe('POST /api/encounters/[id]/status', () => {
@@ -45,7 +45,7 @@ describe('POST /api/encounters/[id]/status', () => {
     expect(completeEncounter).not.toHaveBeenCalled()
     const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ encounter: PROJECTED })
+    expect(await res.json()).toEqual({ encounter: PROJECTED, charges: [] })
     expect(transitionEncounter).toHaveBeenCalledWith(3, 'cancelled', expect.objectContaining({ role: 'frontdesk' }), { cancelReason: 'left', actingProviderId: null })
   })
 
@@ -61,7 +61,7 @@ describe('POST /api/encounters/[id]/status', () => {
   it('answers with an explicit projection: no cancel reason, no assignment id, no check-in clerk (M7)', async () => {
     role = 'admin'
     const body = await (await POST(send({ to: 'completed' }), ctx('3'))).json()
-    expect(body).toEqual({ encounter: PROJECTED })
+    expect(body).toEqual({ encounter: PROJECTED, charges: [] })
     expect(JSON.stringify(body)).not.toContain('FREE-TEXT-SECRET')
   })
 
@@ -109,6 +109,35 @@ describe('POST /api/encounters/[id]/status', () => {
     vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'invalid_transition' })
     const started = await POST(send({ to: 'in_consultation' }), ctx('3'))
     expect(started.status).toBe(409)
+  })
+
+  // WS2 T14: the visit charges ride along; a billed visit names its invoice; performed orders are generic.
+  it('completing returns the automatic charge outcomes (consultation on the bill)', async () => {
+    role = 'admin'
+    const charge = { ok: true, source: 'consultation', lineId: 77, itemName: 'Consultation', taxablePaise: 60000, billTo: 'self', existing: false } as const
+    vi.mocked(completeEncounter).mockResolvedValueOnce({ ok: true, encounter: ENCOUNTER as never, warnings: [], charges: [charge] })
+    const res = await POST(send({ to: 'completed' }), ctx('3'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ encounter: PROJECTED, charges: [charge] })
+  })
+
+  it('maps visit_billed to 409 naming the invoice (WS2 T14)', async () => {
+    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'visit_billed', invoiceNumber: 'INV/2026-27/000042' })
+    const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'This visit is on invoice INV/2026-27/000042. Cancel that invoice first.', code: 'visit_billed' })
+    role = 'admin'
+    vi.mocked(completeEncounter).mockResolvedValueOnce({ ok: false, error: 'visit_billed', invoiceNumber: 'INV/2026-27/000043' })
+    const completing = await POST(send({ to: 'completed' }), ctx('3'))
+    expect(completing.status).toBe(409)
+    expect(await completing.json()).toEqual({ error: 'This visit is on invoice INV/2026-27/000043. Cancel that invoice first.', code: 'visit_billed' })
+  })
+
+  it('maps visit_has_performed_orders to 409 with a message that fits tests and procedures (WS2 T14)', async () => {
+    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'visit_has_performed_orders' })
+    const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'Tests or procedures on this visit have already been performed; it cannot be cancelled.', code: 'visit_has_performed_orders' })
   })
 
   it('maps diagnosis_missing to 409 with its code (WS1 T5, spec ruling 4)', async () => {

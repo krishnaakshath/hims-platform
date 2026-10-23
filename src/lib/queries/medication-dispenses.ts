@@ -16,6 +16,7 @@ import { EXPIRY_MONTH_PATTERN, expiryLabel, isExpiredMonth, pharmacyLinePrice } 
 import { allergyConflicts, type AllergyConflict } from '@/lib/prescriptions/allergy-check'
 import { istDateOf } from '@/lib/india-time'
 import { activeAllergies } from '@/lib/queries/prescriptions'
+import { auditSelfPayFallback, untariffedAutoBillToInTx } from '@/lib/queries/auto-charge' // WS2 T14
 import type { WriteExecutor } from './executor'
 
 // WS2 T8 (spec ruling 7): a dispense bills itself. A charged dispense needs a priced medicine and a
@@ -80,6 +81,11 @@ async function insertPharmacyLine(tx: WriteExecutor, input: {
   const gstRateBp = input.medication.gstRateBp ?? settings.pharmacyGstRateBp
   const price = pharmacyLinePrice({ mrpPerUnitPaise: input.medication.mrpPerUnitPaise, quantity: input.quantity, gstRateBp })
   const context = await pharmacyLineContext(tx, input.patientId, input.prescriptionId)
+  // WS2 T14 (ruling on T8): bill-to follows the automatic-line rule (autoBillTo, pre-auth fallback).
+  // Only the payer is decided there; the price stays the MRP-backed one above, never the tariff.
+  // A medicine carries no pre-authorisation flag, so it does not need pre-authorisation by itself.
+  const ref = context.admissionId !== null ? { admissionId: context.admissionId } : context.encounterId !== null ? { encounterId: context.encounterId } : null
+  const billTo = await untariffedAutoBillToInTx(tx, ref, { requiresPreauth: false })
   const batch = input.batchNo !== null && input.expiryMonth !== null ? ` (Batch ${input.batchNo}, Exp ${expiryLabel(input.expiryMonth)})` : ''
   const [line] = await tx.insert(chargeLines).values({
     patientId: input.patientId,
@@ -97,9 +103,11 @@ async function insertPharmacyLine(tx: WriteExecutor, input: {
     gstRateBp,
     hsnSac: input.medication.hsn ?? settings.pharmacyHsn,
     medicationDispenseId: input.dispenseId,
+    payerId: billTo.payerId, // WS2 T14
     createdByName: input.session.name,
     createdByUserId: input.session.userId,
   }).returning({ id: chargeLines.id })
+  if (billTo.fellBack) await auditSelfPayFallback(tx, input.session, input.patientId, line.id, billTo.fellBack) // WS2 T14
   return { lineId: line.id, totalPaise: price.totalPaise }
 }
 

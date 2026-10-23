@@ -58,6 +58,36 @@ describe('CompleteVisitBar', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  // WS2 T14: the consultation outcome from the complete route.
+  it('shows the consultation on the bill after completing', async () => {
+    vi.mocked(sendJson).mockResolvedValue({ ok: true, status: 200, data: { encounter: { id: 5, status: 'completed' }, warnings: [], charges: [
+      { ok: true, source: 'consultation', lineId: 9, itemName: 'GM consultation', taxablePaise: 60000, billTo: 'self', existing: true },
+    ] } })
+    renderBar()
+    fireEvent.click(screen.getByRole('button', { name: 'Complete visit' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Consultation ₹600.00 on the bill')
+  })
+
+  it('shows why the consultation is not billed', async () => {
+    vi.mocked(sendJson).mockResolvedValue({ ok: true, status: 200, data: { encounter: { id: 5, status: 'completed' }, warnings: [], charges: [
+      { ok: false, source: 'consultation', reason: 'price_unresolved', rules: ['price_unresolved'] },
+    ] } })
+    renderBar()
+    fireEvent.click(screen.getByRole('button', { name: 'Complete visit' }))
+    const toast = await screen.findByRole('status')
+    expect(toast).toHaveTextContent('Consultation not billed: no rate for it today. Billing can add it on Charge Capture.')
+    expect(toast).not.toHaveTextContent('on the bill')
+  })
+
+  it('no consultation outcome (free review, no department): no charge text', async () => {
+    vi.mocked(sendJson).mockResolvedValue({ ok: true, status: 200, data: { encounter: { id: 5, status: 'completed' }, warnings: [], charges: [] } })
+    renderBar()
+    fireEvent.click(screen.getByRole('button', { name: 'Complete visit' }))
+    const toast = await screen.findByRole('status')
+    expect(toast).toHaveTextContent('Visit completed.')
+    expect(toast).not.toHaveTextContent(/consultation/i)
+  })
+
   it('shows any other error inline', async () => {
     vi.mocked(sendJson).mockResolvedValue({ ok: false, status: 409, error: 'Visit is closed', body: { error: 'Visit is closed', code: 'visit_closed' } })
     renderBar()

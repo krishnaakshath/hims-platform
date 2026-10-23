@@ -7,7 +7,7 @@
 //   encounter (`for share` here, `for update` there) -> encounter_procedures rows -> patient billing lock.
 // The encounter is re-read under its lock, so an order or cancel never lands on a visit that was
 // closed after the route's ownership check.
-import { and, asc, eq, ilike, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, ilike, isNull, ne, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { chargeLines, departments, encounterProcedures, encounters, serviceCatalog, type EncounterRow } from '@/db/schema'
@@ -16,8 +16,8 @@ import type { Session } from '@/lib/auth'
 import { autoBillTo } from '@/lib/billing/visit-charges'
 import { DEFAULT_TIMEZONE, todayIsoIn } from '@/lib/india-time'
 import { resolvePrice } from '@/lib/tariff/resolve'
-import { captureAutoChargeInTx, type AutoChargeOutcome } from './auto-charge'
-import { loadChargeContext, lockPatientBilling } from './charge-capture'
+import { admissionFirstChargeContext, captureAutoChargeInTx, type AutoChargeOutcome } from './auto-charge'
+import { lockPatientBilling } from './charge-capture'
 import type { WriteExecutor } from './executor'
 import { loadPricingContext } from './tariff'
 
@@ -37,8 +37,9 @@ const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`)
 
 /**
  * Active `procedure` services matching `q` (code or name, case-insensitive), at most 20, each
- * priced for this visit: the same resolver inputs as the line (payer only when the line would bill
- * the payer, the visit's department, room category and ward, IST today). Null price = no rate.
+ * priced for this visit: the same resolver inputs as the line (its context: the active admission,
+ * else the visit; payer only when the line would bill the payer; that context's department, room
+ * category and ward; IST today). Null price = no rate.
  */
 export async function listProcedureOptions(encounterId: number, q: string, now: Date = new Date()): Promise<ProcedureOption[]> {
   const db = getDb()
@@ -51,7 +52,8 @@ export async function listProcedureOptions(encounterId: number, q: string, now: 
       term === '' ? undefined : or(ilike(serviceCatalog.code, pattern), ilike(serviceCatalog.name, pattern)),
     ))
     .orderBy(asc(serviceCatalog.name), asc(serviceCatalog.id)).limit(OPTIONS_LIMIT)
-  const ctx = await loadChargeContext(db, { encounterId })
+  const [enc] = await db.select({ patientId: encounters.patientId }).from(encounters).where(eq(encounters.id, encounterId)).limit(1)
+  const ctx = enc ? (await admissionFirstChargeContext(db, enc.patientId, encounterId))?.ctx ?? null : null
   const payerId = ctx && autoBillTo(ctx) === 'payer' ? ctx.primaryPayerId : null
   const onDate = todayIsoIn(DEFAULT_TIMEZONE, now)
   const out: ProcedureOption[] = []
@@ -99,8 +101,11 @@ export async function orderProcedure(encounter: EncounterRow, input: OrderProced
       orderNotes: input.notes ? input.notes : null,
     }).returning({ id: encounterProcedures.id })
     await logAudit(session, 'ordered procedure', encounter.patientId, `encounter=${encounter.id} procedure=${row.id} service=${svc.code} qty=${input.quantity}`, tx)
+    // Final fix wave (item 4): admission-first, like lab orders and pharmacy (the patient's active
+    // stay, else this visit). The visit cancel finds the line by encounter_procedure_id.
+    const context = (await admissionFirstChargeContext(tx, encounter.patientId, encounter.id))?.ref ?? { encounterId: encounter.id }
     const charge = await captureAutoChargeInTx(tx, {
-      context: { encounterId: encounter.id }, serviceId: svc.id, quantity: input.quantity, serviceDate: performedOn,
+      context, serviceId: svc.id, quantity: input.quantity, serviceDate: performedOn,
       source: 'procedure', links: { encounterProcedureId: row.id },
     }, session, now)
     return { ok: true, procedureId: row.id, charge }
@@ -133,16 +138,40 @@ export async function cancelProcedure(encounter: EncounterRow, procedureId: numb
     await tx.update(encounterProcedures).set({ voidedAt: now, voidedByName: session.name }).where(eq(encounterProcedures.id, procedureId))
     await logAudit(session, 'cancelled procedure', encounter.patientId, `encounter=${encounter.id} procedure=${procedureId}`, tx)
 
-    await lockPatientBilling(tx, encounter.patientId)
-    const [line] = await tx.select({ id: chargeLines.id, status: chargeLines.status }).from(chargeLines)
-      .where(eq(chargeLines.encounterProcedureId, procedureId)).for('update')
-    if (!line || line.status === 'void') return { ok: true, billing: 'none' }
-    if (line.status === 'invoiced') return { ok: true, billing: 'credit_note_needed' }
-    await tx.update(chargeLines).set({ status: 'void', voidReason: PROCEDURE_CANCELLED_REASON, voidedAt: now, voidedByName: session.name, invoiceId: null })
-      .where(eq(chargeLines.id, line.id))
-    await logAudit(session, 'billing: voided charge line', encounter.patientId, `line=${line.id} procedure=${procedureId} cause=procedure_cancelled`, tx)
-    return { ok: true, billing: 'voided' }
+    return { ok: true, billing: await voidProcedureLineInTx(tx, procedureId, encounter.patientId, session, now) }
   })
+}
+
+/**
+ * The line of a procedure that was just voided (doctor cancel, or a coder removing it in SP6
+ * coding), on the caller's transaction after the procedure row lock: takes the patient billing lock
+ * (last), then voids the line (a draft invoice loses it). A line on a finalised invoice is never
+ * touched: the result is credit_note_needed and that is audited (ids only). No line or a void one: 'none'.
+ */
+export async function voidProcedureLineInTx(tx: WriteExecutor, procedureId: number, patientId: string, session: Session, now: Date): Promise<ProcedureCancelBilling> {
+  await lockPatientBilling(tx, patientId)
+  const [line] = await tx.select({ id: chargeLines.id, status: chargeLines.status }).from(chargeLines)
+    .where(eq(chargeLines.encounterProcedureId, procedureId)).for('update')
+  if (!line || line.status === 'void') return 'none'
+  if (line.status === 'invoiced') {
+    await logAudit(session, 'billing: credit note needed', patientId, `line=${line.id} procedure=${procedureId} cause=procedure_cancelled`, tx)
+    return 'credit_note_needed'
+  }
+  await tx.update(chargeLines).set({ status: 'void', voidReason: PROCEDURE_CANCELLED_REASON, voidedAt: now, voidedByName: session.name, invoiceId: null })
+    .where(eq(chargeLines.id, line.id))
+  await logAudit(session, 'billing: voided charge line', patientId, `line=${line.id} procedure=${procedureId} cause=procedure_cancelled`, tx)
+  return 'voided'
+}
+
+/**
+ * Under the patient billing lock (taken here, last): whether the procedure has a live line
+ * (captured or invoiced). Used by SP6 coding to refuse a service change on a billed procedure.
+ */
+export async function procedureHasLiveLineInTx(tx: WriteExecutor, procedureId: number, patientId: string): Promise<boolean> {
+  await lockPatientBilling(tx, patientId)
+  const [line] = await tx.select({ id: chargeLines.id }).from(chargeLines)
+    .where(and(eq(chargeLines.encounterProcedureId, procedureId), ne(chargeLines.status, 'void'))).limit(1)
+  return !!line
 }
 
 /**

@@ -4,14 +4,12 @@ import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { ALLERGY_WRITE_ROLES, WORKSPACE_READ_ROLES } from '@/lib/role-policy'
 import { parseEncounterId } from '@/lib/encounters/ownership'
-import { getWorkspace, patientDiagnosisCodes } from '@/lib/queries/encounter-workspace'
-import { listMedicationsWithInventory } from '@/lib/queries/medications'
+import { getWorkspace } from '@/lib/queries/encounter-workspace'
 import { listAllProviders } from '@/lib/queries/providers'
 import { listLabTests } from '@/lib/queries/lab-tests'
-import { resolveSessionProvider } from '@/lib/provider-identity'
 import { formatIsoDate, formatIstDateTime } from '@/lib/india-time'
 import { PatientStrip } from '@/components/encounters/PatientStrip'
-import { WorkspaceShell, WorkspaceOrdersLauncher, WorkspaceRxLauncher } from '@/components/encounters/WorkspaceShell'
+import { WorkspaceShell } from '@/components/encounters/WorkspaceShell'
 import { VitalsForm } from '@/components/encounters/VitalsForm'
 import { ConsultForm } from '@/components/encounters/ConsultForm'
 import { NoteForm, NoteCard } from '@/components/NoteForm'
@@ -27,12 +25,28 @@ import { FollowUpAdvice } from '@/components/encounters/FollowUpAdvice'
 // WS1 T5: visit notes and the Complete visit bar.
 import { listNotesForEncounter } from '@/lib/queries/encounter-notes'
 import { CompleteVisitBar } from '@/components/encounters/CompleteVisitBar'
+// WS2 T14: the real Rx, Orders and Procedures panels, and the visit charges chip.
+import { RxBuilder } from '@/components/encounters/RxBuilder'
+import { OrdersPanel } from '@/components/encounters/OrdersPanel'
+import { ProceduresPanel } from '@/components/encounters/ProceduresPanel'
+import { listChargeLinesForContext } from '@/lib/queries/charge-capture'
+import { lineTax } from '@/lib/billing/gst'
 
 const HEADING = 'mb-3 text-sm font-semibold text-foreground'
 const MUTED = 'text-sm text-muted-foreground'
 
 function fmt(value: number | null, unit: string, scale = 1): string | null {
   return value === null ? null : `${scale === 1 ? value : (value / scale).toFixed(1)} ${unit}`
+}
+
+/**
+ * WS2 T14: the visit's live charge lines (captured or invoiced; void left out) and their
+ * GST-inclusive total, estimated intra-state per line as the pharmacy view does (the invoice
+ * applies the place of supply).
+ */
+function visitCharges(lines: { status: string; taxablePaise: number; gstRateBp: number }[]): { totalPaise: number; lines: number } {
+  const live = lines.filter((l) => l.status !== 'void')
+  return { totalPaise: live.reduce((sum, l) => sum + lineTax(l.taxablePaise, l.gstRateBp, 'intra').totalPaise, 0), lines: live.length }
 }
 
 /**
@@ -53,15 +67,14 @@ export default async function EncounterWorkspacePage({ params }: { params: Promi
   await logAudit(session, 'viewed encounter workspace', view.patient.id, `encounter=${encounterId}`)
 
   const { encounter, patient, canWrite } = view
-  // The chart dialogs need their reference data only when the viewer may write.
-  const [catalog, providers, labTests, sessionProvider, diagnosisCodes] = canWrite
-    ? await Promise.all([listMedicationsWithInventory(), listAllProviders(), listLabTests(), resolveSessionProvider(session), patientDiagnosisCodes(patient.id)])
-    : [[], [], [], null, []] as const
+  // The order and referral forms need their reference data only when the viewer may write.
+  const [providers, labTests] = canWrite ? await Promise.all([listAllProviders(), listLabTests()]) : [[], []] as const
   // WS1 T4
-  const [visitDiagnoses, problemList, visitReferrals, departmentOptions, visitNotes] = await Promise.all([
+  const [visitDiagnoses, problemList, visitReferrals, departmentOptions, visitNotes, chargeLines] = await Promise.all([
     listEncounterDiagnoses(encounter.id), listProblemList(patient.id), listEncounterReferrals(encounter.id),
     canWrite ? listDepartments({ activeOnly: true }) : Promise.resolve([]),
     listNotesForEncounter(encounter.id), // WS1 T5
+    listChargeLinesForContext({ encounterId: encounter.id }), // WS2 T14
   ])
   // WS1 T5: the author (or an admin) signs a draft, as on the medical record; signing stays open after completion.
   const mayWriteNotes = session.role === 'pi' || session.role === 'admin'
@@ -159,24 +172,27 @@ export default async function EncounterWorkspacePage({ params }: { params: Promi
 
   return (
     <div className="flex flex-col gap-4">
-      <PatientStrip view={view} canEditAllergies={ALLERGY_WRITE_ROLES.includes(session.role)} />
+      <PatientStrip view={view} canEditAllergies={ALLERGY_WRITE_ROLES.includes(session.role)} visitCharges={visitCharges(chargeLines)} />
       <WorkspaceShell
         panels={{
           vitals: vitalsPanel,
           history: historyPanel,
           diagnosis: diagnosisPanel,
           rx: canWrite ? (
-            <WorkspaceRxLauncher
-              patientId={patient.id}
-              catalog={[...catalog]}
-              activeProviders={providers.filter((p) => p.isActive).map((p) => ({ id: p.id, name: p.name, specialty: p.specialty }))}
-              needsOnBehalfOf={session.role === 'admin' && sessionProvider === null}
-              diagnosisCodes={[...diagnosisCodes]}
+            <RxBuilder
+              encounterId={encounter.id}
+              patientAllergies={patient.allergies.map((a) => ({ allergen: a.allergen, severity: a.severity }))}
+              allergyStatus={patient.allergyStatus}
+              canWrite
             />
           ) : <p className={MUTED}>Prescriptions are written by the visit&apos;s doctor while the visit is open. See the {chartLink}.</p>,
-          orders: canWrite
-            ? <WorkspaceOrdersLauncher patientId={patient.id} labTests={[...labTests]} />
-            : <p className={MUTED}>Tests are ordered by the visit&apos;s doctor while the visit is open. See the {chartLink}.</p>,
+          // Readers see the visit's orders and procedures; only the writer gets the order forms.
+          orders: (
+            <div className="space-y-6">
+              <OrdersPanel encounterId={encounter.id} patientId={patient.id} labTests={[...labTests]} canWrite={canWrite} />
+              <ProceduresPanel encounterId={encounter.id} canWrite={canWrite} />
+            </div>
+          ),
           notes: (
             <div className="space-y-3">
               <NoteForm patientId={patient.id} canWrite={canWrite} encounterId={encounter.id} />

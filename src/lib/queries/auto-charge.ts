@@ -3,19 +3,19 @@
 // after the patient billing lock, which is taken LAST in visit transactions (spec section 6).
 // It never throws for a business reason and never aborts the clinical act: a block or a
 // missing price is returned as an outcome and no line is written.
-import { and, asc, eq, inArray, isNull, max, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, max, ne, or, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { chargeLines, encounterProcedures, encounters, invoices, patients, providers, type ChargeLineRow, type EncounterRow } from '@/db/schema'
+import { admissions, chargeLines, encounterProcedures, encounters, invoices, patients, payers, providers, type ChargeLineRow, type EncounterRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import { isUniqueViolation } from '@/lib/db-errors'
 import type { Session } from '@/lib/auth'
-import type { ChargeRuleCode } from '@/lib/billing/charge-rules'
+import { CHARGE_RULES, type ChargeRuleCode } from '@/lib/billing/charge-rules'
 import type { ChargeCaptureInput } from '@/lib/billing/validation'
 import { autoBillTo, planVisitCharges, type AutoChargeSource } from '@/lib/billing/visit-charges'
 import { defaultEncounterVisitType } from '@/lib/encounters/status'
 import { DEFAULT_TIMEZONE, todayIsoIn } from '@/lib/india-time'
 import { resolvePrice } from '@/lib/tariff/resolve'
-import { getBillingSettings } from './billing-settings'
+import { getBillingSettings, getRuleConfig } from './billing-settings'
 import { captureInTx, loadChargeContext, lockPatientBilling, type ChargeContext, type ChargeContextRef } from './charge-capture'
 import { consultationServiceIdFor } from './providers'
 import { loadPricingContext } from './tariff'
@@ -129,10 +129,48 @@ export async function captureAutoChargeInTx(tx: WriteExecutor, input: AutoCharge
     const rules = (result.violations ?? []).filter((v) => v.severity === 'block').map((v) => v.code)
     return { ok: false, source, reason: rules.includes('price_unresolved') ? 'price_unresolved' : 'blocked', rules }
   }
-  if (fellBack) {
-    await logAudit(session, 'billing: auto charge fell back to self-pay', ctx.patientId, `line=${result.line.id} rules=${fellBack.join(',')}`, tx)
-  }
+  if (fellBack) await auditSelfPayFallback(tx, session, ctx.patientId, result.line.id, fellBack)
   return okOutcome(source, result.line, false)
+}
+
+/** The audit row of a payer line that fell back to self-pay (ids and rule codes only). */
+export async function auditSelfPayFallback(tx: WriteExecutor, session: Session, patientId: string, lineId: number, rules: readonly ChargeRuleCode[]): Promise<void> {
+  await logAudit(session, 'billing: auto charge fell back to self-pay', patientId, `line=${lineId} rules=${rules.join(',')}`, tx)
+}
+
+export interface UntariffedBillTo {
+  /** The payer the line bills, or null for self-pay. */
+  payerId: number | null
+  /** The payer-only rules that moved the line to self-pay (audit with auditSelfPayFallback once the line exists). */
+  fellBack: ChargeRuleCode[] | null
+}
+
+/**
+ * WS2 T14 (ruling on T8): the bill-to of an automatic line priced outside the tariff, i.e. a pharmacy
+ * dispense at MRP, which cannot go through captureInTx (no service, no tariff rate). Same rule as
+ * captureAutoChargeInTx: `autoBillTo` (a line in an admission bills the primary payer when one is set;
+ * everything else is self-pay), falling back to self-pay when the payer-only rule `preauth_required`
+ * blocks. An automatic line never carries a pre-auth reference, so that rule blocks exactly when the
+ * payer and the item both need pre-authorisation and the rule config leaves it at block severity
+ * (`preauth_invalid` needs a reference, so it never applies). Reads only: the caller holds the
+ * patient billing lock and inserts the line.
+ */
+export async function untariffedAutoBillToInTx(
+  tx: WriteExecutor, ref: ChargeContextRef | null, item: { requiresPreauth: boolean },
+): Promise<UntariffedBillTo> {
+  const self: UntariffedBillTo = { payerId: null, fellBack: null }
+  if (ref === null) return self
+  const ctx = await loadChargeContext(tx, ref)
+  if (!ctx || ctx.cancelled || ctx.primaryPayerId === null || autoBillTo(ctx) !== 'payer') return self
+  const [payer] = await tx.select({ requiresPreauth: payers.requiresPreauth }).from(payers).where(eq(payers.id, ctx.primaryPayerId)).limit(1)
+  if (!payer) return self
+  if (payer.requiresPreauth && item.requiresPreauth) {
+    const entry = (await getRuleConfig(tx)).preauth_required
+    const defaultSeverity = CHARGE_RULES.find((r) => r.code === 'preauth_required')!.defaultSeverity
+    const blocks = entry?.enabled !== false && (entry?.severity ?? defaultSeverity) === 'block'
+    if (blocks) return { payerId: null, fellBack: ['preauth_required'] }
+  }
+  return { payerId: ctx.primaryPayerId, fellBack: null }
 }
 
 // ---------- visit charges ----------
@@ -216,6 +254,7 @@ const VISIT_CANCELLED_REASON = 'Visit cancelled'
 /**
  * Cancel: voids the visit's live consultation and lab-order lines (WS2 T10: lab lines billed to the
  * visit, not to a stay), its procedure lines (WS2 T11) and its registration line (a draft invoice loses them, the SP4 void rule).
+ * Its pharmacy lines are detached instead (encounter_id null, still live; a draft invoice loses them).
  * WS2 T10: the registration fee is owed once per patient, so while the patient has another
  * non-cancelled encounter the registration line moves to the earliest of them instead of being
  * voided. A line on a finalised invoice is never touched: the whole cancel is refused with that
@@ -231,11 +270,17 @@ export async function voidAutoLinesForEncounterInTx(
   const lines = await tx.select({ id: chargeLines.id, source: chargeLines.source, status: chargeLines.status, invoiceNumber: invoices.invoiceNumber })
     .from(chargeLines).leftJoin(invoices, eq(invoices.id, chargeLines.invoiceId))
     .where(and(
-      eq(chargeLines.encounterId, encounterId), ne(chargeLines.status, 'void'),
+      ne(chargeLines.status, 'void'),
       or(
-        inArray(chargeLines.source, [...VISIT_SOURCES]),
-        and(eq(chargeLines.source, 'lab_order'), isNull(chargeLines.admissionId)),
-        // WS2 T11: the lines of the visit's procedures (linked by procedure, whatever the context).
+        and(eq(chargeLines.encounterId, encounterId), or(
+          inArray(chargeLines.source, [...VISIT_SOURCES]),
+          and(eq(chargeLines.source, 'lab_order'), isNull(chargeLines.admissionId)),
+          // Final fix wave (item 1): the visit's own pharmacy lines (a stay's line has no visit).
+          and(eq(chargeLines.source, 'pharmacy'), isNull(chargeLines.admissionId)),
+        )),
+        // WS2 T11: the lines of the visit's procedures, linked by procedure whatever the context
+        // (final fix wave item 4: a procedure ordered during a stay bills to the admission, so its
+        // line need not carry this visit's id).
         and(eq(chargeLines.source, 'procedure'), inArray(chargeLines.encounterProcedureId,
           tx.select({ id: encounterProcedures.id }).from(encounterProcedures).where(eq(encounterProcedures.encounterId, encounterId)))),
       ),
@@ -247,6 +292,13 @@ export async function voidAutoLinesForEncounterInTx(
   const at = new Date()
   let voided = 0
   for (const l of lines) {
+    // Final fix wave (item 1): the medicine was dispensed, so its line is not voided. It leaves the
+    // visit (and a draft invoice) and stays live with no visit or stay: a context-less ready line.
+    if (l.source === 'pharmacy') {
+      await tx.update(chargeLines).set({ encounterId: null, invoiceId: null }).where(eq(chargeLines.id, l.id))
+      await logAudit(session, 'billing: pharmacy line detached', enc.patientId, `line=${l.id} cause=visit_cancelled`, tx)
+      continue
+    }
     if (l.source === 'registration') {
       const [next] = await tx.select({ id: encounters.id, admissionId: encounters.admissionId, encounterDate: encounters.encounterDate }).from(encounters)
         .where(and(eq(encounters.patientId, enc.patientId), ne(encounters.id, encounterId), ne(encounters.status, 'cancelled')))
@@ -264,6 +316,22 @@ export async function voidAutoLinesForEncounterInTx(
     voided++
   }
   return { ok: true, voided }
+}
+
+/**
+ * Final fix wave (item 4): the context an order-linked automatic line (lab order, procedure) bills
+ * to: the patient's active admission (the newest), else the given visit, else none. Reads only.
+ */
+export async function admissionFirstChargeContext(
+  executor: WriteExecutor, patientId: string, encounterId: number | null,
+): Promise<{ ref: ChargeContextRef; ctx: ChargeContext } | null> {
+  const [a] = await executor.select({ id: admissions.id }).from(admissions)
+    .where(and(eq(admissions.patientId, patientId), eq(admissions.status, 'admitted')))
+    .orderBy(desc(admissions.admittedAt), desc(admissions.id)).limit(1)
+  const ref: ChargeContextRef | null = a ? { admissionId: a.id } : encounterId !== null ? { encounterId } : null
+  if (ref === null) return null
+  const ctx = await loadChargeContext(executor, ref)
+  return ctx ? { ref, ctx } : null
 }
 
 // ---------- fee preview (check-in dialog) ----------
