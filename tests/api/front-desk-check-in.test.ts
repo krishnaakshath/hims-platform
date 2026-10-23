@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { eq, desc, and, inArray, or } from 'drizzle-orm'
 import { POST } from '@/app/api/front-desk/check-in/route'
 import { getDb } from '@/db/client'
-import { doctorAssignments, rooms, admissions, encounters } from '@/db/schema'
+import { doctorAssignments, rooms, admissions, encounters, chargeLines } from '@/db/schema'
 import { listActiveProviders } from '@/lib/queries/providers'
 
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: 'frontdesk', name: 'Taylor Nguyen' })) }))
@@ -18,6 +18,8 @@ afterEach(async () => {
     createdAssignmentIds.length > 0 ? inArray(encounters.doctorAssignmentId, createdAssignmentIds) : undefined,
     and(eq(encounters.patientId, 'RD-0001'), eq(encounters.checkedInByName, 'Taylor Nguyen')),
   ))
+  // WS2 T9: check-in captures the visit charges; they go before their encounter.
+  await getDb().delete(chargeLines).where(inArray(chargeLines.encounterId, sp3Encounters))
   await getDb().delete(encounters).where(inArray(encounters.id, sp3Encounters))
   while (createdAdmissionIds.length > 0) await getDb().delete(admissions).where(eq(admissions.id, createdAdmissionIds.pop()!))
   // Safety net: several of the pre-existing tests above (not part of this

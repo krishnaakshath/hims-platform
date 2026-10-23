@@ -15,6 +15,7 @@ import { checkInVisit } from '@/lib/queries/encounters'
 import { getActiveAdmissionForPatient } from '@/lib/queries/admissions'
 import { logAudit } from '@/lib/audit'
 import { RETRY_MESSAGE } from '@/lib/db-errors'
+import type { AutoChargeOutcome } from '@/lib/queries/auto-charge' // WS2 T9
 
 const valid = { patientId: 'RD-0001', providerId: 1, visitType: 'outpatient', urgency: 'routine', reason: 'Review' }
 const req = (body: unknown) => new Request('http://localhost/api/front-desk/check-in', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) }) as never
@@ -27,7 +28,7 @@ beforeEach(() => {
 
 describe('POST /api/front-desk/check-in (encounter)', () => {
   it('passes appointmentId through and returns encounterId + opdToken', async () => {
-    vi.mocked(checkInVisit).mockResolvedValue({ ok: true, assignment: { id: 5, roomId: null, status: 'scheduled' } as never, encounter: { id: 9, opdToken: 4 } as never, admissionId: null, completedFollowUpOrderId: 3 })
+    vi.mocked(checkInVisit).mockResolvedValue({ ok: true, assignment: { id: 5, roomId: null, status: 'scheduled' } as never, encounter: { id: 9, opdToken: 4 } as never, admissionId: null, completedFollowUpOrderId: 3, charges: [] })
     const res = await POST(req({ ...valid, appointmentId: 77 }))
     expect(res.status).toBe(201)
     expect(await res.json()).toMatchObject({ id: 5, roomId: null, status: 'scheduled', encounterId: 9, opdToken: 4 })
@@ -36,8 +37,20 @@ describe('POST /api/front-desk/check-in (encounter)', () => {
     expect(logAudit).not.toHaveBeenCalled()
   })
 
+  // WS2 T9
+  it('returns the automatic visit charge outcomes', async () => {
+    const charges: AutoChargeOutcome[] = [
+      { ok: true, source: 'consultation', lineId: 3, itemName: 'Consultation', taxablePaise: 60000, billTo: 'self', existing: false },
+      { ok: false, source: 'registration', reason: 'price_unresolved', rules: ['price_unresolved'] },
+    ]
+    vi.mocked(checkInVisit).mockResolvedValue({ ok: true, assignment: { id: 5 } as never, encounter: { id: 9, opdToken: 4 } as never, admissionId: null, completedFollowUpOrderId: null, charges })
+    const res = await POST(req(valid))
+    expect(res.status).toBe(201)
+    expect((await res.json()).charges).toEqual(charges)
+  })
+
   it('creates the admission only for an inpatient with no active admission', async () => {
-    vi.mocked(checkInVisit).mockResolvedValue({ ok: true, assignment: { id: 5 } as never, encounter: { id: 9, opdToken: 1 } as never, admissionId: 2, completedFollowUpOrderId: null })
+    vi.mocked(checkInVisit).mockResolvedValue({ ok: true, assignment: { id: 5 } as never, encounter: { id: 9, opdToken: 1 } as never, admissionId: 2, completedFollowUpOrderId: null, charges: [] })
     await POST(req({ ...valid, visitType: 'inpatient' }))
     expect(checkInVisit).toHaveBeenLastCalledWith(expect.objectContaining({ createAdmission: true, appointmentId: null }), expect.anything())
     vi.mocked(getActiveAdmissionForPatient).mockResolvedValue({ id: 1 } as never)

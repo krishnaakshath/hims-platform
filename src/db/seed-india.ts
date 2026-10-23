@@ -43,6 +43,8 @@ import { raiseCodingQuery } from '../lib/queries/coding-queries'
 import { nextUhid } from '../lib/queries/uhid'
 import { checkInVisit } from '../lib/queries/encounters'
 import { captureChargeLine } from '../lib/queries/charge-capture'
+import { voidChargeLine } from '../lib/queries/charge-capture' // WS2 T9
+import type { AutoChargeOutcome } from '../lib/queries/auto-charge' // WS2 T9
 import { createDraftInvoice, finaliseInvoice, cancelInvoice } from '../lib/queries/invoices'
 import { recordPayment, issueRefund } from '../lib/queries/patient-ledger'
 import { postRoomRent } from '../lib/queries/room-rent'
@@ -217,6 +219,9 @@ async function seedBillingSettings(db: Db, serviceIds: Map<string, number>): Pro
   const patch: Partial<typeof billingSettings.$inferInsert> = {}
   if (!s.legalName) Object.assign(patch, { legalName: DEMO_HOSPITAL.legalName, gstin: DEMO_HOSPITAL.gstin, stateCode: DEMO_HOSPITAL.stateCode, address: DEMO_HOSPITAL.address, ipdDepositThresholdPaise: DEMO_HOSPITAL.ipdDepositThresholdPaise })
   if (s.roomRentServiceId === null) patch.roomRentServiceId = serviceIds.get('ROOM_RENT') ?? null
+  // WS2 T9: the registration fee is billed automatically at a patient's first visit.
+  if (s.registrationServiceId === null) patch.registrationServiceId = serviceIds.get('REG_FEE') ?? null
+  // end WS2 T9
   if (Object.keys(patch).length > 0) await db.update(billingSettings).set({ ...patch, updatedByName: 'Demo seed', updatedAt: new Date() }).where(eq(billingSettings.id, 1))
 }
 
@@ -476,6 +481,14 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     return r
   }
 
+  // WS2 T9: OPD check-in captures the consultation (self-pay) and, at the first visit, the
+  // registration fee; the seed bills those lines instead of capturing them again.
+  const autoLine = (ci: { charges: AutoChargeOutcome[] }, source: 'consultation' | 'registration'): number | null => {
+    const c = ci.charges.find((o) => o.source === source)
+    return c?.ok ? c.lineId : null
+  }
+  // end WS2 T9
+
   async function setEncounterStatus(encounterId: number, status: 'in_consultation' | 'completed', at: Date, byName: string) {
     await db.update(encounters).set({ status, statusChangedAt: at, statusChangedByName: byName, ...(status === 'completed' ? { completedAt: at } : {}) }).where(eq(encounters.id, encounterId))
   }
@@ -527,7 +540,14 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     // No pre-auth reference: none of these services needs one, and a reference that does not
     // match a real pre-authorisation is blocked at capture (preauth_invalid).
     const billAt = plusMinutes(start, 40)
-    const lines = [await capture({ encounterId }, CONSULT_BY_DEPT[v.doctor.departmentCode], date, billAt, { billTo })]
+    // WS2 T9: a payer visit re-bills the self-pay consultation to the payer (void, then capture);
+    // a self-pay visit bills the automatic consultation and registration lines.
+    const autoConsult = autoLine(ci, 'consultation')
+    const autoRegistration = autoLine(ci, 'registration')
+    if (hasPayer && autoConsult !== null) must(await voidChargeLine(autoConsult, 'Re-billed to the patient\'s payer', sessions.billing), 'void auto consultation')
+    const consultLine = !hasPayer && autoConsult !== null ? autoConsult : await capture({ encounterId }, CONSULT_BY_DEPT[v.doctor.departmentCode], date, billAt, { billTo })
+    const lines = [consultLine, ...(!hasPayer && autoRegistration !== null ? [autoRegistration] : [])]
+    // end WS2 T9
     if (v.i % 3 === 0) lines.push(await capture({ encounterId }, 'LAB_CBC', date, billAt, { billTo }))
     if (v.doctor.departmentCode === 'CARDIO') lines.push(await capture({ encounterId }, 'PROC_ECG', date, billAt, { billTo }))
     if (v.i % 7 === 3) lines.push(await capture({ encounterId }, 'MED_CERT', date, billAt, { billTo }))
@@ -713,7 +733,7 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
         await setEncounterStatus(ci.encounter.id, 'completed', plusMinutes(checkInAt, 30), doctor.name)
         await db.update(appointments).set({ status: 'completed' }).where(eq(appointments.id, appointmentId))
         todayCompleted.push(ci.encounter.id)
-        const line = await capture({ encounterId: ci.encounter.id }, CONSULT_BY_DEPT[doctor.departmentCode], today, plusMinutes(checkInAt, 35))
+        const line = autoLine(ci, 'consultation') ?? await capture({ encounterId: ci.encounter.id }, CONSULT_BY_DEPT[doctor.departmentCode], today, plusMinutes(checkInAt, 35)) // WS2 T9
         if (i === 0) {
           const inv = await invoice([line], plusMinutes(checkInAt, 40))
           must(await recordPayment({ patientId, kind: 'receipt', invoiceId: inv.invoiceId, mode: 'upi', reference: `UPI-DEMO-${inv.invoiceId}`, amountPaise: await invoiceTotal(inv.invoiceId) }, sessions.billing, plusMinutes(checkInAt, 42)), 'today receipt')

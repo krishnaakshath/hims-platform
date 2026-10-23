@@ -6,6 +6,7 @@ import type { Session } from '@/lib/auth'
 import { istDateOf, startOfIstDay } from '@/lib/india-time'
 import { canTransitionEncounter, defaultEncounterVisitType, type EncounterStatus, type EncounterType, type EncounterVisitType } from '@/lib/encounters/status'
 import type { DoctorAssignmentRow } from './doctor-assignments'
+import { captureVisitChargesInTx, ensureConsultationChargeInTx, voidAutoLinesForEncounterInTx, type AutoChargeOutcome } from './auto-charge' // WS2 T9
 import type { WriteExecutor } from './executor'
 
 export type Encounter = EncounterRow
@@ -53,7 +54,7 @@ export interface CheckInVisitInput {
 export type CheckInVisitError = 'appointment_not_found' | 'appointment_mismatch' | 'appointment_not_scheduled' | 'appointment_not_today' | 'appointment_already_checked_in'
 
 export type CheckInVisitResult =
-  | { ok: true; assignment: DoctorAssignmentRow; encounter: Encounter; admissionId: number | null; completedFollowUpOrderId: number | null }
+  | { ok: true; assignment: DoctorAssignmentRow; encounter: Encounter; admissionId: number | null; completedFollowUpOrderId: number | null; charges: AutoChargeOutcome[] }
   | { ok: false; error: CheckInVisitError }
 
 /**
@@ -67,7 +68,7 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
   return getDb().transaction(async (tx): Promise<CheckInVisitResult> => {
     const encounterDate = istDateOf(now)
 
-    // Global lock order (I1): follow-up order -> appointment -> OPD token -> encounter.
+    // Global lock order (I1): follow-up order -> appointment -> OPD token -> encounter -> patient billing lock (last).
     // bookFollowUp / unbookFollowUp / cancelFollowUpOrder lock the order first and
     // then the appointment, so check-in must too, or the two deadlock (40P01).
     // A writer that unbooked meanwhile set appointment_id to null: Postgres
@@ -150,17 +151,30 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
     await logAudit(session, `checked in patient (${input.visitType})`, input.patientId, `encounter=${encounter.id} token=${token}`, tx)
     if (order) await logAudit(session, 'completed follow-up at check-in', input.patientId, `followUp=${order.id} encounter=${encounter.id}`, tx)
 
-    return { ok: true, assignment, encounter, admissionId, completedFollowUpOrderId: order?.id ?? null }
+    // WS2 T9: the visit charges (OPD consultation, first-visit registration), billing lock last.
+    // Never blocks the check-in: an unpriced or blocked charge comes back as an outcome.
+    const charges = await captureVisitChargesInTx(tx, encounter, session, now)
+
+    return { ok: true, assignment, encounter, admissionId, completedFollowUpOrderId: order?.id ?? null, charges }
   })
 }
 
-export type TransitionEncounterResult = { ok: true; encounter: Encounter } | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' | 'admission_active' }
+export type TransitionEncounterResult =
+  | { ok: true; encounter: Encounter; charges?: AutoChargeOutcome[] }
+  | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' | 'admission_active' }
+  | { ok: false; error: 'visit_billed'; invoiceNumber: string } // WS2 T9
 
+/**
+ * WS2 T9: completing an OPD visit captures its consultation if still missing (`charges`);
+ * cancelling voids its registration/consultation lines, and is refused (`visit_billed`, nothing
+ * changed) while one of them is on a finalised invoice. Lock order: follow-up orders ->
+ * encounter -> patient billing lock (last).
+ */
 export async function transitionEncounter(
   id: number,
   to: 'in_consultation' | 'completed' | 'cancelled',
   session: Session,
-  opts: { cancelReason?: string; actingProviderId?: number | null } = {},
+  opts: { cancelReason?: string; actingProviderId?: number | null; now?: Date } = {},
 ): Promise<TransitionEncounterResult> {
   return getDb().transaction(async (tx): Promise<TransitionEncounterResult> => {
     // Global lock order (I1): follow-up orders before the encounter. Only a
@@ -180,7 +194,12 @@ export async function transitionEncounter(
       const [adm] = await tx.select({ status: admissions.status }).from(admissions).where(eq(admissions.id, current.admissionId))
       if (adm?.status === 'admitted') return { ok: false, error: 'admission_active' }
     }
-    const at = new Date()
+    // WS2 T9: refuse the cancel before any write when a visit charge is already invoiced.
+    if (to === 'cancelled') {
+      const v = await voidAutoLinesForEncounterInTx(tx, id, session)
+      if (!v.ok) return v
+    }
+    const at = opts.now ?? new Date()
     const [updated] = await tx.update(encounters).set({
       status: to,
       statusChangedAt: at,
@@ -199,6 +218,11 @@ export async function transitionEncounter(
         .where(eq(followUpOrders.id, o.id))
       await logAudit(session, 'reopened follow-up after visit cancelled', current.patientId, `followUp=${o.id} encounter=${id}`, tx)
     }
+    if (to === 'completed') {
+      const outcome = await ensureConsultationChargeInTx(tx, updated, session, at)
+      return { ok: true, encounter: updated, charges: outcome ? [outcome] : [] }
+    }
+    if (to === 'cancelled') return { ok: true, encounter: updated, charges: [] }
     return { ok: true, encounter: updated }
   })
 }

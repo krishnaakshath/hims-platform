@@ -1015,11 +1015,14 @@ export const billingSettings = pgTable('billing_settings', {
   rohiniId: text('rohini_id'),
   hfrId: text('hfr_id'),
   // end SP7
+  registrationServiceId: integer('registration_service_id').references(() => serviceCatalog.id), // WS2 T9
+  freeReviewDays: integer('free_review_days').default(0).notNull(), // WS2 T9
 }, (t) => [
   check('billing_settings_singleton', sql`${t.id} = 1`),
   check('billing_settings_consultation_window_range', sql`${t.consultationWindowDays} BETWEEN 1 AND 365`),
   check('billing_settings_deposit_threshold_range', sql`${t.ipdDepositThresholdPaise} BETWEEN 0 AND 1000000000`),
   check('billing_settings_pharmacy_gst_allowed', sql`${t.pharmacyGstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`),
+  check('billing_settings_free_review_days_range', sql`${t.freeReviewDays} BETWEEN 0 AND 30`), // WS2 T9
 ])
 
 // One row per configured rule (rule_code from CHARGE_RULE_CODES); a missing row = table defaults.
@@ -1073,6 +1076,8 @@ export const chargeLines = pgTable('charge_lines', {
   // SP7 (ruling 7): the approved pre-auth a payer line was validated against
   // (scripts/migrations/2026-10-09-sp7-c-preauth-claims.sql).
   preauthId: integer('preauth_id').references(() => preauths.id),
+  labOrderId: integer('lab_order_id').references(() => labOrders.id).unique(), // WS2 T9
+  encounterProcedureId: integer('encounter_procedure_id').references(() => encounterProcedures.id).unique(), // WS2 T9
 }, (t) => [
   index('charge_lines_patient_idx').on(t.patientId),
   index('charge_lines_encounter_idx').on(t.encounterId),
@@ -1088,6 +1093,9 @@ export const chargeLines = pgTable('charge_lines', {
   check('charge_lines_manual_reason', sql`${t.priceSource} <> 'manual' OR ${t.priceOverrideReason} IS NOT NULL`),
   check('charge_lines_void_reason', sql`${t.status} <> 'void' OR ${t.voidReason} IS NOT NULL`),
   index('charge_lines_invoice_idx').on(t.invoiceId),
+  // WS2 T9: automatic visit charges are idempotent (backstops; capture checks under the billing lock first).
+  uniqueIndex('charge_lines_one_consultation_per_encounter').on(t.encounterId).where(sql`source = 'consultation' AND status <> 'void'`), // WS2 T9
+  uniqueIndex('charge_lines_one_registration_per_patient').on(t.patientId).where(sql`source = 'registration' AND status <> 'void'`), // WS2 T9
 ])
 
 // Migration B: scripts/migrations/2026-10-08-sp4-b-invoices-ledger.sql (documents and ledger).

@@ -597,6 +597,7 @@ import { ACCOUNT_ROLES, PAYER_LIST_ROLES, PHARMACY_STOCK_READ_ROLES } from '@/li
 import { GET as getReportCsv } from '@/app/api/reports/[report]/csv/route'
 import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
 // end Wave I
+import { GET as getCheckInFeePreview } from '@/app/api/front-desk/check-in/fee-preview/route' // WS2 T9
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1052,6 +1053,8 @@ export const API_GATES: ApiGateCase[] = [
   // end Foundations T11
   { name: 'PUT /api/settings/notification-templates', call: () => settle(() => putNotificationTemplates(send('PUT', '/api/settings/notification-templates'))), allowed: ['admin'] }, // Foundations T8
   { name: 'GET /api/patients/[anonId]/notices', call: () => getPatientNotices(get(`/api/patients/${BOGUS_PATIENT}/notices`), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'crc', 'pi', 'frontdesk'] }, // Foundations T9
+  // WS2 T9: the check-in fee preview -- CHECK_IN_ROLES; no query is the 400 an allowed role gets, after the gate.
+  { name: 'GET /api/front-desk/check-in/fee-preview', call: () => getCheckInFeePreview(get('/api/front-desk/check-in/fee-preview')), allowed: [...CHECK_IN_ROLES] }, // WS2 T9
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

@@ -20,6 +20,8 @@ export interface BillingSettingsView {
   roomRentServiceId: number | null
   pharmacyGstRateBp: number
   pharmacyHsn: string
+  registrationServiceId: number | null // WS2 T9
+  freeReviewDays: number // WS2 T9
 }
 
 const POS_LABEL = {
@@ -37,9 +39,11 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 /** SP4: hospital billing settings. Editable for BILLING_CONFIG_ROLES (admin) only; read-only otherwise. */
-export function BillingSettingsForm({ settings, roomRentServices, editable }: {
+export function BillingSettingsForm({ settings, roomRentServices, registrationServices = [], editable }: {
   settings: BillingSettingsView
   roomRentServices: { id: number; code: string; name: string }[]
+  /** WS2 T9: candidate registration-fee services (active, category Other). */
+  registrationServices?: { id: number; code: string; name: string }[]
   editable: boolean
 }) {
   const router = useRouter()
@@ -50,6 +54,7 @@ export function BillingSettingsForm({ settings, roomRentServices, editable }: {
     placeOfSupplyMode: settings.placeOfSupplyMode, consultationWindowDays: String(settings.consultationWindowDays),
     deposit: settings.ipdDepositThresholdPaise ? (settings.ipdDepositThresholdPaise / 100).toFixed(2) : '0',
     roomRentServiceId: settings.roomRentServiceId ? String(settings.roomRentServiceId) : '', pharmacyGstRateBp: String(settings.pharmacyGstRateBp), pharmacyHsn: settings.pharmacyHsn,
+    registrationServiceId: settings.registrationServiceId ? String(settings.registrationServiceId) : '', freeReviewDays: String(settings.freeReviewDays), // WS2 T9
   })
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -58,6 +63,7 @@ export function BillingSettingsForm({ settings, roomRentServices, editable }: {
 
   if (!editable) {
     const service = roomRentServices.find((s) => s.id === settings.roomRentServiceId)
+    const registration = registrationServices.find((s) => s.id === settings.registrationServiceId) // WS2 T9
     return (
       <dl>
         <Row label="Legal name">{settings.legalName ?? 'Not set'}</Row>
@@ -69,6 +75,8 @@ export function BillingSettingsForm({ settings, roomRentServices, editable }: {
         <Row label="IPD deposit before procedures">{settings.ipdDepositThresholdPaise > 0 ? formatPaise(settings.ipdDepositThresholdPaise) : 'No deposit required'}</Row>
         <Row label="Room-rent service">{service ? `${service.name} (${service.code})` : 'Not set'}</Row>
         <Row label="Pharmacy GST">{bpToPercent(settings.pharmacyGstRateBp)} · HSN {settings.pharmacyHsn}</Row>
+        <Row label="Registration fee service">{registration ? `${registration.name} (${registration.code})` : settings.registrationServiceId ? 'Set' : 'Not set (no registration fee)'}</Row>
+        <Row label="Free review period">{settings.freeReviewDays > 0 ? `${settings.freeReviewDays} days after a charged consultation` : 'None (every visit is charged)'}</Row>
         <p className="pt-2 text-xs text-muted-foreground">Only an administrator can change these settings.</p>
       </dl>
     )
@@ -82,6 +90,7 @@ export function BillingSettingsForm({ settings, roomRentServices, editable }: {
       legalName: v.legalName, gstin: v.gstin.trim() ? v.gstin : null, stateCode: v.stateCode, address: v.address.trim() ? v.address.trim() : null,
       placeOfSupplyMode: v.placeOfSupplyMode, consultationWindowDays: Number(v.consultationWindowDays), ipdDepositThresholdPaise: depositPaise,
       roomRentServiceId: v.roomRentServiceId ? Number(v.roomRentServiceId) : null, pharmacyGstRateBp: Number(v.pharmacyGstRateBp), pharmacyHsn: v.pharmacyHsn.trim(),
+      registrationServiceId: v.registrationServiceId ? Number(v.registrationServiceId) : null, freeReviewDays: Number(v.freeReviewDays), // WS2 T9
     })
     if (!parsed.success) {
       const issue = parsed.error.issues[0]
@@ -149,6 +158,18 @@ export function BillingSettingsForm({ settings, roomRentServices, editable }: {
       <div>
         <label htmlFor={id('phsn')} className="mb-1 block text-xs font-medium text-muted-foreground">Pharmacy HSN</label>
         <input id={id('phsn')} value={v.pharmacyHsn} inputMode="numeric" maxLength={8} onChange={set('pharmacyHsn')} className={FIELD_CLASS} />
+      </div>
+      {/* WS2 T9: automatic visit charges */}
+      <div>
+        <label htmlFor={id('reg')} className="mb-1 block text-xs font-medium text-muted-foreground">Registration fee service (first visit)</label>
+        <select id={id('reg')} value={v.registrationServiceId} onChange={set('registrationServiceId')} className={FIELD_CLASS}>
+          <option value="">Not set (no registration fee)</option>
+          {registrationServices.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+        </select>
+      </div>
+      <div>
+        <label htmlFor={id('review')} className="mb-1 block text-xs font-medium text-muted-foreground">Free review period (days after a charged consultation, 0 = none)</label>
+        <input id={id('review')} type="number" min={0} max={30} value={v.freeReviewDays} onChange={set('freeReviewDays')} className={FIELD_CLASS} />
       </div>
       <div className="flex items-center justify-end gap-3 sm:col-span-2">
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
