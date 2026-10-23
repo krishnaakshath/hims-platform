@@ -11,10 +11,11 @@ import { checkEncounterWriter, parseEncounterId } from '@/lib/encounters/ownersh
 import { getEncounterById } from '@/lib/queries/encounters'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 
+const FIXED_CHECKED_IN_AT = new Date('2099-01-01T08:00:00.000Z')
 const enc = (over: Partial<EncounterRow> = {}): EncounterRow => ({
   id: 12, patientId: 'RD-0001', encounterType: 'opd', visitType: 'new', status: 'in_consultation',
   encounterDate: '2099-01-01', opdToken: 1, departmentId: null, providerId: 7, appointmentId: null,
-  admissionId: null, doctorAssignmentId: null, checkedInByName: 'TEST_WS1', checkedInAt: new Date(),
+  admissionId: null, doctorAssignmentId: null, checkedInByName: 'TEST_WS1', checkedInAt: FIXED_CHECKED_IN_AT,
   statusChangedAt: null, statusChangedByName: null, completedAt: null, cancelReason: null, ...over,
 })
 const as = (role: Session['role']): Session => ({ role, name: 'TEST_WS1 user', userId: 1 })
