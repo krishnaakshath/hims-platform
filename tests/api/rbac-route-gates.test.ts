@@ -597,6 +597,10 @@ import { ACCOUNT_ROLES, PAYER_LIST_ROLES, PHARMACY_STOCK_READ_ROLES } from '@/li
 import { GET as getReportCsv } from '@/app/api/reports/[report]/csv/route'
 import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
 // end Wave I
+// WS12 T2
+import { GET as getPatientCoverage } from '@/app/api/patients/[anonId]/coverage/route'
+import { COVERAGE_READ_ROLES } from '@/lib/role-policy'
+// end WS12 T2
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1052,6 +1056,9 @@ export const API_GATES: ApiGateCase[] = [
   // end Foundations T11
   { name: 'PUT /api/settings/notification-templates', call: () => settle(() => putNotificationTemplates(send('PUT', '/api/settings/notification-templates'))), allowed: ['admin'] }, // Foundations T8
   { name: 'GET /api/patients/[anonId]/notices', call: () => getPatientNotices(get(`/api/patients/${BOGUS_PATIENT}/notices`), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'crc', 'pi', 'frontdesk'] }, // Foundations T9
+  // WS12 T2: patient coverage summary (unknown patient: 404 after the gate).
+  { name: 'GET /api/patients/[anonId]/coverage', call: () => settle(() => getPatientCoverage(get(`/api/patients/${BOGUS_PATIENT}/coverage`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...COVERAGE_READ_ROLES] },
+  // end WS12 T2
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

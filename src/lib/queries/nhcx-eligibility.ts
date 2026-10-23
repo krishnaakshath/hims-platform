@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { desc, eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { nhcxEligibilityChecks, nhcxExchanges, payers, providers, type NhcxExchangeRow } from '@/db/schema'
+import { coverageVerifications, nhcxEligibilityChecks, nhcxExchanges, payers, providers, type NhcxExchangeRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { todayIsoIn } from '@/lib/india-time'
@@ -14,6 +14,7 @@ import { NHCX_BUILD_ERROR_COPY, NhcxBuildError } from '@/lib/fhir/nhcx/resources
 import { validateNhcxBundle } from '@/lib/fhir/nhcx/validate'
 import { recipientCodeFor } from '@/lib/nhcx/claim-gateway'
 import type { EligibilityContext, EligibilityPurpose, EligibilityStatus } from '@/lib/nhcx/constants'
+import type { CoverageLimits } from '@/lib/insurance/coverage'
 import { registrationOf } from './claim-submissions'
 import { defaultSchedule, dispatchExchange, senderCode, type OutboundBuild } from './nhcx-exchanges'
 import { loadPolicyContext, loadRcmPatient, loadSnapshotHospital } from './rcm-context'
@@ -106,23 +107,33 @@ export async function buildEligibilityOutbound(row: NhcxExchangeRow, now: Date):
   }
 }
 
-export interface EligibilityView { id: number; status: EligibilityStatus; inforce: boolean | null; requestedAt: string; respondedAt: string | null; payerName: string; isMock: boolean; patientId: string }
+/** `limits`: what the saved verification of this check recorded (WS12 T2), paise and basis points only; null until answered. */
+export interface EligibilityView { id: number; status: EligibilityStatus; inforce: boolean | null; requestedAt: string; respondedAt: string | null; payerName: string; isMock: boolean; patientId: string; limits: CoverageLimits | null }
 
 const viewColumns = {
   id: nhcxEligibilityChecks.id, status: nhcxEligibilityChecks.status, inforce: nhcxEligibilityChecks.inforce, requestedAt: nhcxEligibilityChecks.requestedAt,
   respondedAt: nhcxEligibilityChecks.respondedAt, payerName: payers.name, isMock: nhcxEligibilityChecks.isMock, patientId: nhcxEligibilityChecks.patientId,
+  verificationId: coverageVerifications.id, sumInsuredPaise: coverageVerifications.sumInsuredPaise, balancePaise: coverageVerifications.balancePaise,
+  copayBp: coverageVerifications.copayBp, roomRentLimitPaise: coverageVerifications.roomRentLimitPaise, icuLimitPaise: coverageVerifications.icuLimitPaise,
 }
-const toView = (r: { id: number; status: EligibilityStatus; inforce: boolean | null; requestedAt: Date; respondedAt: Date | null; payerName: string; isMock: boolean; patientId: string }): EligibilityView => ({
+type ViewRow = {
+  id: number; status: EligibilityStatus; inforce: boolean | null; requestedAt: Date; respondedAt: Date | null; payerName: string; isMock: boolean; patientId: string
+  verificationId: number | null; sumInsuredPaise: number | null; balancePaise: number | null; copayBp: number | null; roomRentLimitPaise: number | null; icuLimitPaise: number | null
+}
+const toView = ({ verificationId, sumInsuredPaise, balancePaise, copayBp, roomRentLimitPaise, icuLimitPaise, ...r }: ViewRow): EligibilityView => ({
   ...r, requestedAt: r.requestedAt.toISOString(), respondedAt: r.respondedAt ? r.respondedAt.toISOString() : null,
+  limits: verificationId === null ? null : { sumInsuredPaise, balancePaise, copayBp, roomRentLimitPaise, icuLimitPaise },
 })
+const viewFrom = () => getDb().select(viewColumns).from(nhcxEligibilityChecks).innerJoin(payers, eq(payers.id, nhcxEligibilityChecks.payerId))
+  .leftJoin(coverageVerifications, eq(coverageVerifications.nhcxCheckId, nhcxEligibilityChecks.id))
 
 export async function getEligibilityCheck(id: number): Promise<EligibilityView | null> {
-  const [r] = await getDb().select(viewColumns).from(nhcxEligibilityChecks).innerJoin(payers, eq(payers.id, nhcxEligibilityChecks.payerId)).where(eq(nhcxEligibilityChecks.id, id)).limit(1)
+  const [r] = await viewFrom().where(eq(nhcxEligibilityChecks.id, id)).limit(1)
   return r ? toView(r) : null
 }
 
 export async function latestEligibilityForPolicy(policyId: number): Promise<EligibilityView | null> {
-  const [r] = await getDb().select(viewColumns).from(nhcxEligibilityChecks).innerJoin(payers, eq(payers.id, nhcxEligibilityChecks.payerId))
+  const [r] = await viewFrom()
     .where(eq(nhcxEligibilityChecks.policyId, policyId)).orderBy(desc(nhcxEligibilityChecks.id)).limit(1)
   return r ? toView(r) : null
 }

@@ -4,8 +4,9 @@
 import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { coverageVerifications, nhcxEligibilityChecks, payerProfiles, type CoverageVerificationRow } from '@/db/schema'
+import type { EligibilityStatus, NhcxResponseSummary } from '@/lib/nhcx/constants'
 import {
-  effectiveLimits, evaluateCoverage,
+  COVERAGE_FRESH_HOURS, effectiveLimits, evaluateCoverage,
   type CoverageContext, type CoverageLimits, type CoveragePolicyFacts, type CoverageVerdict, type CoverageVerificationFacts,
 } from '@/lib/insurance/coverage'
 import { payersOnNhcx } from './nhcx-eligibility'
@@ -80,4 +81,42 @@ export async function getCoverageSummary(patientId: string, context: CoverageCon
   for (const p of views) policies.push(await coverageOf(executor, p, onNhcx[p.id] ?? false, context, now))
   const primaryView = primaryOf(views)
   return { primary: primaryView ? policies.find((c) => c.policyId === primaryView.id) ?? null : null, policies }
+}
+
+const INSURER_REFERENCE_MAX = 64
+const MAX_LIMIT_PAISE = 1_000_000_000_000
+const amount = (v: number | null | undefined): number | null => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= MAX_LIMIT_PAISE ? v : null)
+
+/**
+ * R1/R2/R6: the verification an answered NHCX eligibility check leaves, written inside the
+ * transaction that settles the check. `eligible` -> active, `not_eligible` -> inactive; an
+ * `error`, `no_response` or `pending` status writes nothing (null). Current for
+ * COVERAGE_FRESH_HOURS. A second answer for the same check writes nothing (ON CONFLICT on
+ * nhcx_check_id). The insurer reference is stored (≤ 64), never logged or returned.
+ */
+export async function recordNhcxVerificationTx(
+  tx: WriteExecutor,
+  i: { checkId: number; summary: NhcxResponseSummary; insurerReference: string | null; status: EligibilityStatus; isMock: boolean; now: Date },
+): Promise<number | null> {
+  const result = i.status === 'eligible' ? 'active' : i.status === 'not_eligible' ? 'inactive' : null
+  if (!result) return null
+  const [check] = await tx.select({
+    patientId: nhcxEligibilityChecks.patientId, policyId: nhcxEligibilityChecks.policyId, context: nhcxEligibilityChecks.context,
+    requestedByName: nhcxEligibilityChecks.requestedByName, requestedByUserId: nhcxEligibilityChecks.requestedByUserId, isMock: nhcxEligibilityChecks.isMock,
+  }).from(nhcxEligibilityChecks).where(eq(nhcxEligibilityChecks.id, i.checkId)).limit(1)
+  if (!check) return null
+  const c = i.summary.coverage ?? null
+  const reference = i.insurerReference?.trim().slice(0, INSURER_REFERENCE_MAX) || null
+  const copay = c?.copayBp
+  const [row] = await tx.insert(coverageVerifications).values({
+    patientId: check.patientId, policyId: check.policyId,
+    source: i.isMock || check.isMock ? 'nhcx_mock' : 'nhcx', result, context: check.context, nhcxCheckId: i.checkId,
+    insurerReference: reference, verifiedByName: check.requestedByName, verifiedByUserId: check.requestedByUserId,
+    verifiedAt: i.now, validUntil: new Date(i.now.getTime() + COVERAGE_FRESH_HOURS * 3_600_000),
+    sumInsuredPaise: amount(c?.sumInsuredPaise), balancePaise: amount(c?.balancePaise),
+    copayBp: typeof copay === 'number' && Number.isInteger(copay) && copay >= 0 && copay <= 10_000 ? copay : null,
+    roomRentLimitPaise: amount(c?.roomRentLimitPaise), icuLimitPaise: amount(c?.icuLimitPaise),
+    reportedValidTo: c?.benefitPeriodEnd && /^\d{4}-\d{2}-\d{2}$/.test(c.benefitPeriodEnd) ? c.benefitPeriodEnd : null,
+  }).onConflictDoNothing({ target: coverageVerifications.nhcxCheckId }).returning({ id: coverageVerifications.id })
+  return row?.id ?? null
 }

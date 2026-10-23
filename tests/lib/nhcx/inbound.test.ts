@@ -3,11 +3,13 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { auditLog, claimEvents, claims, claimSubmissions, nhcxEligibilityChecks, nhcxExchanges, nhcxInboundCalls } from '@/db/schema'
-import { handleNhcxCallback, type InboundDeps } from '@/lib/nhcx/inbound'
+import { auditLog, claimEvents, claims, claimSubmissions, coverageVerifications, nhcxEligibilityChecks, nhcxExchanges, nhcxInboundCalls } from '@/db/schema'
+import { handleNhcxCallback, synthesizeMockResponse, type InboundDeps } from '@/lib/nhcx/inbound'
 import { openPayload } from '@/lib/integrations/payload-vault'
 import { makeRcmBase, purgeRcmFixtures, deleteRcmBasePatient, type RcmBase } from '../../db/rcm-fixtures'
 import { purgeSp8Fixtures } from '../../db/sp8-fixtures'
+import { purgeCoverageFixtures } from '../../db/ws12-fixtures'
+import { getEligibilityCheck } from '@/lib/queries/nhcx-eligibility'
 import { makeCallbackKit } from '../../helpers/nhcx-callback'
 import { SNAP, fixture } from '../fhir/nhcx/fixtures'
 
@@ -23,6 +25,7 @@ describe.skipIf(!process.env.DATABASE_URL)('NHCX inbound (DB)', () => {
     b = await makeRcmBase(RUN, 'IN')
   })
   afterAll(async () => {
+    await purgeCoverageFixtures([b.patientId])
     await purgeSp8Fixtures([b.patientId])
     await purgeRcmFixtures([b.patientId], [b.insurerId, b.tpaId])
     await deleteRcmBasePatient(b.patientId)
@@ -125,5 +128,68 @@ describe.skipIf(!process.env.DATABASE_URL)('NHCX inbound (DB)', () => {
     expect((await notes(x.claim.id))[0].note).toBe('Insurer query received via NHCX; review it in the NHCX panel')
     const [out] = await getDb().select().from(nhcxExchanges).where(eq(nhcxExchanges.id, x.outbound.id))
     expect(out.state).toBe('sent')
+  })
+  // WS12 T2 (R1, R2, R6): every answered eligibility check leaves one coverage_verifications row.
+  async function eligibilityCheck(isMock: boolean, context: 'checkin' | 'manual' = 'checkin') {
+    const [chk] = await getDb().insert(nhcxEligibilityChecks).values({
+      patientId: b.patientId, policyId: b.policyId, payerId: b.insurerId, purpose: 'validation', context, requestedByName: `Desk ${RUN}`, isMock,
+    }).returning()
+    const correlationId = randomUUID()
+    const [out] = await getDb().insert(nhcxExchanges).values({
+      entityType: 'coverageeligibility', direction: 'outbound', action: 'coverageeligibility/check', correlationId, apiCallId: randomUUID(), senderCode: 'P1@sbx', recipientCode: 'TPA1@sbx',
+      state: 'sent', patientId: b.patientId, policyId: b.policyId, eligibilityCheckId: chk.id, bodySha256: 'a'.repeat(64), isMock,
+    }).returning()
+    return { chk, out, correlationId }
+  }
+  const verificationsFor = (checkId: number) => getDb().select().from(coverageVerifications).where(eq(coverageVerifications.nhcxCheckId, checkId))
+
+  it('the mock answer writes one nhcx_mock verification with the fixed limits, current for 24 h; a second answer writes none', async () => {
+    const { chk, out } = await eligibilityCheck(true)
+    await synthesizeMockResponse(out)
+    const rows = await verificationsFor(chk.id)
+    expect(rows).toHaveLength(1)
+    const v = rows[0]
+    expect(v).toMatchObject({
+      patientId: b.patientId, policyId: b.policyId, source: 'nhcx_mock', result: 'active', context: 'checkin', verifiedByName: `Desk ${RUN}`, method: null,
+      sumInsuredPaise: 50_000_000, balancePaise: 45_000_000, copayBp: 1000, roomRentLimitPaise: 400_000, icuLimitPaise: 800_000, reportedValidTo: '2099-12-31',
+      documentBlobUrl: null,
+    })
+    expect(v.validUntil.getTime() - v.verifiedAt.getTime()).toBe(24 * 3_600_000)
+    const [c] = await getDb().select().from(nhcxEligibilityChecks).where(eq(nhcxEligibilityChecks.id, chk.id))
+    expect(c.status).toBe('eligible')
+    expect((await getEligibilityCheck(chk.id))!.limits).toEqual({ sumInsuredPaise: 50_000_000, balancePaise: 45_000_000, copayBp: 1000, roomRentLimitPaise: 400_000, icuLimitPaise: 800_000 })
+    await synthesizeMockResponse(out)
+    expect(await verificationsFor(chk.id)).toHaveLength(1)
+  })
+
+  it('a live answer writes an nhcx verification with the insurer reference; replays write no second row', async () => {
+    const { chk, correlationId } = await eligibilityCheck(false, 'manual')
+    const fhir = fixture('Bundle-CoverageEligibilityResponseBundle-validation-example-01')
+    fhir.entry.find((e: { resource: { resourceType: string } }) => e.resource.resourceType === 'CoverageEligibilityResponse').resource.identifier = [{ value: `ELIG-${RUN}` }]
+    const apiCallId = randomUUID()
+    const first = await handleNhcxCallback((await kit.request('coverageeligibility/on_check', fhir, { headers: { correlationId, apiCallId } })).req, 'coverageeligibility/on_check', deps)
+    const replay = await handleNhcxCallback((await kit.request('coverageeligibility/on_check', fhir, { headers: { correlationId, apiCallId } })).req, 'coverageeligibility/on_check', deps)
+    const again = await handleNhcxCallback((await kit.request('coverageeligibility/on_check', fhir, { headers: { correlationId } })).req, 'coverageeligibility/on_check', deps)
+    expect([first.http, replay.http, again.http]).toEqual([202, 202, 202])
+    const rows = await verificationsFor(chk.id)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ source: 'nhcx', result: 'active', context: 'manual', insurerReference: `ELIG-${RUN}`, reportedValidTo: '2026-08-07', sumInsuredPaise: null })
+    const audits = await getDb().select().from(auditLog).where(eq(auditLog.patientId, b.patientId))
+    expect(JSON.stringify(audits)).not.toContain(`ELIG-${RUN}`)
+  })
+
+  it('an error answer and a not-in-force answer: error writes no row, not in force writes an inactive row', async () => {
+    const err = await eligibilityCheck(false)
+    const r = await handleNhcxCallback((await kit.request('coverageeligibility/on_check', fixture('Bundle-CoverageEligibilityResponseBundle-validation-example-01'), { headers: { correlationId: err.correlationId }, status: 'response.error' })).req, 'coverageeligibility/on_check', deps)
+    expect(r.http).toBe(202)
+    const [c] = await getDb().select().from(nhcxEligibilityChecks).where(eq(nhcxEligibilityChecks.id, err.chk.id))
+    expect(c.status).toBe('error')
+    expect(await verificationsFor(err.chk.id)).toHaveLength(0)
+
+    const off = await eligibilityCheck(false)
+    const fhir = fixture('Bundle-CoverageEligibilityResponseBundle-validation-example-01')
+    fhir.entry.find((e: { resource: { resourceType: string } }) => e.resource.resourceType === 'CoverageEligibilityResponse').resource.insurance[0].inforce = false
+    await handleNhcxCallback((await kit.request('coverageeligibility/on_check', fhir, { headers: { correlationId: off.correlationId } })).req, 'coverageeligibility/on_check', deps)
+    expect(await verificationsFor(off.chk.id)).toMatchObject([{ result: 'inactive', source: 'nhcx' }])
   })
 })
