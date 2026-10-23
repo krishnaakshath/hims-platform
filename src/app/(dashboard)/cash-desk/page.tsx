@@ -12,6 +12,8 @@ import { Balance, LedgerTable } from '@/components/billing/LedgerTable'
 import { FIELD_CLASS } from '@/components/tariff/api'
 import { MAX_DOCUMENT_PAISE } from '@/lib/billing/amounts'
 import { upiConfig } from '@/lib/payments/upi'
+import { listPendingUpiRequests } from '@/lib/payments/manual-upi' // WS7 T8
+import { PendingUpiList } from '@/components/billing/PendingUpiList' // WS7 T8
 
 // Foundations T11: "Collect payment" links prefill the payment tab. A positive whole number of
 // paise up to the document maximum, else ignored; an invoice only if it is this patient's and payable.
@@ -35,6 +37,7 @@ export default async function CashDeskPage({ searchParams }: { searchParams: Pro
   const ledger = patientId ? await getPatientLedger(patientId) : null
   if (patientId && !ledger) notFound()
   const invoices = ledger ? await listPayableInvoices(ledger.patient.id) : []
+  const pendingUpi = ledger ? await listPendingUpiRequests(ledger.patient.id) : [] // WS7 T8
   if (ledger) await logAudit(session, 'billing: viewed patient ledger', ledger.patient.id)
   const legacyLinks = CHARGES_ROLES.includes(session.role)
   const initialAmountPaise = ledger ? prefillAmountPaise(sp.amountPaise) : undefined
@@ -116,6 +119,13 @@ export default async function CashDeskPage({ searchParams }: { searchParams: Pro
               )}
             </section>
             <section>
+              {/* WS7 T8 (spec D14): portal Pay now and cash desk QRs awaiting the cashier's confirmation */}
+              {pendingUpi.length > 0 && (
+                <div className="mb-6">
+                  <h2 className="mb-2 text-lg font-semibold">Pending UPI payments</h2>
+                  <PendingUpiList requests={pendingUpi} />
+                </div>
+              )}
               <h2 className="mb-2 text-lg font-semibold">Take money</h2>
               <CashDeskPanel patientId={ledger.patient.id} admissionId={ledger.activeAdmissionId} finalisedInvoices={invoices} canRefund={BILLING_AUTHORITY_ROLES.includes(session.role)}
                 upiReady={upiConfig() !== null} initialAmountPaise={initialAmountPaise} initialInvoiceId={initialInvoiceId} />

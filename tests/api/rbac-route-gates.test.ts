@@ -1356,6 +1356,8 @@ const UNGATED_EXEMPT: Record<string, string> = {
   'POST /api/webhooks/fhir-labs': 'LIS shared-secret token (tests/api/webhooks-fhir-labs.test.ts)',
   'GET /api/messages/[patientId]': 'staff-or-patient dual session via getSession, not requireSession; staff roles pinned in tests/api/messages.test.ts',
   'POST /api/messages/[patientId]': 'staff-or-patient dual session via getSession, not requireSession; staff roles pinned in tests/api/messages.test.ts',
+  'POST /api/patient-portal/payments/upi-request': 'patient session only, own finalised bill, rate limited (tests/api/patient-portal-payments.test.ts)', // WS7 T8
+  'POST /api/patient-portal/payments/[id]/reported-utr': 'patient session only, own portal request; never posts a receipt (tests/api/patient-portal-payments.test.ts)', // WS7 T8
 }
 
 function findRouteFiles(dir: string): string[] {

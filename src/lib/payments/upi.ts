@@ -22,3 +22,10 @@ export function upiConfig(): { vpa: string; payeeName: string } | null {
   const payeeName = (process.env.HOSPITAL_UPI_PAYEE ?? '').trim().slice(0, 99) || 'Hospital'
   return { vpa, payeeName }
 }
+
+// WS7 T8: a UTR shown to staff is masked to its last four characters ("••••1234"); the full
+// UTR is typed by the cashier from the bank statement, never sent to a browser.
+export function maskUtr(utr: string): string {
+  return `••••${utr.slice(-4)}`
+}
+// end WS7 T8

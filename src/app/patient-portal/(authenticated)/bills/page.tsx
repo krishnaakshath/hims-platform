@@ -8,6 +8,8 @@ import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { formatPaise } from '@/lib/format'
 import { formatIsoDate } from '@/lib/india-time'
 import { PAYMENT_MODE_LABELS } from '@/components/billing/labels'
+import { PayNowDialog } from '@/components/portal/PayNowDialog' // WS7 T8
+import { upiConfig } from '@/lib/payments/upi' // WS7 T8
 
 const SECTION = 'rounded-xl border border-primary/10 bg-card/80 p-5 shadow-sm backdrop-blur-sm'
 const HEADING = 'mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
@@ -19,6 +21,7 @@ export default async function PatientPortalBillsPage() {
   const session = await requirePatientSessionOrRedirect()
   const [bills, receipts] = await Promise.all([listPortalInvoices(session.patientId), listPortalReceipts(session.patientId)])
   await logPatientPortalAction('viewed patient portal bills', session.patientId)
+  const upiReady = upiConfig() !== null // WS7 T8: Pay now only when the hospital UPI id is set
 
   return (
     <div className="space-y-6">
@@ -39,11 +42,18 @@ export default async function PatientPortalBillsPage() {
                     <p className="text-xs text-muted-foreground">{b.documentTitle ?? 'Tax invoice'} · {formatIsoDate(b.invoiceDate)}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-sm font-semibold tabular-nums text-foreground">{formatPaise(b.totalPaise)}</span>
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="text-right">
+                    <p className="text-sm font-semibold tabular-nums text-foreground">{formatPaise(b.totalPaise)}</p>
+                    {/* WS7 T8: what is still owed on this bill */}
+                    <p className="text-xs tabular-nums text-muted-foreground">
+                      {b.outstandingPaise > 0 ? <>Outstanding {formatPaise(b.outstandingPaise)}</> : 'Paid'}
+                    </p>
+                  </div>
                   <Link href={`/patient-portal/documents/invoices/${b.id}`} className={LINK}>
                     View<span className="sr-only"> bill {b.invoiceNumber}</span>
                   </Link>
+                  {upiReady && b.outstandingPaise > 0 && <PayNowDialog invoiceId={b.id} invoiceNumber={b.invoiceNumber} outstandingPaise={b.outstandingPaise} />}
                 </div>
               </li>
             ))}

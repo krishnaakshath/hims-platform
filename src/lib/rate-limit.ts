@@ -482,3 +482,15 @@ export async function clearReauthRateLimit(identity: string): Promise<void> {
   await getReauthLimiter().resetUsedTokens(identity)
 }
 // end WS7 T5
+
+// WS7 T8: portal "Pay now" UPI requests. Keyed on the session's patient id: 5 an hour is
+// plenty for a patient paying a few bills (a repeat click reuses the pending request anyway).
+let _portalPaymentRequestLimiter: Ratelimit | null = null
+export async function checkPortalPaymentRequestRateLimit(patientId: string): Promise<{ allowed: boolean }> {
+  if (!_portalPaymentRequestLimiter) {
+    _portalPaymentRequestLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(5, '3600 s'), prefix: 'ratelimit:portal-payment-request' })
+  }
+  const { success } = await _portalPaymentRequestLimiter.limit(`patient:${patientId}`)
+  return { allowed: success }
+}
+// end WS7 T8

@@ -2733,8 +2733,12 @@ export const paymentRequests = pgTable('payment_requests', {
   createdByUserId: integer('created_by_user_id').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at'),
+  source: text('source').default('staff').notNull(), // WS7 T8: 'staff' (cash desk) or 'portal' (patient Pay now)
+  reportedUtr: text('reported_utr'), // WS7 T8: the UTR the patient says they paid with; unverified, never posts a receipt, never audited
+  reportedAt: timestamp('reported_at'), // WS7 T8
 }, (t) => [
   check('payment_requests_amount_positive', sql`${t.amountPaise} > 0`),
+  check('payment_requests_source_valid', sql`${t.source} IN ('staff', 'portal')`), // WS7 T8
   check('payment_requests_status_valid', sql`${t.status} IN ('pending', 'confirmed', 'cancelled')`),
   check('payment_requests_confirmed_has_utr', sql`${t.status} <> 'confirmed' OR (${t.utr} IS NOT NULL AND ${t.paymentId} IS NOT NULL)`),
   uniqueIndex('payment_requests_utr_unique').on(t.utr).where(sql`${t.utr} IS NOT NULL`),

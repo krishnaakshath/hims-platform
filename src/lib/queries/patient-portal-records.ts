@@ -10,7 +10,9 @@ import { getDb } from '@/db/client'
 import { admissions, appointments, bookingRequests, departments, encounters, formSubmissions, formTemplates, invoices, medicationEpisodes, patientPayments, patientPolicies, patients, payers, providers } from '@/db/schema' // WS7 T3: + formSubmissions, formTemplates; WS7 T7: + departments, encounters
 import { istDateOf, startOfIstDay, todayIsoIn } from '@/lib/india-time' // WS7 T7
 import type { VisitMode } from './appointments' // WS7 T7
-import { getInvoice, type InvoiceDetail } from './invoices'
+import { getInvoice, invoicePaidSql, type InvoiceDetail } from './invoices' // WS7 T8: + invoicePaidSql
+import { invoiceOutstandingPaise } from '@/lib/billing/invoice-balance' // WS7 T8
+import { paiseFromDb } from '@/lib/billing/amounts' // WS7 T8
 import { getDischargeSummaryData } from './discharge-summary'
 import { getLatestSignatureForSignable } from './signatures'
 import type { DischargeSummaryData } from '@/lib/encounters/discharge-summary'
@@ -27,16 +29,26 @@ export interface PortalInvoiceRow {
   invoiceDate: string
   documentTitle: string | null
   totalPaise: number
+  paidPaise: number // WS7 T8: receipts against this bill less refunds
+  outstandingPaise: number // WS7 T8: what is still owed (0 when settled)
 }
 
 /** The patient's finalised invoices, newest first. Drafts, discarded and cancelled ones are never shown. */
 export async function listPortalInvoices(patientId: string): Promise<PortalInvoiceRow[]> {
   const rows = await getDb()
-    .select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber, invoiceDate: invoices.invoiceDate, documentTitle: invoices.documentTitle, totalPaise: invoices.totalPaise })
+    .select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber, invoiceDate: invoices.invoiceDate, documentTitle: invoices.documentTitle, totalPaise: invoices.totalPaise, paid: invoicePaidSql /* WS7 T8 */ })
     .from(invoices)
+    // WS7 T8: the join makes drizzle qualify every column, which the correlated paid subquery needs.
+    .innerJoin(patients, eq(patients.id, invoices.patientId))
     .where(and(eq(invoices.patientId, patientId), eq(invoices.status, 'finalised')))
     .orderBy(desc(invoices.invoiceDate), desc(invoices.id))
-  return rows.map((r) => ({ id: r.id, invoiceNumber: r.invoiceNumber ?? '', invoiceDate: r.invoiceDate ?? '', documentTitle: r.documentTitle, totalPaise: Number(r.totalPaise ?? 0) }))
+  return rows.map((r) => {
+    const paidPaise = paiseFromDb(r.paid) // WS7 T8
+    return {
+      id: r.id, invoiceNumber: r.invoiceNumber ?? '', invoiceDate: r.invoiceDate ?? '', documentTitle: r.documentTitle, totalPaise: Number(r.totalPaise ?? 0),
+      paidPaise, outstandingPaise: invoiceOutstandingPaise('finalised', r.totalPaise, paidPaise) ?? 0,
+    }
+  })
 }
 
 /** One finalised invoice of this patient as the GST invoice document; null when it is not theirs or not finalised. */
