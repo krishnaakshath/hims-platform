@@ -28,6 +28,8 @@ async function patientContact(patientId: string): Promise<{ phone?: string; emai
   return { ...(p.phone ? { phone: p.phone } : {}), ...(p.email ? { email: p.email } : {}) }
 }
 
+interface PatientNoticeRequest<K extends NotificationTemplateKey> { patientId: string; templateKey: K; vars: TemplateVars[K]; dedupeKey: string }
+
 /**
  * Foundations T9: the one place staff-triggered patient notices go through. Loads the patient's
  * contact details and hands over to sendNotification (channel config, opt-out, adapters, log,
@@ -35,10 +37,12 @@ async function patientContact(patientId: string): Promise<{ phone?: string; emai
  * notice can never fail the primary action. `vars` must never carry a token or link.
  */
 export async function sendPatientNotice<K extends NotificationTemplateKey>(
-  req: { patientId: string; templateKey: K; vars: TemplateVars[K]; dedupeKey: string },
+  reqOrBuild: PatientNoticeRequest<K> | (() => PatientNoticeRequest<K>),
   deps?: SendNotificationDeps,
 ): Promise<SendNotificationResult | null> {
   try {
+    // A builder runs inside the try, so computing vars (dates, labels) can never throw into the caller.
+    const req = typeof reqOrBuild === 'function' ? reqOrBuild() : reqOrBuild
     const destination = (await patientContact(req.patientId)) ?? {}
     return await sendNotification({ patientId: req.patientId, templateKey: req.templateKey, vars: req.vars, destination, dedupeKey: req.dedupeKey }, deps)
   } catch (err) {
@@ -68,7 +72,7 @@ export async function notifyPatient<K extends NotificationTemplateKey>(
   const destination = await patientContact(req.patientId)
   if (!destination) return 'skipped_no_contact'
   const r = await sendNotification({ patientId: req.patientId, templateKey: req.templateKey, vars: req.vars, destination, dedupeKey: req.dedupeKey }, deps)
-  // Every channel opted out (master toggle or per-channel) is reported as suppressed.
+  // Only the master opt-out is checked here; per-channel opt-outs report as skipped_no_contact.
   const suppressed = r.attempts.length > 0 && !r.deduped && r.attempts.every((a) => a.status === 'skipped') && (await optedOutEverywhere(req.patientId))
   return suppressed ? 'suppressed_opt_out' : outcomeOf(r)
 }

@@ -5,17 +5,29 @@ import { eq, inArray, like } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
   bookingRequests, doctorAssignments, labOrders, labResults, medicationInventory, medications,
-  notificationDeliveries, patients, staffNotificationReads,
+  notificationDeliveries, notificationLog, patients, staffNotificationReads,
 } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 
 // The pi source resolves the doctor from the session; keep it deterministic.
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 1, name: 'Dr. Test' })) }))
 
+import { sendNotification } from '@/lib/notify/send'
+import type { ChannelAdapter, ChannelRegistry, DeliveryChannel } from '@/lib/notify/registry'
 import { getStaffFeed, loadStaffNotifications, markStaffNotificationsRead } from '@/lib/queries/staff-notifications'
 
 const RUN = `${Date.now()}`
 const PATIENT = 'RD-0001'
+const DK = (k: string) => `twg-${RUN}-${k}`
+const fakeRegistry = (): ChannelRegistry => {
+  const ad = (name: DeliveryChannel, configured: boolean, send: ChannelAdapter['send']) => ({ name, configured: () => configured, send })
+  return {
+    sms: ad('sms', true, async () => ({ ok: false, errorClass: 'provider_down' })),
+    whatsapp: ad('whatsapp', false, async () => ({ ok: true })), // unconfigured -> log_only
+    email: ad('email', false, async () => ({ ok: true })),
+    in_app: ad('in_app', false, async () => ({ ok: true })),
+  }
+}
 const s = (role: Session['role'], userId: number | null = null): Session => ({ role, name: `twg-${RUN}-${role}`, userId })
 
 describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () => {
@@ -31,6 +43,12 @@ describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () =>
     const [r] = await db.insert(labResults).values({ labOrderId: o.id, value: '9.9', flag: 'critical', resultedByName: 'test' }).returning()
     const [dec] = await db.insert(doctorAssignments).values({ patientId: PATIENT, providerId: 1, visitType: 'outpatient', reason: 'twg', status: 'declined', assignedByName: 'test', declineReason: 'away' }).returning()
     const [pen] = await db.insert(doctorAssignments).values({ patientId: PATIENT, providerId: 1, visitType: 'inpatient', urgency: 'emergency', reason: 'twg', status: 'pending', assignedByName: 'test' }).returning()
+    // Foundations T9: failures come through sendNotification. sms fails (alerts); whatsapp is
+    // unconfigured (log_only); the second call has no destination (skipped); the third has bad vars.
+    const registry = fakeRegistry()
+    await sendNotification({ patientId: PATIENT, templateKey: 'lab_report_ready', vars: { hospitalName: 'H' }, destination: { phone: '9845013210' }, dedupeKey: DK('fail') }, { registry })
+    await sendNotification({ patientId: PATIENT, templateKey: 'lab_report_ready', vars: { hospitalName: 'H' }, destination: {}, dedupeKey: DK('skip') }, { registry })
+    await sendNotification({ patientId: PATIENT, templateKey: 'booking_confirmed', vars: { hospitalName: 'H' }, destination: { phone: '9845013210' }, dedupeKey: DK('bad') }, { registry })
     Object.assign(ids, { booking: b.id, med: m.id, delivery: d.id, order: o.id, result: r.id, declined: dec.id, pending: pen.id })
   })
 
@@ -41,6 +59,7 @@ describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () =>
     await db.delete(labResults).where(inArray(labResults.id, [ids.result]))
     await db.delete(labOrders).where(inArray(labOrders.id, [ids.order]))
     await db.delete(doctorAssignments).where(inArray(doctorAssignments.id, [ids.declined, ids.pending]))
+    await db.delete(notificationLog).where(like(notificationLog.dedupeKey, `twg-${RUN}-%`))
     await db.delete(notificationDeliveries).where(inArray(notificationDeliveries.id, [ids.delivery]))
     await db.delete(medicationInventory).where(inArray(medicationInventory.medicationId, [ids.med]))
     await db.delete(medications).where(inArray(medications.id, [ids.med]))
@@ -61,6 +80,20 @@ describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () =>
     expect(notice.href).toBe(`/patients/${PATIENT}`)
     // No phone number in any item, ever.
     expect(JSON.stringify(feed)).not.toMatch(/98765|XXXXXX/)
+  })
+
+  it('alerts only on failed notification_log rows (send failure, invalid_vars), never skipped or log_only', async () => {
+    const rows = await getDb().select().from(notificationLog).where(like(notificationLog.dedupeKey, `twg-${RUN}-%`))
+    const byStatus = (st: string) => rows.filter((r) => r.status === st)
+    expect(byStatus('failed').map((r) => r.errorClass).sort()).toEqual(['invalid_vars', 'provider_down'])
+    expect(byStatus('log_only').length).toBeGreaterThan(0)
+    expect(byStatus('skipped').length).toBeGreaterThan(0)
+    const feed = await loadStaffNotifications(s('frontdesk'))
+    const logKeys = feed.map((n) => n.key).filter((k) => k.startsWith('notice_failed:log:'))
+    const mine = new Set(rows.map((r) => `notice_failed:log:${r.id}`))
+    expect(logKeys.filter((k) => mine.has(k)).sort()).toEqual(byStatus('failed').map((r) => `notice_failed:log:${r.id}`).sort())
+    const invalid = feed.find((n) => n.key === `notice_failed:log:${byStatus('failed').find((r) => r.errorClass === 'invalid_vars')!.id}`)!
+    expect(invalid.title).toBe('Patient message could not be built')
   })
 
   it('gives a coordinator the critical result with the patient, linked to the chart', async () => {

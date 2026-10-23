@@ -90,12 +90,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   await logAudit(session, existing.requestKind === 'reschedule' ? 'confirmed appointment reschedule request' : 'confirmed booking request', parsed.data.patientId) // Wave J
   // Foundations T9: booking_confirmed (hospital name, date and time only). Keyed by the request, so a
   // retried confirm never notifies twice. Never throws.
-  await sendPatientNotice({
+  await sendPatientNotice(() => ({
     patientId: parsed.data.patientId,
-    templateKey: 'booking_confirmed',
+    templateKey: 'booking_confirmed' as const,
     vars: { hospitalName: brand.name, visitDate: istDateOf(startsAt), timeLabel: formatIstTime(startsAt) },
     dedupeKey: `booking:${requestId}`,
-  })
+  }))
   // end Foundations T9
   return NextResponse.json(result)
 }

@@ -51,12 +51,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   await logAudit(session, 'started telemedicine session', appointment.patientId)
   // Foundations T9: only a freshly created session notifies (the 409 recovery above never does). The
   // text names the visit date and time only; the join token is never part of it. Never throws.
-  await sendPatientNotice({
+  await sendPatientNotice(() => ({
     patientId: appointment.patientId,
-    templateKey: 'video_visit_link',
+    templateKey: 'video_visit_link' as const,
     vars: { hospitalName: brand.name, visitDate: istDateOf(appointment.startsAt), timeLabel: formatIstTime(appointment.startsAt) },
     dedupeKey: `video:${result.session!.id}`,
-  })
+  }))
   // end Foundations T9
   return NextResponse.json({ id: result.session!.id, patientJoinToken: result.session!.patientJoinToken }, { status: 201 })
 }
