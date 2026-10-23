@@ -28,6 +28,7 @@ import { listRcmPayers } from '@/lib/queries/rcm-payers'
 import { POLICY_READ_ROLES, POLICY_WRITE_ROLES } from '@/lib/role-policy'
 import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
 import { NOTIFICATION_PREFERENCE_ROLES } from '@/lib/role-policy' // SP5
+import { getPatientChannelPreferences } from '@/lib/queries/notification-log' // Foundations T8
 import { ABHA_LINK_ROLES, NHCX_ELIGIBILITY_ROLES } from '@/lib/role-policy' // SP8
 import { nhcxEligibilityAvailable, payersOnNhcx } from '@/lib/queries/nhcx-eligibility' // SP8
 import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
@@ -96,6 +97,8 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   // this view (never the summary, whose last4 is role-gated) is handed to a
   // client component.
   const aadhaarView = toAadhaarView(patient.aadhaar, session.role)
+  // Foundations T8: per-channel notice preferences (read live, not from the cached detail).
+  const channelPrefs = NOTIFICATION_PREFERENCE_ROLES.includes(session.role) ? await getPatientChannelPreferences(patient.id) : null
   const profileTab = (
     <PatientProfilePanel
       patient={{
@@ -107,6 +110,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         abhaUnavailableNote: patient.abhaUnavailableNote ?? null, // Wave C P2-11
         isMlc: patient.isMlc, mlcNumber: patient.mlcNumber,
         notificationOptOut: patient.notificationOptOut, // SP5
+        notificationChannels: channelPrefs ? { sms: channelPrefs.sms, whatsapp: channelPrefs.whatsapp, email: channelPrefs.email } : undefined, // Foundations T8
         abhaVerifiedAt: patient.abhaVerifiedAt ? String(patient.abhaVerifiedAt) : null, abhaVerificationSource: patient.abhaVerificationSource ?? null, // SP8
         contacts: patient.contacts.map((c) => ({ kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, addressText: c.addressText, isPrimary: c.isPrimary })),
       }}

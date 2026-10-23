@@ -88,6 +88,7 @@ import { INTEGRATION_SETTINGS_ROLES } from '@/lib/role-policy'
 import { GET as getNhcxPayload } from '@/app/api/rcm/nhcx/exchanges/[id]/payload/route'
 import { POST as postNhcxReview } from '@/app/api/rcm/nhcx/exchanges/[id]/review/route'
 import { POST as postIntegrationTest } from '@/app/api/settings/integrations/test/route'
+import { PUT as putNotificationTemplates } from '@/app/api/settings/notification-templates/route' // Foundations T8
 // end SP8
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -1070,6 +1071,7 @@ export const API_GATES: ApiGateCase[] = [
     ]
   })(),
   // end Wave I
+  { name: 'PUT /api/settings/notification-templates', call: () => settle(() => putNotificationTemplates(send('PUT', '/api/settings/notification-templates'))), allowed: ['admin'] }, // Foundations T8
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1221,6 +1223,7 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/nhcx/eligibility', call: () => postNhcxEligibility(send('POST', '/api/nhcx/eligibility', NOT_JSON)), allowed: NHCX_ELIGIBILITY_ROLES },
   { name: 'POST /api/rcm/nhcx/exchanges/[id]/review', call: () => postNhcxReview(send('POST', `/api/rcm/nhcx/exchanges/${BOGUS_ID}/review`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: NHCX_EXCHANGE_ROLES },
   { name: 'POST /api/settings/integrations/test', call: () => postIntegrationTest(send('POST', '/api/settings/integrations/test', NOT_JSON)), allowed: INTEGRATION_SETTINGS_ROLES },
+  { name: 'PUT /api/settings/notification-templates', call: () => putNotificationTemplates(send('PUT', '/api/settings/notification-templates', NOT_JSON)), allowed: ['admin'] }, // Foundations T8
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {
