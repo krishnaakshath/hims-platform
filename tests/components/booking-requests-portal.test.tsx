@@ -25,6 +25,16 @@ describe('BookingRequestsQueue portal requests', () => {
     expect(screen.getAllByText(/^Portal ·/)).toHaveLength(1)
   })
 
+  // WS7 T7: staff see when the patient asked for a video consultation.
+  it('marks a request for a video consultation; in person and unstated show nothing', () => {
+    render(<BookingRequestsQueue canResolve providers={[]} requests={[
+      row({ id: 1, patientId: 'RD-1', requestedVisitMode: 'video' }),
+      row({ id: 2, patientId: 'RD-2', requestedVisitMode: 'in_person' }),
+      row({ id: 3 }),
+    ]} />)
+    expect(screen.getAllByText('Video consultation requested')).toHaveLength(1)
+  })
+
   it('confirms a cancellation with an empty body after a second click', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)

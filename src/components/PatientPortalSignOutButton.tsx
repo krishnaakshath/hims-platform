@@ -2,10 +2,12 @@
 import { sendJson } from '@/lib/client-fetch'
 import { useRouter } from 'next/navigation'
 import { LogOut } from 'lucide-react'
+import { clearMfaNudgeDismissal } from '@/components/portal/MfaNudge' // WS7 T7
 
 export function PatientPortalSignOutButton() {
   const router = useRouter()
   async function signOut() {
+    clearMfaNudgeDismissal() // WS7 T7: a dismissal never carries over to the next sign-in
     await sendJson('/api/patient-portal/logout', 'POST')
     router.push('/patient-portal/login')
   }

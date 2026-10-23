@@ -1,7 +1,7 @@
 // WS7 T7 (spec D13): patient MFA is offered, not required. The portal shell shows a nudge
 // linking to Security until MFA is on; dismissing it hides it for this browser session only.
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 const h = vi.hoisted(() => ({ mfaEnabled: false }))
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('NEXT_NOT_FOUND') }, redirect: () => { throw new Error('NEXT_REDIRECT') }, useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }))
@@ -13,14 +13,21 @@ vi.mock('@/lib/queries/patient-portal', () => ({
 }))
 vi.mock('@/components/PatientPortalSideNav', () => ({ PatientPortalSideNav: () => <nav /> }))
 vi.mock('@/components/PatientPortalTopBar', () => ({ PatientPortalTopBar: () => <header /> }))
-vi.mock('@/components/PatientPortalSessionTimeoutWarning', () => ({ PatientPortalSessionTimeoutWarning: () => null }))
 
 import PatientPortalLayout from '@/app/patient-portal/(authenticated)/layout'
 import { MfaNudge } from '@/components/portal/MfaNudge'
+import { PatientPortalSignOutButton } from '@/components/PatientPortalSignOutButton'
+import { PatientPortalSessionTimeoutWarning } from '@/components/PatientPortalSessionTimeoutWarning'
+
+const DISMISS_KEY = 'hims.portal.mfaNudgeDismissed'
 
 beforeEach(() => {
   h.mfaEnabled = false
   sessionStorage.clear()
+})
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('portal MFA nudge', () => {
@@ -55,5 +62,27 @@ describe('portal MFA nudge', () => {
   it('without dismissible there is no Not now button', () => {
     render(<MfaNudge dismissible={false} />)
     expect(screen.queryByRole('button', { name: 'Not now' })).toBeNull()
+  })
+})
+
+// Review round 1: a dismissal must not carry over to the next patient signing in on this tab.
+describe('signing out forgets the nudge dismissal', () => {
+  it('the Sign out button clears it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    render(<MfaNudge dismissible />)
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    expect(sessionStorage.getItem(DISMISS_KEY)).toBe('1')
+    render(<PatientPortalSignOutButton />)
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    await waitFor(() => expect(sessionStorage.getItem(DISMISS_KEY)).toBeNull())
+  })
+
+  it('the inactivity sign-out clears it', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    sessionStorage.setItem(DISMISS_KEY, '1')
+    render(<PatientPortalSessionTimeoutWarning />)
+    await act(async () => { vi.advanceTimersByTime(12 * 60 * 1000 + 1) })
+    expect(sessionStorage.getItem(DISMISS_KEY)).toBeNull()
   })
 })

@@ -8,6 +8,11 @@ import { ShieldCheck } from 'lucide-react'
 // cookie), so it comes back at the next sign-in.
 const DISMISS_KEY = 'hims.portal.mfaNudgeDismissed'
 
+/** Forget a "Not now" so the next patient to sign in on this tab sees the nudge (sign-out, session timeout). */
+export function clearMfaNudgeDismissal(): void {
+  try { sessionStorage.removeItem(DISMISS_KEY) } catch { /* storage blocked: nothing stored */ }
+}
+
 function readDismissed(): boolean {
   try { return sessionStorage.getItem(DISMISS_KEY) === '1' } catch { return false }
 }

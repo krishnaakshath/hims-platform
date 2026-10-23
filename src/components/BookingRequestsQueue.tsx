@@ -84,6 +84,10 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
                       Portal · {KIND_LABEL[r.requestKind]}{r.appointmentId ? ` of appointment #${r.appointmentId}` : ''}
                     </div>
                   )}
+                  {/* WS7 T7 (spec D20): the patient asked to be seen by video; confirming books a video appointment. */}
+                  {r.requestedVisitMode === 'video' && (
+                    <span className="mt-1 inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Video consultation requested</span>
+                  )}
                 </td>
                 <td className="p-3 text-foreground">{providerName(r.preferredProviderId)}</td>
                 <td className="p-3 text-foreground">{formatDate(r.preferredDateRangeStart)} – {formatDate(r.preferredDateRangeEnd)}</td>
