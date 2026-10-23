@@ -25,7 +25,19 @@ describe('runtime flags', () => {
     expect(mocksEnabled({ ABDM_USE_MOCKS: '1', VERCEL_ENV: 'production', NODE_ENV: 'development' })).toBe(false)
     expect(mocksEnabled({ ABDM_USE_MOCKS: '1', NODE_ENV: 'development' })).toBe(true)
     expect(mocksEnabled({ NODE_ENV: 'development' })).toBe(false)
-    expect(mocksEnabled({ ABDM_USE_MOCKS: 'true', NODE_ENV: 'development' })).toBe(false)
+    expect(mocksEnabled({ ABDM_USE_MOCKS: 'true', NODE_ENV: 'development' })).toBe(true)
+    expect(mocksEnabled({ ABDM_USE_MOCKS: 'yes', NODE_ENV: 'development' })).toBe(false)
+  })
+  it('production needs explicit DEMO_FEATURES and ALLOW_DEMO_MOCKS=true', () => {
+    const prod = { ABDM_USE_MOCKS: 'true', NODE_ENV: 'production' }
+    expect(mocksEnabled(prod)).toBe(false)
+    expect(mocksEnabled({ ...prod, ALLOW_DEMO_MOCKS: 'true' })).toBe(false) // DEMO_FEATURES unset
+    expect(mocksEnabled({ ...prod, DEMO_FEATURES: 'true' })).toBe(false)
+    expect(mocksEnabled({ ...prod, DEMO_FEATURES: 'false', ALLOW_DEMO_MOCKS: 'true' })).toBe(false)
+    expect(mocksEnabled({ ...prod, DEMO_FEATURES: 'true', ALLOW_DEMO_MOCKS: '1' })).toBe(false)
+    expect(mocksEnabled({ ...prod, DEMO_FEATURES: 'true', ALLOW_DEMO_MOCKS: 'true' })).toBe(true)
+    expect(mocksEnabled({ ABDM_USE_MOCKS: '1', VERCEL_ENV: 'production', DEMO_FEATURES: '1', ALLOW_DEMO_MOCKS: 'true' })).toBe(true)
+    expect(mocksEnabled({ DEMO_FEATURES: 'true', ALLOW_DEMO_MOCKS: 'true', NODE_ENV: 'production' })).toBe(false)
   })
   it('production is NODE_ENV or VERCEL_ENV production', () => {
     expect(isProductionRuntime({ NODE_ENV: 'production' })).toBe(true)
