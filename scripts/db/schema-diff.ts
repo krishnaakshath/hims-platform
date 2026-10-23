@@ -3,7 +3,7 @@
 // database built by `db:migrate` from empty equals one that has been running
 // for a while (or a dev database built by drizzle-kit push).
 //
-//   npx dotenv -e .env.local -- tsx scripts/db/schema-diff.ts hims hims_fresh
+//   docker compose run --rm migrate npx tsx scripts/db/schema-diff.ts hims hims_fresh
 //
 // Bare names are database names on the DATABASE_URL server; full
 // postgres:// URLs work too. Prints only catalogue entries, never data.

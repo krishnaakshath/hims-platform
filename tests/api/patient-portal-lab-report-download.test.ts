@@ -17,7 +17,7 @@ import { getLabReportForDownload } from '@/lib/queries/lab-reports'
 import { streamPrivateBlob } from '@/lib/blob-store'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 
-const BLOB_URL = 'https://store.private.blob.vercel-storage.com/lab-reports/5/x.pdf'
+const BLOB_URL = 'local:lab-reports/5/x.pdf'
 const call = (id = '41') => GET(new NextRequest(`http://localhost/api/patient-portal/lab-reports/${id}/download`), { params: Promise.resolve({ id }) })
 const row = (over: Partial<{ patientId: string; supersededAt: Date | null }> = {}) => ({ id: 41, patientId: 'RD-0001', reportNumber: 'LR-2099-000007', blobUrl: BLOB_URL, supersededAt: null, ...over })
 
