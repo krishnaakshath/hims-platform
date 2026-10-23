@@ -161,7 +161,8 @@ function PatientCard({ patient, showMedicalRecordLink, showScreening, quickActio
   )
 }
 
-function HospitalTable({ patients, showMedicalRecordLink }: { patients: PatientRow[]; showMedicalRecordLink: boolean }) {
+function HospitalTable({ patients, showMedicalRecordLink, quickActions }: { patients: PatientRow[]; showMedicalRecordLink: boolean; quickActions?: QuickActions }) {
+  const showActions = showMedicalRecordLink || !!quickActions?.checkIn || !!quickActions?.book
   const today = todayIsoIn()
   const TH = 'p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
   return (
@@ -176,7 +177,7 @@ function HospitalTable({ patients, showMedicalRecordLink }: { patients: PatientR
             <th className={TH}>Last visit</th>
             <th className={TH}>Doctor</th>
             <th className={TH}>Payer</th>
-            {showMedicalRecordLink && <th className={TH}><span className="sr-only">Medical record</span></th>}
+            {showActions && <th className={TH}>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -185,15 +186,33 @@ function HospitalTable({ patients, showMedicalRecordLink }: { patients: PatientR
             const sex = p.gender ? p.gender.charAt(0).toUpperCase() : null
             return (
               <tr key={p.id} className="border-b border-border last:border-b-0 hover:bg-secondary">
-                <td className="p-3 font-mono text-xs text-muted-foreground">{p.uhid ?? p.id}</td>
+                <td className="p-3 font-mono text-xs text-muted-foreground">{p.uhid ?? '—'}</td>
                 <td className="p-3"><Link href={`/patients/${p.id}`} className="font-medium text-primary hover:underline">{p.name}</Link></td>
                 <td className="p-3 text-foreground">{[age, sex].filter((v) => v !== null && v !== '').join(' / ') || '—'}</td>
                 <td className="p-3 text-foreground">{p.phone ? formatPhoneForDisplay(p.phone) : '—'}</td>
                 <td className="p-3 text-muted-foreground">{p.lastVisitAt ? formatIstDate(p.lastVisitAt) : '—'}</td>
                 <td className="p-3 text-foreground">{p.currentProvider ?? 'Unassigned'}</td>
                 <td className="p-3 text-foreground">{p.primaryPayerName ?? 'Self-pay'}</td>
-                {showMedicalRecordLink && (
-                  <td className="p-3 text-right"><Link href={`/patients/${p.id}/medical-record`} className="text-xs font-medium text-primary hover:underline">Medical Record</Link></td>
+                {showActions && (
+                  <td className="p-3">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {quickActions?.checkIn && (
+                        <Link href={`/front-desk/check-in?patient=${encodeURIComponent(p.id)}`} aria-label={`Check in ${p.name}`} className={QUICK_LINK}>
+                          <UserCheck className="h-3.5 w-3.5" aria-hidden="true" />Check in
+                        </Link>
+                      )}
+                      {quickActions?.book && (
+                        <Link href={`/calendar?book=${encodeURIComponent(p.id)}`} aria-label={`Book appointment for ${p.name}`} className={QUICK_LINK}>
+                          <CalendarPlus className="h-3.5 w-3.5" aria-hidden="true" />Book
+                        </Link>
+                      )}
+                      {showMedicalRecordLink && (
+                        <Link href={`/patients/${p.id}/medical-record`} className={QUICK_LINK}>
+                          <FileText className="h-3.5 w-3.5" aria-hidden="true" />Medical Record
+                        </Link>
+                      )}
+                    </div>
+                  </td>
                 )}
               </tr>
             )
@@ -270,7 +289,7 @@ export function PatientsTable({ patients, showMedicalRecordLink = true, showScre
           {activeQuery ? <>No patients match &quot;{activeQuery}&quot;.</> : 'No patients yet.'}
         </p>
       ) : hospitalView ? (
-        <HospitalTable patients={filtered} showMedicalRecordLink={showMedicalRecordLink} />
+        <HospitalTable patients={filtered} showMedicalRecordLink={showMedicalRecordLink} quickActions={quickActions} />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((p) => <PatientCard key={p.id} patient={p} showMedicalRecordLink={showMedicalRecordLink} showScreening={showScreening} quickActions={quickActions} />)}

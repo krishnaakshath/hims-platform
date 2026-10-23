@@ -23,7 +23,7 @@ const DETAIL = {
   aadhaar: { status: 'not_recorded', last4: null, declineReason: null, consentRecordedAt: null, recordedByName: null },
 }
 
-function mockCommon(role: Role) {
+function mockCommon(role: Role, row: Record<string, unknown> = LIST_ROW) {
   vi.resetModules()
   vi.doMock('next/navigation', () => ({
     redirect: (to: string) => { throw new Error(`NEXT_REDIRECT:${to}`) },
@@ -33,7 +33,7 @@ function mockCommon(role: Role) {
   vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: `Test ${role}`, userId: null })) }))
   vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
   vi.doMock('@/db/client', () => ({ getDb: () => { throw new Error('DB_BLOCKED') } }))
-  vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: vi.fn(async () => [LIST_ROW]), getPatientDetail: vi.fn(async () => DETAIL) }))
+  vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: vi.fn(async () => [row]), getPatientDetail: vi.fn(async () => DETAIL) }))
   vi.doMock('@/lib/queries/trials', () => ({ listAllTrials: vi.fn(async () => [{ id: 'trial-a', condition: 'TRIAL-A-CONDITION' }]) }))
   vi.doMock('@/lib/queries/admissions', () => ({ listAdmissionsForPatient: async () => [] }))
   vi.doMock('@/lib/queries/rooms', () => ({ listAvailableRooms: async () => [] }))
@@ -45,8 +45,8 @@ function mockCommon(role: Role) {
   vi.doMock('@/lib/queries/rcm-payers', () => ({ listRcmPayers: async () => [] }))
 }
 
-async function renderList(role: Role) {
-  mockCommon(role)
+async function renderList(role: Role, row: Record<string, unknown> = LIST_ROW) {
+  mockCommon(role, row)
   const { default: Page } = await import('@/app/(dashboard)/patients/page')
   const { render, screen } = await import('@testing-library/react')
   render(await Page({ searchParams: Promise.resolve({}) }))
@@ -85,6 +85,26 @@ describe('ENABLE_TRIALS off', () => {
     expect(screen.queryByRole('button', { name: 'Screening' })).not.toBeInTheDocument()
     expect(screen.getByText('Identity')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Verification' })).toBeInTheDocument()
+  })
+})
+
+describe('ENABLE_TRIALS off: actions and ids', () => {
+  it.each([
+    ['frontdesk', true, true, false],
+    ['admin', true, true, true],
+    ['pi', false, true, true],
+  ] as const)('%s: check in %s, book %s, medical record %s', async (role, checkIn, book, record) => {
+    vi.stubEnv('ENABLE_TRIALS', '')
+    const screen = await renderList(role)
+    expect(!!screen.queryByRole('link', { name: 'Check in Pat Hospital' })).toBe(checkIn)
+    expect(!!screen.queryByRole('link', { name: 'Book appointment for Pat Hospital' })).toBe(book)
+    expect(!!screen.queryByRole('link', { name: 'Medical Record' })).toBe(record)
+  })
+  it('shows a dash, never the chart id, when there is no UHID', async () => {
+    vi.stubEnv('ENABLE_TRIALS', '')
+    const screen = await renderList('admin', { ...LIST_ROW, uhid: null })
+    expect(screen.queryByText('RD-T1')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('cell')[0]).toHaveTextContent('—')
   })
 })
 
