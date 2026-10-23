@@ -26,6 +26,10 @@ vi.mock('@/lib/queries/encounter-workspace', () => ({
 vi.mock('@/lib/queries/medications', () => ({ listMedicationsWithInventory: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/providers', () => ({ listAllProviders: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/lab-tests', () => ({ listLabTests: vi.fn(async () => []) }))
+// WS1 T4
+vi.mock('@/lib/queries/encounter-diagnoses', () => ({ listEncounterDiagnoses: vi.fn(async () => []), listProblemList: vi.fn(async () => []) }))
+vi.mock('@/lib/queries/referrals', () => ({ listEncounterReferrals: vi.fn(async () => []) }))
+vi.mock('@/lib/queries/departments', () => ({ listDepartments: vi.fn(async () => []) }))
 vi.mock('@/lib/provider-identity', () => ({ resolveSessionProvider: vi.fn(async () => ({ id: 3, name: 'Dr. A Rao' })) }))
 
 import EncounterWorkspacePage from '@/app/(dashboard)/encounters/[id]/page'

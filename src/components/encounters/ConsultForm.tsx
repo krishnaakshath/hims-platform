@@ -25,7 +25,8 @@ const SECTIONS: { key: keyof ConsultFields; label: string }[] = [
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 // Each field saves on blur (only that field, only when it changed) through PUT .../consult.
-export function ConsultForm({ encounterId, initial, readOnly = false }: { encounterId: number; initial: Partial<ConsultFields>; readOnly?: boolean }) {
+// `omit` hides sections edited elsewhere in the workspace (WS1 T4: advice is on the Diagnosis tab).
+export function ConsultForm({ encounterId, initial, readOnly = false, omit = [] }: { encounterId: number; initial: Partial<ConsultFields>; readOnly?: boolean; omit?: (keyof ConsultFields)[] }) {
   const [values, setValues] = useState<Record<keyof ConsultFields, string>>(() =>
     Object.fromEntries(SECTIONS.map((s) => [s.key, initial[s.key] ?? ''])) as Record<keyof ConsultFields, string>)
   const lastSaved = useRef<Record<string, string>>(Object.fromEntries(SECTIONS.map((s) => [s.key, (initial[s.key] ?? '').trim()])))
@@ -45,7 +46,7 @@ export function ConsultForm({ encounterId, initial, readOnly = false }: { encoun
 
   return (
     <div className="space-y-3">
-      {SECTIONS.map((s) => (
+      {SECTIONS.filter((s) => !omit.includes(s.key)).map((s) => (
         <label key={s.key} className="block text-xs font-medium text-muted-foreground">
           {s.label}
           <textarea

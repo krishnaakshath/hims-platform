@@ -98,6 +98,9 @@ import { POST as postPatientAllergy } from '@/app/api/patients/[anonId]/allergie
 import { PATCH as patchPatientAllergy } from '@/app/api/patients/[anonId]/allergies/[id]/route' // WS1 T3
 import { PUT as putAllergyStatus } from '@/app/api/patients/[anonId]/allergy-status/route' // WS1 T3
 import { ALLERGY_WRITE_ROLES } from '@/lib/role-policy' // WS1 T3
+import { POST as postEncounterDiagnosis } from '@/app/api/encounters/[id]/diagnoses/route' // WS1 T4
+import { PATCH as patchEncounterDiagnosis, DELETE as deleteEncounterDiagnosis } from '@/app/api/encounters/[id]/diagnoses/[diagnosisId]/route' // WS1 T4
+import { POST as postEncounterReferral } from '@/app/api/encounters/[id]/referrals/route' // WS1 T4
 // end SP8
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -1066,6 +1069,10 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/patients/[anonId]/allergies', call: () => settle(() => postPatientAllergy(send('POST', `/api/patients/${BOGUS_PATIENT}/allergies`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...ALLERGY_WRITE_ROLES] }, // WS1 T3
   { name: 'PATCH /api/patients/[anonId]/allergies/[id]', call: () => settle(() => patchPatientAllergy(send('PATCH', `/api/patients/${BOGUS_PATIENT}/allergies/${BOGUS_ID}`), ctx({ anonId: BOGUS_PATIENT, id: BOGUS_ID }))), allowed: [...ALLERGY_WRITE_ROLES] }, // WS1 T3
   { name: 'PUT /api/patients/[anonId]/allergy-status', call: () => settle(() => putAllergyStatus(send('PUT', `/api/patients/${BOGUS_PATIENT}/allergy-status`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...ALLERGY_WRITE_ROLES] }, // WS1 T3
+  { name: 'POST /api/encounters/[id]/diagnoses', call: () => settle(() => postEncounterDiagnosis(send('POST', `/api/encounters/${BOGUS_ID}/diagnoses`), ctx({ id: BOGUS_ID }))), allowed: [...CLINICAL_WRITE_ROLES] }, // WS1 T4
+  { name: 'PATCH /api/encounters/[id]/diagnoses/[diagnosisId]', call: () => settle(() => patchEncounterDiagnosis(send('PATCH', `/api/encounters/${BOGUS_ID}/diagnoses/${BOGUS_ID}`), ctx({ id: BOGUS_ID, diagnosisId: BOGUS_ID }))), allowed: [...CLINICAL_WRITE_ROLES] }, // WS1 T4
+  { name: 'DELETE /api/encounters/[id]/diagnoses/[diagnosisId]', call: () => settle(() => deleteEncounterDiagnosis(del(`/api/encounters/${BOGUS_ID}/diagnoses/${BOGUS_ID}`), ctx({ id: BOGUS_ID, diagnosisId: BOGUS_ID }))), allowed: [...CLINICAL_WRITE_ROLES] }, // WS1 T4
+  { name: 'POST /api/encounters/[id]/referrals', call: () => settle(() => postEncounterReferral(send('POST', `/api/encounters/${BOGUS_ID}/referrals`), ctx({ id: BOGUS_ID }))), allowed: [...CLINICAL_WRITE_ROLES] }, // WS1 T4
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1229,6 +1236,9 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/patients/[anonId]/allergies', call: () => postPatientAllergy(send('POST', `/api/patients/${BOGUS_PATIENT}/allergies`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: ALLERGY_WRITE_ROLES }, // WS1 T3
   { name: 'PATCH /api/patients/[anonId]/allergies/[id]', call: () => patchPatientAllergy(send('PATCH', `/api/patients/${BOGUS_PATIENT}/allergies/${BOGUS_ID}`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT, id: BOGUS_ID })), allowed: ALLERGY_WRITE_ROLES }, // WS1 T3
   { name: 'PUT /api/patients/[anonId]/allergy-status', call: () => putAllergyStatus(send('PUT', `/api/patients/${BOGUS_PATIENT}/allergy-status`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: ALLERGY_WRITE_ROLES }, // WS1 T3
+  { name: 'POST /api/encounters/[id]/diagnoses', call: () => postEncounterDiagnosis(send('POST', `/api/encounters/${BOGUS_ID}/diagnoses`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CLINICAL_WRITE_ROLES }, // WS1 T4
+  { name: 'PATCH /api/encounters/[id]/diagnoses/[diagnosisId]', call: () => patchEncounterDiagnosis(send('PATCH', `/api/encounters/${BOGUS_ID}/diagnoses/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID, diagnosisId: BOGUS_ID })), allowed: CLINICAL_WRITE_ROLES }, // WS1 T4
+  { name: 'POST /api/encounters/[id]/referrals', call: () => postEncounterReferral(send('POST', `/api/encounters/${BOGUS_ID}/referrals`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CLINICAL_WRITE_ROLES }, // WS1 T4
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

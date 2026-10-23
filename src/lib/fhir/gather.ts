@@ -53,7 +53,7 @@ export async function gatherPatientFhirData(anonId: string): Promise<PatientFhir
   if (!patient) return null
 
   const [allergyRows, diagnosisJoined, medicationEpisodeRows, dispenses, labOrderRows, procedureJoined, encounterJoined] = await Promise.all([
-    db.select().from(allergies).where(eq(allergies.patientId, anonId)),
+    db.select().from(allergies).where(and(eq(allergies.patientId, anonId), isNull(allergies.inactivatedAt))), // WS1 T4: active only
     // SP6: voided rows hidden; coded rows joined to the code system they were coded from.
     db.select({ ...getTableColumns(diagnoses), ...bindingColumns }).from(diagnoses)
       .leftJoin(codes, eq(codes.id, diagnoses.codeId))

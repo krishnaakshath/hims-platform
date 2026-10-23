@@ -32,6 +32,10 @@ import { addDaysIso } from '@/lib/follow-ups/rules'
 import { encountersForAppointments, listMyRecentPatients, providerDepartmentName, uhidsForPatients } from '@/lib/queries/encounter-workspace'
 import type { ScheduleRow } from '@/components/DoctorScheduleTimeline'
 // end WS1 T3
+// WS1 T4: open referrals addressed to this doctor or their department.
+import { Share2 } from 'lucide-react'
+import { listOpenReferralsToProvider, providerDepartmentId } from '@/lib/queries/referrals'
+// end WS1 T4
 
 // Wave E: a compact titled list card for the doctor's own work queues.
 function DoctorList({ title, icon: Icon, count, empty, href, linkLabel, children }: {
@@ -82,6 +86,8 @@ export default async function DoctorPortalPage() {
   const pendingAssignments = providerMatch ? await listPendingAssignmentsForProvider(providerMatch.id) : []
   // SP6: coding queries addressed to this doctor's own provider row (none without a match).
   const codingQueries = providerMatch ? await listOpenCodingQueriesForProvider(providerMatch.id) : []
+  // WS1 T4
+  const referredToMe = providerMatch ? await listOpenReferralsToProvider(providerMatch.id, await providerDepartmentId(providerMatch.id)) : []
 
   const now = new Date()
   // Today's IST business day, whatever zone the server runs in.
@@ -207,6 +213,21 @@ export default async function DoctorPortalPage() {
 
           {/* SP6: coding queries for this doctor; hidden when none are open */}
           <DoctorCodingQueries queries={codingQueries} />
+
+          {/* WS1 T4: referrals to me (or my department), most urgent first. */}
+          {providerMatch && (
+            <DoctorList title="Referred to me" icon={Share2} count={referredToMe.length} empty="No open referrals.">
+              {referredToMe.map((r) => (
+                <li key={r.id} className="flex items-center justify-between gap-2 px-4 py-3">
+                  <PatientCell patientId={r.patientId} name={r.patientName} uhid={r.uhid} href={`/patients/${r.patientId}`} />
+                  <span className="shrink-0 text-right text-xs text-muted-foreground">
+                    <span className={`block font-semibold capitalize ${r.urgency === 'routine' ? 'text-foreground' : 'text-destructive'}`}>{r.urgency}</span>
+                    from {r.fromProviderName} · {formatIstDate(r.createdAt)}
+                  </span>
+                </li>
+              ))}
+            </DoctorList>
+          )}
 
           {/* SP5 + Wave E P1-02: results on my own orders waiting for verification, critical first. */}
           <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">

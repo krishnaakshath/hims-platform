@@ -19,6 +19,7 @@ vi.mock('@/lib/queries/lab-orders', () => ({ listWorklist: vi.fn(async () => [])
 vi.mock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(async () => []) }))
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => null) }))
 // SP6: the "Coding queries for you" card; empty by default so no test reaches the DB.
+vi.mock('@/lib/queries/referrals', () => ({ listOpenReferralsToProvider: vi.fn(async () => []), providerDepartmentId: vi.fn(async () => null) })) // WS1 T4
 vi.mock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider: vi.fn(async () => []) }))
 // Wave E P1-02/P1-03: the doctor's own workload; empty by default (no DB).
 const EMPTY_WORKLOAD = { encountersToday: [], inpatients: [], resultsToVerify: [], labsAwaitingResult: 0, followUps: [], unsignedNotes: 0, draftNotes: [] }

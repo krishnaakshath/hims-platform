@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   refresh: vi.fn(),
   listMyRecentPatients: vi.fn(),
   listPatientsWithStatus: vi.fn(),
+  listOpenReferralsToProvider: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -22,6 +23,7 @@ vi.mock('@/lib/queries/patients', () => ({ listPatientsWithStatus: h.listPatient
 vi.mock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 3, name: 'Dr. A Rao' }]) }))
 vi.mock('@/lib/queries/doctor-assignments', () => ({ listPendingAssignmentsForProvider: vi.fn(async () => []) }))
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 3, name: 'Dr. A Rao' })) }))
+vi.mock('@/lib/queries/referrals', () => ({ listOpenReferralsToProvider: h.listOpenReferralsToProvider, providerDepartmentId: vi.fn(async () => 12) })) // WS1 T4
 vi.mock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/appointments', () => ({
   listAppointmentsInRange: vi.fn(async () => [
@@ -52,6 +54,8 @@ describe('doctor home (hospital-first)', () => {
     h.listMyRecentPatients.mockResolvedValue([
       { id: 'RD-0900', name: 'Gopal Shah', dob: '1970-05-01', uhid: 'UH-900', phone: null, gender: 'male', currentProvider: 'Dr. A Rao', referralType: null, lastCommunication: null, lastVisitAt: '2026-10-01T05:00:00.000Z', primaryPayerName: null },
     ])
+    h.listOpenReferralsToProvider.mockReset()
+    h.listOpenReferralsToProvider.mockResolvedValue([])
     h.listPatientsWithStatus.mockReset()
     h.listPatientsWithStatus.mockResolvedValue([
       { id: 'RD-0001', overallStatus: 'green', name: 'Trial Person', dob: '1990-01-01', currentProvider: 'Dr. A Rao', referralType: null, lastCommunication: null, criteriaSummary: { inclusionMet: 1, inclusionTotal: 2, exclusionMet: 0, exclusionTotal: 0 } },
@@ -111,5 +115,19 @@ describe('doctor home (hospital-first)', () => {
       expect(h.listMyRecentPatients).not.toHaveBeenCalled()
       expect(screen.getByRole('button', { name: /start encounter/i })).toBeInTheDocument()
     })
+  })
+  // WS1 T4
+  it('"Referred to me" lists open referrals with the UHID (never the chart id), linked to the chart', async () => {
+    h.listOpenReferralsToProvider.mockResolvedValue([
+      { id: 9, patientId: 'RD-0777', patientName: 'Kiran Das', uhid: 'UH-777', fromProviderName: 'Dr. B Shah', urgency: 'urgent', createdAt: new Date('2026-10-22T05:00:00Z') },
+    ])
+    render(await DoctorPortalPage())
+    expect(screen.getByRole('heading', { name: 'Referred to me' })).toBeInTheDocument()
+    const link = screen.getByRole('link', { name: 'Kiran Das' })
+    expect(link).toHaveAttribute('href', '/patients/RD-0777')
+    expect(screen.getByText('UH-777')).toBeInTheDocument()
+    expect(screen.getByText(/from Dr\. B Shah/)).toBeInTheDocument()
+    expect(screen.queryByText('RD-0777')).toBeNull()
+    expect(h.listOpenReferralsToProvider).toHaveBeenCalledWith(3, 12)
   })
 })

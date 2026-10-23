@@ -195,6 +195,7 @@ export const diagnoses = pgTable('diagnoses', {
   createdByName: text('created_by_name'),
   createdAt: timestamp('created_at'),
   // end SP6
+  onProblemList: boolean('on_problem_list').default(false).notNull(), // WS1 T4
 }, (t) => [
   // SP6
   index('diagnoses_encounter_id_idx').on(t.encounterId),
@@ -2860,3 +2861,34 @@ export const encounterConsults = pgTable('encounter_consults', {
 export type EncounterVitalsRow = typeof encounterVitals.$inferSelect
 export type EncounterConsultRow = typeof encounterConsults.$inferSelect
 // end WS1 T2
+
+// WS1 T4: referrals written from the consultation workspace. Internal referrals name a department
+// and/or a doctor; external ones name a facility. The reason is clinical text (never audited).
+export const referrals = pgTable('referrals', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  kind: text('kind', { enum: ['internal', 'external'] }).notNull(),
+  toDepartmentId: integer('to_department_id').references(() => departments.id),
+  toProviderId: integer('to_provider_id').references(() => providers.id),
+  externalFacility: text('external_facility'),
+  externalDoctor: text('external_doctor'),
+  reason: text('reason').notNull(),
+  urgency: text('urgency', { enum: ['routine', 'urgent', 'emergency'] }).notNull(),
+  status: text('status', { enum: ['open', 'seen', 'closed'] }).default('open').notNull(),
+  createdByName: text('created_by_name').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('referrals_encounter_idx').on(t.encounterId),
+  index('referrals_to_provider_open_idx').on(t.toProviderId).where(sql`${t.status} = 'open'`),
+  index('referrals_to_department_open_idx').on(t.toDepartmentId).where(sql`${t.status} = 'open'`),
+  check('referrals_kind_valid', sql`${t.kind} IN ('internal', 'external')`),
+  check('referrals_urgency_valid', sql`${t.urgency} IN ('routine', 'urgent', 'emergency')`),
+  check('referrals_status_valid', sql`${t.status} IN ('open', 'seen', 'closed')`),
+  check('referrals_target', sql`(${t.kind} = 'internal' AND (${t.toDepartmentId} IS NOT NULL OR ${t.toProviderId} IS NOT NULL)) OR (${t.kind} = 'external' AND ${t.externalFacility} IS NOT NULL)`),
+  check('referrals_text_len', sql`char_length(${t.reason}) <= 1000 AND coalesce(char_length(${t.externalFacility}), 0) <= 200 AND coalesce(char_length(${t.externalDoctor}), 0) <= 120`),
+])
+
+export type ReferralRow = typeof referrals.$inferSelect
+// end WS1 T4

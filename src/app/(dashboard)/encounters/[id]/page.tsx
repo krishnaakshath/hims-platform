@@ -15,6 +15,15 @@ import { WorkspaceShell, WorkspaceOrdersLauncher, WorkspaceRxLauncher } from '@/
 import { VitalsForm } from '@/components/encounters/VitalsForm'
 import { ConsultForm } from '@/components/encounters/ConsultForm'
 import { NoteForm } from '@/components/NoteForm'
+// WS1 T4: diagnoses, problem list, referral, advice and follow-up on the Diagnosis tab.
+import { listEncounterDiagnoses, listProblemList } from '@/lib/queries/encounter-diagnoses'
+import { listEncounterReferrals } from '@/lib/queries/referrals'
+import { listDepartments } from '@/lib/queries/departments'
+import { DiagnosisPicker, EncounterDiagnosisList } from '@/components/encounters/DiagnosisPicker'
+import { ProblemList } from '@/components/encounters/ProblemList'
+import { ReferralForm } from '@/components/encounters/ReferralForm'
+import { FollowUpAdvice } from '@/components/encounters/FollowUpAdvice'
+// end WS1 T4
 
 const HEADING = 'mb-3 text-sm font-semibold text-foreground'
 const MUTED = 'text-sm text-muted-foreground'
@@ -45,6 +54,11 @@ export default async function EncounterWorkspacePage({ params }: { params: Promi
   const [catalog, providers, labTests, sessionProvider, diagnosisCodes] = canWrite
     ? await Promise.all([listMedicationsWithInventory(), listAllProviders(), listLabTests(), resolveSessionProvider(session), patientDiagnosisCodes(patient.id)])
     : [[], [], [], null, []] as const
+  // WS1 T4
+  const [visitDiagnoses, problemList, visitReferrals, departmentOptions] = await Promise.all([
+    listEncounterDiagnoses(encounter.id), listProblemList(patient.id), listEncounterReferrals(encounter.id),
+    canWrite ? listDepartments({ activeOnly: true }) : Promise.resolve([]),
+  ])
 
   const vitalsPanel = (
     <div className="space-y-5">
@@ -74,7 +88,7 @@ export default async function EncounterWorkspacePage({ params }: { params: Promi
 
   const historyPanel = (
     <div className="space-y-6">
-      <ConsultForm encounterId={encounter.id} initial={view.consult ?? {}} readOnly={!canWrite} />
+      <ConsultForm encounterId={encounter.id} initial={view.consult ?? {}} readOnly={!canWrite} omit={['advice']} />
       <div>
         <h2 className={HEADING}>Previous visits</h2>
         {view.history.length === 0 ? <p className={MUTED}>No earlier completed visits.</p> : (
@@ -92,6 +106,49 @@ export default async function EncounterWorkspacePage({ params }: { params: Promi
     </div>
   )
 
+  // WS1 T4: diagnoses are writable until SP6 codes the visit; referral, advice and follow-up while it is open.
+  const diagnosisPanel = (
+    <div className="space-y-6">
+      <section>
+        <h2 className={HEADING}>Diagnoses this visit</h2>
+        <EncounterDiagnosisList
+          encounterId={encounter.id}
+          canWrite={canWrite}
+          items={visitDiagnoses.map((d) => ({
+            id: d.id, label: d.codeDisplay || d.description, code: d.code === '' ? null : d.code,
+            diagnosisType: d.diagnosisType, codingStatus: d.codingStatus, onProblemList: d.onProblemList,
+          }))}
+        />
+        {canWrite && <div className="mt-3"><DiagnosisPicker encounterId={encounter.id} onDate={encounter.encounterDate} /></div>}
+      </section>
+      <section>
+        <h2 className={HEADING}>Problem list</h2>
+        <ProblemList items={problemList} />
+      </section>
+      <section>
+        <h2 className={HEADING}>Advice and follow-up</h2>
+        <FollowUpAdvice encounterId={encounter.id} patientId={patient.id} providerId={encounter.providerId} initialAdvice={view.consult?.advice ?? null} readOnly={!canWrite} />
+      </section>
+      <section>
+        <h2 className={HEADING}>Referral</h2>
+        {visitReferrals.length > 0 && (
+          <ul className="mb-3 divide-y divide-border text-sm" aria-label="Referrals this visit">
+            {visitReferrals.map((r) => (
+              <li key={r.id} className="py-1.5">
+                <span className="text-foreground">{r.kind === 'external' ? 'External: ' : ''}{r.target}</span>
+                <span className="ml-2 text-xs capitalize text-muted-foreground">{r.urgency} · {r.status}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {canWrite
+          ? <ReferralForm encounterId={encounter.id} departments={departmentOptions.map((d) => ({ id: d.id, name: d.name }))}
+              doctors={providers.filter((p) => p.isActive).map((p) => ({ id: p.id, name: p.name, specialty: p.specialty }))} />
+          : visitReferrals.length === 0 && <p className={MUTED}>No referral from this visit.</p>}
+      </section>
+    </div>
+  )
+
   const chartLink = <Link href={`/patients/${patient.id}/medical-record`} className="font-medium text-primary hover:underline">medical record</Link>
 
   return (
@@ -101,7 +158,7 @@ export default async function EncounterWorkspacePage({ params }: { params: Promi
         panels={{
           vitals: vitalsPanel,
           history: historyPanel,
-          diagnosis: <p className={MUTED}>Diagnoses for this patient are on the {chartLink}.</p>,
+          diagnosis: diagnosisPanel,
           rx: canWrite ? (
             <WorkspaceRxLauncher
               patientId={patient.id}
