@@ -1,7 +1,6 @@
 // SP5 notification channel. Channel-agnostic: callers hand over the rendered text and a
 // destination; the notifier reports which channel it used and whether it delivered.
 import type { NotificationTemplateKey } from '@/lib/notify/templates'
-import { getChannelRegistry, type ChannelRegistry } from '@/lib/notify/registry' // Foundations T8
 
 export interface OutboundNotification {
   patientId: string
@@ -43,22 +42,9 @@ export function createLogOnlyNotifier(log: (line: string) => void = console.info
   }
 }
 
-// Foundations T8: the notifier is backed by the channel registry. For the existing SP5 callers
-// (one phone destination) it uses SMS when the SMS adapter is configured (Twilio + DLT), else
-// it stays log-only and the delivery log says so (status 'logged', never 'sent'). New callers
-// use sendNotification (src/lib/notify/send.ts), which routes per template and logs each attempt.
-export function createRegistryNotifier(registry: ChannelRegistry, log: (line: string) => void = console.info): Notifier {
-  const fallback = createLogOnlyNotifier(log)
-  return {
-    async send(msg) {
-      const sms = registry.sms
-      if (!sms.configured() || msg.destination.includes('@')) return fallback.send(msg)
-      const r = await sms.send({ patientId: msg.patientId, templateKey: msg.templateKey, text: msg.text, params: [], subject: '', to: msg.destination })
-      return r.ok ? { channel: 'sms', delivered: true } : { channel: 'sms', delivered: false, errorCode: r.errorClass ?? 'not_delivered' }
-    },
-  }
-}
-
+// Legacy SP5 notifier: always log-only. It cannot apply per-channel preferences or the
+// per-template config, so it must never reach a real channel (spec §4.4). Real sending goes only
+// through sendNotification (src/lib/notify/send.ts); Task 9 moves the SP5 callers onto it.
 export function getNotifier(): Notifier {
-  return createRegistryNotifier(getChannelRegistry())
+  return createLogOnlyNotifier()
 }
