@@ -4,11 +4,12 @@ import { NextRequest } from 'next/server'
 // Foundations T11: the UPI QR request and confirm routes.
 let role = 'frontdesk'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role, name: 'Probe User', userId: 7 })) }))
-vi.mock('@/lib/payments/manual-upi', () => ({ createUpiRequest: vi.fn(), confirmUpiRequest: vi.fn() }))
+vi.mock('@/lib/payments/manual-upi', () => ({ createUpiRequest: vi.fn(), confirmUpiRequest: vi.fn(), cancelUpiRequest: vi.fn() }))
 
 import { POST as createRoute } from '@/app/api/billing/payments/upi-request/route'
 import { POST as confirmRoute } from '@/app/api/billing/payments/upi-request/[id]/confirm/route'
-import { confirmUpiRequest, createUpiRequest } from '@/lib/payments/manual-upi'
+import { POST as cancelRoute } from '@/app/api/billing/payments/upi-request/[id]/cancel/route'
+import { cancelUpiRequest, confirmUpiRequest, createUpiRequest } from '@/lib/payments/manual-upi'
 
 const req = (path: string, body: unknown) =>
   new NextRequest(`http://localhost${path}`, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) })
@@ -87,5 +88,34 @@ describe('POST /api/billing/payments/upi-request/[id]/confirm', () => {
     role = 'pi'
     const res = await confirmRoute(req('/x', '{not json'), ctx('9'))
     expect([res.status, await res.json()]).toEqual([403, { error: 'Forbidden' }])
+  })
+})
+
+describe('Foundations T11 fixes: expiry and cancel', () => {
+  it('an expired, cancelled or already-paid request is a 409 request_expired', async () => {
+    vi.mocked(confirmUpiRequest).mockResolvedValueOnce({ ok: false, error: 'request_expired' })
+    const res = await confirmRoute(req('/x', { utr: '412345678901' }), ctx('9'))
+    expect([res.status, await res.json()]).toEqual([409, { error: 'This UPI request has expired or was cancelled. Show a new QR.' }])
+  })
+
+  it('POST /api/billing/payments/upi-request/[id]/cancel cancels a pending request', async () => {
+    vi.mocked(cancelUpiRequest).mockReset().mockResolvedValue({ ok: true })
+    const ok = await cancelRoute(req('/x', {}), ctx('9'))
+    expect([ok.status, await ok.json()]).toEqual([200, { cancelled: true }])
+    expect(cancelUpiRequest).toHaveBeenCalledWith(9, expect.objectContaining({ role: 'frontdesk' }))
+    vi.mocked(cancelUpiRequest).mockResolvedValueOnce({ ok: false, error: 'not_pending' })
+    expect((await cancelRoute(req('/x', {}), ctx('9'))).status).toBe(409)
+    vi.mocked(cancelUpiRequest).mockResolvedValueOnce({ ok: false, error: 'request_not_found' })
+    expect((await cancelRoute(req('/x', {}), ctx('9'))).status).toBe(404)
+  })
+
+  it('cancel: strict empty body, bad id 404, denied role 403 before parsing', async () => {
+    vi.mocked(cancelUpiRequest).mockReset()
+    expect((await cancelRoute(req('/x', { reason: 'x' }), ctx('9'))).status).toBe(400)
+    expect((await cancelRoute(req('/x', {}), ctx('abc'))).status).toBe(404)
+    role = 'pi'
+    const denied = await cancelRoute(req('/x', '{not json'), ctx('9'))
+    expect([denied.status, await denied.json()]).toEqual([403, { error: 'Forbidden' }])
+    expect(cancelUpiRequest).not.toHaveBeenCalled()
   })
 })

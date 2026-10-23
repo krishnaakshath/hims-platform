@@ -94,6 +94,22 @@ describe('CashDeskPanel payment modes', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('UPI: a shown QR can be cancelled, which withdraws the request and offers a new QR', async () => {
+    fetchMock
+      .mockImplementationOnce(() => json(201, { requestId: 9, uri: 'upi://pay?pa=h@icici', qrDataUrl: 'data:image/png;base64,AAA', vpa: 'h@icici', payeeName: 'Sunrise', amountPaise: 10000 }))
+      .mockImplementationOnce(() => json(200, { cancelled: true }))
+    panel()
+    fireEvent.change(screen.getByLabelText('Amount (₹)'), { target: { value: '100' } })
+    fireEvent.change(screen.getByLabelText('Mode'), { target: { value: 'upi' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Show UPI QR' }))
+    await screen.findByRole('img', { name: /UPI QR code/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel QR' }))
+    expect(await screen.findByRole('button', { name: 'Show UPI QR' })).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: /UPI QR code/ })).toBeNull()
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/billing/payments/upi-request/9/cancel')
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({})
+  })
+
   it('UPI not set up: the 503 message is shown', async () => {
     fetchMock.mockImplementationOnce(() => json(503, { error: 'UPI is not set up. Ask your administrator.' }))
     panel()

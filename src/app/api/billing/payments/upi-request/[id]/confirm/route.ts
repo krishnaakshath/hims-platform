@@ -31,6 +31,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       switch (result.error) {
         case 'request_not_found': return billingError(404, 'Payment request not found')
         case 'already_confirmed': return billingError(409, 'This UPI payment has already been recorded')
+        case 'request_expired': return billingError(409, 'This UPI request has expired or was cancelled. Show a new QR.')
         case 'duplicate_utr': return billingError(409, 'This UTR has already been recorded')
         case 'admission_mismatch': return billingError(400, "That admission is not this patient's")
         case 'invoice_not_payable': return billingError(409, 'Payments can only be taken against a finalised invoice of this patient')

@@ -86,6 +86,16 @@ export function CashDeskPanel({ patientId, admissionId, finalisedInvoices, canRe
     setUpi(res.data)
   }
 
+  async function cancelQr() {
+    if (!upi || busy) return
+    setBusy(true); setError(null)
+    const res = await sendJson(`/api/billing/payments/upi-request/${upi.requestId}/cancel`, 'POST', {})
+    setBusy(false)
+    // A request that is already confirmed or expired cannot be cancelled; say so and keep the panel.
+    if (!res.ok && res.status !== 409) { setError(res.error); return }
+    setUpi(null); setUtr('')
+  }
+
   async function submit() {
     if (blocked || amountPaise === null) return
     setBusy(true); setError(null); setDone(null)
@@ -203,7 +213,12 @@ export function CashDeskPanel({ patientId, admissionId, finalisedInvoices, canRe
         <div className="flex justify-end">
           {qrFlow && !upi
             ? <Button type="button" disabled={busy || amountPaise === null || amountPaise <= 0} onClick={() => void showQr()}>Show UPI QR</Button>
-            : <Button type="submit" disabled={blocked}>{qrFlow ? 'Record payment' : BUTTON_LABEL[tab]}</Button>}
+            : (
+              <span className="flex gap-2">
+                {qrFlow && upi && <Button type="button" variant="outline" disabled={busy} onClick={() => void cancelQr()}>Cancel QR</Button>}
+                <Button type="submit" disabled={blocked}>{qrFlow ? 'Record payment' : BUTTON_LABEL[tab]}</Button>
+              </span>
+            )}
         </div>
       </form>
     </div>

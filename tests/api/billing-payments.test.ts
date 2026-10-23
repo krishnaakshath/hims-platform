@@ -83,6 +83,12 @@ describe('payments and refunds routes', () => {
     expect([r.status, await r.json()]).toEqual([409, { error: 'The refund number series for this financial year is full' }])
   })
 
+  it('Foundations T11: a UPI reference already recorded (by hand or by QR) is a 409', async () => {
+    vi.mocked(recordPayment).mockResolvedValueOnce({ ok: false, error: 'duplicate_utr' })
+    const dup = await postPayment(req('/api/billing/payments', PAYMENT))
+    expect([dup.status, await dup.json()]).toEqual([409, { error: 'This UTR has already been recorded' }])
+  })
+
   it('bad JSON is a 400; a deadlock is a 409', async () => {
     const bad = await postPayment(req('/api/billing/payments', '{not json'))
     expect([bad.status, await bad.json()]).toEqual([400, { error: 'Invalid JSON' }])

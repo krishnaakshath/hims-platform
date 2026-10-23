@@ -5,7 +5,7 @@ import { and, asc, count, desc, eq, inArray, isNull, like, or, sql, type SQL } f
 import { getDb } from '@/db/client'
 import {
   chargeLines, creditNotes, invoiceLines, invoices, patients, payers,
-  patientPayments, // Foundations T11
+  patientPayments, refunds, // Foundations T11
   type ChargeLineRow, type CreditNoteRow, type InvoiceLineRow, type InvoiceRow,
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
@@ -290,13 +290,24 @@ export interface InvoiceListRow {
   outstandingPaise: number | null // finalised: total less paid (floor 0); cancelled: 0; draft/discarded: null
 }
 
-// Foundations T11: an invoice's paid amount is the sum of the receipts recorded against it at the
-// cash desk (any mode); what is still owed on a finalised invoice is its total less that.
-const invoicePaidSql = sql<string | null>`(select sum(${patientPayments.amountPaise}) from ${patientPayments} where ${patientPayments.invoiceId} = ${invoices.id})`
+// Foundations T11: an invoice's paid amount is the receipts recorded against it at the cash desk
+// (any mode) less the refunds issued against those receipts, floored at 0; what is still owed on a
+// finalised invoice is its total less that.
+const paidForInvoice = (invoiceId: SQL | number) => sql<string | null>`greatest(0,
+  coalesce((select sum(${patientPayments.amountPaise}) from ${patientPayments} where ${patientPayments.invoiceId} = ${invoiceId}), 0)
+  - coalesce((select sum(${refunds.amountPaise}) from ${refunds} inner join ${patientPayments} on ${patientPayments.id} = ${refunds.againstPaymentId}
+      where ${patientPayments.invoiceId} = ${invoiceId}), 0))`
+const invoicePaidSql = paidForInvoice(sql`${invoices.id}`)
+
+/** Receipts against the invoice less refunds against those receipts, floored at 0. Usable inside a transaction. */
+export async function invoicePaidPaise(executor: Pick<ReturnType<typeof getDb>, 'execute'>, invoiceId: number): Promise<number> {
+  const result = await executor.execute(sql`select ${paidForInvoice(invoiceId)}::text as paid`)
+  const rows = (Array.isArray(result) ? result : (result as unknown as { rows: unknown[] }).rows) as { paid: string | null }[]
+  return paiseFromDb(rows[0]?.paid ?? null)
+}
 
 export async function getInvoicePaidPaise(invoiceId: number): Promise<number> {
-  const [row] = await getDb().select({ paid: sql<string | null>`sum(${patientPayments.amountPaise})` }).from(patientPayments).where(eq(patientPayments.invoiceId, invoiceId))
-  return paiseFromDb(row?.paid ?? null)
+  return invoicePaidPaise(getDb(), invoiceId)
 }
 // end Foundations T11
 

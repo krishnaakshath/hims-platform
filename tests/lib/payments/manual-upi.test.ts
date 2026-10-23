@@ -49,6 +49,7 @@ const FY = '2098-99'
 describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => {
   const RUN = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`
   const PID = `TEST-T11-${RUN}`
+  const PID2 = `TEST-T11-${RUN}-B` // a second patient: the cross-patient UTR race is not serialised by the billing lock
   const desk: Session = { role: 'frontdesk', name: `TEST-T11-${RUN}-desk`, userId: null }
   const utr = (n: number) => `${String(Date.now()).slice(-8)}${String(n).padStart(4, '0')}`
 
@@ -59,11 +60,13 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
   })
 
   async function purge() {
-    const { getDb, paymentRequests, patientPayments, documentCounters, eq, sql } = await m()
+    const { getDb, paymentRequests, patientPayments, refunds, invoices, documentCounters, eq, inArray, sql } = await m()
     await getDb().transaction(async (tx) => {
       await tx.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
-      await tx.delete(paymentRequests).where(eq(paymentRequests.patientId, PID))
-      await tx.delete(patientPayments).where(eq(patientPayments.patientId, PID))
+      await tx.delete(paymentRequests).where(inArray(paymentRequests.patientId, [PID, PID2]))
+      await tx.delete(refunds).where(inArray(refunds.patientId, [PID, PID2]))
+      await tx.delete(patientPayments).where(inArray(patientPayments.patientId, [PID, PID2]))
+      await tx.delete(invoices).where(inArray(invoices.patientId, [PID, PID2]))
       await tx.delete(documentCounters).where(eq(documentCounters.financialYear, FY))
     })
   }
@@ -72,7 +75,10 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
     vi.stubEnv('HOSPITAL_UPI_VPA', 'sunrise.hospital@icici')
     vi.stubEnv('HOSPITAL_UPI_PAYEE', 'Sunrise Hospital')
     const { getDb, patients } = await m()
-    await getDb().insert(patients).values({ id: PID, name: `Test T11 Upi ${RUN}`, dob: '1990-01-01' })
+    await getDb().insert(patients).values([
+      { id: PID, name: `Test T11 Upi ${RUN}`, dob: '1990-01-01' },
+      { id: PID2, name: `Test T11 Upi B ${RUN}`, dob: '1990-01-01' },
+    ])
   })
 
   afterEach(async () => {
@@ -81,10 +87,10 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
   })
 
   afterAll(async () => {
-    const { getDb, patients, auditLog, eq } = await m()
+    const { getDb, patients, auditLog, inArray } = await m()
     await purge()
-    await getDb().delete(auditLog).where(eq(auditLog.patientId, PID))
-    await getDb().delete(patients).where(eq(patients.id, PID))
+    await getDb().delete(auditLog).where(inArray(auditLog.patientId, [PID, PID2]))
+    await getDb().delete(patients).where(inArray(patients.id, [PID, PID2]))
     vi.unstubAllEnvs()
   })
 
@@ -96,13 +102,13 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
   it('without HOSPITAL_UPI_VPA a request is refused as not configured and nothing is stored', async () => {
     const { upi, getDb, paymentRequests, eq } = await m()
     vi.stubEnv('HOSPITAL_UPI_VPA', '')
-    expect(await upi.createUpiRequest({ patientId: PID, amountPaise: 50000 }, desk)).toEqual({ ok: false, error: 'not_configured' })
+    expect(await upi.createUpiRequest({ patientId: PID, amountPaise: 50000 }, desk, NOW)).toEqual({ ok: false, error: 'not_configured' })
     expect(await getDb().select().from(paymentRequests).where(eq(paymentRequests.patientId, PID))).toEqual([])
   })
 
   it('creates a pending request with a server-rendered QR of the UPI URI', async () => {
     const { upi } = await m()
-    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 123456, note: 'OPD bill' }, desk)
+    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 123456, note: 'OPD bill' }, desk, NOW)
     if (!r.ok) throw new Error(r.error)
     expect(r.uri).toBe('upi://pay?pa=sunrise.hospital@icici&pn=Sunrise%20Hospital&am=1234.56&cu=INR&tn=OPD%20bill')
     expect(r.qrDataUrl).toMatch(/^data:image\/png;base64,/)
@@ -112,7 +118,7 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
 
   it('confirming with a UTR posts exactly one receipt (RCT numbering, mode upi, UTR as reference)', async () => {
     const { upi, pl, getDb } = await m()
-    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 50000 }, desk)
+    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 50000 }, desk, NOW)
     if (!r.ok) throw new Error(r.error)
     const ref = utr(1)
     const c = await upi.confirmUpiRequest({ requestId: r.requestId, utr: ref }, desk, NOW)
@@ -126,8 +132,8 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
 
   it('the same UTR a second time is a duplicate with no extra row, on the same or another request', async () => {
     const { upi, getDb, paymentRequests, eq } = await m()
-    const a = await upi.createUpiRequest({ patientId: PID, amountPaise: 50000 }, desk)
-    const b = await upi.createUpiRequest({ patientId: PID, amountPaise: 50000 }, desk)
+    const a = await upi.createUpiRequest({ patientId: PID, amountPaise: 50000 }, desk, NOW)
+    const b = await upi.createUpiRequest({ patientId: PID, amountPaise: 50000 }, desk, NOW)
     if (!a.ok || !b.ok) throw new Error('create failed')
     const ref = utr(2)
     expect((await upi.confirmUpiRequest({ requestId: a.requestId, utr: ref }, desk, NOW)).ok).toBe(true)
@@ -140,8 +146,8 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
 
   it('a double-click (two confirmations at once) records one receipt only', async () => {
     const { upi } = await m()
-    const a = await upi.createUpiRequest({ patientId: PID, amountPaise: 70000 }, desk)
-    const b = await upi.createUpiRequest({ patientId: PID, amountPaise: 70000 }, desk)
+    const a = await upi.createUpiRequest({ patientId: PID, amountPaise: 70000 }, desk, NOW)
+    const b = await upi.createUpiRequest({ patientId: PID, amountPaise: 70000 }, desk, NOW)
     if (!a.ok || !b.ok) throw new Error('create failed')
     const ref = utr(3)
     const results = await Promise.all([
@@ -159,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
     const ref = utr(4)
     const manual = await pl.recordPayment({ patientId: PID, kind: 'receipt', mode: 'upi', reference: ref, amountPaise: 1000 }, desk, NOW)
     expect(manual.ok).toBe(true)
-    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 1000 }, desk)
+    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 1000 }, desk, NOW)
     if (!r.ok) throw new Error(r.error)
     expect(await upi.confirmUpiRequest({ requestId: r.requestId, utr: ref }, desk, NOW)).toEqual({ ok: false, error: 'duplicate_utr' })
     expect(await receiptsOf()).toHaveLength(1)
@@ -175,7 +181,7 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
       const p = await pl.recordPayment({ patientId: PID, kind: 'receipt', amountPaise: 1000, ...m0 }, desk, NOW)
       expect(p.ok, m0.mode).toBe(true)
     }
-    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 1000 }, desk)
+    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 1000 }, desk, NOW)
     if (!r.ok) throw new Error(r.error)
     expect((await upi.confirmUpiRequest({ requestId: r.requestId, utr: utr(5) }, desk, NOW)).ok).toBe(true)
     const rows = await receiptsOf()
@@ -198,12 +204,174 @@ describe.skipIf(!process.env.DATABASE_URL)('manual UPI QR requests (DB)', () => 
 
   it('audit rows carry ids only, never the UTR', async () => {
     const { upi, getDb, auditLog, eq } = await m()
-    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 3000 }, desk)
+    const r = await upi.createUpiRequest({ patientId: PID, amountPaise: 3000 }, desk, NOW)
     if (!r.ok) throw new Error(r.error)
     const ref = utr(7)
     await upi.confirmUpiRequest({ requestId: r.requestId, utr: ref }, desk, NOW)
     const rows = await getDb().select().from(auditLog).where(eq(auditLog.patientId, PID))
     expect(rows.length).toBeGreaterThan(0)
     for (const a of rows) expect(`${a.action} ${a.details ?? ''}`).not.toContain(ref)
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('Foundations T11 fixes: duplicate UTR paths, races, expiry, note (DB)', () => {
+  // Kept in the same file so it shares nothing but the module; own patients, own FY purge.
+  const RUN = `${Date.now()}-${Math.floor(Math.random() * 1e6)}-fx`
+  const PID = `TEST-T11F-${RUN}`
+  const PID2 = `TEST-T11F-${RUN}-B`
+  const desk: Session = { role: 'frontdesk', name: `TEST-T11F-${RUN}-desk`, userId: null }
+  const FY2 = '2097-98'
+  const NOW2 = new Date('2097-06-01T06:00:00Z')
+  const utr = (n: number) => `${String(Date.now()).slice(-7)}9${String(n).padStart(4, '0')}`
+
+  const m = async () => ({
+    ...(await import('@/db/client')), ...(await import('@/db/schema')), ...(await import('drizzle-orm')),
+    upi: await import('@/lib/payments/manual-upi'),
+    pl: await import('@/lib/queries/patient-ledger'),
+  })
+
+  async function purge() {
+    const { getDb, paymentRequests, patientPayments, refunds, invoices, documentCounters, eq, inArray, sql } = await m()
+    await getDb().transaction(async (tx) => {
+      await tx.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+      await tx.delete(paymentRequests).where(inArray(paymentRequests.patientId, [PID, PID2]))
+      await tx.delete(refunds).where(inArray(refunds.patientId, [PID, PID2]))
+      await tx.delete(patientPayments).where(inArray(patientPayments.patientId, [PID, PID2]))
+      await tx.delete(invoices).where(inArray(invoices.patientId, [PID, PID2]))
+      await tx.delete(documentCounters).where(eq(documentCounters.financialYear, FY2))
+    })
+  }
+
+  beforeAll(async () => {
+    vi.stubEnv('HOSPITAL_UPI_VPA', 'sunrise.hospital@icici')
+    vi.stubEnv('HOSPITAL_UPI_PAYEE', 'Sunrise Hospital')
+    const { getDb, patients } = await m()
+    await getDb().insert(patients).values([
+      { id: PID, name: `Test T11F ${RUN}`, dob: '1990-01-01' },
+      { id: PID2, name: `Test T11F B ${RUN}`, dob: '1990-01-01' },
+    ])
+  })
+  afterEach(async () => { await purge() })
+  afterAll(async () => {
+    const { getDb, patients, auditLog, inArray } = await m()
+    await purge()
+    await getDb().delete(auditLog).where(inArray(auditLog.patientId, [PID, PID2]))
+    await getDb().delete(patients).where(inArray(patients.id, [PID, PID2]))
+    vi.unstubAllEnvs()
+  })
+
+  async function receipts() {
+    const { getDb, patientPayments, inArray } = await m()
+    return getDb().select().from(patientPayments).where(inArray(patientPayments.patientId, [PID, PID2]))
+  }
+  async function request(id: number) {
+    const { getDb, paymentRequests, eq } = await m()
+    return (await getDb().select().from(paymentRequests).where(eq(paymentRequests.id, id)))[0]
+  }
+  async function create(patientId: string, amountPaise: number, extra: Record<string, unknown> = {}, at = NOW2) {
+    const { upi } = await m()
+    const r = await upi.createUpiRequest({ patientId, amountPaise, ...extra }, desk, at)
+    if (!r.ok) throw new Error(r.error)
+    return r
+  }
+  async function finalisedInvoice(totalPaise: number) {
+    const { getDb, invoices } = await m()
+    const [row] = await getDb().insert(invoices).values({
+      invoiceNumber: `TEST-T11F-INV-${RUN}-${Math.floor(Math.random() * 1e9)}`, status: 'finalised', patientId: PID, totalPaise,
+      snapshot: {} as never, invoiceDate: '2097-06-01', financialYear: FY2, createdByName: 'TEST-T11F', finalisedAt: NOW2,
+    }).returning({ id: invoices.id })
+    return row.id
+  }
+
+  it('a UTR confirmed through a QR request cannot be recorded again as a manual UPI payment (any spacing or case)', async () => {
+    const { upi, pl } = await m()
+    const r = await create(PID, 50000)
+    const ref = utr(1)
+    expect((await upi.confirmUpiRequest({ requestId: r.requestId, utr: ref }, desk, NOW2)).ok).toBe(true)
+    for (const reference of [ref, `${ref.slice(0, 4)} ${ref.slice(4, 8)}-${ref.slice(8)}`]) {
+      expect(await pl.recordPayment({ patientId: PID, kind: 'receipt', mode: 'upi', reference, amountPaise: 50000 }, desk, NOW2)).toEqual({ ok: false, error: 'duplicate_utr' })
+      expect(await pl.recordPayment({ patientId: PID2, kind: 'receipt', mode: 'upi', reference, amountPaise: 50000 }, desk, NOW2)).toEqual({ ok: false, error: 'duplicate_utr' })
+    }
+    expect(await receipts()).toHaveLength(1)
+  })
+
+  it('two manual UPI payments with one UTR: the second is refused; non-UPI modes are not checked', async () => {
+    const { pl } = await m()
+    const ref = utr(2)
+    expect((await pl.recordPayment({ patientId: PID, kind: 'receipt', mode: 'upi', reference: ref, amountPaise: 1000 }, desk, NOW2)).ok).toBe(true)
+    expect(await pl.recordPayment({ patientId: PID2, kind: 'receipt', mode: 'upi', reference: ref.toLowerCase(), amountPaise: 1000 }, desk, NOW2)).toEqual({ ok: false, error: 'duplicate_utr' })
+    expect((await pl.recordPayment({ patientId: PID, kind: 'receipt', mode: 'neft', reference: ref, amountPaise: 1000 }, desk, NOW2)).ok).toBe(true)
+    expect(await receipts()).toHaveLength(2)
+  })
+
+  it('two patients, two requests, one UTR, confirmed at once: one receipt, one duplicate_utr, no RCT number skipped', async () => {
+    const { upi, pl } = await m()
+    const a = await create(PID, 40000)
+    const b = await create(PID2, 40000)
+    const ref = utr(3)
+    const results = await Promise.all([
+      upi.confirmUpiRequest({ requestId: a.requestId, utr: ref }, desk, NOW2),
+      upi.confirmUpiRequest({ requestId: b.requestId, utr: ref }, desk, NOW2),
+    ])
+    expect(results.filter((x) => x.ok)).toHaveLength(1)
+    expect(results.filter((x) => !x.ok)).toEqual([{ ok: false, error: 'duplicate_utr' }])
+    const rows = await receipts()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].receiptNumber).toBe('RCT/97-98/000001')
+    const next = await pl.recordPayment({ patientId: PID, kind: 'receipt', mode: 'cash', amountPaise: 100 }, desk, NOW2)
+    expect(next).toMatchObject({ ok: true, receiptNumber: 'RCT/97-98/000002' })
+  })
+
+  it('a manual UPI payment and a QR confirmation of one UTR for two patients at once: exactly one receipt', async () => {
+    const { upi, pl } = await m()
+    const b = await create(PID2, 40000)
+    const ref = utr(4)
+    const results = await Promise.all([
+      pl.recordPayment({ patientId: PID, kind: 'receipt', mode: 'upi', reference: ref, amountPaise: 40000 }, desk, NOW2),
+      upi.confirmUpiRequest({ requestId: b.requestId, utr: ref }, desk, NOW2),
+    ])
+    expect(results.filter((x) => x.ok)).toHaveLength(1)
+    expect(results.filter((x) => !x.ok)).toEqual([{ ok: false, error: 'duplicate_utr' }])
+    expect(await receipts()).toHaveLength(1)
+  })
+
+  it('a request older than 24 hours is expired and writes nothing', async () => {
+    const { upi } = await m()
+    const r = await create(PID, 1000)
+    const later = new Date(NOW2.getTime() + 24 * 3600_000 + 1000)
+    expect(await upi.confirmUpiRequest({ requestId: r.requestId, utr: utr(5) }, desk, later)).toEqual({ ok: false, error: 'request_expired' })
+    expect(await receipts()).toEqual([])
+    expect(await request(r.requestId)).toMatchObject({ status: 'pending', utr: null })
+    const justInTime = new Date(NOW2.getTime() + 23 * 3600_000)
+    expect((await upi.confirmUpiRequest({ requestId: r.requestId, utr: utr(5) }, desk, justInTime)).ok).toBe(true)
+  })
+
+  it('a cancelled request is expired; cancelling is pending-only and writes nothing to the ledger', async () => {
+    const { upi } = await m()
+    const r = await create(PID, 1000)
+    expect(await upi.cancelUpiRequest(r.requestId, desk)).toEqual({ ok: true })
+    expect(await upi.cancelUpiRequest(r.requestId, desk)).toEqual({ ok: false, error: 'not_pending' })
+    expect(await upi.cancelUpiRequest(2147483000, desk)).toEqual({ ok: false, error: 'request_not_found' })
+    expect(await upi.confirmUpiRequest({ requestId: r.requestId, utr: utr(6) }, desk, NOW2)).toEqual({ ok: false, error: 'request_expired' })
+    expect(await receipts()).toEqual([])
+    expect(await request(r.requestId)).toMatchObject({ status: 'cancelled', utr: null, paymentId: null })
+  })
+
+  it('a request against an invoice that is already fully paid is expired and writes nothing', async () => {
+    const { upi, pl } = await m()
+    const invoiceId = await finalisedInvoice(5000)
+    const r = await create(PID, 5000, { kind: 'receipt', invoiceId })
+    expect((await pl.recordPayment({ patientId: PID, kind: 'receipt', invoiceId, mode: 'cash', amountPaise: 5000 }, desk, NOW2)).ok).toBe(true)
+    expect(await upi.confirmUpiRequest({ requestId: r.requestId, utr: utr(7) }, desk, NOW2)).toEqual({ ok: false, error: 'request_expired' })
+    expect(await receipts()).toHaveLength(1)
+    expect(await request(r.requestId)).toMatchObject({ status: 'pending', utr: null })
+  })
+
+  it('the default note names the request, never the patient id', async () => {
+    const r = await create(PID, 1000)
+    expect(r.note).toBe(`Hospital payment #${r.requestId}`)
+    expect(r.uri).toContain(`&tn=Hospital%20payment%20%23${r.requestId}`)
+    expect(r.uri).not.toContain(PID)
+    expect((await request(r.requestId)).note).toBe(`Hospital payment #${r.requestId}`)
   })
 })

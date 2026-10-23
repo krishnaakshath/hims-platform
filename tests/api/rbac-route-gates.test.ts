@@ -465,6 +465,7 @@ import { POST as cancelInvoiceRoute } from '@/app/api/billing/invoices/[id]/canc
 import { POST as postPaymentRoute } from '@/app/api/billing/payments/route'
 import { POST as postUpiRequestRoute } from '@/app/api/billing/payments/upi-request/route' // Foundations T11
 import { POST as postUpiConfirmRoute } from '@/app/api/billing/payments/upi-request/[id]/confirm/route' // Foundations T11
+import { POST as postUpiCancelRoute } from '@/app/api/billing/payments/upi-request/[id]/cancel/route' // Foundations T11
 import { POST as postRefundRoute } from '@/app/api/billing/refunds/route'
 // end SP4
 // SP5
@@ -1045,6 +1046,7 @@ export const API_GATES: ApiGateCase[] = [
   // Foundations T11: UPI QR request and confirm -- CASH_DESK_ROLES, like POST /api/billing/payments.
   { name: 'POST /api/billing/payments/upi-request', call: () => settle(() => postUpiRequestRoute(send('POST', '/api/billing/payments/upi-request'))), allowed: [...CASH_DESK_ROLES] },
   { name: 'POST /api/billing/payments/upi-request/[id]/confirm', call: () => settle(() => postUpiConfirmRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/confirm`), ctx({ id: BOGUS_ID }))), allowed: [...CASH_DESK_ROLES] },
+  { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => settle(() => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...CASH_DESK_ROLES] },
   // end Foundations T11
 ]
 
@@ -1200,6 +1202,7 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // Foundations T11
   { name: 'POST /api/billing/payments/upi-request', call: () => postUpiRequestRoute(send('POST', '/api/billing/payments/upi-request', NOT_JSON)), allowed: CASH_DESK_ROLES },
   { name: 'POST /api/billing/payments/upi-request/[id]/confirm', call: () => postUpiConfirmRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/confirm`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
+  { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
   // end Foundations T11
 ]
 // end SP8

@@ -5,14 +5,15 @@
 // ordinary receipt through insertPaymentInTx, the same ledger write every other mode uses.
 // UTRs are stored on the request and as the receipt reference, never in the audit log or console.
 import QRCode from 'qrcode'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { invoices, patientPayments, paymentRequests } from '@/db/schema'
+import { invoices, paymentRequests } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { isUniqueViolation } from '@/lib/db-errors'
 import { lockPatientBilling } from '@/lib/queries/charge-capture'
-import { admissionIsPatients, insertPaymentInTx, patientExists, withSeriesGuard } from '@/lib/queries/patient-ledger'
+import { UPI_REFERENCE_UNIQUE, admissionIsPatients, insertPaymentInTx, patientExists, upiReferenceTaken, withSeriesGuard } from '@/lib/queries/patient-ledger'
+import { invoicePaidPaise } from '@/lib/queries/invoices'
 import { NOTE_MAX, upiConfig, upiUri } from './upi'
 import { PaymentProviderError, UTR_PATTERN, normaliseUtr, type PaymentProvider, type PaymentProviderErrorCode } from './provider'
 
@@ -32,7 +33,10 @@ export type CreateUpiRequestResult =
   | { ok: true; requestId: number; uri: string; qrDataUrl: string; vpa: string; payeeName: string; amountPaise: number; note: string }
   | { ok: false; error: 'not_configured' | 'patient_not_found' | 'admission_mismatch' | 'invoice_not_payable' }
 
-export async function createUpiRequest(input: UpiRequestInput, session: Session): Promise<CreateUpiRequestResult> {
+/** Foundations T11: a pending request can be confirmed for this long after it was shown. */
+export const UPI_REQUEST_TTL_MS = 24 * 60 * 60 * 1000
+
+export async function createUpiRequest(input: UpiRequestInput, session: Session, now: Date = new Date()): Promise<CreateUpiRequestResult> {
   const config = upiConfig()
   if (!config) return { ok: false, error: 'not_configured' }
   if (!(await patientExists(input.patientId))) return { ok: false, error: 'patient_not_found' }
@@ -43,21 +47,27 @@ export async function createUpiRequest(input: UpiRequestInput, session: Session)
       .where(and(eq(invoices.id, input.invoiceId), eq(invoices.patientId, input.patientId), eq(invoices.status, 'finalised'))).limit(1)
     if (!inv) return { ok: false, error: 'invoice_not_payable' }
   }
-  const note = (input.note?.trim() || `Hospital payment ${input.patientId}`).slice(0, NOTE_MAX)
-  const uri = upiUri(config.vpa, config.payeeName, input.amountPaise, note)
-  const qrDataUrl = await QRCode.toDataURL(uri, { errorCorrectionLevel: 'M', margin: 1, width: 240 })
-  const requestId = await db.transaction(async (tx) => {
+  const staffNote = input.note?.trim().slice(0, NOTE_MAX)
+  // One transaction: the default note needs the new id, and a QR that fails to render leaves no row.
+  const created = await db.transaction(async (tx) => {
     const [row] = await tx.insert(paymentRequests).values({
       patientId: input.patientId, kind: input.kind ?? 'receipt', admissionId: input.admissionId ?? null, invoiceId: input.invoiceId ?? null,
-      amountPaise: input.amountPaise, vpa: config.vpa, note, createdBy: session.name, createdByUserId: session.userId,
+      amountPaise: input.amountPaise, vpa: config.vpa, note: staffNote || 'Hospital payment', createdBy: session.name, createdByUserId: session.userId,
+      createdAt: now,
     }).returning({ id: paymentRequests.id })
+    // The note reaches the payer's UPI app and bank statement: the request id, never the patient's id.
+    const note = staffNote || `Hospital payment #${row.id}`
+    if (!staffNote) await tx.update(paymentRequests).set({ note }).where(eq(paymentRequests.id, row.id))
+    const uri = upiUri(config.vpa, config.payeeName, input.amountPaise, note)
+    const qrDataUrl = await QRCode.toDataURL(uri, { errorCorrectionLevel: 'M', margin: 1, width: 240 })
     await logAudit(session, 'billing: created UPI payment request', input.patientId, `request=${row.id} amount=${input.amountPaise}`, tx)
-    return row.id
+    return { requestId: row.id, note, uri, qrDataUrl }
   })
-  return { ok: true, requestId, uri, qrDataUrl, vpa: config.vpa, payeeName: config.payeeName, amountPaise: input.amountPaise, note }
+  return { ok: true, ...created, vpa: config.vpa, payeeName: config.payeeName, amountPaise: input.amountPaise }
 }
 
 export type ConfirmUpiError = 'request_not_found' | 'already_confirmed' | 'duplicate_utr' | 'admission_mismatch' | 'invoice_not_payable' | 'series_exhausted'
+  | 'request_expired' // cancelled, older than UPI_REQUEST_TTL_MS, or its invoice is already fully paid
 
 class ConfirmAbort extends Error {
   constructor(readonly code: ConfirmUpiError) { super(code) }
@@ -73,13 +83,21 @@ export async function confirmUpiRequest(
     return await withSeriesGuard(() => getDb().transaction(async (tx) => {
       // Row lock: a second confirmation of the same request waits here, then sees it confirmed.
       const [req] = await tx.select().from(paymentRequests).where(eq(paymentRequests.id, input.requestId)).for('update')
-      if (!req || req.status === 'cancelled') return { ok: false as const, error: 'request_not_found' as const }
-      if (req.status !== 'pending') return { ok: false as const, error: 'already_confirmed' as const }
+      if (!req) return { ok: false as const, error: 'request_not_found' as const }
+      if (req.status === 'confirmed') return { ok: false as const, error: 'already_confirmed' as const }
+      if (req.status !== 'pending' || now.getTime() - req.createdAt.getTime() > UPI_REQUEST_TTL_MS) {
+        return { ok: false as const, error: 'request_expired' as const }
+      }
       await lockPatientBilling(tx, req.patientId)
-      // The same UTR typed by hand on the cash desk as a plain UPI payment.
-      const [typed] = await tx.select({ id: patientPayments.id }).from(patientPayments)
-        .where(and(eq(patientPayments.mode, 'upi'), sql`upper(regexp_replace(${patientPayments.reference}, '[[:space:]-]', '', 'g')) = ${utr}`)).limit(1)
-      if (typed) return { ok: false as const, error: 'duplicate_utr' as const }
+      if (req.invoiceId !== null) {
+        // Under the patient lock: another receipt may have settled the invoice since the QR was shown.
+        const [inv] = await tx.select({ totalPaise: invoices.totalPaise }).from(invoices).where(eq(invoices.id, req.invoiceId)).limit(1)
+        if (inv && inv.totalPaise !== null && (await invoicePaidPaise(tx, req.invoiceId)) >= inv.totalPaise) {
+          return { ok: false as const, error: 'request_expired' as const }
+        }
+      }
+      // The same UTR typed by hand as a plain UPI payment, or already on another request.
+      if (await upiReferenceTaken(tx, utr)) return { ok: false as const, error: 'duplicate_utr' as const }
       // Claims the UTR first: a UTR already on another request is a 23505 here (or once the
       // concurrent holder commits), and the whole transaction rolls back.
       await tx.update(paymentRequests).set({ utr }).where(eq(paymentRequests.id, req.id))
@@ -94,9 +112,23 @@ export async function confirmUpiRequest(
     }))
   } catch (err) {
     if (err instanceof ConfirmAbort) return { ok: false, error: err.code }
-    if (isUniqueViolation(err, 'payment_requests_utr_unique')) return { ok: false, error: 'duplicate_utr' }
+    if (isUniqueViolation(err, 'payment_requests_utr_unique') || isUniqueViolation(err, UPI_REFERENCE_UNIQUE)) return { ok: false, error: 'duplicate_utr' }
     throw err
   }
+}
+
+/** Foundations T11: withdraw a QR that will not be paid. Pending only; never touches the ledger. */
+export async function cancelUpiRequest(requestId: number, session: Session): Promise<{ ok: true } | { ok: false; error: 'request_not_found' | 'not_pending' }> {
+  return getDb().transaction(async (tx) => {
+    const [row] = await tx.update(paymentRequests).set({ status: 'cancelled' })
+      .where(and(eq(paymentRequests.id, requestId), eq(paymentRequests.status, 'pending'))).returning({ patientId: paymentRequests.patientId })
+    if (!row) {
+      const [exists] = await tx.select({ id: paymentRequests.id }).from(paymentRequests).where(eq(paymentRequests.id, requestId)).limit(1)
+      return { ok: false as const, error: exists ? 'not_pending' as const : 'request_not_found' as const }
+    }
+    await logAudit(session, 'billing: cancelled UPI payment request', row.patientId, `request=${requestId}`, tx)
+    return { ok: true as const }
+  })
 }
 
 /** The PaymentProvider view of the same two calls, for one staff session. */
@@ -104,7 +136,7 @@ export function manualUpiProvider(session: Session, clock: () => Date = () => ne
   return {
     name: 'manual_upi_qr',
     async createRequest(i) {
-      const r = await createUpiRequest(i, session)
+      const r = await createUpiRequest(i, session, clock())
       if (!r.ok) throw new PaymentProviderError(r.error)
       return { requestId: r.requestId, qrPayload: r.uri }
     },

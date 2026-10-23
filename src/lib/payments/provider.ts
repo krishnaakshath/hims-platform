@@ -12,7 +12,7 @@ export interface PaymentProvider {
 
 export type PaymentProviderErrorCode =
   | 'not_configured' | 'patient_not_found' | 'admission_mismatch' | 'invoice_not_payable'
-  | 'request_not_found' | 'already_confirmed' | 'duplicate_utr' | 'series_exhausted'
+  | 'request_not_found' | 'already_confirmed' | 'duplicate_utr' | 'series_exhausted' | 'request_expired'
 
 /** A refusal from a provider; `code` maps 1:1 to the route's HTTP answer. Never carries a UTR. */
 export class PaymentProviderError extends Error {

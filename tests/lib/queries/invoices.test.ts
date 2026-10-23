@@ -274,6 +274,20 @@ describe.skipIf(!process.env.DATABASE_URL)('invoices (DB)', () => {
     })
     expect((await inv.listInvoices({ q: `${CODE}0`, status: 'finalised' })).rows[0]).toMatchObject({ paidPaise: 20000, outstandingPaise: 30000 })
     expect(await inv.getInvoicePaidPaise(id)).toBe(20000)
+    // Foundations T11 fix: a refund against that receipt nets out of Paid, so Outstanding reappears.
+    const { refunds, eq } = await m()
+    const [rct] = await getDb().select({ id: patientPayments.id }).from(patientPayments).where(eq(patientPayments.receiptNumber, `TEST-T11-${RUN}`))
+    await getDb().insert(refunds).values({
+      refundNumber: `TEST-T11-R-${RUN}`, patientId: PID, againstPaymentId: rct.id, mode: 'cash', amountPaise: 15000, reason: 'Test refund',
+      financialYear: '2099-00', refundDate: '2099-06-01', issuedByName: 'TEST-T11', issuedAt: new Date('2099-06-01T07:00:00Z'),
+    })
+    expect(await inv.getInvoicePaidPaise(id)).toBe(5000)
+    expect((await inv.listInvoices({ q: `${CODE}0`, status: 'finalised' })).rows[0]).toMatchObject({ paidPaise: 5000, outstandingPaise: 45000 })
+    await getDb().insert(refunds).values({
+      refundNumber: `TEST-T11-R2-${RUN}`, patientId: PID, againstPaymentId: rct.id, mode: 'cash', amountPaise: 9000, reason: 'Test refund',
+      financialYear: '2099-00', refundDate: '2099-06-01', issuedByName: 'TEST-T11', issuedAt: new Date('2099-06-01T07:00:00Z'),
+    })
+    expect(await inv.getInvoicePaidPaise(id)).toBe(0) // floored at 0
     expect((await inv.listCapturedLinesForContext({ encounterId: encounterOf.get(PID)! })).map((r) => r.id)).toEqual([l2.id])
   })
 
