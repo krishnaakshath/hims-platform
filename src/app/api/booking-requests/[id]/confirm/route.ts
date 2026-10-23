@@ -11,7 +11,8 @@ import { istDateOf, formatIstTime } from '@/lib/india-time' // Foundations T9
 import { sendPatientNotice } from '@/lib/queries/notifications' // Foundations T9
 import { getBookingRequestById, confirmBookingRequest, confirmCancelRequest } from '@/lib/queries/booking-requests'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
-import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
+import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError, outsideWorkingHoursResponse } from '@/lib/appointment-time'
+import { isOutsideWorkingHours } from '@/lib/queries/provider-schedules' // WS6 T7
 
 const confirmBookingRequestSchema = z.object({
   patientId: z.string().min(1),
@@ -19,6 +20,7 @@ const confirmBookingRequestSchema = z.object({
   startsAt: appointmentInstantSchema,
   endsAt: appointmentInstantSchema,
   visitReason: visitReasonSchema,
+  outsideHoursConfirmed: z.boolean().optional(), // WS6 T7
 }).strict()
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -75,6 +77,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // used for preferredProviderId on the public submission route.
   const [patientRow] = await getDb().select({ id: patients.id }).from(patients).where(eq(patients.id, parsed.data.patientId))
   if (!patientRow) return NextResponse.json({ error: 'patientId does not reference a real patient' }, { status: 400 })
+
+  // WS6 T7: outside the doctor's working hours only when staff confirm it (before the overlap check).
+  if (parsed.data.outsideHoursConfirmed !== true && await isOutsideWorkingHours(parsed.data.providerId, startsAt, endsAt)) {
+    return outsideWorkingHoursResponse()
+  }
 
   const result = await confirmBookingRequest(requestId, {
     patientId: parsed.data.patientId,

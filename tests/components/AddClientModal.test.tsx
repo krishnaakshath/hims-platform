@@ -88,6 +88,20 @@ describe('AddClientModal', () => {
       expect(onClose).toHaveBeenCalled()
     })
 
+    // WS6 T7: registering from a booking request stays on the queue to confirm the booking.
+    it('stays on the page when navigateToPatient is false', async () => {
+      const onRegistered = vi.fn(async () => undefined)
+      const onClose = vi.fn()
+      render(<AddClientModal onClose={onClose} onRegistered={onRegistered} navigateToPatient={false} />)
+      fillBase()
+      fireEvent.change(screen.getByLabelText('Aadhaar number'), { target: { value: VALID_AADHAAR } })
+      fireEvent.click(screen.getByLabelText('Patient consents to recording their Aadhaar number'))
+      fireEvent.click(screen.getByText('Save'))
+      await waitFor(() => expect(onClose).toHaveBeenCalled())
+      expect(onRegistered).toHaveBeenCalledWith(7)
+      expect(push).not.toHaveBeenCalled()
+    })
+
     it('clears the Aadhaar field after a failed submit and maps server field errors', async () => {
       patientsResponse = () => new Response(JSON.stringify({ error: 'Invalid registration', details: { formErrors: [], fieldErrors: { pinCode: ['Enter a valid 6-digit PIN code'] } } }), { status: 400 })
       render(<AddClientModal onClose={vi.fn()} />)

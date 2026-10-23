@@ -46,9 +46,11 @@ describe('ConfirmBookingRequestModal for a portal reschedule', () => {
     expect(screen.getByText(/cancels appointment #12/)).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: /patient/i })).toBeNull()
     fireEvent.change(screen.getByLabelText('Provider'), { target: { value: '1' } })
+    await screen.findByLabelText('Start time (IST)') // WS6 T7: the doctor's slots load first
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    const confirmCall = () => fetchMock.mock.calls.find(([u]) => u === '/api/booking-requests/5/confirm')
+    await waitFor(() => expect(confirmCall()).toBeDefined())
+    const body = JSON.parse(String(confirmCall()![1]?.body))
     expect(body.patientId).toBe('RD-0042')
   })
 })

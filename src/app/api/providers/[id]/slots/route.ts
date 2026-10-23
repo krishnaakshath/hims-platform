@@ -5,7 +5,7 @@ import { invalidIdResponse, parseId } from '@/lib/http'
 import { SCHEDULING_ROLES } from '@/lib/role-policy'
 import { todayIsoIn } from '@/lib/india-time'
 import { buildSlots } from '@/lib/scheduling/slots'
-import { getProviderScheduleForDate, listBookedIntervals } from '@/lib/queries/provider-schedules'
+import { getProviderScheduleForDate, hasWorkingHours, listBookedIntervals } from '@/lib/queries/provider-schedules'
 
 // WS6 T6 (spec D5): a doctor's slots for one IST day, computed on read.
 
@@ -33,8 +33,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const schedule = await getProviderScheduleForDate(providerId, date)
   if (!schedule) return NextResponse.json({ error: 'Provider not found' }, { status: 404 })
-  const booked = schedule.onLeave ? [] : await listBookedIntervals(providerId, date)
+  const [booked, hoursSet] = await Promise.all([
+    schedule.onLeave ? [] : listBookedIntervals(providerId, date),
+    hasWorkingHours(providerId), // WS6 T7: no hours set up at all -> the booking form takes any time
+  ])
   const slots = buildSlots({ dateIso: date, sessions: schedule.sessions, slotMinutes: schedule.slotMinutes, onLeave: schedule.onLeave, booked, now })
   await logAudit(session, 'viewed provider slots', null, `provider=${providerId} date=${date}`)
-  return NextResponse.json({ date, slotMinutes: schedule.slotMinutes, onLeave: schedule.onLeave, slots })
+  return NextResponse.json({ date, slotMinutes: schedule.slotMinutes, onLeave: schedule.onLeave, hoursSet, slots })
 }

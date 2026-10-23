@@ -6,6 +6,9 @@ import { Button } from '@/components/ui/button'
 import { ConfirmBookingRequestModal } from '@/components/ConfirmBookingRequestModal'
 import { DeclineBookingRequestModal } from '@/components/DeclineBookingRequestModal'
 import { ConfirmCancelRequestButton } from '@/components/ConfirmCancelRequestButton' // Wave J
+import { AddClientModal } from '@/components/AddClientModal' // WS6 T7
+import { EMPTY_REGISTRATION_FORM } from '@/components/registration/registration-form-state'
+import type { PickedPatient } from '@/components/PatientPicker'
 
 interface ProviderOption {
   id: number
@@ -47,6 +50,10 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
 }) {
   const [confirmTarget, setConfirmTarget] = useState<BookingRequestRow | null>(null)
   const [declineTarget, setDeclineTarget] = useState<BookingRequestRow | null>(null)
+  // WS6 T7: a public request from someone with no chart is registered here, then confirmed
+  // against the new patient.
+  const [registerTarget, setRegisterTarget] = useState<BookingRequestRow | null>(null)
+  const [registeredPatient, setRegisteredPatient] = useState<PickedPatient | null>(null)
 
   const providerName = (id: number | null) => {
     if (id === null) return 'No preference'
@@ -107,6 +114,9 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
                         ) : (
                           <Button size="sm" onClick={() => setConfirmTarget(r)}>Confirm</Button>
                         )}
+                        {r.patientId === null && r.requestKind !== 'cancel' && (
+                          <Button size="sm" variant="outline" onClick={() => setRegisterTarget(r)}>Register from this request</Button>
+                        )}
                         <Button size="sm" variant="outline" onClick={() => setDeclineTarget(r)}>Decline</Button>
                       </div>
                     ) : null}
@@ -119,7 +129,29 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
       </div>
 
       {confirmTarget && (
-        <ConfirmBookingRequestModal request={confirmTarget} providers={providers} onClose={() => setConfirmTarget(null)} />
+        <ConfirmBookingRequestModal
+          request={confirmTarget}
+          providers={providers}
+          initialPatient={registeredPatient}
+          onClose={() => { setConfirmTarget(null); setRegisteredPatient(null) }}
+        />
+      )}
+      {registerTarget && (
+        <AddClientModal
+          initial={{
+            ...EMPTY_REGISTRATION_FORM,
+            name: registerTarget.requesterName,
+            dob: registerTarget.requesterDob,
+            phone: registerTarget.requesterPhone ?? '',
+            email: registerTarget.requesterEmail ?? '',
+          }}
+          navigateToPatient={false}
+          onRegistered={(patientId) => {
+            setRegisteredPatient({ id: patientId, name: registerTarget.requesterName, uhid: null })
+            setConfirmTarget(registerTarget)
+          }}
+          onClose={() => setRegisterTarget(null)}
+        />
       )}
       {declineTarget && (
         <DeclineBookingRequestModal request={declineTarget} onClose={() => setDeclineTarget(null)} />

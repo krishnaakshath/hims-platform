@@ -20,3 +20,11 @@ export function isTimeFieldError(error: ZodError, fields: readonly string[] = ['
 export function invalidAppointmentTime(): NextResponse {
   return NextResponse.json({ error: INVALID_APPOINTMENT_TIME }, { status: 400 })
 }
+
+/** WS6 T7: the refusal for a booking outside the doctor's working hours without outsideHoursConfirmed. */
+export function outsideWorkingHoursResponse(): NextResponse {
+  return NextResponse.json({
+    error: 'This time is outside the doctor\'s working hours. Tick "Outside working hours" to book it anyway.',
+    code: 'outside_working_hours',
+  }, { status: 422 })
+}

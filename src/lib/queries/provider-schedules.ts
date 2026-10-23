@@ -3,9 +3,9 @@
 import { and, asc, eq, gt, gte, lt, ne } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { appointments, providerLeave, providerSchedules, providers } from '@/db/schema'
-import { startOfIstDay } from '@/lib/india-time'
+import { istDateOf, startOfIstDay } from '@/lib/india-time'
 import { invalidateCache, providersListCacheKey } from '@/lib/cache'
-import { istWeekdayOf, type Weekday, type WeeklySession } from '@/lib/scheduling/slots'
+import { istWeekdayOf, withinWorkingHours, type Weekday, type WeeklySession } from '@/lib/scheduling/slots'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -70,6 +70,25 @@ export async function getProviderScheduleForDate(providerId: number, dateIso: st
       .where(and(eq(providerLeave.providerId, providerId), eq(providerLeave.leaveDate, dateIso))).limit(1),
   ])
   return { slotMinutes: p.slotMinutes, sessions: sessions.map(toSession), onLeave: leave.length > 0 }
+}
+
+/** WS6 T7: whether the doctor has any weekly session at all (working hours have been set up). */
+export async function hasWorkingHours(providerId: number): Promise<boolean> {
+  const [row] = await getDb().select({ id: providerSchedules.id }).from(providerSchedules)
+    .where(eq(providerSchedules.providerId, providerId)).limit(1)
+  return row !== undefined
+}
+
+/**
+ * WS6 T7: true when [startsAt, endsAt) is not inside one of the doctor's sessions on its IST date,
+ * or that date is a leave day. A doctor with no weekly sessions at all has no hours set up yet and
+ * is never outside them (legacy doctors keep booking until hours are entered); so is an unknown id.
+ */
+export async function isOutsideWorkingHours(providerId: number, startsAt: Date, endsAt: Date): Promise<boolean> {
+  if (!(await hasWorkingHours(providerId))) return false
+  const schedule = await getProviderScheduleForDate(providerId, istDateOf(startsAt))
+  if (!schedule) return false
+  return !withinWorkingHours({ startsAt, endsAt, sessions: schedule.sessions, onLeave: schedule.onLeave })
 }
 
 /**

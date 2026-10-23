@@ -20,11 +20,13 @@ interface PayerOption {
 }
 
 // SP8: `initial` pre-fills the form (a Scan & Share profile); `onRegistered`
-// runs after the patient is created, before navigating to them.
-export function AddClientModal({ onClose, initial, onRegistered }: {
+// runs after the patient is created, before navigating to them. WS6 T7:
+// `navigateToPatient={false}` stays on the page (register from a booking request).
+export function AddClientModal({ onClose, initial, onRegistered, navigateToPatient = true }: {
   onClose: () => void
   initial?: RegistrationFormState
-  onRegistered?: (patientId: string) => Promise<void>
+  onRegistered?: (patientId: string) => Promise<void> | void
+  navigateToPatient?: boolean
 }) {
   const { name: brandName } = useBrand()
   const router = useRouter()
@@ -72,6 +74,7 @@ export function AddClientModal({ onClose, initial, onRegistered }: {
       if (res.ok) {
         if (onRegistered) await onRegistered(res.data.id) // SP8
         onClose()
+        if (!navigateToPatient) return
         // Navigate straight to the new patient's page so the front desk sees
         // it; ?registered=1 shows the registration-slip / check-in banner (Wave C).
         router.push(`/patients/${encodeURIComponent(res.data.id)}?registered=1`)

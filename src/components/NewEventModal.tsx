@@ -6,7 +6,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { VISIT_REASON_MAX_LENGTH } from '@/lib/notification-templates'
 import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
-import { istSlotString } from '@/lib/india-time'
+import { todayIsoIn } from '@/lib/india-time'
+import { SlotPicker, type SlotValue } from '@/components/scheduling/SlotPicker'
+import { defaultBookingDate } from '@/lib/scheduling/default-booking-date'
 
 interface ProviderOption {
   id: number
@@ -26,24 +28,27 @@ export function NewEventModal({ providers, defaultDate, onClose, initialPatient 
   const [patient, setPatient] = useState<PickedPatient | null>(initialPatient)
   const patientId = patient?.id ?? ''
   const [providerId, setProviderId] = useState<number | ''>('')
-  const [date, setDate] = useState(defaultDate)
-  const [startTime, setStartTime] = useState('09:00')
-  const [endTime, setEndTime] = useState('09:30')
+  // WS6 T7: never a past date; the time comes from the doctor's slots (or a typed time).
+  const [today] = useState(() => todayIsoIn())
+  const [date, setDate] = useState(() => defaultBookingDate(defaultDate, defaultDate, today))
+  const [slot, setSlot] = useState<SlotValue | null>(null)
   const [visitReason, setVisitReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function submit() {
+    if (!slot) return
     setSubmitting(true)
     setError(null)
     try {
       const res = await sendJson('/api/appointments', 'POST', {
         patientId,
         providerId,
-        // IST wall-clock time with an explicit offset; the server rejects naive times.
-        startsAt: istSlotString(date, startTime),
-        endsAt: istSlotString(date, endTime),
+        // Explicit-offset instants from the slot picker; the server rejects naive times.
+        startsAt: slot.startsAt,
+        endsAt: slot.endsAt,
         visitReason,
+        ...(slot.outsideHours ? { outsideHoursConfirmed: true } : {}),
       })
       if (res.ok) {
         router.refresh()
@@ -58,7 +63,7 @@ export function NewEventModal({ providers, defaultDate, onClose, initialPatient 
     }
   }
 
-  const canSubmit = Boolean(patientId) && providerId !== '' && Boolean(date) && Boolean(startTime) && Boolean(endTime) && Boolean(visitReason) && !submitting
+  const canSubmit = Boolean(patientId) && providerId !== '' && Boolean(date) && slot !== null && Boolean(visitReason) && !submitting
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -72,11 +77,8 @@ export function NewEventModal({ providers, defaultDate, onClose, initialPatient 
             <option value="">Select a doctor…</option>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <input value={date} onChange={(e) => setDate(e.target.value)} type="date" aria-label="Appointment date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-          <div className="flex gap-2">
-            <input value={startTime} onChange={(e) => setStartTime(e.target.value)} type="time" aria-label="Start time (IST)" className="w-1/2 rounded-md border border-border px-3 py-2 text-sm" />
-            <input value={endTime} onChange={(e) => setEndTime(e.target.value)} type="time" aria-label="End time (IST)" className="w-1/2 rounded-md border border-border px-3 py-2 text-sm" />
-          </div>
+          <input value={date} min={today} onChange={(e) => setDate(e.target.value)} type="date" aria-label="Appointment date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+          {providerId !== '' && date && <SlotPicker providerId={providerId} date={date} value={slot} onChange={setSlot} allowCustom />}
           <input value={visitReason} onChange={(e) => setVisitReason(e.target.value)} placeholder="Visit reason" maxLength={VISIT_REASON_MAX_LENGTH} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>

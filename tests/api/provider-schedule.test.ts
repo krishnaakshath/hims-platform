@@ -166,7 +166,7 @@ describe('GET /api/providers/[id]/slots', () => {
     const res = await slots(MONDAY)
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body).toMatchObject({ date: MONDAY, slotMinutes: 15, onLeave: false })
+    expect(body).toMatchObject({ date: MONDAY, slotMinutes: 15, onLeave: false, hoursSet: true })
     expect(body.slots).toHaveLength(16 + 8)
     expect(body.slots[0]).toEqual({ startsAt: new Date(`${MONDAY}T09:00:00+05:30`).toISOString(), endsAt: new Date(`${MONDAY}T09:15:00+05:30`).toISOString(), status: 'free' })
     const booked = body.slots.filter((s: { status: string }) => s.status === 'booked')
@@ -175,7 +175,19 @@ describe('GET /api/providers/[id]/slots', () => {
 
   it('returns no slots with onLeave on a leave day', async () => {
     const body = await (await slots(VALID.leave[0].date)).json()
-    expect(body).toEqual({ date: VALID.leave[0].date, slotMinutes: 15, onLeave: true, slots: [] })
+    expect(body).toEqual({ date: VALID.leave[0].date, slotMinutes: 15, onLeave: true, hoursSet: true, slots: [] })
+  })
+
+  // WS6 T7: the booking form tells "no hours this day" (needs confirming) from "no hours set up".
+  it('says whether any working hours are set up', async () => {
+    const tuesday = addDays(MONDAY, 1)
+    expect(await (await slots(tuesday)).json()).toMatchObject({ onLeave: false, hoursSet: true, slots: [] })
+    const [bare] = await getDb().insert(providers).values({ name: 'No Hours Probe', specialty: 'General Medicine', colorTag: 'chart-1' }).returning({ id: providers.id })
+    try {
+      expect(await (await slots(MONDAY, String(bare.id))).json()).toMatchObject({ onLeave: false, hoursSet: false, slots: [] })
+    } finally {
+      await getDb().delete(providers).where(eq(providers.id, bare.id))
+    }
   })
 
   it('400s a malformed date or one more than 90 days ahead; 404s an unknown provider; 403s a non-scheduling role', async () => {
