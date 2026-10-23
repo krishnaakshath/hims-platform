@@ -396,4 +396,6 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/billing/insurance-collections', load: () => import('@/app/(dashboard)/billing/insurance-collections/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/rcm/claims'])) },
   { route: '/billing/statements', load: () => import('@/app/(dashboard)/billing/statements/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/cash-desk'])) },
   // end Foundations T11
+  // WS1 T3: the consultation workspace -- WORKSPACE_READ_ROLES; labs goes to its worklist.
+  { route: '/encounters/[id]', load: () => import('@/app/(dashboard)/encounters/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'pi', 'crc'], deniedRedirect: { labs: '/labs' } },
 ]

@@ -19,6 +19,7 @@ vi.mock('@/lib/queries/lab-orders', () => ({ listWorklist: vi.fn(async () => [])
 vi.mock('@/lib/queries/form-submissions', () => ({ listFormSubmissions: vi.fn(async () => []) }))
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => null) }))
 // SP6: the "Coding queries for you" card; empty by default so no test reaches the DB.
+vi.mock('@/lib/queries/referrals', () => ({ listOpenReferralsToProvider: vi.fn(async () => []), providerDepartmentId: vi.fn(async () => null) })) // WS1 T4
 vi.mock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider: vi.fn(async () => []) }))
 // Wave E P1-02/P1-03: the doctor's own workload; empty by default (no DB).
 const EMPTY_WORKLOAD = { encountersToday: [], inpatients: [], resultsToVerify: [], labsAwaitingResult: 0, followUps: [], unsignedNotes: 0, draftNotes: [] }
@@ -258,7 +259,7 @@ describe('PI dashboard (/doctor)', () => {
     const { deadLinks } = await import('./dashboard-link-gates')
     const { container } = render(await Page())
     expect(screen.getByRole('heading', { name: /today's opd/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /opd patient/i })).toHaveAttribute('href', '/patients/RD-0005')
+    expect(screen.getByRole('link', { name: /opd patient/i })).toHaveAttribute('href', '/encounters/5') // WS1 T3: Today's OPD opens the workspace
     expect(screen.getByText('#12')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /my inpatients/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /ward patient/i })).toHaveAttribute('href', '/patients/RD-0003')

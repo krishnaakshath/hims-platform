@@ -46,7 +46,8 @@ describe('SP6 clinical coding schema', () => {
     expect(s).toMatch(/ADD COLUMN IF NOT EXISTS coding_status code_entry_status NOT NULL DEFAULT 'uncoded'/)
     // The legacy NOT NULL `code`/`description` columns are never altered.
     expect(s).not.toMatch(/ALTER COLUMN/i)
-    const legacy = getTableConfig(diagnoses).columns.filter((c) => !SP6_DIAGNOSIS_COLUMNS.includes(c.name)).map((c) => c.name)
+    // WS1 T4 adds on_problem_list in its own migration (2026-10-24-ws1-diagnoses-referrals.sql).
+    const legacy = getTableConfig(diagnoses).columns.filter((c) => !SP6_DIAGNOSIS_COLUMNS.includes(c.name) && c.name !== 'on_problem_list').map((c) => c.name)
     expect(legacy.sort()).toEqual(['code', 'date', 'description', 'id', 'patient_id'])
   })
 

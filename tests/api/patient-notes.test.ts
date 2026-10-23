@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { POST as createRoute } from '@/app/api/patients/[anonId]/notes/route'
 import { PUT as signRoute } from '@/app/api/patients/[anonId]/notes/[id]/sign/route'
 import { getDb } from '@/db/client'
-import { patients, providers, rooms, admissions, appointments, encounterNotes } from '@/db/schema'
+import { patients, providers, rooms, admissions, appointments, encounterNotes, signatures } from '@/db/schema'
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' = 'pi'
 let sessionName = 'Dr. R. Kunam'
@@ -16,11 +16,20 @@ const createdAppointmentIds: number[] = []
 afterEach(async () => {
   sessionRole = 'pi'
   sessionName = 'Dr. R. Kunam'
-  while (createdNoteIds.length > 0) await getDb().delete(encounterNotes).where(eq(encounterNotes.id, createdNoteIds.pop()!))
+  while (createdNoteIds.length > 0) {
+    const noteId = createdNoteIds.pop()!
+    await getDb().delete(signatures).where(and(eq(signatures.signableType, 'encounter_note'), eq(signatures.signableId, noteId)))
+    await getDb().delete(encounterNotes).where(eq(encounterNotes.id, noteId))
+  }
   while (createdAdmissionIds.length > 0) await getDb().delete(admissions).where(eq(admissions.id, createdAdmissionIds.pop()!))
   while (createdRoomIds.length > 0) await getDb().delete(rooms).where(eq(rooms.id, createdRoomIds.pop()!))
   while (createdAppointmentIds.length > 0) await getDb().delete(appointments).where(eq(appointments.id, createdAppointmentIds.pop()!))
 })
+
+// WS1 T5: signing needs the signer's typed name and the attestation (body-less PUT is 400).
+function signReq() {
+  return new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ typedName: sessionName, attestation: true }), headers: { 'Content-Type': 'application/json' } })
+}
 
 function req(body: unknown) {
   return new Request('http://localhost', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } })
@@ -97,7 +106,7 @@ describe('PUT /api/patients/[anonId]/notes/[id]/sign', () => {
     const created = await createRes.json()
     createdNoteIds.push(created.id)
 
-    const signRes = await signRoute(new Request('http://localhost', { method: 'PUT' }) as never, { params: Promise.resolve({ anonId: patientRow.id, id: String(created.id) }) })
+    const signRes = await signRoute(signReq() as never, { params: Promise.resolve({ anonId: patientRow.id, id: String(created.id) }) })
     expect(signRes.status).toBe(200)
   })
 
@@ -108,7 +117,7 @@ describe('PUT /api/patients/[anonId]/notes/[id]/sign', () => {
     createdNoteIds.push(created.id)
 
     sessionName = 'A Different Doctor'
-    const signRes = await signRoute(new Request('http://localhost', { method: 'PUT' }) as never, { params: Promise.resolve({ anonId: patientRow.id, id: String(created.id) }) })
+    const signRes = await signRoute(signReq() as never, { params: Promise.resolve({ anonId: patientRow.id, id: String(created.id) }) })
     expect(signRes.status).toBe(403)
   })
 
@@ -118,10 +127,10 @@ describe('PUT /api/patients/[anonId]/notes/[id]/sign', () => {
     const created = await createRes.json()
     createdNoteIds.push(created.id)
 
-    const firstSign = await signRoute(new Request('http://localhost', { method: 'PUT' }) as never, { params: Promise.resolve({ anonId: patientRow.id, id: String(created.id) }) })
+    const firstSign = await signRoute(signReq() as never, { params: Promise.resolve({ anonId: patientRow.id, id: String(created.id) }) })
     expect(firstSign.status).toBe(200)
 
-    const secondSign = await signRoute(new Request('http://localhost', { method: 'PUT' }) as never, { params: Promise.resolve({ anonId: patientRow.id, id: String(created.id) }) })
+    const secondSign = await signRoute(signReq() as never, { params: Promise.resolve({ anonId: patientRow.id, id: String(created.id) }) })
     expect(secondSign.status).toBe(409)
   })
 
@@ -136,7 +145,7 @@ describe('PUT /api/patients/[anonId]/notes/[id]/sign', () => {
     createdNoteIds.push(created.id)
 
     // Attempt to sign patientA's note via patientB's URL.
-    const signRes = await signRoute(new Request('http://localhost', { method: 'PUT' }) as never, { params: Promise.resolve({ anonId: patientB.id, id: String(created.id) }) })
+    const signRes = await signRoute(signReq() as never, { params: Promise.resolve({ anonId: patientB.id, id: String(created.id) }) })
     expect(signRes.status).toBe(404)
 
     const [noteRow] = await getDb().select().from(encounterNotes).where(eq(encounterNotes.id, created.id))

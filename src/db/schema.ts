@@ -1,5 +1,6 @@
 import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, unique, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
+import { smallint } from 'drizzle-orm/pg-core' // WS1 T2
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
@@ -194,6 +195,7 @@ export const diagnoses = pgTable('diagnoses', {
   createdByName: text('created_by_name'),
   createdAt: timestamp('created_at'),
   // end SP6
+  onProblemList: boolean('on_problem_list').default(false).notNull(), // WS1 T4
 }, (t) => [
   // SP6
   index('diagnoses_encounter_id_idx').on(t.encounterId),
@@ -2111,7 +2113,10 @@ export const encounterNotes = pgTable('encounter_notes', {
   status: noteStatusEnum('status').default('draft').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   signedAt: timestamp('signed_at'),
-})
+  encounterId: integer('encounter_id').references(() => encounters.id), // WS1 T5 (the visit the note was written in)
+}, (t) => [
+  index('encounter_notes_encounter_idx').on(t.encounterId), // WS1 T5
+])
 
 // WS1 T1: + encounter_note (scripts/migrations/2026-10-24-ws1-0-enum-values.sql).
 export const signableTypeEnum = pgEnum('signable_type', ['form_submission', 'admission_discharge', 'policy_acceptance', 'form_submission_consent', 'encounter_note'])
@@ -2800,3 +2805,93 @@ export type NotificationLogRow = typeof notificationLog.$inferSelect
 export type NotificationTemplateConfigRow = typeof notificationTemplateConfig.$inferSelect
 export type PatientNotificationPreferencesRow = typeof patientNotificationPreferences.$inferSelect
 // end Foundations T8
+
+// WS1 T2: vitals and the consultation record, both per encounter. encounter_vitals is the ONE
+// vitals table for the product (lane ruling R1; IPD nursing reuses it). Values are integers in
+// base units (mmHg, bpm, deci-degrees C, %, per minute, grams, millimetres).
+export const encounterVitals = pgTable('encounter_vitals', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  recordedAt: timestamp('recorded_at').defaultNow().notNull(),
+  recordedByName: text('recorded_by_name').notNull(),
+  recordedByUserId: integer('recorded_by_user_id').references(() => users.id),
+  systolicMmhg: integer('systolic_mmhg'),
+  diastolicMmhg: integer('diastolic_mmhg'),
+  pulseBpm: integer('pulse_bpm'),
+  tempDeciC: integer('temp_deci_c'),
+  spo2Pct: integer('spo2_pct'),
+  respRate: integer('resp_rate'),
+  weightG: integer('weight_g'),
+  heightMm: integer('height_mm'),
+  painScore: smallint('pain_score'),
+  notes: text('notes'),
+}, (t) => [
+  index('encounter_vitals_encounter_idx').on(t.encounterId),
+  check('encounter_vitals_systolic_range', sql`${t.systolicMmhg} IS NULL OR ${t.systolicMmhg} BETWEEN 50 AND 300`),
+  check('encounter_vitals_diastolic_range', sql`${t.diastolicMmhg} IS NULL OR ${t.diastolicMmhg} BETWEEN 20 AND 200`),
+  check('encounter_vitals_pulse_range', sql`${t.pulseBpm} IS NULL OR ${t.pulseBpm} BETWEEN 20 AND 250`),
+  check('encounter_vitals_temp_range', sql`${t.tempDeciC} IS NULL OR ${t.tempDeciC} BETWEEN 300 AND 450`),
+  check('encounter_vitals_spo2_range', sql`${t.spo2Pct} IS NULL OR ${t.spo2Pct} BETWEEN 50 AND 100`),
+  check('encounter_vitals_resp_range', sql`${t.respRate} IS NULL OR ${t.respRate} BETWEEN 4 AND 80`),
+  check('encounter_vitals_weight_range', sql`${t.weightG} IS NULL OR ${t.weightG} BETWEEN 300 AND 400000`),
+  check('encounter_vitals_height_range', sql`${t.heightMm} IS NULL OR ${t.heightMm} BETWEEN 300 AND 2500`),
+  check('encounter_vitals_pain_range', sql`${t.painScore} IS NULL OR ${t.painScore} BETWEEN 0 AND 10`),
+  check('encounter_vitals_notes_len', sql`${t.notes} IS NULL OR char_length(${t.notes}) <= 300`),
+  check('encounter_vitals_bp_order', sql`${t.systolicMmhg} IS NULL OR ${t.diastolicMmhg} IS NULL OR ${t.diastolicMmhg} < ${t.systolicMmhg}`),
+  check('encounter_vitals_any_measurement', sql`num_nonnulls(${t.systolicMmhg}, ${t.diastolicMmhg}, ${t.pulseBpm}, ${t.tempDeciC}, ${t.spo2Pct}, ${t.respRate}, ${t.weightG}, ${t.heightMm}, ${t.painScore}) > 0`),
+])
+
+export const encounterConsults = pgTable('encounter_consults', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().unique().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  chiefComplaint: text('chief_complaint'),
+  historyPresentIllness: text('history_present_illness'),
+  pastHistory: text('past_history'),
+  familyHistory: text('family_history'),
+  personalHistory: text('personal_history'),
+  examination: text('examination'),
+  advice: text('advice'),
+  noDiagnosisReason: text('no_diagnosis_reason'),
+  updatedAt: timestamp('updated_at').notNull(),
+  updatedByName: text('updated_by_name').notNull(),
+}, (t) => [
+  check('encounter_consults_text_len', sql`coalesce(char_length(${t.chiefComplaint}), 0) <= 4000 AND coalesce(char_length(${t.historyPresentIllness}), 0) <= 4000 AND coalesce(char_length(${t.pastHistory}), 0) <= 4000 AND coalesce(char_length(${t.familyHistory}), 0) <= 4000 AND coalesce(char_length(${t.personalHistory}), 0) <= 4000 AND coalesce(char_length(${t.examination}), 0) <= 4000 AND coalesce(char_length(${t.advice}), 0) <= 4000`),
+  check('encounter_consults_reason_len', sql`${t.noDiagnosisReason} IS NULL OR char_length(${t.noDiagnosisReason}) <= 300`),
+])
+
+export type EncounterVitalsRow = typeof encounterVitals.$inferSelect
+export type EncounterConsultRow = typeof encounterConsults.$inferSelect
+// end WS1 T2
+
+// WS1 T4: referrals written from the consultation workspace. Internal referrals name a department
+// and/or a doctor; external ones name a facility. The reason is clinical text (never audited).
+export const referrals = pgTable('referrals', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  kind: text('kind', { enum: ['internal', 'external'] }).notNull(),
+  toDepartmentId: integer('to_department_id').references(() => departments.id),
+  toProviderId: integer('to_provider_id').references(() => providers.id),
+  externalFacility: text('external_facility'),
+  externalDoctor: text('external_doctor'),
+  reason: text('reason').notNull(),
+  urgency: text('urgency', { enum: ['routine', 'urgent', 'emergency'] }).notNull(),
+  status: text('status', { enum: ['open', 'seen', 'closed'] }).default('open').notNull(),
+  createdByName: text('created_by_name').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('referrals_encounter_idx').on(t.encounterId),
+  index('referrals_to_provider_open_idx').on(t.toProviderId).where(sql`${t.status} = 'open'`),
+  index('referrals_to_department_open_idx').on(t.toDepartmentId).where(sql`${t.status} = 'open'`),
+  check('referrals_kind_valid', sql`${t.kind} IN ('internal', 'external')`),
+  check('referrals_urgency_valid', sql`${t.urgency} IN ('routine', 'urgent', 'emergency')`),
+  check('referrals_status_valid', sql`${t.status} IN ('open', 'seen', 'closed')`),
+  check('referrals_target', sql`(${t.kind} = 'internal' AND (${t.toDepartmentId} IS NOT NULL OR ${t.toProviderId} IS NOT NULL)) OR (${t.kind} = 'external' AND ${t.externalFacility} IS NOT NULL)`),
+  check('referrals_text_len', sql`char_length(${t.reason}) <= 1000 AND coalesce(char_length(${t.externalFacility}), 0) <= 200 AND coalesce(char_length(${t.externalDoctor}), 0) <= 120`),
+])
+
+export type ReferralRow = typeof referrals.$inferSelect
+// end WS1 T4

@@ -23,7 +23,7 @@ import {
   bookingRequests, // Wave J
   payers,
 } from '@/db/schema'
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
@@ -31,6 +31,8 @@ import type { Verdict } from '@/lib/rule-engine'
 import type { ChargeStatus } from '@/lib/charge-status'
 import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
 import { publicPatientColumns, patientPortalConfiguredSql, type PublicPatientRow } from '@/lib/queries/patient-columns'
+import { encounterVitals, encounterConsults } from '@/db/schema' // WS1 T2
+import { referrals } from '@/db/schema' // WS1 T4
 import { logAudit } from '@/lib/audit'
 import { lockPatientBilling } from './charge-capture' // SP4
 import type { Session } from '@/lib/auth'
@@ -192,7 +194,7 @@ export async function getPatientDetail(anonId: string) {
     const criteria = screening ? await getDb().select().from(screeningCriteriaResults).where(eq(screeningCriteriaResults.screeningId, screening.id)) : []
     const dx = await getDb().select().from(diagnoses).where(and(eq(diagnoses.patientId, anonId), liveDiagnosis)) // SP6: voided rows hidden
     const meds = await getDb().select().from(medicationEpisodes).where(eq(medicationEpisodes.patientId, anonId))
-    const patientAllergies = await getDb().select().from(allergies).where(eq(allergies.patientId, anonId))
+    const patientAllergies = await getDb().select().from(allergies).where(and(eq(allergies.patientId, anonId), isNull(allergies.inactivatedAt))) // WS1 T4: active only
     // Project down to only what callers need. The full row includes
     // `idNumberEncrypted` (encrypted ciphertext of the ID number) and the
     // internal `id`/`patientId` keys -- never decrypted here, but there's no
@@ -546,6 +548,14 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   if (await hasFinancialRecords(db, anonId)) throw new PatientHasFinancialRecordsError()
   if (await hasRetainedClaimRecords(db, anonId)) throw new PatientHasFinancialRecordsError() // SP7
   if (await hasNhcxExchanges(db, anonId)) throw new PatientHasFinancialRecordsError() // SP8
+
+  // WS1 T2: vitals and the consultation record reference encounters and patients.
+  await db.delete(encounterVitals).where(eq(encounterVitals.patientId, anonId))
+  await db.delete(encounterConsults).where(eq(encounterConsults.patientId, anonId))
+  // end WS1 T2
+  // WS1 T4: referrals reference encounters and patients.
+  await db.delete(referrals).where(eq(referrals.patientId, anonId))
+  // end WS1 T4
 
   // SP8, before the SP7 deletes (eligibility checks reference policies; exchanges reference
   // claims, pre-auths and policies). abdm_consents is append-only, so the purge setting is on for
