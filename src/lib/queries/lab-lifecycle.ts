@@ -13,7 +13,11 @@
 //   3. the per-IST-date sample-sequence advisory lock (allocateSampleId)
 //   4. home_collection_visits row, `for update` (cancelLabOrder only)
 //   5. the patient billing lock, then the order's charge line `for update` (cancelLabOrder only, WS2 T10)
-//   6. encounters (not taken here)
+// WS2 T10: a visit cancel (transitionEncounter) cancels the visit's pending orders through
+// cancelLabOrderInTx, locking in the order follow-up -> encounter -> lab orders -> home visits ->
+// billing. The encounter comes first, and the order and home-visit rows are taken before the
+// billing lock, so it never waits on a row while holding the billing lock. No path in this file
+// locks an encounter.
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { chargeLines, homeCollectionVisits, labOrders, labResults, type LabOrderRow } from '@/db/schema'

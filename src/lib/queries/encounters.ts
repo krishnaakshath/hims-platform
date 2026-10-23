@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { admissions, appointments, departments, doctorAssignments, encounters, followUpOrders, labOrders, labRequisitions, providers, type EncounterRow } from '@/db/schema'
+import { admissions, appointments, departments, doctorAssignments, encounters, followUpOrders, homeCollectionVisits, labOrders, labRequisitions, providers, type EncounterRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { istDateOf, startOfIstDay } from '@/lib/india-time'
@@ -175,8 +175,10 @@ export type TransitionEncounterResult =
  * WS2 T9: completing an OPD visit captures its consultation if still missing (`charges`);
  * cancelling voids its consultation and lab-order lines and its registration line (WS2 T10: moved
  * to another live visit of the patient instead, when there is one), and is refused (`visit_billed`,
- * nothing changed) while one of them is on a finalised invoice. Lock order: follow-up orders ->
- * encounter -> patient billing lock (last).
+ * nothing changed) while one of them is on a finalised invoice. WS2 T10: cancelling also cancels the
+ * visit's pending lab orders, and is refused (`visit_has_performed_orders`, nothing changed) when one
+ * is collected or later. Lock order: follow-up orders -> encounter -> lab orders (ascending id) ->
+ * their home collection visits (ascending id) -> patient billing lock (last).
  */
 export async function transitionEncounter(
   id: number,
@@ -202,18 +204,24 @@ export async function transitionEncounter(
       const [adm] = await tx.select({ status: admissions.status }).from(admissions).where(eq(admissions.id, current.admissionId))
       if (adm?.status === 'admitted') return { ok: false, error: 'admission_active' }
     }
-    // WS2 T10 (fix round 1): the visit's lab orders, locked before the billing lock (lab lifecycle
-    // lock order: order rows, home visit, billing). A sample already taken (collected or later)
-    // means the test was performed: the visit cannot be cancelled. Checked before any write.
+    // WS2 T10: the visit's lab orders, then their home visits, are locked before the billing lock
+    // (the lab lifecycle order: order rows, home visit, billing). A sample already taken (collected
+    // or later) means the test was performed: the visit cannot be cancelled. Checked before any write.
     const pendingOrders: number[] = []
     if (to === 'cancelled') {
-      const visitOrders = await tx.select({ id: labOrders.id, status: labOrders.status }).from(labOrders)
+      const visitOrders = await tx.select({ id: labOrders.id, status: labOrders.status, homeVisitId: labOrders.homeCollectionVisitId }).from(labOrders)
         .innerJoin(labRequisitions, eq(labRequisitions.id, labOrders.requisitionId))
         .where(and(eq(labRequisitions.originatingEncounterId, id), ne(labOrders.status, 'cancelled')))
         .orderBy(asc(labOrders.id))
         .for('update', { of: labOrders })
       if (visitOrders.some((o) => !LAB_PENDING_STATUSES.includes(o.status))) return { ok: false, error: 'visit_has_performed_orders' }
       pendingOrders.push(...visitOrders.map((o) => o.id))
+      // Fix round 2: the pending orders' home visits, ascending id, before voidAutoLines takes the billing lock.
+      const homeVisitIds = [...new Set(visitOrders.map((o) => o.homeVisitId).filter((v): v is number => v !== null))].sort((a, b) => a - b)
+      if (homeVisitIds.length > 0) {
+        await tx.select({ id: homeCollectionVisits.id }).from(homeCollectionVisits)
+          .where(inArray(homeCollectionVisits.id, homeVisitIds)).orderBy(asc(homeCollectionVisits.id)).for('update')
+      }
     }
     // WS2 T9: refuse the cancel before any write when a visit charge is already invoiced.
     if (to === 'cancelled') {

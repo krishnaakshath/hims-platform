@@ -21,7 +21,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
   const PIN = `9${String(Math.floor(Math.random() * 1e5)).padStart(5, '0')}`
   const doctor: Session = { role: 'admin', name: `TEST-WS2T10-${RUN}-dr`, userId: null }
   const billing: Session = { role: 'billing', name: `TEST-WS2T10-${RUN}-billing`, userId: null }
-  const fx = { dep: 0, prov: 0, prov2: 0, svcA: 0, svcB: 0, svcImg: 0, payerId: 0, tA: 0, tB: 0, tFast: 0, tImg: 0, pinId: 0, rateIds: [] as number[] }
+  const fx = { dep: 0, prov: 0, prov2: 0, svcA: 0, svcB: 0, svcImg: 0, payerId: 0, tA: 0, tB: 0, tFast: 0, tImg: 0, pinId: 0, windowId: 0, rateIds: [] as number[] }
   const PIDS: string[] = []
   let savedSettings: Record<string, unknown> | null = null
   let seq = 0
@@ -109,12 +109,13 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
   })
 
   async function purgeOrders() {
-    const { getDb, labOrders, labRequisitions, encounters, admissions, inArray } = await m()
+    const { getDb, labOrders, labRequisitions, encounters, admissions, homeCollectionVisits, inArray } = await m()
     const { purgeBillingFixtures } = await import('../db/billing-fixtures')
     await purgeBillingFixtures([...PIDS])
     if (PIDS.length === 0) return
     const db = getDb()
     await db.delete(labOrders).where(inArray(labOrders.patientId, PIDS))
+    await db.delete(homeCollectionVisits).where(inArray(homeCollectionVisits.patientId, PIDS))
     await db.delete(labRequisitions).where(inArray(labRequisitions.patientId, PIDS))
     await db.delete(encounters).where(inArray(encounters.patientId, PIDS))
     await db.delete(admissions).where(inArray(admissions.patientId, PIDS))
@@ -127,7 +128,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
   })
 
   afterAll(async () => {
-    const { getDb, departments, providers, serviceCatalog, tariffRates, patients, payers, billingSettings, auditLog, labTests, labServiceAreaPins, eq, inArray, or } = await m()
+    const { getDb, departments, providers, serviceCatalog, tariffRates, patients, payers, billingSettings, auditLog, labTests, labServiceAreaPins, homeCollectionWindows, eq, inArray, or } = await m()
     const db = getDb()
     await purgeOrders()
     if (savedSettings) await db.update(billingSettings).set(savedSettings).where(eq(billingSettings.id, 1))
@@ -136,6 +137,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
       await db.delete(patients).where(inArray(patients.id, PIDS))
     }
     await db.delete(labServiceAreaPins).where(eq(labServiceAreaPins.id, fx.pinId))
+    if (fx.windowId) await db.delete(homeCollectionWindows).where(eq(homeCollectionWindows.id, fx.windowId))
     await db.delete(labTests).where(inArray(labTests.id, [fx.tA, fx.tB, fx.tFast, fx.tImg]))
     await db.delete(tariffRates).where(inArray(tariffRates.id, fx.rateIds))
     await db.delete(serviceCatalog).where(inArray(serviceCatalog.id, [fx.svcA, fx.svcB, fx.svcImg]))
@@ -311,6 +313,74 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
       ])
     })
 
+    // Fix round 2: a pending order booked on a home visit; the visit rows are locked before the billing lock.
+    async function homeVisitFor(pid: string, orderId: number) {
+      const { getDb, homeCollectionWindows, homeCollectionVisits, labOrders, eq } = await m()
+      const db = getDb()
+      if (!fx.windowId) {
+        const [w] = await db.insert(homeCollectionWindows).values({ label: `T10 ${RUN}`, startTime: '07:00', endTime: '09:00', capacity: 5 }).returning()
+        fx.windowId = w.id
+      }
+      const [v] = await db.insert(homeCollectionVisits).values({
+        patientId: pid, visitDate: '2099-07-02', windowId: fx.windowId, windowLabel: 'Morning', windowStart: '07:00', windowEnd: '09:00',
+        addressLine1: '1 Test Street', city: 'Pune', stateCode: 'IN-MH', pinCode: '411001', contactPhone: '+919999999999', bookedByName: doctor.name,
+      } as never).returning()
+      await db.update(labOrders).set({ status: 'scheduled', homeCollectionVisitId: v.id }).where(eq(labOrders.id, orderId))
+      return v.id
+    }
+
+    it('cancelling a visit whose pending order is booked for home collection cancels the order and the emptied home visit', async () => {
+      const pid = await newPatient()
+      const e = await opdEncounter(pid)
+      const r = await order({ patientId: pid, originatingEncounterId: e.id })
+      const visitId = await homeVisitFor(pid, r.lines[0].orderId)
+      const { enc, getDb, homeCollectionVisits, eq } = await m()
+      const c = await enc.transitionEncounter(e.id, 'cancelled', doctor, { cancelReason: 'Left', now: LATER })
+      expect(c.ok).toBe(true)
+      expect((await ordersOf(r.requisition.id)).map((o) => [o.status, o.homeCollectionVisitId])).toEqual([['cancelled', null], ['cancelled', null]])
+      const [v] = await getDb().select().from(homeCollectionVisits).where(eq(homeCollectionVisits.id, visitId))
+      expect([v.status, v.cancelReason]).toEqual(['cancelled', 'tests_cancelled'])
+      expect((await linesOf(pid)).map((l) => l.status)).toEqual(['void', 'void'])
+    })
+
+    it('lock order: the home visit row is locked before the patient billing lock (follow-up, encounter, lab orders, home visits, billing)', async () => {
+      const pid = await newPatient()
+      const e = await opdEncounter(pid)
+      const r = await order({ patientId: pid, originatingEncounterId: e.id })
+      const visitId = await homeVisitFor(pid, r.lines[0].orderId)
+      const { enc, getDb, sql } = await m()
+      const db = getDb()
+      let release!: () => void
+      const gate = new Promise<void>((res) => { release = res })
+      let held!: () => void
+      const holding = new Promise<void>((res) => { held = res })
+      // Another transaction holds the patient's billing lock.
+      const holder = db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`billing:patient:${pid}`}))`)
+        held()
+        await gate
+      })
+      await holding
+      const cancel = enc.transitionEncounter(e.id, 'cancelled', doctor, { cancelReason: 'Left', now: LATER })
+      for (let i = 0; i < 200; i++) {
+        const res = await db.execute(sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and wait_event = 'advisory'`)
+        if (Number((res as unknown as { rows: { n: number }[] }).rows[0].n) > 0) break
+        await new Promise((res) => setTimeout(res, 25))
+      }
+      // The cancel now waits on the billing lock; it must already hold the home visit row.
+      let nowait: string | null = null
+      try {
+        await db.transaction(async (tx) => { await tx.execute(sql`select id from home_collection_visits where id = ${visitId} for update nowait`) })
+      } catch (err) {
+        const { pgErrorCode } = await import('@/lib/db-errors')
+        nowait = pgErrorCode(err)
+      }
+      release()
+      await holder
+      expect((await cancel).ok).toBe(true)
+      expect(nowait).toBe('55P03')
+    })
+
     it('a visit with a collected order cannot be cancelled (visit_has_performed_orders) and nothing changes', async () => {
       const pid = await newPatient()
       const e = await opdEncounter(pid)
@@ -324,6 +394,12 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
       expect([after.status, after.cancelReason]).toEqual(['checked_in', null])
       expect((await ordersOf(r.requisition.id)).map((o) => o.status)).toEqual(['collected', 'ordered'])
       expect((await linesOf(pid)).map((l) => l.status)).toEqual(['captured', 'captured'])
+      // Fix round 2: the status route answers 409 with a plain message and the code.
+      role = 'admin'
+      const { POST } = await import('@/app/api/encounters/[id]/status/route')
+      const res = await POST(new Request('http://localhost', { method: 'POST', body: JSON.stringify({ to: 'cancelled', cancelReason: 'Left' }) }) as never, { params: Promise.resolve({ id: String(e.id) }) })
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'A sample has already been collected for this visit; it cannot be cancelled.', code: 'visit_has_performed_orders' })
     })
 
     it('a lab line on a finalised invoice blocks the visit cancel (visit_billed) and changes nothing', async () => {
