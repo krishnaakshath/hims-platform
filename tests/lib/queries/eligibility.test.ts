@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patientTrialScreenings, messages, trials } from '@/db/schema'
-import { confirmScreeningSelection, regenerateScreeningCriteria, SYSTEM_SENDER_NAME } from '@/lib/queries/eligibility'
+import { confirmScreeningSelection, regenerateScreeningCriteria, systemSenderName } from '@/lib/queries/eligibility'
 import { listMessagesForPatient } from '@/lib/queries/messages'
 
 const PATIENT = 'RD-0003'
@@ -71,7 +71,7 @@ describe('confirmScreeningSelection', () => {
     const created = after.find((m) => !before.some((b) => b.id === m.id))
     expect(created).toBeTruthy()
     expect(created!.senderRole).toBe('system')
-    expect(created!.senderName).toBe(SYSTEM_SENDER_NAME)
+    expect(created!.senderName).toBe(await systemSenderName())
 
     const [trial] = await getDb().select().from(trials).where(eq(trials.id, original.trialId))
     expect(created!.body).toContain(trial.name)
@@ -90,7 +90,7 @@ describe('confirmScreeningSelection', () => {
 
     const after = await listMessagesForPatient(PATIENT)
     const created = after.find((m) => !before.some((b) => b.id === m.id))
-    expect(created!.senderName).toBe(SYSTEM_SENDER_NAME)
+    expect(created!.senderName).toBe(await systemSenderName())
     expect(created!.senderName).not.toBe('Dr. Rajiv Kunam')
   })
 

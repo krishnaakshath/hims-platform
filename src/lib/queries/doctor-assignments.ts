@@ -4,7 +4,7 @@ import { and, asc, desc, eq, getTableColumns, gte, isNull, lt, sql } from 'drizz
 import { istDayBounds } from '@/lib/india-time'
 import { hasSchedulingConflict, lockProviderSchedule } from './appointments'
 import { sendMessage } from './messages'
-import { SYSTEM_SENDER_NAME } from './eligibility'
+import { systemSenderName } from './eligibility'
 import { buildVisitConfirmationBody } from '@/lib/notification-templates'
 
 // Assignments are created only by checkInVisit (src/lib/queries/encounters.ts),
@@ -178,6 +178,8 @@ export async function notifyPatientOfScheduledAssignment(
   appointment: typeof appointments.$inferSelect,
   providerName: string,
 ): Promise<void> {
+  // Resolved before the transaction so the brand read never runs inside it.
+  const senderName = await systemSenderName()
   await getDb().transaction(async (tx) => {
     const claimed = await tx
       .update(doctorAssignments)
@@ -192,6 +194,6 @@ export async function notifyPatientOfScheduledAssignment(
       visitReason: appointment.visitReason,
       visitType: assignment.visitType,
     })
-    await sendMessage(assignment.patientId, 'system', SYSTEM_SENDER_NAME, body, false, tx)
+    await sendMessage(assignment.patientId, 'system', senderName, body, false, tx)
   })
 }

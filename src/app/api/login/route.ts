@@ -5,6 +5,7 @@ import type { Role } from '@/lib/auth'
 import { setSessionCookie } from '@/lib/auth'
 import { encryptSensitive } from '@/lib/crypto'
 import { generateMfaEnrollment } from '@/lib/mfa'
+import { getBrand } from '@/lib/brand-server'
 import { setPendingStaffMfaCookie } from '@/lib/mfa-pending-session'
 import { verifyPassword } from '@/lib/password'
 import { checkLoginRateLimit } from '@/lib/rate-limit'
@@ -116,7 +117,7 @@ async function startStaffMfaChallenge({ role, name, userId, ip, mfaMethod, phone
 
   const mfaState = userId === null ? await getAdminMfaState() : await getUserMfaState(userId)
   if (!mfaState || !mfaState.mfaEnabled) {
-    const enrollment = await generateMfaEnrollment(`${name} <${role}>`)
+    const enrollment = await generateMfaEnrollment(`${name} <${role}>`, (await getBrand()).mfaIssuer)
     if (userId === null) await setAdminMfaSecret(encryptSensitive(enrollment.secretBase32))
     else await setUserMfaSecret(userId, encryptSensitive(enrollment.secretBase32))
     await setPendingStaffMfaCookie({ role, name, mode: 'enroll', userId, method: 'totp' })

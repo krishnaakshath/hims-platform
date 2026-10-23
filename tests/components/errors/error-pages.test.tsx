@@ -9,7 +9,7 @@ import GlobalError from '@/app/global-error'
 import NotFound from '@/app/not-found'
 import DashboardError from '@/app/(dashboard)/error'
 import PortalError from '@/app/patient-portal/error'
-import { brand } from '@/lib/brand'
+import { envBrand } from '@/lib/brand'
 
 const secret = Object.assign(new Error('relation "patients" does not exist at /srv/app.js:12'), { digest: 'abc123' })
 
@@ -49,7 +49,7 @@ describe('global-error', () => {
     expect(html).toMatch(/Go to dashboard/)
     expect(html).toContain('abc123')
     expect(html).not.toContain('relation')
-    if (brand.name) expect(html).not.toContain(brand.name)
+    if (envBrand.name) expect(html).not.toContain(envBrand.name)
   })
 })
 
@@ -58,6 +58,6 @@ describe('not-found', () => {
     render(<NotFound />)
     expect(screen.getByRole('heading', { name: /page not found/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /go to dashboard/i })).toHaveAttribute('href', '/')
-    if (brand.name) expect(document.body.textContent).not.toContain(brand.name)
+    if (envBrand.name) expect(document.body.textContent).not.toContain(envBrand.name)
   })
 })

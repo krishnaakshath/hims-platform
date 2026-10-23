@@ -327,9 +327,6 @@ function loadFromProcessEnv(): Brand {
  */
 export const envBrand: Brand = loadFromProcessEnv()
 
-/** @deprecated The env layer only; use `await getBrand()`, or `envBrand` for the env layer. Removed in WL Task 10. */
-export const brand: Brand = envBrand
-
 /**
  * The ONE place cookie names come from. proxy.ts, auth.ts, patient-session.ts
  * and mfa-pending-session.ts must all use this -- a mismatch between the

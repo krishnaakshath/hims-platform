@@ -225,7 +225,7 @@ describe('module-level brand from process.env', () => {
     const mod = await import('@/lib/brand')
     expect(mod.envBrand.name).toBe('Acme Health')
     expect(mod.envBrand.primaryColor).toBeNull()
-    expect(mod.brand).toBe(mod.envBrand)
+    expect('brand' in mod).toBe(false) // WL T10: the deprecated sync alias is gone
     expect(mod.cookieName('session')).toBe('acme_session')
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('BRAND_PRIMARY_COLOR'))
     expect(warn.mock.calls.flat().join(' ')).not.toContain('not-a-colour')

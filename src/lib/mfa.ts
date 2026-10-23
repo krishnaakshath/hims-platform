@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto'
 import * as OTPAuth from 'otpauth'
 import QRCode from 'qrcode'
 import { getRedis } from '@/lib/cache'
-import { brand } from '@/lib/brand'
 
-const ISSUER = brand.mfaIssuer
+// Spec D15: the issuer (the authenticator app's label) is resolved by the caller at enrolment from
+// `(await getBrand()).mfaIssuer`. Verification never depends on it: a TOTP code is a function of the
+// secret and the time step only, so entries enrolled under an earlier brand name keep working.
+const VERIFY_LABEL = 'verify'
 
 export interface MfaEnrollment {
   secretBase32: string
@@ -15,9 +17,9 @@ export interface MfaEnrollment {
 // secret in plaintext base32 -- callers are responsible for encrypting it
 // with lib/crypto.ts before it ever reaches a database row; this module
 // never touches storage.
-export async function generateMfaEnrollment(accountLabel: string): Promise<MfaEnrollment> {
+export async function generateMfaEnrollment(accountLabel: string, issuer: string): Promise<MfaEnrollment> {
   const secret = new OTPAuth.Secret({ size: 20 })
-  const totp = new OTPAuth.TOTP({ issuer: ISSUER, label: accountLabel, algorithm: 'SHA1', digits: 6, period: 30, secret })
+  const totp = new OTPAuth.TOTP({ issuer, label: accountLabel, algorithm: 'SHA1', digits: 6, period: 30, secret })
   const qrDataUrl = await QRCode.toDataURL(totp.toString())
   return { secretBase32: secret.base32, qrDataUrl }
 }
@@ -52,7 +54,7 @@ const USED_CODE_TTL_SECONDS = 120
 // Redis is unreachable this throws rather than accepting an unverifiable
 // code.
 export async function verifyMfaCode(secretBase32: string, code: string, identity: string): Promise<boolean> {
-  const totp = new OTPAuth.TOTP({ issuer: ISSUER, label: 'verify', algorithm: 'SHA1', digits: 6, period: PERIOD_SECONDS, secret: secretBase32 })
+  const totp = new OTPAuth.TOTP({ label: VERIFY_LABEL, algorithm: 'SHA1', digits: 6, period: PERIOD_SECONDS, secret: secretBase32 })
   // One timestamp for both the check and the step math, so a request that
   // straddles a 30s boundary can't validate against one step and record
   // another.
