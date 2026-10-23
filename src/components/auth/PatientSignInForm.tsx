@@ -6,21 +6,13 @@ import { PortalOtpSignIn } from '@/components/portal/PortalOtpSignIn' // Wave J
 import { FloatingField } from '@/components/auth/FloatingField'
 import { PasswordField } from '@/components/auth/PasswordField'
 import { SubmitButton } from '@/components/auth/SubmitButton'
-import { DESIGN_STYLES, rise, type Design } from '@/components/auth/auth-styles'
+import { BADGE as s, rise } from '@/components/auth/auth-styles'
 import { sendJson } from '@/lib/client-fetch'
 
 // Patient portal sign-in: email or patient ID + password, or a code sent to
 // the mobile on file (Wave J, P1-20), then TOTP when the account has it.
-const STEP_WRAP: Record<Design, string> = {
-  // MFA / OTP steps use the neutral surface; on the dark immersive field they
-  // sit on a card so their text keeps AA contrast.
-  a: 'rounded-xl bg-card p-5 text-card-foreground sm:p-6',
-  b: '',
-  c: 'max-w-[440px]',
-}
 
-export function PatientSignInForm({ design = 'a', below }: { design?: Design; below?: React.ReactNode }) {
-  const s = DESIGN_STYLES[design]
+export function PatientSignInForm({ below }: { below?: React.ReactNode }) {
   const router = useRouter()
   const [patientId, setPatientId] = useState('')
   const [password, setPassword] = useState('')
@@ -62,7 +54,7 @@ export function PatientSignInForm({ design = 'a', below }: { design?: Design; be
 
   if (needsMfa) {
     return (
-      <div className={`auth-rise ${STEP_WRAP[design]}`} style={rise(0)}>
+      <div className="auth-rise" style={rise(0)}>
         <MfaCodeStep
           title="Enter your code"
           description="Open your authenticator app and enter the current 6-digit code."
@@ -74,7 +66,7 @@ export function PatientSignInForm({ design = 'a', below }: { design?: Design; be
   }
   if (otpMode) {
     return (
-      <div className={`auth-rise ${STEP_WRAP[design]}`} style={rise(0)}>
+      <div className="auth-rise" style={rise(0)}>
         <PortalOtpSignIn onMfaRequired={() => setNeedsMfa(true)} onSignedIn={() => router.push('/patient-portal')} onUsePassword={() => setOtpMode(false)} />
       </div>
     )
@@ -86,8 +78,7 @@ export function PatientSignInForm({ design = 'a', below }: { design?: Design; be
         <h1 className={s.title}>Sign in</h1>
         <p className={s.subtitle}>Your records, forms and messages.</p>
       </div>
-      {/* Typographic design: the patient form stays stacked (it has a hint). */}
-      <form onSubmit={submit} className={design === 'c' ? 'grid max-w-[560px] gap-y-6' : s.form}>
+      <form onSubmit={submit} className={s.form}>
         <div className="auth-rise" style={rise(2)}>
           <FloatingField
             id="patientId"
@@ -100,13 +91,12 @@ export function PatientSignInForm({ design = 'a', below }: { design?: Design; be
             aria-describedby="patientId-hint"
             placeholder="name@example.com or RD-0001"
             invalid={!!error}
-            design={design}
             hint="Use the email address the clinic has on file, or the UHID or patient ID from your paperwork."
             hintId="patientId-hint"
           />
         </div>
         <div className="auth-rise" style={rise(3)}>
-          <PasswordField value={password} onChange={setPassword} invalid={!!error} design={design} />
+          <PasswordField value={password} onChange={setPassword} invalid={!!error} />
         </div>
         {error && (
           <div role="alert" className={`${s.alert} auth-pop-menu`}>
@@ -114,10 +104,10 @@ export function PatientSignInForm({ design = 'a', below }: { design?: Design; be
           </div>
         )}
         <div className={`auth-rise ${s.submitWrap}`} style={rise(4)}>
-          <SubmitButton className={design === 'c' ? s.button.replace('lg:w-auto lg:min-w-[168px]', '') : s.button} disabled={submitting || done || !patientId || !password} submitting={submitting} done={done} />
+          <SubmitButton className={s.button} disabled={submitting || done || !patientId || !password} submitting={submitting} done={done} />
         </div>
       </form>
-      <div className={`auth-rise ${design === 'c' ? 'mt-4' : 'mt-3'}`} style={rise(5)}>
+      <div className="auth-rise mt-3" style={rise(5)}>
         <button type="button" onClick={() => { setError(null); setOtpMode(true) }} className={s.link}>
           Sign in with a code sent to your mobile
         </button>

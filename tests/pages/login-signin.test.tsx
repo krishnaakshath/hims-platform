@@ -248,66 +248,36 @@ describe('/patient-portal/login', () => {
   })
 })
 
-describe('review-only design switch (?design=a|b|c)', () => {
+describe('the ID-badge design', () => {
   afterEach(() => window.history.replaceState(null, '', '/login'))
 
-  it.each(['a', 'b', 'c'] as const)('design %s renders a complete sign-in with the switch and department menu', (d) => {
-    window.history.replaceState(null, '', `/login?design=${d}`)
+  it('renders the badge with its wordmark, audience tag and the quote as a record note', () => {
     const { container } = render(<LoginPage />)
-    expect(container.querySelector('[data-design]')).toHaveAttribute('data-design', d)
-    expect(screen.getByRole('radiogroup', { name: 'Sign in as' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Email address')).toBeInTheDocument()
-    expect(screen.getByLabelText('Password')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
-    expect(container.textContent ?? '').not.toMatch(EMOJI_RE)
-    expect(container.textContent ?? '').not.toMatch(TRUST_COPY_RE)
-    for (const el of container.querySelectorAll('svg')) expect(el.closest('[aria-hidden="true"]')).not.toBeNull()
+    const badge = container.querySelector('article[data-auth-panel]')!
+    expect(badge).toBeInTheDocument()
+    expect(within(badge as HTMLElement).getByText('Staff', { selector: 'header span' })).toBeInTheDocument()
+    expect(badge.querySelector('form')).toBeTruthy()
+    expect(screen.getByText(DEFAULT_LOGIN_QUOTE.text).closest('figure')).toHaveTextContent(DEFAULT_LOGIN_QUOTE.attribution!)
     fireEvent.click(screen.getByRole('radio', { name: 'Patient' }))
-    expect(screen.getByLabelText('Email address or patient ID')).toBeInTheDocument()
-    expect(replaceState).toHaveBeenLastCalledWith(null, '', `/patient-portal/login?design=${d}`)
+    expect(within(badge as HTMLElement).getByText('Patient', { selector: 'header span' })).toBeInTheDocument()
   })
 
-  it('falls back to design a for an unknown value', () => {
-    window.history.replaceState(null, '', '/login?design=zzz')
+  it('keeps every label and control text at 12px or larger', () => {
     const { container } = render(<LoginPage />)
-    expect(container.querySelector('[data-design]')).toHaveAttribute('data-design', 'a')
-  })
-
-  it('design c: the department picker is a filterable command palette', () => {
-    window.history.replaceState(null, '', '/login?design=c')
-    render(<LoginPage />)
     fireEvent.click(departmentButton())
-    const input = screen.getByRole('combobox', { name: 'Find a department' })
-    expect(input).toHaveFocus()
-    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(STAFF_PORTALS.length)
-    fireEvent.change(input, { target: { value: 'pharm' } })
-    const options = within(screen.getByRole('listbox')).getAllByRole('option')
-    expect(options).toHaveLength(1)
-    expect(input).toHaveAttribute('aria-activedescendant', options[0].id)
-    fireEvent.keyDown(input, { key: 'Enter' })
-    expect(push).toHaveBeenCalledWith('/login/pharmacy')
+    expect(container.innerHTML).not.toMatch(/text-\[(9|10|11)px\]/)
   })
 
-  it('design c: "/" opens the palette when focus is not in a field, Escape closes it', () => {
+  it('ignores the retired ?design switch', () => {
     window.history.replaceState(null, '', '/login?design=c')
-    render(<LoginPage />)
-    ;(document.activeElement as HTMLElement | null)?.blur()
-    fireEvent.keyDown(document.body, { key: '/' })
-    const input = screen.getByRole('combobox', { name: 'Find a department' })
-    fireEvent.keyDown(input, { key: 'Escape' })
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    const { container } = render(<LoginPage />)
+    expect(container.querySelector('[data-design]')).toBeNull()
+    expect(container.querySelector('article[data-auth-panel]')).toBeInTheDocument()
   })
 
-  it('design b: department menu is keyboard operable too', () => {
-    window.history.replaceState(null, '', '/login?design=b')
-    render(<LoginPage />)
-    const button = departmentButton()
-    fireEvent.keyDown(button, { key: 'ArrowDown' })
-    const list = screen.getByRole('listbox')
-    expect(list).toHaveFocus()
-    fireEvent.keyDown(list, { key: 'ArrowDown' })
-    fireEvent.keyDown(list, { key: 'Enter' })
-    expect(push).toHaveBeenCalledWith(`/login/${STAFF_PORTALS[1].key}`)
+  it('the patient portal sign-in uses the same badge', () => {
+    const { container } = render(<PatientPortalLoginPage />)
+    expect(container.querySelector('article[data-auth-panel]')).toBeInTheDocument()
+    expect(screen.getByLabelText('Email address or patient ID')).toBeInTheDocument()
   })
 })

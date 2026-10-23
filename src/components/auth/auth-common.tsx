@@ -1,9 +1,7 @@
 'use client'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useState } from 'react'
 import { useBrand } from '@/components/BrandProvider'
-import { BrandMark } from '@/components/auth/BrandMark'
 import { DEFAULT_LOGIN_QUOTE, type LoginQuote } from '@/lib/brand'
-import { DESIGNS, type Design } from '@/components/auth/auth-styles'
 
 type MotionState = 'on' | 'paused' | 'reduce'
 
@@ -27,53 +25,8 @@ export function useMotionState(): MotionState {
   return state
 }
 
-// REVIEW-ONLY design switch: ?design=a|b|c picks one of three concepts while
-// the owner chooses. Enabled outside production builds, or in production only
-// with NEXT_PUBLIC_LOGIN_DESIGN_PREVIEW=1. Once a design is chosen this hook
-// and the other two shells are deleted.
-export function designPreviewEnabled(): boolean {
-  return process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_LOGIN_DESIGN_PREVIEW === '1'
-}
-
-function readDesign(): Design {
-  if (!designPreviewEnabled()) return 'a'
-  const v = new URLSearchParams(window.location.search).get('design')
-  return DESIGNS.includes(v as Design) ? (v as Design) : 'a'
-}
-const noopSubscribe = () => () => {}
-
-export function useDesign(): Design {
-  return useSyncExternalStore(noopSubscribe, readDesign, () => 'a')
-}
-
 export function useLoginQuote(): LoginQuote {
   return useBrand().loginQuote ?? DEFAULT_LOGIN_QUOTE
-}
-
-// "Good morning" etc. from the viewer's clock; a neutral word during SSR so
-// hydration matches, then the real greeting (same line box, no reflow).
-function readGreeting(): string {
-  const h = new Date().getHours()
-  return h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
-}
-export function useGreeting(): string {
-  return useSyncExternalStore(noopSubscribe, readGreeting, () => 'Welcome')
-}
-
-// The wordmark: the favicon's pulse-plus mark plus the hospital name, or the
-// configured logo image.
-export function Wordmark({ className = '', markClassName = 'h-9 w-9', nameClassName = 'text-lg font-semibold tracking-[-0.015em]' }: { className?: string; markClassName?: string; nameClassName?: string }) {
-  const { name, logoUrl } = useBrand()
-  if (logoUrl) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={logoUrl} alt={name} className={`h-9 w-auto ${className}`} />
-  }
-  return (
-    <span className={`inline-flex items-center gap-3 ${className}`}>
-      <BrandMark className={markClassName} />
-      <span className={nameClassName}>{name}</span>
-    </span>
-  )
 }
 
 // A long heartbeat trace: `beats` complexes across `width` user units, centred
