@@ -11,6 +11,7 @@ import {
   chargeLines, invoices, patientPayments, refunds,
   // SP5
   labRequisitions, homeCollectionVisits, labReports, notificationDeliveries,
+  notificationLog, patientNotificationPreferences, // Foundations T8
   // SP6
   codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures,
   // SP7
@@ -689,6 +690,9 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // SP5: notification_deliveries and lab_reports reference patients(id) (and lab_reports
   // references lab_requisitions) with no ON DELETE action, so both go before the lab block.
   await db.delete(notificationDeliveries).where(eq(notificationDeliveries.patientId, anonId))
+  // Foundations T8: the notification log and channel preferences reference patients(id).
+  await db.delete(notificationLog).where(eq(notificationLog.patientId, anonId))
+  await db.delete(patientNotificationPreferences).where(eq(patientNotificationPreferences.patientId, anonId))
   await db.delete(labReports).where(eq(labReports.patientId, anonId))
   // end SP5
 

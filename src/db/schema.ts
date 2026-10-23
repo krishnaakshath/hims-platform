@@ -2703,3 +2703,50 @@ export const staffNotificationReads = pgTable('staff_notification_reads', {
   index('staff_notification_reads_read_at_idx').on(t.readAt),
 ])
 // end Wave G
+
+// Foundations T8: notification log
+// (scripts/migrations/2026-10-23-notification-log.sql). One row per channel attempt of a patient
+// notice: ids, a masked destination, a status and an error class. NEVER a message body.
+export const notificationLog = pgTable('notification_log', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  templateKey: text('template_key').notNull(),
+  channel: text('channel', { enum: ['sms', 'email', 'whatsapp', 'in_app', 'log'] }).notNull(),
+  destinationMasked: text('destination_masked'),
+  status: text('status', { enum: ['queued', 'sent', 'failed', 'skipped', 'log_only'] }).notNull(),
+  providerMessageId: text('provider_message_id'),
+  errorClass: text('error_class'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('notification_log_patient_created_idx').on(t.patientId, t.createdAt),
+  check('notification_log_channel_check', sql`${t.channel} IN ('sms', 'email', 'whatsapp', 'in_app', 'log')`),
+  check('notification_log_status_check', sql`${t.status} IN ('queued', 'sent', 'failed', 'skipped', 'log_only')`),
+])
+
+// Per-template channel choice plus the provider-side ids (DLT template id, WhatsApp template
+// name). A template with no row uses DEFAULT_TEMPLATE_CHANNELS (src/lib/queries/notification-log.ts).
+export const notificationTemplateConfig = pgTable('notification_template_config', {
+  templateKey: text('template_key').primaryKey(),
+  channels: text('channels').array().notNull().default(sql`'{}'::text[]`),
+  dltTemplateId: text('dlt_template_id'),
+  whatsappTemplateName: text('whatsapp_template_name'),
+  updatedByName: text('updated_by_name').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  check('notification_template_config_channels_check', sql`${t.channels} <@ ARRAY['sms', 'whatsapp', 'email', 'in_app']::text[]`),
+])
+
+// Per-patient channel preferences, extending the SP5 notices opt-out (patients.notification_opt_out
+// stays the master switch). No row = every channel on.
+export const patientNotificationPreferences = pgTable('patient_notification_preferences', {
+  patientId: text('patient_id').primaryKey().references(() => patients.id, { onDelete: 'cascade' }),
+  sms: boolean('sms').default(true).notNull(),
+  whatsapp: boolean('whatsapp').default(true).notNull(),
+  email: boolean('email').default(true).notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+export type NotificationLogRow = typeof notificationLog.$inferSelect
+export type NotificationTemplateConfigRow = typeof notificationTemplateConfig.$inferSelect
+export type PatientNotificationPreferencesRow = typeof patientNotificationPreferences.$inferSelect
+// end Foundations T8
