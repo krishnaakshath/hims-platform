@@ -29,8 +29,8 @@ Order follows dependencies: foundations first because later work cannot be verif
 
 ### 4.1 Feature flags (`src/lib/features.ts`)
 One small module reads `ENABLE_TRIALS` (`true`/`1` enables; anything else disables). `trialsEnabled()` is the only way code asks. When off:
-- the nav hides Workbook, Trials & Protocols, Pipeline Dashboard, Client Forms;
-- those pages redirect to the role's home and their API routes answer `404`;
+- the nav hides Workbook, Trials & Protocols and Pipeline Dashboard (Form Templates, Consent Documents and Client Forms stay: they carry the hospital's own consents and intake forms);
+- those three pages redirect to the role's home and their API routes answer `404`; the form-submission API is never gated;
 - the patients list drops the screening column and trial filter; the patient header drops trial status and "Needs Verification";
 - the patient portal and broadcasts drop trial wording and trial filters.
 Existing tests run with the flag on (set once in `vitest.config.ts`); new tests cover the flag off. The RBAC harnesses learn about the flag so a hidden page is expected to redirect.

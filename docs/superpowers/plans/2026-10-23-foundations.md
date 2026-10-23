@@ -38,7 +38,7 @@
 - Modify: `vitest.config.ts` (set `test.env.ENABLE_TRIALS = 'true'`), `.env.example` (document `ENABLE_TRIALS`)
 
 **Interfaces:**
-- Produces: `trialsEnabled(env?: Record<string, string|undefined>): boolean`; `TRIALS_PATHS: readonly string[]` (the dashboard paths hidden when off: `/workbook`, `/trials`, `/pipeline-dashboard`, `/client-forms`); `isTrialsPath(pathname: string): boolean`.
+- Produces: `trialsEnabled(env?: Record<string, string|undefined>): boolean`; `TRIALS_PATHS: readonly string[]` (the dashboard paths hidden when off: `/workbook`, `/trials`, `/pipeline-dashboard`; Form Templates, Client Forms and the form-submission API stay available because they carry the hospital's own consents and intake forms); `isTrialsPath(pathname: string): boolean`.
 
 - [ ] **Step 1: Write failing tests** `trialsEnabled` returns true for `'true'`, `'1'`, `' TRUE '`; false for unset, `''`, `'false'`, `'yes'`, `'0'`; `isTrialsPath('/trials/3')` is true, `isTrialsPath('/trials-x')` is false, `isTrialsPath('/patients')` is false.
 - [ ] **Step 2: Run** `npx vitest run tests/lib/features.test.ts` → FAIL (module missing).
@@ -49,14 +49,14 @@
 ### Task 2: Hide the trial module when the flag is off
 
 **Files:**
-- Modify: `src/components/LeftNav.tsx` (drop the four entries when off), the four page files under `src/app/(dashboard)/` (`workbook`, `trials`, `pipeline-dashboard`, `client-forms`: redirect to the role home when off), their API routes under `src/app/api/{workbook,trials,form-submissions}` and the pipeline route (answer `404 {"error":"Not found"}` when off), `tests/pages/page-gates-harness.ts`, `tests/api/rbac-route-gates.test.ts`, `tests/pages/nav-role-enforcement.test.tsx`
+- Modify: `src/components/LeftNav.tsx` (drop the three entries when off), the three page files under `src/app/(dashboard)/` (`workbook`, `trials`, `pipeline-dashboard`: redirect to the role home when off), their API routes (`src/app/api/workbook`, `src/app/api/trials`, the pipeline/reports route; answer `404 {"error":"Not found"}` when off). Do NOT gate `form-submissions`, `form-templates` or `client-forms`, `tests/pages/page-gates-harness.ts`, `tests/api/rbac-route-gates.test.ts`, `tests/pages/nav-role-enforcement.test.tsx`
 - Test: `tests/lib/trials-flag-gates.test.ts`
 
 **Interfaces:**
 - Consumes: `trialsEnabled`, `isTrialsPath` (Task 1).
 - Produces: nothing new; behaviour only.
 
-- [ ] **Step 1: Write failing tests**: with `ENABLE_TRIALS` unset, `LeftNav` for admin renders none of Workbook / Trials & Protocols / Pipeline Dashboard / Client Forms; each trial page redirects before any query; each trial API route answers 404; with `true` all current behaviour holds.
+- [ ] **Step 1: Write failing tests**: with `ENABLE_TRIALS` unset, `LeftNav` for admin renders none of Workbook / Trials & Protocols / Pipeline Dashboard, and still renders Form Templates, Consent Documents and Client Forms; each of the three trial pages redirects before any query; each trial API route answers 404; with `true` all current behaviour holds.
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement** the gating. Pages check the flag as their first statement after the session gate; routes check it right after `requireSession()`.
 - [ ] **Step 4: Update** both RBAC harnesses so a flag-off run expects the redirect/404 and a flag-on run keeps today's expectations; run `npx vitest run tests/pages tests/api/rbac-route-gates.test.ts` → PASS.
@@ -79,7 +79,7 @@
 ### Task 4: Demo-able stack: mock gating, payload key, Docker template, banner
 
 **Files:**
-- Modify: `src/lib/integrations/runtime.ts` (`mocksEnabled` accepts `ABDM_USE_MOCKS` `'1'` or `'true'`; allowed when not production, or when production AND `DEMO_FEATURES` is explicitly on AND `ALLOW_DEMO_MOCKS=true`), `src/lib/abdm/route-helpers.ts` (missing payload key answers a distinct `abdm_payload_key_missing` 503 with its own message), `src/lib/abdm/constants.ts`, settings integrations page (a "Demo mode: mock integrations are active" banner whenever `mocksEnabled()`), `docker-compose.yml` (volume for blob store; no env changes), create `.env.docker.example`
+- Modify: `src/lib/integrations/runtime.ts` (`mocksEnabled` accepts `ABDM_USE_MOCKS` `'1'` or `'true'`; allowed when not production, or when production AND `DEMO_FEATURES` is explicitly on AND `ALLOW_DEMO_MOCKS=true`), `src/lib/abdm/route-helpers.ts` (missing payload key answers a distinct `abdm_payload_key_missing` 503 with its own message), `src/lib/abdm/constants.ts`, settings integrations page (a "Demo mode: mock integrations are active" banner whenever `mocksEnabled()`), create `.env.docker.example` (do not edit `docker-compose.yml`: Task 5 owns the blob volume)
 - Test: `tests/lib/integrations/runtime.test.ts` (extend), `tests/api/abdm-payload-key.test.ts`
 
 **Interfaces:**
