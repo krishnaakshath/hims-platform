@@ -112,6 +112,8 @@ import {
   syntheticAbhaNumber, syntheticMobile, type HeroIdentity, type PatientProfileSeed,
 } from './seed-india-data'
 import { seedAadhaar, seedContacts, seedIndiaOperations, seedIndiaReference, type IndiaRefs } from './seed-india'
+import { seedHospitalForms } from './seed-hospital-forms' // WS7 T4
+import { trialsEnabled } from '../lib/features' // WS7 T4
 // end Wave D
 
 const MDD_TRIAL = {
@@ -1184,7 +1186,9 @@ export async function seed(opts: { reset?: boolean } = {}) {
 
   // Form templates: one per trial condition, each with a handful of
   // realistic intake questions including at least one hipaaSensitive field.
-  const [mddTemplate] = await db.insert(formTemplates).values({
+  // WS7 T4: trial-only forms (and their demo submissions) only when trials are on.
+  const withTrials = trialsEnabled()
+  const [mddTemplate] = !withTrials ? [] : await db.insert(formTemplates).values({
     name: 'MDD Intake Packet',
     category: 'Trial Intake',
     diagnosisTag: 'Major Depressive Disorder',
@@ -1197,7 +1201,7 @@ export async function seed(opts: { reset?: boolean } = {}) {
     ],
   }).returning()
 
-  const [adhdTemplate] = await db.insert(formTemplates).values({
+  const [adhdTemplate] = !withTrials ? [] : await db.insert(formTemplates).values({
     name: 'ADHD Intake Packet',
     category: 'Trial Intake',
     diagnosisTag: 'ADHD',
@@ -1274,9 +1278,12 @@ export async function seed(opts: { reset?: boolean } = {}) {
     },
   ])
 
+  // WS7 T4: the hospital form pack (consents, admission, discharge, MLC, vaccination) in en/hi/kn.
+  await seedHospitalForms(db)
+
   // Form submissions: a spread of sent/partial/completed across seeded patients.
   const heroName = (id: string) => hero(id).name
-  await db.insert(formSubmissions).values([
+  if (mddTemplate && adhdTemplate) await db.insert(formSubmissions).values([ // WS7 T4: trial forms only
     { templateId: mddTemplate.id, patientId: 'RD-0001', status: 'completed', sentDate: new Date('2026-08-10T10:00:00+05:30'), completedDate: new Date('2026-08-15T10:00:00+05:30'), answers: { q1: heroName('RD-0001'), q4: 'Yes' } },
     { templateId: mddTemplate.id, patientId: 'RD-0002', status: 'completed', sentDate: new Date('2026-08-16T10:00:00+05:30'), completedDate: new Date('2026-08-20T10:00:00+05:30'), answers: { q1: heroName('RD-0002'), q4: 'Yes' } },
     { templateId: mddTemplate.id, patientId: 'RD-0003', status: 'sent', sentDate: new Date('2026-08-25T10:00:00+05:30') },

@@ -609,6 +609,9 @@ import { POST as postPolicyVerification } from '@/app/api/rcm/policies/[id]/veri
 import { GET as getVerificationDocument } from '@/app/api/rcm/verification-documents/[id]/route'
 import { COVERAGE_VERIFY_ROLES } from '@/lib/role-policy'
 // end WS12 T3
+// WS7 T4
+import { POST as postHospitalFormPack } from '@/app/api/form-templates/hospital-pack/route'
+// end WS7 T4
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1075,6 +1078,9 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/rcm/policies/[id]/verifications', call: () => settle(() => postPolicyVerification(send('POST', `/api/rcm/policies/${BOGUS_ID}/verifications`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_VERIFY_ROLES] },
   { name: 'GET /api/rcm/verification-documents/[id]', call: () => settle(() => getVerificationDocument(get(`/api/rcm/verification-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_READ_ROLES] },
   // end WS12 T3
+  // WS7 T4: install the hospital form pack -- admin only. Denied roles never reach the seed.
+  { name: 'POST /api/form-templates/hospital-pack', call: () => settle(() => postHospitalFormPack(send('POST', '/api/form-templates/hospital-pack', NOT_JSON))), allowed: ['admin'] },
+  // end WS7 T4
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
