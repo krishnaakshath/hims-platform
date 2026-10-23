@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
-import { eq, or, sql } from 'drizzle-orm'
+import { and, eq, or, sql } from 'drizzle-orm'
 import { requireSession } from '@/lib/auth'
 import { getDb } from '@/db/client'
 import { patients, providers } from '@/db/schema'
@@ -11,6 +11,7 @@ import { checkInVisit, type CheckInVisitError } from '@/lib/queries/encounters'
 import { CHECK_IN_ROLES } from '@/lib/role-policy'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
+import { notArchived } from '@/lib/queries/patient-archive' // WS8 T13
 
 const checkInSchema = z.object({
   patientId: z.string().min(1),
@@ -58,9 +59,10 @@ export async function POST(request: NextRequest) {
   // a bad providerId must never be able to strand a room as occupied with no
   // valid assignment behind it.
   // Wave C: the chart id (what the PatientPicker sends) or a UHID typed
-  // directly (case-insensitive); an exact chart-id match wins.
+  // directly (case-insensitive); an exact chart-id match wins. WS8 T13: an archived chart cannot
+  // be checked in or admitted (it is hidden from the queue) -- it reads as not found.
   const patientRows = await getDb().select({ id: patients.id }).from(patients)
-    .where(or(eq(patients.id, patientRef), sql`upper(${patients.uhid}) = upper(${patientRef})`))
+    .where(and(notArchived(), or(eq(patients.id, patientRef), sql`upper(${patients.uhid}) = upper(${patientRef})`)))
   const patientRow = patientRows.find((r) => r.id === patientRef) ?? patientRows[0]
   if (!patientRow) return NextResponse.json({ error: 'Patient not found' }, { status: 404 })
   const patientId = patientRow.id

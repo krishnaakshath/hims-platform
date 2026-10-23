@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { eq, desc, and, inArray, or } from 'drizzle-orm'
 import { POST } from '@/app/api/front-desk/check-in/route'
 import { getDb } from '@/db/client'
-import { doctorAssignments, rooms, admissions, encounters } from '@/db/schema'
+import { doctorAssignments, rooms, admissions, encounters, patients } from '@/db/schema'
 import { listActiveProviders } from '@/lib/queries/providers'
 
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: 'frontdesk', name: 'Taylor Nguyen' })) }))
@@ -75,6 +75,30 @@ describe('POST /api/front-desk/check-in', () => {
     const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-NOPE', visitType: 'outpatient', urgency: 'routine', reason: 'Follow-up', providerId: providers[0].id }) })
     const res = await POST(req as never)
     expect(res.status).toBe(404)
+  })
+
+  // WS8 T13: an archived chart is hidden from the queue, so it cannot be checked in or admitted --
+  // by chart id or by typed UHID. Nothing is written.
+  it('returns 404 for an archived chart (OPD and inpatient, by chart id and by UHID)', async () => {
+    const providers = await listActiveProviders()
+    const id = `WS8T13-CI-${process.pid}`
+    const uhid = `ARCH${process.pid}`.slice(0, 20)
+    await getDb().insert(patients).values({ id, uhid, name: 'Archived Check In', dob: '1980-01-01', archivedAt: new Date(), archivedByName: 'Test Admin', archiveReason: 'Duplicate chart for testing' })
+    try {
+      for (const visitType of ['outpatient', 'inpatient'] as const) {
+        for (const ref of [id, uhid.toLowerCase()]) {
+          const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: ref, visitType, urgency: 'routine', reason: 'Follow-up', providerId: providers[0].id }) })
+          const res = await POST(req as never)
+          expect(res.status, `${visitType} ${ref}`).toBe(404)
+          expect(await res.json()).toEqual({ error: 'Patient not found' })
+        }
+      }
+      expect(await getDb().select().from(doctorAssignments).where(eq(doctorAssignments.patientId, id))).toEqual([])
+      expect(await getDb().select().from(admissions).where(eq(admissions.patientId, id))).toEqual([])
+      expect(await getDb().select().from(encounters).where(eq(encounters.patientId, id))).toEqual([])
+    } finally {
+      await getDb().delete(patients).where(eq(patients.id, id))
+    }
   })
 
   it('returns 404 when the provider does not exist', async () => {

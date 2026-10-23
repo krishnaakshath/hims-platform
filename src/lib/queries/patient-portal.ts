@@ -229,8 +229,9 @@ export async function revokePatientPortalAccess(patientId: string): Promise<void
   await getDb().update(patients).set({ portalPasswordHash: null }).where(eq(patients.id, patientId))
 }
 
+/** WS8 T13: null for an archived chart, so the TOTP step of sign-in fails like an unknown account. */
 export async function getPatientMfaState(patientId: string): Promise<{ mfaSecretEncrypted: string | null; mfaEnabled: boolean } | null> {
-  const [row] = await getDb().select({ mfaSecretEncrypted: patients.mfaSecretEncrypted, mfaEnabled: patients.mfaEnabled }).from(patients).where(eq(patients.id, patientId))
+  const [row] = await getDb().select({ mfaSecretEncrypted: patients.mfaSecretEncrypted, mfaEnabled: patients.mfaEnabled }).from(patients).where(and(eq(patients.id, patientId), notArchived()))
   return row ?? null
 }
 

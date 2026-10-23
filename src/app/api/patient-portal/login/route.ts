@@ -63,7 +63,9 @@ export const POST = withServiceGuard('patient login', async function POST(reques
   }
 
   const mfaState = await getPatientMfaState(patientId)
-  if (mfaState?.mfaEnabled) {
+  // WS8 T13: null = archived since the password check; sign in fails like an unknown account.
+  if (!mfaState) return NextResponse.json({ error: 'Invalid patient ID or password' }, { status: 401 })
+  if (mfaState.mfaEnabled) {
     await setPendingPatientMfaCookie({ patientId })
     return NextResponse.json({ mfaRequired: true })
   }
