@@ -20,6 +20,7 @@ import { getRcmDashboard } from '@/lib/queries/rcm-worklist'
 import { countPendingBookingRequests } from '@/lib/queries/booking-requests'
 import { snapshotScope, type HospitalSnapshot } from '@/lib/dashboard-tiles'
 import type { Role } from '@/lib/auth'
+import { dispenseNotBilledSql } from '@/lib/queries/medication-dispenses' // WS2 T8
 
 const KPI_TTL_SECONDS = 20
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -178,7 +179,8 @@ export async function loadPharmacyKpis(today: string): Promise<PharmacyKpi> {
       low: sql<string>`count(*) filter (where ${medicationInventory.quantityOnHand} > 0 and ${medicationInventory.quantityOnHand} <= ${medicationInventory.reorderThreshold})`,
     }).from(medicationInventory),
     db.select({ n: count() }).from(medicationDispenses).where(and(gte(medicationDispenses.dispensedAt, start), lt(medicationDispenses.dispensedAt, end))),
-    db.select({ n: count() }).from(medicationDispenses).where(isNull(medicationDispenses.chargeId)),
+    // WS2 T8: not billed = no live charge line, no free-dispense reason, no pre-SP4 legacy bill.
+    db.select({ n: count() }).from(medicationDispenses).where(dispenseNotBilledSql),
   ])
   return { outOfStock: n(stock?.out), lowStock: n(stock?.low), dispensedToday: n(disp?.n), unbilledDispenses: n(unbilled?.n) }
 }

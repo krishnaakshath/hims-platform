@@ -1,7 +1,6 @@
 'use client'
 import { CLIENT_ERROR_MESSAGES, fetchJson, sendJson } from '@/lib/client-fetch'
 import { formatIstDateTime } from '@/lib/india-time'
-import { formatPaise } from '@/lib/format'
 import { useState } from 'react'
 import { Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -9,9 +8,8 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
 import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
-import { LogDispenseBillModal } from '@/components/LogDispenseBillModal'
+import { BillLegacyDispenseButton, DispenseBillingStatus } from '@/components/PharmacyBillingTable' // WS2 T8
 import { MessageThreadView, type MessageRow } from '@/components/MessageThreadView'
-import { CHARGE_STATUS_LABELS } from '@/lib/charge-status'
 import type { MedicationWithInventory } from '@/lib/queries/medications'
 import type { PharmacyPatientView, PharmacyEpisode, PharmacyRosterRow } from '@/lib/queries/patients'
 
@@ -121,7 +119,6 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<PharmacyPatientViewClient | null>(null)
   const [dispensingEpisode, setDispensingEpisode] = useState<{ medication: MedicationWithInventory; episode: PharmacyEpisode } | null>(null)
-  const [billingDispense, setBillingDispense] = useState<PharmacyDispense | null>(null)
   const [messages, setMessages] = useState<MessageRow[]>([])
 
   const medicationById = new Map(medications.map((m) => [m.id, m]))
@@ -149,7 +146,7 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
     setError(res.status === 404 && res.error === CLIENT_ERROR_MESSAGES.notFound ? 'No patient with that ID' : res.error)
   }
 
-  // Re-fetches the same chart after a dispense or a bill is logged, so the
+  // Re-fetches the same chart after a dispense or a legacy dispense is billed, so the
   // dispense history / charge cells reflect the write without a full page
   // reload (this component owns its own state -- `router.refresh()` alone
   // wouldn't re-run this component's own `fetch`).
@@ -253,11 +250,10 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
                         <td className="p-3 text-foreground">{d.dispensedByName}</td>
                         <td className="p-3 text-foreground">{formatIstDateTime(d.dispensedAt)}</td>
                         <td className="p-3">
-                          {d.charge === null ? (
-                            <Button size="sm" variant="outline" onClick={() => setBillingDispense(d)}>Log bill</Button>
-                          ) : (
-                            <span className="text-foreground">{CHARGE_STATUS_LABELS[d.charge.status]} · {formatPaise(d.charge.amountCents)}</span>
-                          )}
+                          {/* WS2 T8: a dispense bills itself; only a legacy unbilled one can be billed here. */}
+                          {d.billing.status === 'unbilled'
+                            ? <BillLegacyDispenseButton dispenseId={d.id} onBilled={refreshLookup} />
+                            : <DispenseBillingStatus billing={d.billing} />}
                         </td>
                       </tr>
                     ))}
@@ -288,17 +284,10 @@ export function PharmacyPatientLookup({ medications, roster }: { medications: Me
           medication={dispensingEpisode.medication}
           initialPatientId={view.id}
           medicationEpisodeId={dispensingEpisode.episode.id}
+          prescribedQuantity={dispensingEpisode.episode.quantityPrescribed} // WS2 T8
+          allergies={view.allergies} // WS2 T8
           onClose={() => setDispensingEpisode(null)}
           onDispensed={refreshLookup}
-        />
-      )}
-
-      {billingDispense && view && (
-        <LogDispenseBillModal
-          dispense={billingDispense}
-          diagnoses={view.diagnoses}
-          onClose={() => setBillingDispense(null)}
-          onLogged={refreshLookup}
         />
       )}
     </div>

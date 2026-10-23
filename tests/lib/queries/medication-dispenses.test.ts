@@ -2,7 +2,14 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, medications, medicationInventory, medicationDispenses, medicationEpisodes } from '@/db/schema'
-import { dispenseMedication, listDispensesForPatient } from '@/lib/queries/medication-dispenses'
+import { dispenseMedication, listDispensesForPatient, type DispenseResult } from '@/lib/queries/medication-dispenses'
+import type { Session } from '@/lib/auth'
+
+// WS2 T8: dispenseMedication(input, session); a free dispense needs a reason and writes no charge line.
+const FREE = 'Test free dispense'
+const staff = (name: string): Session => ({ role: 'pharmacy', name, userId: null })
+const idOf = (r: DispenseResult) => (r.ok ? r.dispenseId : undefined)
+const errorOf = (r: DispenseResult) => (r.ok ? undefined : r.error)
 
 const createdDispenseIds: number[] = []
 const createdEpisodeIds: number[] = []
@@ -29,21 +36,21 @@ describe('medication dispenses', () => {
   it('dispenses and decrements stock', async () => {
     const med = await makeMedWithStock(50)
     const [patientRow] = await getDb().select().from(patients).limit(1)
-    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: med.id, quantity: 10, noChargeReason: FREE }, staff('Test Staff'))
     expect(result.ok).toBe(true)
-    createdDispenseIds.push(result.dispenseId!)
+    createdDispenseIds.push(idOf(result)!)
 
     const [inv] = await getDb().select().from(medicationInventory).where(eq(medicationInventory.medicationId, med.id))
     expect(inv.quantityOnHand).toBe(40)
 
     const history = await listDispensesForPatient(patientRow.id)
-    expect(history.some((d) => d.id === result.dispenseId)).toBe(true)
+    expect(history.some((d) => d.id === idOf(result))).toBe(true)
   })
 
   it('rejects dispensing more than is on hand', async () => {
     const med = await makeMedWithStock(5)
     const [patientRow] = await getDb().select().from(patients).limit(1)
-    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: med.id, quantity: 10, noChargeReason: FREE }, staff('Test Staff'))
     expect(result.ok).toBe(false)
     const [inv] = await getDb().select().from(medicationInventory).where(eq(medicationInventory.medicationId, med.id))
     expect(inv.quantityOnHand).toBe(5) // unchanged
@@ -53,15 +60,15 @@ describe('medication dispenses', () => {
     const med = await makeMedWithStock(100)
     const patientsRows = await getDb().select().from(patients).limit(2)
     const [patientA, patientB] = patientsRows
-    const resultA = await dispenseMedication({ patientId: patientA.id, medicationId: med.id, medicationEpisodeId: null, quantity: 5, dispensedByName: 'Staff A', notes: null })
-    createdDispenseIds.push(resultA.dispenseId!)
-    const resultB = await dispenseMedication({ patientId: patientB.id, medicationId: med.id, medicationEpisodeId: null, quantity: 7, dispensedByName: 'Staff B', notes: null })
-    createdDispenseIds.push(resultB.dispenseId!)
+    const resultA = await dispenseMedication({ patientId: patientA.id, medicationId: med.id, quantity: 5, noChargeReason: FREE }, staff('Staff A'))
+    createdDispenseIds.push(idOf(resultA)!)
+    const resultB = await dispenseMedication({ patientId: patientB.id, medicationId: med.id, quantity: 7, noChargeReason: FREE }, staff('Staff B'))
+    createdDispenseIds.push(idOf(resultB)!)
 
     const historyA = await listDispensesForPatient(patientA.id)
     const historyB = await listDispensesForPatient(patientB.id)
-    expect(historyA.some((d) => d.id === resultB.dispenseId)).toBe(false)
-    expect(historyB.some((d) => d.id === resultA.dispenseId)).toBe(false)
+    expect(historyA.some((d) => d.id === idOf(resultB))).toBe(false)
+    expect(historyB.some((d) => d.id === idOf(resultA))).toBe(false)
   })
 
   it('rejects a medicationEpisodeId that belongs to a different patient', async () => {
@@ -73,22 +80,22 @@ describe('medication dispenses', () => {
     createdEpisodeIds.push(episode.id)
 
     // patientB's dispense request forges patientA's episode id.
-    const result = await dispenseMedication({ patientId: patientB.id, medicationId: med.id, medicationEpisodeId: episode.id, quantity: 5, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: patientB.id, medicationId: med.id, medicationEpisodeId: episode.id, quantity: 5, noChargeReason: FREE }, staff('Test Staff'))
     expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/does not belong/)
+    expect(errorOf(result)).toBe('episode_mismatch')
 
     const [inv] = await getDb().select().from(medicationInventory).where(eq(medicationInventory.medicationId, med.id))
     expect(inv.quantityOnHand).toBe(50) // stock untouched -- rejected before the decrement
 
-    if (result.dispenseId) createdDispenseIds.push(result.dispenseId)
+    if (result.ok) createdDispenseIds.push(result.dispenseId)
   })
 
   it('rejects an unknown patientId and leaves stock untouched (no orphaned dispense row)', async () => {
     const med = await makeMedWithStock(50)
-    const result = await dispenseMedication({ patientId: 'rd-does-not-exist', medicationId: med.id, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: 'rd-does-not-exist', medicationId: med.id, quantity: 10, noChargeReason: FREE }, staff('Test Staff'))
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Unknown patient')
-    expect(result.dispenseId).toBeUndefined()
+    expect(errorOf(result)).toBe('unknown_patient')
+    expect(idOf(result)).toBeUndefined()
 
     const [inv] = await getDb().select().from(medicationInventory).where(eq(medicationInventory.medicationId, med.id))
     expect(inv.quantityOnHand).toBe(50)
@@ -99,9 +106,9 @@ describe('medication dispenses', () => {
 
   it('rejects an unknown medicationId (not a misleading "not enough stock" result)', async () => {
     const [patientRow] = await getDb().select().from(patients).limit(1)
-    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: 999999999, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: 999999999, quantity: 10, noChargeReason: FREE }, staff('Test Staff'))
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Unknown medication')
+    expect(errorOf(result)).toBe('unknown_medication')
   })
 
   it('is race-safe: two concurrent dispenses cannot both succeed past actual stock', async () => {
@@ -113,11 +120,11 @@ describe('medication dispenses', () => {
     const med = await makeMedWithStock(10)
     const [patientRow] = await getDb().select().from(patients).limit(1)
     const [resultA, resultB] = await Promise.all([
-      dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 6, dispensedByName: 'Staff A', notes: null }),
-      dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 6, dispensedByName: 'Staff B', notes: null }),
+      dispenseMedication({ patientId: patientRow.id, medicationId: med.id, quantity: 6, noChargeReason: FREE }, staff('Staff A')),
+      dispenseMedication({ patientId: patientRow.id, medicationId: med.id, quantity: 6, noChargeReason: FREE }, staff('Staff B')),
     ])
-    if (resultA.dispenseId) createdDispenseIds.push(resultA.dispenseId)
-    if (resultB.dispenseId) createdDispenseIds.push(resultB.dispenseId)
+    if (resultA.ok) createdDispenseIds.push(resultA.dispenseId)
+    if (resultB.ok) createdDispenseIds.push(resultB.dispenseId)
 
     const succeeded = [resultA, resultB].filter((r) => r.ok)
     expect(succeeded.length).toBe(1)

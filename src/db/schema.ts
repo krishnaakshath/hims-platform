@@ -228,7 +228,20 @@ export const medicationEpisodes = pgTable('medication_episodes', {
   prescribedByProviderId: integer('prescribed_by_provider_id').references(() => providers.id),
   enteredByName: text('entered_by_name'),
   prescribedAt: timestamp('prescribed_at'),
-})
+  prescriptionId: integer('prescription_id').references(() => prescriptions.id), // WS1 T6
+  dosePattern: text('dose_pattern'), // WS1 T6 ('1-0-1'; parseDosePattern label)
+  route: text('route', { enum: ['oral', 'iv', 'im', 'sc', 'topical', 'inhaled', 'sublingual', 'rectal', 'vaginal', 'eye', 'ear', 'nasal', 'other'] }), // WS1 T6
+  foodTiming: text('food_timing', { enum: ['before_food', 'after_food', 'with_food', 'any'] }), // WS1 T6
+  isSos: boolean('is_sos').default(false).notNull(), // WS1 T6
+  quantityPrescribed: integer('quantity_prescribed'), // WS1 T6
+  allergyOverrideReason: text('allergy_override_reason'), // WS1 T6
+}, (t) => [ // WS1 T6
+  index('medication_episodes_prescription_idx').on(t.prescriptionId), // WS1 T6
+  check('medication_episodes_route_valid', sql`${t.route} IS NULL OR ${t.route} IN ('oral', 'iv', 'im', 'sc', 'topical', 'inhaled', 'sublingual', 'rectal', 'vaginal', 'eye', 'ear', 'nasal', 'other')`), // WS1 T6
+  check('medication_episodes_food_timing_valid', sql`${t.foodTiming} IS NULL OR ${t.foodTiming} IN ('before_food', 'after_food', 'with_food', 'any')`), // WS1 T6
+  check('medication_episodes_quantity_prescribed_positive', sql`${t.quantityPrescribed} IS NULL OR ${t.quantityPrescribed} > 0`), // WS1 T6
+  check('medication_episodes_allergy_override_reason_len', sql`${t.allergyOverrideReason} IS NULL OR char_length(${t.allergyOverrideReason}) BETWEEN 5 AND 300`), // WS1 T6
+]) // WS1 T6
 
 export const patientTrialScreenings = pgTable('patient_trial_screenings', {
   id: serial('id').primaryKey(),
@@ -2184,7 +2197,13 @@ export const medications = pgTable('medications', {
   medicationClass: text('medication_class').notNull(),
   commonDose: text('common_dose'),
   form: medicationFormEnum('form').default('tablet').notNull(),
-})
+  mrpPerUnitPaise: integer('mrp_per_unit_paise'), // WS2 T8 (GST-inclusive MRP per dispensing unit; null = unpriced)
+  gstRateBp: integer('gst_rate_bp'), // WS2 T8 (null = billing_settings.pharmacy_gst_rate_bp)
+  hsn: text('hsn'), // WS2 T8 (null = billing_settings.pharmacy_hsn)
+}, (t) => [ // WS2 T8
+  check('medications_mrp_range', sql`${t.mrpPerUnitPaise} IS NULL OR ${t.mrpPerUnitPaise} BETWEEN 0 AND 1000000000`), // WS2 T8
+  check('medications_gst_rate_allowed', sql`${t.gstRateBp} IS NULL OR ${t.gstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`), // WS2 T8
+]) // WS2 T8
 
 export const medicationInventory = pgTable('medication_inventory', {
   id: serial('id').primaryKey(),
@@ -2213,7 +2232,13 @@ export const medicationDispenses = pgTable('medication_dispenses', {
   // (Postgres does not treat NULLs as equal) for the many dispenses that are
   // samples or in-office doses and are never billed.
   chargeId: integer('charge_id').references(() => charges.id).unique(),
-})
+  batchNo: text('batch_no'), // WS2 T8 (snapshot text; stock by batch is WS5)
+  expiryMonth: text('expiry_month'), // WS2 T8 ('YYYY-MM')
+  noChargeReason: text('no_charge_reason'), // WS2 T8 (a free dispense; never audited)
+  unitMrpPaise: integer('unit_mrp_paise'), // WS2 T8 (MRP snapshot at dispense)
+}, (t) => [ // WS2 T8
+  check('medication_dispenses_expiry_month_format', sql`${t.expiryMonth} IS NULL OR ${t.expiryMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`), // WS2 T8
+]) // WS2 T8
 
 export const marStatusEnum = pgEnum('mar_status', ['scheduled', 'given', 'held', 'refused'])
 
@@ -2895,3 +2920,21 @@ export const referrals = pgTable('referrals', {
 
 export type ReferralRow = typeof referrals.$inferSelect
 // end WS1 T4
+// WS1 T6: prescription header (scripts/migrations/2026-10-24-ws1-prescriptions-v2.sql). Groups the
+// drugs written together on one visit; each drug stays a medication_episodes row (prescription_id).
+export const prescriptions = pgTable('prescriptions', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  encounterId: integer('encounter_id').references(() => encounters.id),
+  prescribedByProviderId: integer('prescribed_by_provider_id').notNull().references(() => providers.id),
+  advice: text('advice'),
+  enteredByName: text('entered_by_name').notNull(),
+  enteredByUserId: integer('entered_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('prescriptions_patient_idx').on(t.patientId),
+  index('prescriptions_encounter_idx').on(t.encounterId),
+  check('prescriptions_advice_len', sql`${t.advice} IS NULL OR char_length(${t.advice}) <= 1000`),
+])
+export type PrescriptionRow = typeof prescriptions.$inferSelect
+// end WS1 T6

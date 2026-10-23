@@ -75,10 +75,10 @@ describe('createPrescription', () => {
     expect(episode.prescribedAt).toBeInstanceOf(Date)
   })
 
-  it('accepts medicationId: null and dose: null (the off-catalog path)', async () => {
-    const episode = await makePrescription({ medicationId: null, dose: null })
+  // WS1 T6: dose is mandatory on every new prescription; only the catalogue link may be null.
+  it('accepts medicationId: null (the off-catalog path)', async () => {
+    const episode = await makePrescription({ medicationId: null })
     expect(episode.medicationId).toBeNull()
-    expect(episode.dose).toBeNull()
   })
 })
 

@@ -7,6 +7,7 @@ import {
   adverseEvents, drugAccountabilityEntries, signatures,
   // SP3
   encounters, followUpOrders,
+  prescriptions, // WS1 T6
   // SP4
   chargeLines, invoices, patientPayments, refunds,
   // SP5
@@ -28,7 +29,9 @@ import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
-import type { ChargeStatus } from '@/lib/charge-status'
+import { dispenseBilling, dispenseBillingColumns, type DispenseBilling } from './medication-dispenses' // WS2 T8
+import { activeAllergies } from './prescriptions' // WS2 T8
+import type { AllergyInput } from '@/lib/prescriptions/allergy-check' // WS2 T8
 import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
 import { publicPatientColumns, patientPortalConfiguredSql, type PublicPatientRow } from '@/lib/queries/patient-columns'
 import { encounterVitals, encounterConsults } from '@/db/schema' // WS1 T2
@@ -256,6 +259,7 @@ export interface PharmacyEpisode {
   startDate: string
   stopDate: string | null
   catalogMedicationId: number | null
+  quantityPrescribed: number | null // WS2 T8: pre-fills the dispense quantity
 }
 
 export interface PharmacyPatientView {
@@ -268,6 +272,7 @@ export interface PharmacyPatientView {
   diagnoses: { id: number; code: string; description: string }[]
   activeMedications: PharmacyEpisode[]
   pastMedications: PharmacyEpisode[]
+  allergies: AllergyInput[] // WS2 T8: active allergies, for the dispense allergy banner
   dispenses: {
     id: number
     medicationId: number
@@ -277,7 +282,7 @@ export interface PharmacyPatientView {
     dispensedByName: string
     dispensedAt: Date
     notes: string | null
-    charge: { id: number; status: ChargeStatus; amountCents: number } | null
+    billing: DispenseBilling // WS2 T8: from charge_lines
   }[]
 }
 
@@ -364,6 +369,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
       startDate: medicationEpisodes.startDate,
       stopDate: medicationEpisodes.stopDate,
       status: medicationEpisodes.status,
+      quantityPrescribed: medicationEpisodes.quantityPrescribed, // WS2 T8
     })
     .from(medicationEpisodes)
     .where(eq(medicationEpisodes.patientId, patientRow.id))
@@ -379,6 +385,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
     startDate: e.startDate,
     stopDate: e.stopDate,
     catalogMedicationId: catalogIdByName.get(e.name.toLowerCase()) ?? null,
+    quantityPrescribed: e.quantityPrescribed, // WS2 T8
   })
 
   const activeMedications = episodeRows.filter((e) => e.status === 'active').map(toEpisode)
@@ -394,12 +401,11 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
       dispensedByName: medicationDispenses.dispensedByName,
       dispensedAt: medicationDispenses.dispensedAt,
       notes: medicationDispenses.notes,
-      chargeId: charges.id,
-      chargeStatus: charges.status,
-      chargeAmountCents: charges.amountCents,
+      ...dispenseBillingColumns, // WS2 T8
     })
     .from(medicationDispenses)
     .leftJoin(medications, eq(medications.id, medicationDispenses.medicationId))
+    .leftJoin(chargeLines, eq(chargeLines.medicationDispenseId, medicationDispenses.id)) // WS2 T8
     .leftJoin(charges, eq(charges.id, medicationDispenses.chargeId))
     .where(eq(medicationDispenses.patientId, patientRow.id))
     .orderBy(desc(medicationDispenses.dispensedAt), desc(medicationDispenses.id))
@@ -413,6 +419,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
     diagnoses: dx,
     activeMedications,
     pastMedications,
+    allergies: await activeAllergies(patientRow.id), // WS2 T8
     dispenses: dispenseRows.map((r) => ({
       id: r.id,
       medicationId: r.medicationId,
@@ -425,7 +432,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
       dispensedByName: r.dispensedByName,
       dispensedAt: r.dispensedAt,
       notes: r.notes,
-      charge: r.chargeId != null ? { id: r.chargeId, status: r.chargeStatus as ChargeStatus, amountCents: r.chargeAmountCents! } : null,
+      billing: dispenseBilling(r), // WS2 T8
     })),
   }
 }
@@ -660,6 +667,9 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // class in this function, alongside care_plans below.)
   await db.delete(medicationDispenses).where(eq(medicationDispenses.patientId, anonId))
   await db.delete(medicationEpisodes).where(eq(medicationEpisodes.patientId, anonId))
+  // WS1 T6: prescription headers, after their episodes (prescription_id) and before encounters.
+  await db.delete(prescriptions).where(eq(prescriptions.patientId, anonId))
+  // end WS1 T6
   await db.delete(diagnoses).where(eq(diagnoses.patientId, anonId))
   // form_submission_consents.form_submission_id references form_submissions
   // with no ON DELETE action, so this patient's consent rows must go before
