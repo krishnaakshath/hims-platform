@@ -7,6 +7,7 @@ import type { PharmacyKpi } from '@/lib/queries/hospital-kpis'
 import { Button } from '@/components/ui/button'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
 import { AddMedicationModal } from '@/components/AddMedicationModal'
+import { ReceiveStockDialog } from '@/components/pharmacy/ReceiveStockDialog' // WS5 T3
 import type { MedicationWithInventory, ActiveMedicationSummaryRow } from '@/lib/queries/medications'
 import type { Session } from '@/lib/auth'
 
@@ -87,6 +88,7 @@ export function PharmacyDashboard({
   // `null` = closed; `{}` = open with no prefill (header button);
   // `{ name, medicationClass }` = open prefilled from a not-in-catalog row.
   const [addingMedication, setAddingMedication] = useState<{ name?: string; medicationClass?: string } | null>(null)
+  const [receivingStock, setReceivingStock] = useState(false) // WS5 T3
 
   const groupedSummary = groupByClass(prescribedSummary)
   const outOfStockCount = medications.filter((m) => stockStatus(m.quantityOnHand, m.reorderThreshold) === 'out').length
@@ -124,7 +126,11 @@ export function PharmacyDashboard({
       </div>
 
       <section className={`${CARD_SURFACE} p-5`}>
-        <SectionHeading>Medication Stock{stockFilter ? ` -- ${STATUS_LABELS[stockFilter].toLowerCase()} only` : ''}</SectionHeading>
+        <div className="flex items-start justify-between gap-3">
+          <SectionHeading>Medication Stock{stockFilter ? ` -- ${STATUS_LABELS[stockFilter].toLowerCase()} only` : ''}</SectionHeading>
+          {/* WS5 T3: a supplier delivery (GRN) adds batches and stock. */}
+          {canAddMedication && <Button size="sm" onClick={() => setReceivingStock(true)}>Receive stock</Button>}
+        </div>
         {stockFilter && (
           <p className="mb-3 text-xs text-muted-foreground">{shownMedications.length} of {medications.length} medications. <Link href="/pharmacy" className="font-medium text-primary hover:underline">Show all stock</Link></p>
         )}
@@ -230,6 +236,10 @@ export function PharmacyDashboard({
           </div>
         )}
       </section>
+
+      {receivingStock && (
+        <ReceiveStockDialog medications={medications.map((m) => ({ id: m.id, name: m.name }))} onClose={() => setReceivingStock(false)} />
+      )}
 
       {addingMedication && (
         <AddMedicationModal

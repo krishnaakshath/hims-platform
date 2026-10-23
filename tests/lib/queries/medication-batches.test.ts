@@ -47,7 +47,8 @@ describe('WS5 T2 migration (medication batches)', () => {
     expect(s).toMatch(/ALTER TABLE medication_dispenses ADD COLUMN IF NOT EXISTS batch_id integer;/)
     const c = getTableConfig(medicationBatches)
     const names = [
-      ...c.foreignKeys.map((f) => f.getName()), ...c.checks.map((k) => k.name), ...c.indexes.map((i) => i.config.name!),
+      // WS5 T3: the grn_id FK is created by 2026-10-25-ws5-pharmacy-grns.sql (pinned in tests/api/pharmacy-grns.test.ts).
+      ...c.foreignKeys.map((f) => f.getName()).filter((n) => n !== 'medication_batches_grn_id_pharmacy_grns_id_fk'), ...c.checks.map((k) => k.name), ...c.indexes.map((i) => i.config.name!),
       ...c.uniqueConstraints.map((u) => u.getName()!),
       ...getTableConfig(medicationDispenses).foreignKeys.map((f) => f.getName()).filter((n) => n.includes('batch')),
     ]

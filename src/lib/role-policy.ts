@@ -262,3 +262,8 @@ export const COVERAGE_READ_ROLES: readonly Role[] = POLICY_READ_ROLES
 export const COVERAGE_VERIFY_ROLES: readonly Role[] = POLICY_WRITE_ROLES
 export const ADMISSION_COVERAGE_ROLES: readonly Role[] = ['admin', 'frontdesk', 'crc', 'rcm']
 // end WS12 T1
+
+// WS5 T3: pharmacy stock writes (goods received notes; later write-off and reorder): the
+// /pharmacy page roles that may change stock.
+export const PHARMACY_STOCK_ROLES: readonly Role[] = ['admin', 'pharmacy']
+// end WS5 T3

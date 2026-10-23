@@ -1095,7 +1095,7 @@ export const chargeLines = pgTable('charge_lines', {
 // Each raises SQLSTATE 55000 unless the transaction ran
 // `select set_config('hims.allow_document_purge', 'on', true)` (seed clear and test
 // fixtures only; never app code). After `db:push` on a fresh DB, apply migration B.
-export const documentSeriesEnum = pgEnum('document_series', ['invoice', 'receipt', 'credit_note', 'refund'])
+export const documentSeriesEnum = pgEnum('document_series', ['invoice', 'receipt', 'credit_note', 'refund', 'grn']) // WS5 T3: + 'grn' (2026-10-25-ws5-pharmacy-grns.sql)
 export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'finalised', 'cancelled', 'discarded'])
 export const paymentModeEnum = pgEnum('payment_mode', ['cash', 'upi', 'card', 'cheque', 'neft', 'other'])
 export const patientPaymentKindEnum = pgEnum('patient_payment_kind', ['advance', 'receipt'])
@@ -2925,7 +2925,7 @@ export const medicationBatches = pgTable('medication_batches', {
   mrpPerUnitPaise: integer('mrp_per_unit_paise').notNull(),
   purchaseRatePaise: integer('purchase_rate_paise').default(0).notNull(),
   quantityOnHand: integer('quantity_on_hand').default(0).notNull(),
-  grnId: integer('grn_id'),
+  grnId: integer('grn_id').references((): AnyPgColumn => pharmacyGrns.id), // WS5 T3
   receivedAt: timestamp('received_at').defaultNow().notNull(),
   writtenOffAt: timestamp('written_off_at'),
   writeOffReason: text('write_off_reason'),
@@ -2938,3 +2938,27 @@ export const medicationBatches = pgTable('medication_batches', {
 
 export type MedicationBatchRow = typeof medicationBatches.$inferSelect
 // end WS5 T2
+// WS5 T3
+// Goods received notes (spec §3). Numbered GRN/<FY>/<6 digits> through allocateDocumentNumber
+// (document_series 'grn'). Each line inserts or tops up a medication_batches row (grn_id = the GRN
+// that created the batch); line_count keeps the number of lines because a topped-up batch keeps
+// its first GRN. Migration 2026-10-25-ws5-pharmacy-grns.sql.
+export const pharmacyGrns = pgTable('pharmacy_grns', {
+  id: serial('id').primaryKey(),
+  grnNumber: text('grn_number').notNull(),
+  supplierName: text('supplier_name').notNull(),
+  supplierInvoiceNo: text('supplier_invoice_no').notNull(),
+  supplierInvoiceDate: date('supplier_invoice_date').notNull(),
+  receivedByName: text('received_by_name').notNull(),
+  receivedAt: timestamp('received_at').defaultNow().notNull(),
+  totalPaise: bigint('total_paise', { mode: 'number' }).notNull(),
+  lineCount: integer('line_count').notNull(),
+}, (t) => [
+  unique('pharmacy_grns_grn_number_unique').on(t.grnNumber),
+  index('pharmacy_grns_received_at_idx').on(t.receivedAt),
+  check('pharmacy_grns_total_nonneg', sql`${t.totalPaise} >= 0`),
+  check('pharmacy_grns_line_count_positive', sql`${t.lineCount} > 0`),
+])
+
+export type PharmacyGrnRow = typeof pharmacyGrns.$inferSelect
+// end WS5 T3
