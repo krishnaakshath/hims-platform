@@ -19,7 +19,7 @@ export function InsuranceAttentionTiles({ data, canEditSettings }: { data: Insur
         {unverified.length > 0 && (
           <ul className="mt-1 space-y-0.5">
             {unverified.slice(0, 5).map((a) => (
-              <li key={a.admissionId}><Link href={`/patients/${encodeURIComponent(a.patientId)}`} className="text-primary hover:underline">{a.uhid ?? '—'}</Link> · {a.payerName}</li>
+              <li key={a.admissionId}><Link href={`/rcm/policies?patientId=${encodeURIComponent(a.patientId)}`} className="text-primary hover:underline">{a.uhid ?? '—'}</Link> · {a.payerName}</li>
             ))}
             {unverified.length > 5 && <li className="text-muted-foreground">and {unverified.length - 5} more</li>}
           </ul>
