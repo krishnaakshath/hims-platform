@@ -387,19 +387,18 @@ describe.skipIf(!process.env.DATABASE_URL)('procedure orders billed at order tim
   })
 
   describe('visit cancel and procedures', () => {
-    it('cancelling the visit voids its procedure lines and soft-voids its uncoded procedures; a coded procedure stays', async () => {
+    it('cancelling the visit voids its procedure lines and soft-voids its uncoded procedures', async () => {
       const pid = await newPatient()
       const e = await opdEncounter(pid)
       const a = await orderAt(e)
       const b = await orderAt(e, { quantity: 2 })
-      await markCoded(b.procedureId)
       const { enc, getDb, auditLog, eq } = await m()
       const c = await enc.transitionEncounter(e.id, 'cancelled', doctor, { cancelReason: 'Left', now: LATER })
       expect(c.ok).toBe(true)
       const procs = await proceduresOf(e.id)
       expect(procs.map((p) => [p.id, p.voidedAt?.toISOString() ?? null, p.voidedByName])).toEqual([
         [a.procedureId, LATER.toISOString(), doctor.name],
-        [b.procedureId, null, null],
+        [b.procedureId, LATER.toISOString(), doctor.name],
       ])
       const lines = await linesOf(pid)
       expect(lines.map((l) => [l.encounterProcedureId, l.status, l.voidReason])).toEqual([
@@ -409,6 +408,26 @@ describe.skipIf(!process.env.DATABASE_URL)('procedure orders billed at order tim
       const audits = (await getDb().select().from(auditLog).where(eq(auditLog.patientId, pid))).map((x) => `${x.action}|${x.details}`)
       expect(audits).toContain(`cancelled procedure|encounter=${e.id} procedure=${a.procedureId} cause=visit_cancelled`)
       expect(audits).toContain(`billing: voided charge line|line=${lines[0].id} encounter=${e.id} cause=visit_cancelled`)
+    })
+
+    // WS2 T12 (controller ruling, consistent with T10's performed lab orders): a coded procedure
+    // means the procedure was performed; the visit cannot be cancelled. Refused before any write.
+    it('a coded live procedure refuses the visit cancel (visit_has_performed_orders) and changes nothing', async () => {
+      const pid = await newPatient()
+      const e = await opdEncounter(pid)
+      const a = await orderAt(e)
+      const b = await orderAt(e, { quantity: 2 })
+      await markCoded(b.procedureId)
+      const { enc, getDb, encounters, eq } = await m()
+      const c = await enc.transitionEncounter(e.id, 'cancelled', doctor, { cancelReason: 'Left', now: LATER })
+      expect(c).toEqual({ ok: false, error: 'visit_has_performed_orders' })
+      expect((await proceduresOf(e.id)).map((p) => [p.id, p.voidedAt, p.codingStatus])).toEqual([[a.procedureId, null, 'uncoded'], [b.procedureId, null, 'coded']])
+      expect((await linesOf(pid)).map((l) => [l.encounterProcedureId, l.status])).toEqual([[a.procedureId, 'captured'], [b.procedureId, 'captured']])
+      const [after] = await getDb().select().from(encounters).where(eq(encounters.id, e.id))
+      expect([after.status, after.cancelReason]).toEqual(['checked_in', null])
+      // A voided coded procedure no longer blocks.
+      await getDb().update((await m()).encounterProcedures).set({ voidedAt: NOW, voidedByName: 'TEST' }).where(eq((await m()).encounterProcedures.id, b.procedureId))
+      expect((await enc.transitionEncounter(e.id, 'cancelled', doctor, { cancelReason: 'Left', now: LATER })).ok).toBe(true)
     })
 
     it('a procedure line on a finalised invoice blocks the visit cancel (visit_billed) and changes nothing', async () => {

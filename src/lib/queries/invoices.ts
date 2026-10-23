@@ -20,6 +20,7 @@ import { istDateOf } from '@/lib/india-time'
 import { getBillingSettings } from './billing-settings'
 import { lockPatientBilling } from './charge-capture'
 import { SeriesExhaustedError, allocateDocumentNumber } from './document-numbers'
+import type { WriteExecutor } from './executor' // WS2 T12
 
 export type InvoiceStatus = InvoiceRow['status']
 
@@ -30,8 +31,14 @@ async function invoicePatient(invoiceId: number): Promise<string | null> {
 
 // ---------- drafts ----------
 
+/**
+ * WS2 T12: `stillEligible` (optional) runs inside the transaction after the billing lock and the
+ * line locks; false refuses with lines_not_available ("Invoice all ready lines" re-checks readiness
+ * there, so a visit cancelled since its read is not drafted).
+ */
 export async function createDraftInvoice(
   lineIds: number[], session: Session,
+  opts: { stillEligible?: (tx: WriteExecutor, lineIds: number[]) => Promise<boolean> } = {}, // WS2 T12
 ): Promise<{ ok: true; invoiceId: number } | { ok: false; error: 'lines_not_found' | 'lines_not_available' | 'mixed_lines' }> {
   const ids = [...new Set(lineIds)]
   const pre = await getDb().select({ patientId: chargeLines.patientId }).from(chargeLines).where(inArray(chargeLines.id, ids))
@@ -45,6 +52,7 @@ export async function createDraftInvoice(
     const lines = await tx.select().from(chargeLines).where(inArray(chargeLines.id, ids)).orderBy(asc(chargeLines.id)).for('update')
     if (lines.length !== ids.length) return { ok: false as const, error: 'lines_not_found' as const }
     if (lines.some((l) => l.status !== 'captured' || l.invoiceId !== null)) return { ok: false as const, error: 'lines_not_available' as const }
+    if (opts.stillEligible && !(await opts.stillEligible(tx, ids))) return { ok: false as const, error: 'lines_not_available' as const } // WS2 T12
     // One patient, one payer (null = self-pay counts), one context: the same admission when any line
     // has one, else the same encounter (pharmacy lines with neither form their own group).
     const same = <T>(values: T[]) => values.every((v) => v === values[0])

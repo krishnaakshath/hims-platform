@@ -228,12 +228,14 @@ export async function transitionEncounter(
     }
     // WS2 T11: the visit's live procedures, ascending id, after the home visits and before the
     // billing lock (cancelProcedure: encounter, procedure row, billing). Uncoded/proposed ones are
-    // soft-voided with the visit; a coded one stays (the coder owns it). Their lines are voided by
-    // voidAutoLinesForEncounterInTx below.
+    // soft-voided with the visit; their lines are voided by voidAutoLinesForEncounterInTx below.
+    // WS2 T12 (controller ruling): a coded live procedure was performed, like a collected sample,
+    // so the cancel is refused with visit_has_performed_orders before any write.
     const proceduresToVoid: number[] = []
     if (to === 'cancelled') {
       const procs = await lockVisitProceduresInTx(tx, id)
-      proceduresToVoid.push(...procs.filter((p) => p.codingStatus !== 'coded').map((p) => p.id))
+      if (procs.some((p) => p.codingStatus === 'coded')) return { ok: false, error: 'visit_has_performed_orders' }
+      proceduresToVoid.push(...procs.map((p) => p.id))
     }
     // WS2 T9: refuse the cancel before any write when a visit charge is already invoiced.
     if (to === 'cancelled') {

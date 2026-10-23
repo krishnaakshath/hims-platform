@@ -14,7 +14,7 @@ vi.mock('@/lib/queries/hospital-kpis', () => ({
   getFollowUpBuckets: vi.fn(async () => ({ due: 2, overdue: 3, upcoming: 9, scheduled: 1, missed: 4, capped: false })),
   getLabKpis: vi.fn(async () => ({ awaitingCollection: 4, inTransit: 1, atBench: 2, toVerify: 8, toReport: 1, criticalUnverified: 1, resultedToday: 0, criticalToday: 0, medianTatMinutes: null })),
   getPharmacyKpis: vi.fn(async () => ({ outOfStock: 2, lowStock: 5, dispensedToday: 0, unbilledDispenses: 7 })),
-  getBillingQueue: vi.fn(async () => ({ draftInvoices: 4, uninvoicedLines: 0, uninvoicedPaise: 0, pharmacyDraftCharges: 1, pendingApprovalCharges: 9 })),
+  getBillingQueue: vi.fn(async () => ({ draftInvoices: 4, uninvoicedLines: 0, uninvoicedPaise: 0, pharmacyDraftCharges: 1, pendingApprovalCharges: 9, readyLines: 0, readyPaise: 0, waitingLines: 0 })),
   getClaimAgeing: vi.fn(async () => ({ outstandingPaise: 0, aging: [], preauthsOverdue: 2, queried: 5 })),
   countResultsToVerifyForProvider: vi.fn(async () => 4),
 }))

@@ -64,6 +64,14 @@ describe('/cash-desk', () => {
     expect(screen.queryByRole('link', { name: 'INV/26-27/000001' })).toBeNull()
     expect(vi.mocked(CashDeskPanel).mock.calls[0][0]).toMatchObject({ patientId: 'RD-1', admissionId: 12, canRefund: false })
     expect(logAudit).toHaveBeenCalledWith(expect.anything(), 'billing: viewed patient ledger', 'RD-1')
+    // WS2 T12: frontdesk takes money but does not draft invoices (INVOICE_READY_ROLES).
+    expect(screen.queryByRole('button', { name: 'Invoice ready charges' })).toBeNull()
+  })
+
+  it.each(['billing', 'crc', 'admin'] as const)('%s can invoice the patient\'s ready charges', async (r) => {
+    role = r
+    render(await CashDeskPage({ searchParams: Promise.resolve({ patientId: 'RD-1' }) }))
+    expect(screen.getByRole('button', { name: 'Invoice ready charges' })).toBeInTheDocument()
   })
 
   it('billing can refund and follow legacy charge links', async () => {

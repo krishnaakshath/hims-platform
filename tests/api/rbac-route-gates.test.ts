@@ -604,6 +604,8 @@ import { GET as getVisitProcedures, POST as postVisitProcedure } from '@/app/api
 import { DELETE as deleteVisitProcedure } from '@/app/api/encounters/[id]/procedures/[procedureId]/route' // WS2 T11
 import { GET as getProcedureOptions } from '@/app/api/encounters/[id]/procedure-options/route' // WS2 T11
 import { CLINICAL_WRITE_ROLES as WS2T11_CLINICAL_WRITE_ROLES, WORKSPACE_READ_ROLES as WS2T11_WORKSPACE_READ_ROLES } from '@/lib/role-policy' // WS2 T11
+import { GET as getInvoiceReady, POST as postInvoiceReady } from '@/app/api/billing/invoice-ready/route' // WS2 T12
+import { INVOICE_READY_ROLES as WS2T12_INVOICE_READY_ROLES } from '@/lib/role-policy' // WS2 T12
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1068,6 +1070,9 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'DELETE /api/encounters/[id]/procedures/[procedureId]', call: () => deleteVisitProcedure(del(`/api/encounters/${BOGUS_ID}/procedures/x`), ctx({ id: BOGUS_ID, procedureId: 'x' })), allowed: [...WS2T11_CLINICAL_WRITE_ROLES] }, // WS2 T11
   { name: 'GET /api/encounters/[id]/procedure-options', call: () => getProcedureOptions(get('/api/encounters/x/procedure-options'), ctx({ id: 'x' })), allowed: [...WS2T11_CLINICAL_WRITE_ROLES] }, // WS2 T11
   { name: 'GET /api/encounters/[id]/procedures', call: () => getVisitProcedures(get(`/api/encounters/${BOGUS_ID}/procedures`), ctx({ id: BOGUS_ID })), allowed: [...WS2T11_WORKSPACE_READ_ROLES] }, // WS2 T11
+  // WS2 T12: invoice all ready lines -- INVOICE_READY_ROLES; an invalid patient id is the 400 an allowed role gets (never a real batch).
+  { name: 'GET /api/billing/invoice-ready', call: () => getInvoiceReady(get('/api/billing/invoice-ready?patientId=bad%20id')), allowed: [...WS2T12_INVOICE_READY_ROLES] }, // WS2 T12
+  { name: 'POST /api/billing/invoice-ready', call: () => postInvoiceReady(send('POST', '/api/billing/invoice-ready', { patientId: 'bad id' })), allowed: [...WS2T12_INVOICE_READY_ROLES] }, // WS2 T12
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1226,6 +1231,7 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // end Foundations T11
   { name: 'PUT /api/settings/notification-templates', call: () => putNotificationTemplates(send('PUT', '/api/settings/notification-templates', NOT_JSON)), allowed: ['admin'] }, // Foundations T8
   { name: 'POST /api/encounters/[id]/procedures', call: () => postVisitProcedure(send('POST', `/api/encounters/${BOGUS_ID}/procedures`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: [...WS2T11_CLINICAL_WRITE_ROLES] }, // WS2 T11
+  { name: 'POST /api/billing/invoice-ready', call: () => postInvoiceReady(send('POST', '/api/billing/invoice-ready', NOT_JSON)), allowed: [...WS2T12_INVOICE_READY_ROLES] }, // WS2 T12
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {
