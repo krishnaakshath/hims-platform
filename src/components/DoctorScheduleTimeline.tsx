@@ -5,6 +5,8 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Filter } from 'lucide-react'
 import type { AppointmentStatus } from '@/lib/queries/appointments'
+import type { EncounterStatus } from '@/lib/encounters/status'
+import { StartEncounterButton } from '@/components/encounters/StartEncounterButton'
 
 export interface ScheduleRow {
   id: number
@@ -13,6 +15,27 @@ export interface ScheduleRow {
   startsAt: Date
   visitReason: string
   status: AppointmentStatus
+  // WS1 T3: the visit checked in from this appointment (null until the front desk checks it in).
+  encounterId: number | null
+  encounterStatus: EncounterStatus | null
+  uhid: string | null
+}
+
+// WS1 T3 (spec ruling 2): the doctor never checks a patient in. A checked-in visit is started
+// explicitly (POST, then the workspace opens); one in consultation is continued; an appointment
+// with no visit yet waits for the front desk.
+function VisitAction({ row }: { row: ScheduleRow }) {
+  if (row.encounterId !== null && row.encounterStatus === 'checked_in') return <StartEncounterButton encounterId={row.encounterId} />
+  if (row.encounterId !== null && row.encounterStatus === 'in_consultation') {
+    return <Link href={`/encounters/${row.encounterId}`} className="rounded bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/20">Continue</Link>
+  }
+  if (row.encounterId !== null && row.encounterStatus === 'completed') {
+    return <Link href={`/encounters/${row.encounterId}`} className="text-xs font-medium text-primary hover:underline">View visit</Link>
+  }
+  if (row.encounterId === null && row.status === 'scheduled') {
+    return <span className="rounded bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">Awaiting check-in</span>
+  }
+  return null
 }
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
@@ -87,13 +110,9 @@ export function DoctorScheduleTimeline({ appointments }: { appointments: Schedul
               <div className="flex flex-1 flex-col">
                 <div className="flex items-center justify-between">
                   <Link href={`/patients/${a.patientId}`} className="text-sm font-bold text-primary hover:underline">
-                    {a.patientName} <span className="text-xs font-normal text-muted-foreground">({a.patientId})</span>
+                    {a.patientName}{a.uhid && <span className="text-xs font-normal text-muted-foreground"> ({a.uhid})</span>}
                   </Link>
-                  {a.status === 'scheduled' && (
-                    <Link href={`/patients/${a.patientId}`} className="rounded bg-success/10 px-2.5 py-1 text-xs font-bold text-success hover:bg-success/20">
-                      Start Encounter
-                    </Link>
-                  )}
+                  <VisitAction row={a} />
                 </div>
                 <p className="mt-1 text-xs text-foreground/80">{a.visitReason}</p>
               </div>

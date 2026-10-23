@@ -258,7 +258,7 @@ describe('PI dashboard (/doctor)', () => {
     const { deadLinks } = await import('./dashboard-link-gates')
     const { container } = render(await Page())
     expect(screen.getByRole('heading', { name: /today's opd/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /opd patient/i })).toHaveAttribute('href', '/patients/RD-0005')
+    expect(screen.getByRole('link', { name: /opd patient/i })).toHaveAttribute('href', '/encounters/5') // WS1 T3: Today's OPD opens the workspace
     expect(screen.getByText('#12')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /my inpatients/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /ward patient/i })).toHaveAttribute('href', '/patients/RD-0003')
