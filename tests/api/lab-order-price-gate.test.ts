@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { eq, inArray } from 'drizzle-orm'
 
 vi.mock('@/lib/auth', () => ({
@@ -13,9 +13,11 @@ import { POST } from '@/app/api/patients/[anonId]/lab-orders/route'
 import { PATCH as PATCH_TEST } from '@/app/api/lab-tests/[id]/route'
 import { PATCH as PATCH_SERVICE } from '@/app/api/tariff/services/[id]/route'
 import { unmappedTests } from '@/lib/queries/lab-setup'
+import { ServiceHasOpenLabOrdersError, commitServiceImport } from '@/lib/queries/tariff'
 
 const RUN = `${Date.now()}`
 const PID = `TEST-T10-${RUN}`
+let inactiveTest = 0, noRateTest = 0, inactiveSvc = 0, noRateSvc = 0
 let deptId = 0, providerId = 0, serviceId = 0, mapped = 0, unmapped = 0
 
 const post = (labTestIds: number[]) =>
@@ -43,6 +45,17 @@ describe.skipIf(!process.env.DATABASE_URL)('lab order price gate (DB)', () => {
       { name: `TEST_T10 unmapped ${RUN}`, code: `T10-U-${RUN}`, isActive: false },
     ]).returning()
     mapped = a.id
+    const svcs = await db.insert(serviceCatalog).values([
+      { code: `T10I${RUN.slice(-7)}`, name: 'TEST_T10 inactive svc', departmentId: d.id, category: 'investigation_lab', hsnSac: '999316', isActive: false },
+      { code: `T10N${RUN.slice(-7)}`, name: 'TEST_T10 no-rate svc', departmentId: d.id, category: 'investigation_lab', hsnSac: '999316' },
+    ]).returning()
+    inactiveSvc = svcs[0].id; noRateSvc = svcs[1].id
+    await db.insert(tariffRates).values({ serviceId: inactiveSvc, scope: 'base', amountPaise: 100, validFrom: '2020-01-01', createdByName: 'TEST_T10' })
+    const tt = await db.insert(labTests).values([
+      { name: `TEST_T10 inactive-svc ${RUN}`, code: `T10-I-${RUN}`, serviceId: inactiveSvc },
+      { name: `TEST_T10 no-rate ${RUN}`, code: `T10-N-${RUN}`, serviceId: noRateSvc },
+    ]).returning()
+    inactiveTest = tt[0].id; noRateTest = tt[1].id
     unmapped = b.id
   })
 
@@ -52,9 +65,10 @@ describe.skipIf(!process.env.DATABASE_URL)('lab order price gate (DB)', () => {
     await db.delete(labOrders).where(eq(labOrders.patientId, PID))
     const ids = reqs.map((r) => r.id).filter((x): x is number => x !== null)
     if (ids.length) await db.delete(labRequisitions).where(inArray(labRequisitions.id, ids))
-    await db.delete(labTests).where(inArray(labTests.id, [mapped, unmapped]))
+    await db.delete(labTests).where(inArray(labTests.id, [mapped, unmapped, inactiveTest, noRateTest]))
     await db.delete(tariffRates).where(eq(tariffRates.serviceId, serviceId))
-    await db.delete(serviceCatalog).where(eq(serviceCatalog.id, serviceId))
+    await db.delete(tariffRates).where(eq(tariffRates.serviceId, inactiveSvc))
+    await db.delete(serviceCatalog).where(inArray(serviceCatalog.id, [serviceId, inactiveSvc, noRateSvc]))
     await db.delete(patients).where(eq(patients.id, PID))
     await db.delete(providers).where(eq(providers.id, providerId))
     await db.delete(departments).where(eq(departments.id, deptId))
@@ -71,6 +85,14 @@ describe.skipIf(!process.env.DATABASE_URL)('lab order price gate (DB)', () => {
   it('is all-or-nothing for a multi-test order', async () => {
     const res = await post([mapped, unmapped])
     expect(res.status).toBe(422)
+    expect(await ordersFor()).toHaveLength(0)
+    expect(await getDb().select().from(labRequisitions).where(eq(labRequisitions.patientId, PID))).toHaveLength(0)
+  })
+
+  it.each([['inactive service', () => inactiveTest], ['service with no current rate', () => noRateTest]])('refuses a test mapped to an %s with 422 test_unpriced and writes nothing', async (_n, id) => {
+    const res = await post([mapped, id()])
+    expect(res.status).toBe(422)
+    expect(await res.json()).toEqual({ error: 'This test has no price. Map it to a tariff service first.', code: 'test_unpriced' })
     expect(await ordersFor()).toHaveLength(0)
     expect(await getDb().select().from(labRequisitions).where(eq(labRequisitions.patientId, PID))).toHaveLength(0)
   })
@@ -105,10 +127,28 @@ describe.skipIf(!process.env.DATABASE_URL)('lab order price gate (DB)', () => {
     expect((await getDb().select().from(serviceCatalog).where(eq(serviceCatalog.id, serviceId)))[0].isActive).toBe(true)
   })
 
+  it('CSV import cannot deactivate a service with open orders, and writes nothing', async () => {
+    const row = (id: number, code: string, isActive: boolean) =>
+      ({ code, name: `renamed ${code}`, departmentId: deptId, category: 'investigation_lab' as const, hsnSac: '999316', gstRateBp: 0, isActive, existingId: id })
+    const [svc] = await getDb().select().from(serviceCatalog).where(eq(serviceCatalog.id, serviceId))
+    const [other] = await getDb().select().from(serviceCatalog).where(eq(serviceCatalog.id, noRateSvc))
+    const err = await commitServiceImport([row(noRateSvc, other.code, false), row(serviceId, svc.code, false)]).catch((e) => e)
+    expect(err).toBeInstanceOf(ServiceHasOpenLabOrdersError)
+    expect(err.message).toContain(svc.code)
+    const after = await getDb().select().from(serviceCatalog).where(inArray(serviceCatalog.id, [serviceId, noRateSvc]))
+    expect(after.every((s) => s.isActive && !s.name.startsWith('renamed'))).toBe(true)
+  })
+
+  it('CSV import still deactivates a service with no open orders', async () => {
+    const [other] = await getDb().select().from(serviceCatalog).where(eq(serviceCatalog.id, noRateSvc))
+    const n = await commitServiceImport([{ code: other.code, name: other.name, departmentId: deptId, category: 'investigation_lab', hsnSac: '999316', gstRateBp: 0, isActive: false, existingId: noRateSvc }])
+    expect(n).toBe(1)
+    expect((await getDb().select().from(serviceCatalog).where(eq(serviceCatalog.id, noRateSvc)))[0].isActive).toBe(false)
+  })
+
   it('allows both once the orders are closed', async () => {
     await getDb().update(labOrders).set({ status: 'cancelled' }).where(eq(labOrders.patientId, PID))
     expect((await patchService(serviceId, { isActive: false })).status).toBe(200)
     expect((await patchTest(mapped, { serviceId: null })).status).toBe(200)
   })
 })
-void NextResponse

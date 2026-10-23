@@ -30,7 +30,7 @@ export type CreateLabRequisitionResult =
   // includesLabTest: at least one ordered test is a lab test (not imaging); the home-collection
   // notice is sent only then (Task 8 ruling).
   | { ok: true; requisition: LabRequisitionRow; lines: QuotedLine[]; patientIsLocal: boolean; includesLabTest: boolean }
-  | { ok: false; error: 'patient_not_found' | 'test_not_found' | 'encounter_not_found' | 'encounter_mismatch' | 'test_unmapped' | 'test_inactive' }
+  | { ok: false; error: 'patient_not_found' | 'test_not_found' | 'encounter_not_found' | 'encounter_mismatch' | 'test_unmapped' | 'test_inactive' | 'test_unpriced' }
 
 export async function createLabRequisition(input: CreateLabRequisitionInput, session: Session, now = new Date()): Promise<CreateLabRequisitionResult> {
   const db = getDb()
@@ -74,6 +74,10 @@ export async function createLabRequisition(input: CreateLabRequisitionInput, ses
     )
     quotes.set(labTestId, quoteFromResolution(res))
   }
+
+  // Foundations T10: a mapped test whose service is inactive or has no current rate is as unpriced as an
+  // unmapped one. Same resolver as the quote above; nothing has been written yet.
+  if (input.labTestIds.some((id) => quotes.get(id)!.quoteStatus !== 'quoted')) return { ok: false, error: 'test_unpriced' }
 
   // 3. One transaction: requisition, one order per test (input order), one audit per order.
   const { requisition, lines } = await db.transaction(async (tx) => {

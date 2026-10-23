@@ -253,14 +253,21 @@ async function assertCategoryChangesAllowed(tx: Tx, changes: { id: number; from:
 
 /** Foundations T10: a service that prices a lab test with open orders cannot be deactivated. */
 export class ServiceHasOpenLabOrdersError extends Error {
-  constructor() { super('This service prices a lab or imaging test that has open orders. Finish or cancel them first.') }
+  constructor(code?: string) {
+    super(`${code ? `${code}: ` : ''}This service prices a lab or imaging test that has open orders. Finish or cancel them first.`)
+  }
+}
+
+/** Shared by the single PATCH and the CSV import; call with the service row already locked. */
+async function assertNoOpenLabOrders(tx: Tx, serviceId: number, code?: string): Promise<void> {
+  if ((await countOpenOrdersForService(serviceId, tx)) > 0) throw new ServiceHasOpenLabOrdersError(code)
 }
 
 export async function updateService(id: number, patch: ServiceUpdateInput, audit?: TariffAudit): Promise<ServiceRow | null> {
   return inTx(audit, async (tx) => {
     if (patch.isActive === false) {
       const [cur] = await tx.select({ isActive: serviceCatalog.isActive }).from(serviceCatalog).where(eq(serviceCatalog.id, id)).for('update')
-      if (cur?.isActive && (await countOpenOrdersForService(id, tx)) > 0) throw new ServiceHasOpenLabOrdersError()
+      if (cur?.isActive) await assertNoOpenLabOrders(tx, id)
     }
     if (patch.category !== undefined) {
       // Lock the service (same lock as package-item writes) so the item check cannot race.
@@ -481,9 +488,14 @@ export async function commitServiceImport(rows: ServiceImportRow[], audit?: Tari
   return inTx(audit, async (tx) => {
     const existingIds = rows.flatMap((r) => (r.existingId === null ? [] : [r.existingId]))
     if (existingIds.length > 0) {
-      const current = await tx.select({ id: serviceCatalog.id, category: serviceCatalog.category }).from(serviceCatalog)
+      const current = await tx.select({ id: serviceCatalog.id, category: serviceCatalog.category, isActive: serviceCatalog.isActive, code: serviceCatalog.code }).from(serviceCatalog)
         .where(inArray(serviceCatalog.id, [...new Set(existingIds)])).orderBy(asc(serviceCatalog.id)).for('update')
       const from = new Map(current.map((c) => [c.id, c.category]))
+      // Foundations T10: same open-order guard as the single PATCH, per row, before anything is written.
+      for (const r of rows) {
+        const cur = r.existingId === null ? undefined : current.find((c) => c.id === r.existingId)
+        if (cur?.isActive && !r.isActive) await assertNoOpenLabOrders(tx, cur.id, cur.code)
+      }
       await assertCategoryChangesAllowed(tx, rows.flatMap((r) =>
         r.existingId !== null && from.has(r.existingId) ? [{ id: r.existingId, from: from.get(r.existingId)!, to: r.category }] : []))
     }

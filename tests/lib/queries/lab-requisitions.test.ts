@@ -62,6 +62,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     const rates = await db.insert(tariffRates).values([
       { serviceId, scope: 'base', amountPaise: 45000, validFrom: '2099-01-01', createdByName: PROBE },
       { serviceId, scope: 'payer', payerId, amountPaise: 38000, validFrom: '2099-01-01', createdByName: PROBE },
+      { serviceId: noRateServiceId, scope: 'base', amountPaise: 20000, validFrom: '2099-01-01', createdByName: PROBE },
     ]).returning()
     rateIds.push(...rates.map((r) => r.id))
     const [a, b] = await db.insert(labTests).values([
@@ -100,19 +101,19 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
 
   it('creates one requisition with one priced order per test', async () => {
     const r = await create()
-    expect(r.ok && r.lines.map((l) => [l.quotedPricePaise, l.quoteStatus])).toEqual([[45000, 'quoted'], [null, 'no_rate']])
+    expect(r.ok && r.lines.map((l) => [l.quotedPricePaise, l.quoteStatus])).toEqual([[45000, 'quoted'], [20000, 'quoted']])
     if (!r.ok) return
     expect(r.requisition).toMatchObject({ patientId: P, orderedByProviderId: providerId, followUpRequested: false, followUpIntervalValue: null, createdByName: PROBE })
     expect(r.lines.map((l) => l.labTestId)).toEqual([t1, t2])
     const full = await getRequisitionWithOrders(r.requisition.id)
     expect(full?.orders.map((o) => [o.id, o.status, o.requisitionId, o.quotedPricePaise, o.quotedTariffRateId, o.quotedOn, o.quoteStatus])).toEqual([
       [r.lines[0].orderId, 'ordered', r.requisition.id, 45000, rateIds[0], '2099-05-01', 'quoted'],
-      [r.lines[1].orderId, 'ordered', r.requisition.id, null, null, '2099-05-01', 'no_rate'],
+      [r.lines[1].orderId, 'ordered', r.requisition.id, 20000, rateIds[2], '2099-05-01', 'quoted'],
     ])
     const audits = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, PROBE), eq(auditLog.action, 'created lab order'), eq(auditLog.patientId, P)))
     expect(audits.map((a) => a.details)).toEqual(expect.arrayContaining([
       `order=${r.lines[0].orderId} requisition=${r.requisition.id} quote=quoted`,
-      `order=${r.lines[1].orderId} requisition=${r.requisition.id} quote=no_rate`,
+      `order=${r.lines[1].orderId} requisition=${r.requisition.id} quote=quoted`,
     ]))
     expect(await getRequisitionWithOrders(2_000_000_000)).toBeNull()
   })
@@ -120,7 +121,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
   it('quotes on the IST order date', async () => {
     // 2098-12-31 23:00 IST is before the rate starts: no rate.
     const r = await create({ labTestIds: [t1] }, new Date('2098-12-31T17:30:00Z'))
-    expect(r.ok && r.lines.map((l) => [l.quotedPricePaise, l.quoteStatus])).toEqual([[null, 'no_rate']])
+    expect(r).toEqual({ ok: false, error: 'test_unpriced' })
     // 00:10 IST on 1 Jan 2099 (still 31 Dec in UTC) is on the rate's first day.
     const r2 = await create({ labTestIds: [t1] }, new Date('2098-12-31T18:40:00Z'))
     expect(r2.ok && r2.lines[0].quotedPricePaise).toBe(45000)
@@ -137,11 +138,11 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     expect(r.ok && (await getRequisitionWithOrders(r.requisition.id))?.orders[0].quotedTariffRateId).toBe(rateIds[1])
   })
 
-  it('an inactive tariff service is ordered unpriced', async () => {
+  it('an inactive tariff service refuses the order as unpriced', async () => {
     await getDb().update(serviceCatalog).set({ isActive: false }).where(eq(serviceCatalog.id, serviceId))
     try {
       const r = await create({ labTestIds: [t1] })
-      expect(r.ok && r.lines.map((l) => [l.quotedPricePaise, l.quoteStatus])).toEqual([[null, 'service_inactive']])
+      expect(r).toEqual({ ok: false, error: 'test_unpriced' })
     } finally {
       await getDb().update(serviceCatalog).set({ isActive: true }).where(eq(serviceCatalog.id, serviceId))
     }

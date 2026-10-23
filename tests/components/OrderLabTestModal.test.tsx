@@ -7,9 +7,9 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh, push: vi.fn() }
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); refresh.mockClear() })
 
 const TESTS: LabTestOption[] = [
-  { id: 1, name: 'Complete Blood Count', code: 'CBC', defaultUnit: null, referenceRange: null, category: 'lab' },
-  { id: 2, name: 'Chest X-Ray, 2 Views', code: 'XR-CHEST-2V', defaultUnit: null, referenceRange: null, category: 'imaging' },
-  { id: 3, name: 'Lipid Panel', code: 'LIPID', defaultUnit: null, referenceRange: null, category: 'lab' },
+  { id: 1, name: 'Complete Blood Count', code: 'CBC', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: 1, isActive: true, priced: true },
+  { id: 2, name: 'Chest X-Ray, 2 Views', code: 'XR-CHEST-2V', defaultUnit: null, referenceRange: null, category: 'imaging', serviceId: 1, isActive: true, priced: true },
+  { id: 3, name: 'Lipid Panel', code: 'LIPID', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: 1, isActive: true, priced: true },
 ]
 
 const created = (patientIsLocal: boolean) =>
@@ -91,11 +91,21 @@ describe('OrderLabTestModal', () => {
 describe('OrderLabTestModal price gate (Foundations T10)', () => {
   it('greys out an unmapped test with "No price: ask billing"', () => {
     render(<OrderLabTestModal patientId="P1" labTests={[
-      { id: 1, name: 'Mapped test', code: 'M1', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: 5 },
-      { id: 2, name: 'Unmapped test', code: 'U1', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: null },
+      { id: 1, name: 'Mapped test', code: 'M1', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: 5, isActive: true, priced: true },
+      { id: 2, name: 'Unmapped test', code: 'U1', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: null, isActive: true, priced: false },
     ]} onClose={() => {}} />)
     expect(screen.getByText('No price: ask billing')).toBeInTheDocument()
     expect(screen.getByLabelText(/Unmapped test/)).toBeDisabled()
     expect(screen.getByLabelText(/Mapped test/)).not.toBeDisabled()
+  })
+
+  it('greys a mapped-but-unpriced test and an inactive test', () => {
+    render(<OrderLabTestModal patientId="P1" labTests={[
+      { id: 1, name: 'No rate test', code: 'N1', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: 5, isActive: true, priced: false },
+      { id: 2, name: 'Inactive test', code: 'I1', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: 5, isActive: false, priced: true },
+    ]} onClose={() => {}} />)
+    expect(screen.getByLabelText(/No rate test/)).toBeDisabled()
+    expect(screen.getByLabelText(/Inactive test/)).toBeDisabled()
+    expect(screen.getAllByText('No price: ask billing')).toHaveLength(1)
   })
 })
