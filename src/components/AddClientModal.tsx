@@ -28,10 +28,18 @@ interface PayerOption {
 
 // WS6 T8: an unsaved registration is kept in sessionStorage (this tab only) while the
 // dialog is open, so an accidental close or reload does not lose it; it is removed on
-// success. The Aadhaar number is never written there. A dialog opened pre-filled
+// success. Aadhaar and the other identifiers (DRAFT_OMIT) are never written there. A dialog opened pre-filled
 // (`initial`: Scan & Share, a booking request) carries its own source and keeps no draft.
 const DRAFT_KEY = 'hims.registration-draft.v1'
 interface Draft { form: RegistrationFormState; step: number }
+// Identifiers never kept in the draft (blanked on write and on read): Aadhaar, ABHA and its
+// ABDM flow, KYC document number, MLC number, insurance member id.
+const DRAFT_OMIT = ['aadhaarNumber', 'abhaNumber', 'abhaAddress', 'abhaFlowId', 'kycDocNumber', 'mlcNumber', 'primaryMemberId'] as const
+function withoutSensitive(form: RegistrationFormState): RegistrationFormState {
+  const out = { ...form }
+  for (const k of DRAFT_OMIT) out[k] = ''
+  return out
+}
 
 function readDraft(): Draft | null {
   try {
@@ -40,13 +48,13 @@ function readDraft(): Draft | null {
     const d = JSON.parse(raw) as Partial<Draft>
     if (!d || typeof d !== 'object' || !d.form || typeof d.form !== 'object') return null
     const step = typeof d.step === 'number' && d.step >= 0 && d.step < REGISTRATION_STEPS.length ? d.step : 0
-    return { form: { ...EMPTY_REGISTRATION_FORM, ...d.form, aadhaarNumber: '' }, step }
+    return { form: withoutSensitive({ ...EMPTY_REGISTRATION_FORM, ...d.form }), step }
   } catch {
     return null
   }
 }
 function writeDraft(d: Draft) {
-  try { window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ ...d, form: { ...d.form, aadhaarNumber: '' } })) } catch { /* storage unavailable */ }
+  try { window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ ...d, form: withoutSensitive(d.form) })) } catch { /* storage unavailable */ }
 }
 function clearDraft() {
   try { window.sessionStorage.removeItem(DRAFT_KEY) } catch { /* storage unavailable */ }
@@ -101,8 +109,8 @@ export function AddClientModal({ onClose, initial, onRegistered, navigateToPatie
   const registered = useRef(false) // no draft is written once the patient exists
   useEffect(() => {
     if (!keepsDraft || registered.current) return
-    // Nothing typed yet (or only the Aadhaar number, which is never kept): no draft.
-    if (filledRoots({ ...form, aadhaarNumber: '' }).size === 0) clearDraft()
+    // Nothing typed yet (or only identifiers, which are never kept): no draft.
+    if (filledRoots(withoutSensitive(form)).size === 0) clearDraft()
     else writeDraft({ form, step })
   }, [keepsDraft, form, step])
 

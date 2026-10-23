@@ -149,18 +149,26 @@ describe('AddClientModal in steps (WS6 T8)', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('keeps a draft in sessionStorage without the Aadhaar number and clears it on success', async () => {
+  it('keeps a draft in sessionStorage without any identifier and clears it on success', async () => {
     const first = renderModal()
     fillIdentity()
-    fireEvent.click(next())
-    const saved = JSON.parse(window.sessionStorage.getItem('hims.registration-draft.v1') ?? 'null')
-    expect(saved).toMatchObject({ step: 1, form: { name: 'Asha Rao', aadhaarNumber: '' } })
+    fireEvent.click(next()); fillAddress(); fireEvent.click(next())
+    change('Aadhaar number', '234567890124')
+    change('ABHA number', '91234567890123')
+    change('Other ID document type', 'pan')
+    change('ID document number', 'ABCDE1234F')
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    const raw = window.sessionStorage.getItem('hims.registration-draft.v1') ?? ''
+    expect(JSON.parse(raw)).toMatchObject({ step: 1, form: { name: 'Asha Rao', aadhaarNumber: '', abhaNumber: '', kycDocNumber: '', kycDocType: 'pan' } })
+    expect(raw).not.toMatch(/234567890124|91234567890123|ABCDE1234F/)
     first.unmount()
 
     renderModal()
     expect(screen.getByText('Step 2 of 4')).toBeInTheDocument()
     expect(screen.getByText(/Restored an unsaved registration/)).toBeInTheDocument()
-    fillAddress(); fireEvent.click(next()); fillIds(); fireEvent.click(next())
+    fillAddress(); fireEvent.click(next()); fillIds()
+    change('Other ID document type', '') // the restored type came back without its (never kept) number
+    fireEvent.click(next())
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await screen.findByText('Patient registered')
     expect(window.sessionStorage.getItem('hims.registration-draft.v1')).toBeNull()
@@ -186,7 +194,7 @@ describe('AddClientModal in steps (WS6 T8)', () => {
     renderModal()
     await toReview()
     change('Department to see (optional)', '3')
-    expect(await screen.findByText('Next available: Dr Rao today 11:30 · Room 4')).toBeInTheDocument()
+    expect(await screen.findByText('Next available: Dr Rao today 11:30 am · Room 4')).toBeInTheDocument()
     expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/providers/13/'))).toBe(false)
   })
 

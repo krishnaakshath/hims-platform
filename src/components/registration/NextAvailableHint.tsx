@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { todayIsoIn } from '@/lib/india-time'
+import { formatIstTime, todayIsoIn } from '@/lib/india-time'
 import { Field, INPUT_CLASS } from './Field'
 
 // WS6 T8 (spec D5, D6): on the Review step, the front desk picks the department the patient
@@ -14,9 +14,7 @@ interface Doctor { id: number; name: string; departmentId: number; departmentNam
 interface Slot { startsAt: string; endsAt: string; status: string }
 
 const MAX_DOCTORS = 5
-const IST_OFFSET_MS = 330 * 60_000
 
-const istClock = (iso: string) => new Date(Date.parse(iso) + IST_OFFSET_MS).toISOString().slice(11, 16)
 const doctorLabel = (name: string) => (/^dr\.?\s/i.test(name) ? name : `Dr ${name}`)
 
 type Hint = { state: 'idle' } | { state: 'loading' } | { state: 'none' } | { state: 'hidden' } | { state: 'found'; text: string }
@@ -65,7 +63,7 @@ export function NextAvailableHint() {
           .sort((a, b) => Date.parse(a.slot.startsAt) - Date.parse(b.slot.startsAt))[0]
         if (!best) { setHint({ state: 'none' }); return }
         const room = best.doctor.opdRoom ? ` · Room ${best.doctor.opdRoom}` : ''
-        setHint({ state: 'found', text: `Next available: ${doctorLabel(best.doctor.name)} today ${istClock(best.slot.startsAt)}${room}` })
+        setHint({ state: 'found', text: `Next available: ${doctorLabel(best.doctor.name)} today ${formatIstTime(best.slot.startsAt)}${room}` })
       })
       .catch(() => { if (request === latest.current) setHint({ state: 'hidden' }) })
   }

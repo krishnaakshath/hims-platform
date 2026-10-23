@@ -45,6 +45,9 @@ describe('patient master schema', () => {
       { file: '2026-10-10-sp8-abdm-nhcx.sql', columns: ['abha_verified_at', 'abha_verification_source', 'abha_verified_via'] }, // SP8
       { file: '2026-10-25-ws6-referral-source.sql', columns: ['referral_source', 'referral_note'] }, // WS6 T8
     ],
+    providers: [
+      { file: '2026-10-25-ws6-provider-schedules.sql', columns: ['slot_minutes', 'opd_room', 'portal_bookable'] }, // WS6 T6
+    ],
   }
 
   it.each([
@@ -91,7 +94,7 @@ describe('patient master schema', () => {
     const uniqueNames = p.columns.filter((c) => c.isUnique).map((c) => c.uniqueName)
     expect(uniqueNames).toEqual(expect.arrayContaining(['patients_uhid_unique', 'patients_abha_number_unique', 'patients_abha_address_unique']))
     expect(getTableConfig(patientAadhaar).checks.map((c) => c.name)).toEqual(['patient_aadhaar_value_xor_decline'])
-    expect(getTableConfig(providers).checks.map((c) => c.name)).toEqual(['providers_consultation_fee_nonneg'])
+    expect(getTableConfig(providers).checks.map((c) => c.name)).toEqual(['providers_consultation_fee_nonneg', 'providers_slot_minutes_range']) // WS6 T6
   })
 
   it('patient_contacts.patient_id is indexed in both the schema and the migration', () => {
