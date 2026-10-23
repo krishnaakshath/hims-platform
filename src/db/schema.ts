@@ -2911,3 +2911,77 @@ export const abhaLinkOverrides = pgTable('abha_link_overrides', {
 
 export type AbhaLinkOverrideRow = typeof abhaLinkOverrides.$inferSelect
 // end WS12 T5
+// WL T3
+// White-label branding (spec §3, lane rulings R1-R3; scripts/migrations/2026-10-27-wl-brand-settings.sql).
+// brand_settings is a singleton: each non-null column overrides the BRAND_* env layer for that one
+// field; revision guards concurrent admin edits. brand_assets.blob_url is an opaque driver URL that
+// never leaves the server. Neither table references patients or users (the seed reset keeps them).
+import { BRAND_ASSET_KINDS } from '../lib/brand-snapshot'
+
+const BRAND_EMAIL_PATTERN = String.raw`'^[^\s@<>"''(),;:\\\[\]]+@[^\s@<>"''(),;:\\\[\]]+\.[^\s@<>"''(),;:\\\[\]]+$'`
+const brandMaxChars = (col: AnyPgColumn, n: number) => sql`char_length(${col}) <= ${sql.raw(String(n))}`
+
+export const brandSettings = pgTable('brand_settings', {
+  id: integer('id').primaryKey().default(1),
+  revision: integer('revision').default(0).notNull(),
+  displayName: text('display_name'),
+  tagline: text('tagline'),
+  supportEmail: text('support_email'),
+  supportPhone: text('support_phone'),
+  accentColor: text('accent_color'),              // #rrggbb, lower-case
+  logoUrl: text('logo_url'),                      // https URL or same-origin /path (brand.ts parseLogoUrl)
+  loginQuote: text('login_quote'),
+  loginQuoteAttribution: text('login_quote_attribution'),
+  loginShowDepartmentList: boolean('login_show_department_list').default(true).notNull(),
+  portalName: text('portal_name'),
+  printHeaderText: text('print_header_text'),
+  printFooterText: text('print_footer_text'),
+  printSignatureLine: text('print_signature_line'),
+  emailSignature: text('email_signature'),        // up to 4 lines
+  smsName: text('sms_name'),
+  onboardingTestSigninAt: timestamp('onboarding_test_signin_at'),
+  onboardingDismissedAt: timestamp('onboarding_dismissed_at'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  updatedByName: text('updated_by_name'),
+}, (t) => [
+  check('brand_settings_singleton', sql`${t.id} = 1`),
+  check('brand_settings_revision_nonnegative', sql`${t.revision} >= 0`),
+  check('brand_settings_display_name_length', brandMaxChars(t.displayName, 60)),
+  check('brand_settings_tagline_length', brandMaxChars(t.tagline, 160)),
+  check('brand_settings_support_email_format', sql`${brandMaxChars(t.supportEmail, 254)} AND ${t.supportEmail} ~ ${sql.raw(BRAND_EMAIL_PATTERN)}`),
+  check('brand_settings_support_phone_format', sql`${brandMaxChars(t.supportPhone, 20)} AND ${t.supportPhone} ~ ${sql.raw(String.raw`'^\+?[0-9][0-9 -]{5,18}$'`)}`),
+  check('brand_settings_accent_color_format', sql`${t.accentColor} ~ '^#[0-9a-f]{6}$'`),
+  check('brand_settings_logo_url_length', brandMaxChars(t.logoUrl, 2048)),
+  check('brand_settings_login_quote_length', brandMaxChars(t.loginQuote, 200)),
+  check('brand_settings_login_quote_attribution_length', brandMaxChars(t.loginQuoteAttribution, 100)),
+  check('brand_settings_portal_name_length', brandMaxChars(t.portalName, 40)),
+  check('brand_settings_print_header_text_length', brandMaxChars(t.printHeaderText, 120)),
+  check('brand_settings_print_footer_text_length', brandMaxChars(t.printFooterText, 200)),
+  check('brand_settings_print_signature_line_length', brandMaxChars(t.printSignatureLine, 80)),
+  check('brand_settings_email_signature_length',
+    sql`${brandMaxChars(t.emailSignature, 300)} AND char_length(${t.emailSignature}) - char_length(replace(${t.emailSignature}, ${sql.raw(String.raw`E'\n'`)}, '')) <= 3`),
+  check('brand_settings_sms_name_length', brandMaxChars(t.smsName, 30)),
+])
+
+export const brandAssets = pgTable('brand_assets', {
+  kind: text('kind', { enum: BRAND_ASSET_KINDS }).primaryKey(),
+  source: text('source', { enum: ['upload', 'derived'] }).notNull(),
+  blobUrl: text('blob_url').notNull(),
+  sha256: text('sha256').notNull(),               // hash of the stored PNG
+  contentType: text('content_type').default('image/png').notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  createdByName: text('created_by_name').notNull(),
+}, (t) => [
+  check('brand_assets_kind_valid', sql`${t.kind} IN ('logo_light', 'logo_dark', 'icon_32', 'icon_180', 'icon_192', 'icon_512')`),
+  check('brand_assets_source_valid', sql`${t.source} IN ('upload', 'derived')`),
+  check('brand_assets_sha256_format', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+  check('brand_assets_content_type_png', sql`${t.contentType} = 'image/png'`),
+  check('brand_assets_dimensions_positive', sql`${t.width} > 0 AND ${t.height} > 0 AND ${t.byteSize} > 0`),
+])
+
+export type BrandSettingsRow = typeof brandSettings.$inferSelect
+export type BrandAssetRow = typeof brandAssets.$inferSelect
+// end WL T3
