@@ -12,6 +12,15 @@ export const PREAUTH_ACTIONS = [
 ] as const
 export type PreauthAction = (typeof PREAUTH_ACTIONS)[number]
 
+/** WS12 T7: the pre-auth events whose snapshot is what NHCX is sent (the latest of these). */
+export const PREAUTH_SNAPSHOT_ACTIONS = ['request', 'request_enhancement', 'refresh_snapshot'] as const satisfies readonly PreauthAction[]
+
+/**
+ * WS12 T7: outbound NHCX exchange states that mean the insurer never got the snapshot. Any other
+ * state counts as sent: the same snapshot is not sent again and cannot be refreshed.
+ */
+export const NHCX_UNDELIVERED_EXCHANGE_STATES = ['send_failed', 'error'] as const
+
 /** Statuses in which an approval is in force (an enhancement in flight keeps the last approval). */
 export const LIVE_APPROVED_PREAUTH_STATUSES = ['approved', 'enhancement_requested', 'enhancement_queried', 'enhanced'] as const satisfies readonly PreauthStatus[]
 

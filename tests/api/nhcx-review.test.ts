@@ -175,4 +175,39 @@ describe.skipIf(!process.env.DATABASE_URL)('pre-auth NHCX state and refresh (DB,
     const [x] = await getDb().select().from(nhcxExchanges).where(eq(nhcxExchanges.id, sent.value.exchangeId))
     expect(x).toMatchObject({ recipientCode: `TPA${RUN}T7@sbx`, preauthEventId: refresh.id, state: 'pending_send', isMock: true, action: 'preauth/submit' })
   })
+
+  it('fix round 1: a live exchange blocks a second send; a failed one does not (resend, or refresh then send)', async () => {
+    const schedule = vi.fn()
+    const send = () => createPreauthExchange(preauthId, SESSION, { now: () => NOW, schedule })
+    const latestRefresh = async () => (await getDb().select().from(preauthEvents)
+      .where(and(eq(preauthEvents.preauthId, preauthId), eq(preauthEvents.action, 'refresh_snapshot')))).sort((a, b) => b.id - a.id)[0]
+    const [live] = await getDb().select().from(nhcxExchanges).where(eq(nhcxExchanges.preauthId, preauthId))
+    for (const state of ['pending_send', 'sent', 'responded'] as const) {
+      await getDb().update(nhcxExchanges).set({ state }).where(eq(nhcxExchanges.id, live.id))
+      expect(await preauthNhcxState(preauthId), state).toEqual({ canSend: false, reason: 'Already sent through NHCX; waiting for the insurer.', snapshotStale: false })
+      expect(await send()).toEqual({ ok: false, error: 'duplicate_reference', message: 'Already sent through NHCX' })
+    }
+
+    // Failed with nothing changed: the same snapshot can be sent again (refresh would be not_ready).
+    await getDb().update(nhcxExchanges).set({ state: 'send_failed' }).where(eq(nhcxExchanges.id, live.id))
+    expect(await preauthNhcxState(preauthId)).toEqual({ canSend: true, reason: null, snapshotStale: false })
+    expect(await applyPreauthAction(preauthId, { action: 'refresh_snapshot' }, SESSION, NOW)).toMatchObject({ ok: false, error: 'not_ready' })
+    const again = await send()
+    expect(again.ok).toBe(true); if (!again.ok) return
+    const [x2] = await getDb().select().from(nhcxExchanges).where(eq(nhcxExchanges.id, again.value.exchangeId))
+    expect(x2.id).not.toBe(live.id)
+    expect(x2).toMatchObject({ preauthEventId: live.preauthEventId, recipientCode: `TPA${RUN}T7@sbx`, state: 'pending_send' })
+
+    // Failed, then the TPA code changed: refresh, and the send carries the refresh event and the new code.
+    await getDb().update(nhcxExchanges).set({ state: 'error' }).where(eq(nhcxExchanges.id, x2.id))
+    await getDb().update(payerProfiles).set({ nhcxParticipantCode: `TPA${RUN}T7b@sbx` }).where(eq(payerProfiles.payerId, w.tpaId))
+    expect(await applyPreauthAction(preauthId, { action: 'refresh_snapshot' }, SESSION, NOW)).toEqual({ ok: true, value: { status: 'requested' } })
+    const refresh2 = await latestRefresh()
+    expect(refresh2.id).not.toBe(live.preauthEventId)
+    const third = await send()
+    expect(third.ok).toBe(true); if (!third.ok) return
+    const [x3] = await getDb().select().from(nhcxExchanges).where(eq(nhcxExchanges.id, third.value.exchangeId))
+    expect(x3).toMatchObject({ preauthEventId: refresh2.id, recipientCode: `TPA${RUN}T7b@sbx`, state: 'pending_send' })
+    expect(await preauthNhcxState(preauthId)).toEqual({ canSend: false, reason: 'Already sent through NHCX; waiting for the insurer.', snapshotStale: false })
+  })
 })

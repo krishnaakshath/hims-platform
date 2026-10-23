@@ -11,7 +11,7 @@ import type { NhcxResponseSummary } from '@/lib/nhcx/constants'
 import { parseClaimResponseBundle, parseCommunicationRequestTaskBundle, parsePaymentNoticeTaskBundle, buildPaymentAckTaskBundle } from '@/lib/fhir/nhcx/responses'
 import { recipientCodeFor } from '@/lib/nhcx/claim-gateway'
 import { lockPatientBilling } from './charge-capture'
-import { defaultSchedule, dispatchExchange, latestPreauthSnapshotEvent, listExchangesFor, liveSnapshotSide, senderCode, staleSnapshotReason, type OutboundBuild } from './nhcx-exchanges'
+import { defaultSchedule, dispatchExchange, latestPreauthSnapshotEvent, listExchangesFor, liveSnapshotSide, PREAUTH_ALREADY_SENT, preauthEventWithNhcx, senderCode, staleSnapshotReason, type OutboundBuild } from './nhcx-exchanges'
 import { loadPolicyContext, loadSnapshotHospital } from './rcm-context'
 
 // SP8 Task 15: an RCM user reviews each insurer response (ruling 6). The
@@ -139,6 +139,7 @@ export async function preauthNhcxState(preauthId: number): Promise<{ canSend: bo
   if (!live || !recipientCodeFor(live.policy)) return { canSend: false, reason: 'This insurer or TPA has no NHCX participant code', snapshotStale: false }
   if (p.status !== 'requested' && p.status !== 'enhancement_requested') return { canSend: false, reason: 'Only a requested pre-authorisation can be sent', snapshotStale: false }
   const ev = await latestPreauthSnapshotEvent(db, preauthId)
+  if (ev && await preauthEventWithNhcx(db, ev.id)) return { canSend: false, reason: PREAUTH_ALREADY_SENT, snapshotStale: false }
   const stale = ev?.snapshot ? staleSnapshotReason(ev.snapshot, live) : null
   if (stale) return { canSend: false, reason: stale, snapshotStale: true }
   return { canSend: true, reason: null, snapshotStale: false }

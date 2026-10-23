@@ -21,7 +21,7 @@ import { isUniqueViolation } from '@/lib/db-errors'
 import { formatPaise } from '@/lib/format'
 import { snapshotSha256 } from '@/lib/rcm/hash'
 import { preauthDecisionOverdue } from '@/lib/rcm/sla'
-import { nextPreauthStatus, type PreauthStatus } from '@/lib/rcm/preauth-status'
+import { NHCX_UNDELIVERED_EXCHANGE_STATES, PREAUTH_SNAPSHOT_ACTIONS, nextPreauthStatus, type PreauthStatus } from '@/lib/rcm/preauth-status'
 import { buildPreauthSnapshot, type PreauthSnapshot } from '@/lib/rcm/snapshot'
 import type { CodedEntry, EstimateLine } from '@/lib/rcm/snapshot'
 import type { PreauthActionRequest, PreauthCreateInput } from '@/lib/rcm/validation'
@@ -222,11 +222,11 @@ export async function applyPreauthAction(preauthId: number, req: PreauthActionRe
           // WS12 T7 (R10): a new snapshot of the request still with the insurer; the old event stays
           // as it was sent. Read under the pre-auth row lock, so concurrent refreshes serialise.
           const [latest] = await tx.select().from(preauthEvents)
-            .where(and(eq(preauthEvents.preauthId, preauthId), inArray(preauthEvents.action, ['request', 'request_enhancement', 'refresh_snapshot'])))
+            .where(and(eq(preauthEvents.preauthId, preauthId), inArray(preauthEvents.action, [...PREAUTH_SNAPSHOT_ACTIONS])))
             .orderBy(desc(preauthEvents.id)).limit(1)
           if (!latest?.snapshot) return rcmFail('invalid_transition')
           const [withNhcx] = await tx.select({ id: nhcxExchanges.id }).from(nhcxExchanges).where(and(
-            eq(nhcxExchanges.preauthEventId, latest.id), eq(nhcxExchanges.direction, 'outbound'), notInArray(nhcxExchanges.state, ['send_failed', 'error']),
+            eq(nhcxExchanges.preauthEventId, latest.id), eq(nhcxExchanges.direction, 'outbound'), notInArray(nhcxExchanges.state, [...NHCX_UNDELIVERED_EXCHANGE_STATES]),
           )).limit(1)
           if (withNhcx) return rcmFail('preauth_in_use', 'Already sent through NHCX; the insurer has this version')
           const snapshot = await buildRequestSnapshot(tx, p, latest.snapshot.kind, p.requestedPaise, now)
