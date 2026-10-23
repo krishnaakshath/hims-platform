@@ -634,6 +634,10 @@ import { POST as postGenerateQueuePin } from '@/app/api/settings/queue-display-p
 // WS6 T11
 import { POST as postHandoverOtp } from '@/app/api/home-collections/[id]/otp/route'
 // end WS6 T11
+// WS6 T12
+import { POST as postDoorPayment } from '@/app/api/home-collections/[id]/payment/route'
+import { POST as postDoorPaymentConfirm } from '@/app/api/home-collections/[id]/payment/confirm/route'
+// end WS6 T12
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1129,6 +1133,10 @@ export const API_GATES: ApiGateCase[] = [
   // WS6 T11: send the handover code (an unknown visit is a 404 for an allowed role; nothing is sent).
   { name: 'POST /api/home-collections/[id]/otp', call: () => settle(() => postHandoverOtp(send('POST', `/api/home-collections/${BOGUS_ID}/otp`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
   // end WS6 T11
+  // WS6 T12: payment at the door (an empty body is a 400 for an allowed role; nothing is posted).
+  { name: 'POST /api/home-collections/[id]/payment', call: () => settle(() => postDoorPayment(send('POST', `/api/home-collections/${BOGUS_ID}/payment`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
+  { name: 'POST /api/home-collections/[id]/payment/confirm', call: () => settle(() => postDoorPaymentConfirm(send('POST', `/api/home-collections/${BOGUS_ID}/payment/confirm`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
+  // end WS6 T12
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

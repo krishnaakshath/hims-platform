@@ -217,7 +217,7 @@ describe.skipIf(!process.env.DATABASE_URL)('home collection: route list and coll
       contactPhone: '+919845013210',
       address: { line1: '12 Test Road', line2: null, city: 'Test City', district: null, stateCode: 'IN-KA', pinCode: '990001', landmark: 'Near the temple' },
       notes: 'Ring twice',
-      tests: early.orders.map((o) => ({ orderId: o.id, testName: `TEST_SP5 collect lab ${RUN}`, sampleType: 'blood', container: 'edta_lavender', sampleId: o.sampleId, status: 'scheduled' })),
+      tests: early.orders.map((o) => ({ orderId: o.id, testName: `TEST_SP5 collect lab ${RUN}`, sampleType: 'blood', container: 'edta_lavender', sampleId: o.sampleId, status: 'scheduled', quotedPricePaise: null })),
     })
     const json = JSON.stringify(mine)
     expect(json).not.toMatch(/dob|aadhaar|abha|1980-06-03|Reg line/i)

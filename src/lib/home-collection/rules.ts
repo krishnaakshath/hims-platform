@@ -95,3 +95,23 @@ export function visitNotDueMessage(visitDate: string): string {
   return `This visit is on ${formatCalendarDate(visitDate)}. It can be collected on that day.`
 }
 // end WS6 T11
+
+// WS6 T12: payment at the door (spec D8).
+/** The ledger note on a door payment (cash receipt reference, UPI request note). */
+export function doorPaymentNote(visitId: number): string {
+  return `Home collection visit #${visitId}`
+}
+
+/**
+ * What the collector asks for at the door: the sum of the quoted prices of the visit's tests
+ * still to be drawn (lab orders carry their tariff quote; they are not yet on any invoice).
+ * Unpriced tests add nothing and are counted, so the screen can say so.
+ */
+export function doorAmountDue(tests: readonly { status: string; quotedPricePaise: number | null }[]): { amountPaise: number; unpriced: number } {
+  const due = tests.filter((t) => t.status === 'scheduled')
+  return {
+    amountPaise: due.reduce((sum, t) => sum + (t.quotedPricePaise ?? 0), 0),
+    unpriced: due.filter((t) => t.quotedPricePaise === null).length,
+  }
+}
+// end WS6 T12

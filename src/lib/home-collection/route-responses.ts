@@ -54,6 +54,15 @@ export function handoverOtpError(error: string) {
 }
 // end WS6 T11
 
+// WS6 T12: the door guard's refusals (assertCollectorVisit), shared by the payment routes.
+export function collectorVisitError(error: 'not_found' | 'not_assigned' | 'not_due' | 'not_collectable', visitDate?: string) {
+  if (error === 'not_assigned') return forbidden()
+  if (error === 'not_found') return errorResponse(404, VISIT_NOT_FOUND)
+  if (error === 'not_due') return notDueResponse(visitDate)
+  return errorResponse(409, NOT_COLLECTABLE_MESSAGE)
+}
+// end WS6 T12
+
 type VisitNotice =
   | { kind: 'booked'; visit: { id: number; patientId: string; visitDate: string; windowLabel: string } }
   | { kind: 'rescheduled'; visit: { id: number; patientId: string; visitDate: string; windowLabel: string; rescheduleCount: number } }

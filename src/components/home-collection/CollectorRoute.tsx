@@ -7,14 +7,17 @@
 // Dates are formatted by a pure helper (no toLocale* / Intl), so SSR and the browser agree.
 // WS6 T11: "Open in Maps" per stop; the collect form sends the patient a handover code and takes
 // it back (or a reason it could not be used); Collect is disabled before the visit's day.
+// WS6 T12: "Collect payment" with the amount due for the visit's tests (cash or UPI, one ledger).
 import { useId, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import type { RouteStop } from '@/lib/queries/home-collections'
 import {
-  COLLECTOR_CANCEL_REASONS, HANDOVER_WAIVER_LABEL, HANDOVER_WAIVER_REASONS, type HandoverWaiverReason, type HomeCollectionStatus,
+  COLLECTOR_CANCEL_REASONS, HANDOVER_WAIVER_LABEL, HANDOVER_WAIVER_REASONS, doorAmountDue, type HandoverWaiverReason, type HomeCollectionStatus,
 } from '@/lib/home-collection/rules'
+import { formatPaise } from '@/lib/money'
+import { DoorPaymentDialog } from '@/components/home-collection/DoorPaymentDialog'
 import { mapsUrl } from '@/lib/home-collection/maps'
 import { displaySampleId, parseSampleId } from '@/lib/labs/sample-id'
 import { SAMPLE_CONTAINER_LABEL } from '@/lib/labs/catalog'
@@ -167,8 +170,10 @@ function StopCard({ stop, notDueLabel }: { stop: RouteStop; notDueLabel: string 
   const headingId = useId()
   const [collecting, setCollecting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [paying, setPaying] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const a = stop.address
+  const due = doorAmountDue(stop.tests)
   const gender = stop.patient.gender ? (GENDER_LABEL.get(stop.patient.gender) ?? stop.patient.gender) : null
 
   return (
@@ -216,8 +221,17 @@ function StopCard({ stop, notDueLabel }: { stop: RouteStop; notDueLabel: string 
       {stop.status === 'booked' && !collecting && (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <Button className={TAP} disabled={notDueLabel !== null} onClick={() => { setMessage(null); setCollecting(true) }}>Mark collected</Button>
+          <Button variant="outline" className={TAP} disabled={notDueLabel !== null} onClick={() => setPaying(true)}>
+            Collect payment · {formatPaise(due.amountPaise)}
+          </Button>
           <Button variant="outline" className={TAP} onClick={() => setCancelling(true)}>Could not collect</Button>
         </div>
+      )}
+      {paying && (
+        <DoorPaymentDialog
+          visit={{ id: stop.visitId, patientName: stop.patient.name, amountDuePaise: due.amountPaise, unpricedTests: due.unpriced }}
+          onClose={() => setPaying(false)}
+        />
       )}
       {stop.status === 'booked' && notDueLabel !== null && <p className="mt-2 text-sm text-muted-foreground">{notDueLabel}</p>}
       {stop.status === 'booked' && collecting && (

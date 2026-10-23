@@ -1,6 +1,6 @@
 // SP5: client helpers for the home-collection routes. Types only from the query module (erased at
 // build), so nothing server-side is bundled. Every helper returns the server's fixed error text.
-import { fetchJson } from '@/lib/client-fetch'
+import { fetchJson, type ErrorOptions } from '@/lib/client-fetch'
 import type { HomeCollectionContext, WindowAvailability } from '@/lib/queries/home-collections'
 import type { BookHomeCollectionRequest } from '@/lib/labs/validation'
 import type { HandoverWaiverReason, RescheduleReason, VisitCancelReason } from '@/lib/home-collection/rules'
@@ -9,8 +9,8 @@ export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
 // Shared client fetch helper (src/lib/client-fetch.ts): the route's own 400/404/409/422 text is
 // shown, every other failure (401/403/5xx/network) a fixed message; never server internals.
-async function call<T>(url: string, init: RequestInit | undefined): Promise<ApiResult<T>> {
-  const res = await fetchJson<T>(url, init)
+async function call<T>(url: string, init: RequestInit | undefined, options?: ErrorOptions): Promise<ApiResult<T>> {
+  const res = await fetchJson<T>(url, init, options)
   return res.ok ? { ok: true, data: res.data } : { ok: false, error: res.error }
 }
 
@@ -60,4 +60,15 @@ export function collectVisit(visitId: number, sampleIds: string[], handover: { o
 // WS6 T11: send the patient a fresh handover code. The response never carries the code.
 export function sendHandoverOtp(visitId: number) {
   return call<{ channelStatus: 'sent' | 'log_only' | 'skipped' }>(`/api/home-collections/${visitId}/otp`, json('POST', {}))
+}
+
+// WS6 T12: payment at the door, cash or UPI, through the one ledger.
+export function takeDoorPayment(visitId: number, body: { mode: 'cash' | 'upi'; amountPaise: number }) {
+  return call<{ receiptNumber: string } | { requestId: number; qrDataUrl: string; amountPaise: number }>(
+    `/api/home-collections/${visitId}/payment`, json('POST', body), { passThrough: [503] }, // "UPI is not set up…" is actionable
+  )
+}
+
+export function confirmDoorUpi(visitId: number, body: { requestId: number; utr: string }) {
+  return call<{ receiptNumber: string }>(`/api/home-collections/${visitId}/payment/confirm`, json('POST', body))
 }

@@ -20,7 +20,7 @@ const STOP: RouteStop = {
   contactPhone: '+919845013210',
   address: { line1: '12 MG Road', line2: null, city: 'Pune', district: null, stateCode: 'IN-MH', pinCode: '411001', landmark: 'Opp. Shiva Temple' },
   notes: null,
-  tests: [{ orderId: 11, testName: 'Lipid panel', sampleType: 'serum', container: 'sst_gold', sampleId: SID, status: 'scheduled' }],
+  tests: [{ orderId: 11, testName: 'Lipid panel', sampleType: 'serum', container: 'sst_gold', sampleId: SID, status: 'scheduled', quotedPricePaise: 45000 }],
 }
 
 function mockFetch() {

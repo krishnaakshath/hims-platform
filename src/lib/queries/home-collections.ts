@@ -21,7 +21,7 @@ import { and, asc, count, eq, inArray, ne, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import {
-  encounters, homeCollectionVisits, homeCollectionWindows, labOrders, labTests, patients, providers, users,
+  encounters, homeCollectionVisits, homeCollectionWindows, labOrders, labTests, patients, paymentRequests, providers, users,
   type HomeCollectionVisitRow,
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
@@ -572,7 +572,10 @@ export interface RouteStop {
   contactPhone: string
   address: { line1: string; line2: string | null; city: string; district: string | null; stateCode: string; pinCode: string; landmark: string | null }
   notes: string | null
-  tests: { orderId: number; testName: string; sampleType: SampleType | null; container: SampleContainer | null; sampleId: string | null; status: LabOrderStatus }[]
+  tests: {
+    orderId: number; testName: string; sampleType: SampleType | null; container: SampleContainer | null; sampleId: string | null; status: LabOrderStatus
+    quotedPricePaise: number | null // WS6 T12: the tariff quote, for the amount due at the door
+  }[]
 }
 
 /** "Asha Devi Rao" → "Asha R."; a single name is shown as is. */
@@ -632,6 +635,7 @@ export async function listCollectorRoute(collectorUserId: number | null, dateIso
       container: labTests.container,
       sampleId: labOrders.sampleId,
       status: labOrders.status,
+      quotedPricePaise: labOrders.quotedPricePaise, // WS6 T12
     })
     .from(labOrders)
     .innerJoin(labTests, eq(labTests.id, labOrders.labTestId))
@@ -829,3 +833,10 @@ export async function assertCollectorVisit(visitId: number, session: Session, to
   return { ok: true, patientId: visit.patientId }
 }
 // end WS6 T11
+
+// WS6 T12: a UPI request confirmed at the door must be one raised for this visit's patient.
+export async function upiRequestPatientId(requestId: number): Promise<string | null> {
+  const [row] = await getDb().select({ patientId: paymentRequests.patientId }).from(paymentRequests).where(eq(paymentRequests.id, requestId)).limit(1)
+  return row?.patientId ?? null
+}
+// end WS6 T12

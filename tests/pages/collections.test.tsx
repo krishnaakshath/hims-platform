@@ -31,8 +31,8 @@ const STOP: RouteStop = {
   address: { line1: '12 MG Road', line2: 'Flat 3', city: 'Pune', district: null, stateCode: 'IN-MH', pinCode: '411001', landmark: 'Opp. the temple' },
   notes: 'Ring twice',
   tests: [
-    { orderId: 11, testName: 'Glucose, fasting', sampleType: 'plasma', container: 'fluoride_grey', sampleId: SID_A, status: 'scheduled' },
-    { orderId: 12, testName: 'CBC', sampleType: 'blood', container: 'edta_lavender', sampleId: SID_B, status: 'scheduled' },
+    { orderId: 11, testName: 'Glucose, fasting', sampleType: 'plasma', container: 'fluoride_grey', sampleId: SID_A, status: 'scheduled', quotedPricePaise: 25000 },
+    { orderId: 12, testName: 'CBC', sampleType: 'blood', container: 'edta_lavender', sampleId: SID_B, status: 'scheduled', quotedPricePaise: 35000 },
   ],
 }
 const props = (date?: string) => ({ searchParams: Promise.resolve(date === undefined ? {} : { date }) })
