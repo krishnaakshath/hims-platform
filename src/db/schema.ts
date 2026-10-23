@@ -2886,3 +2886,27 @@ export const admissionCoverage = pgTable('admission_coverage', {
 export type CoverageVerificationRow = typeof coverageVerifications.$inferSelect
 export type AdmissionCoverageRow = typeof admissionCoverage.$inferSelect
 // end WS12 T1
+// WS12 T5
+// A conscious ABHA link despite an identity mismatch (spec R9, §4): which fields differed and
+// the staff member's reason. Append-only (trigger ws12_abha_link_overrides_append_only, migration
+// 2026-10-24-ws12-abha-link-overrides.sql). The reason never reaches logs or audit details.
+export const abhaLinkOverrides = pgTable('abha_link_overrides', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  via: text('via', { enum: ['abha_flow', 'scan_and_share'] }).notNull(),
+  shareId: integer('share_id').references(() => abdmProfileShares.id),
+  fields: jsonb('fields').$type<('name' | 'dob' | 'gender')[]>().notNull(),
+  reason: text('reason').notNull(),
+  byName: text('by_name').notNull(),
+  byUserId: integer('by_user_id').references(() => users.id),
+  at: timestamp('at').defaultNow().notNull(),
+}, (t) => [
+  index('abha_link_overrides_patient_idx').on(t.patientId, t.at),
+  check('abha_link_overrides_via_valid', sql`${t.via} IN ('abha_flow', 'scan_and_share')`),
+  check('abha_link_overrides_share_via', sql`(${t.via} = 'scan_and_share') = (${t.shareId} IS NOT NULL)`),
+  check('abha_link_overrides_fields_valid', sql`jsonb_typeof(${t.fields}) = 'array' AND jsonb_array_length(${t.fields}) > 0 AND ${t.fields} <@ '["name", "dob", "gender"]'::jsonb`),
+  check('abha_link_overrides_reason_length', sql`char_length(${t.reason}) BETWEEN 10 AND 300`),
+])
+
+export type AbhaLinkOverrideRow = typeof abhaLinkOverrides.$inferSelect
+// end WS12 T5

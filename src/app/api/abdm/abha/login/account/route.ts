@@ -6,7 +6,7 @@ import { ABHA_LINK_ROLES } from '@/lib/role-policy'
 import { getAbdmGateway } from '@/lib/abdm/registry'
 import { getFlow, saveFlow } from '@/lib/abdm/flow-store'
 import { accountSchema } from '@/lib/validation/abha-flow'
-import { abdmErrorResponse, abhaRateLimitResponse, flowExpiredResponse, flowPrefix, notConfiguredResponse, profileForBrowser, withAbdmErrors } from '@/lib/abdm/route-helpers'
+import { abdmErrorResponse, abhaRateLimitResponse, comparisonForFlow, flowExpiredResponse, flowPrefix, identityProfileOf, notConfiguredResponse, profileForBrowser, withAbdmErrors } from '@/lib/abdm/route-helpers'
 
 // After a mobile login: the staff member picks one of the masked ABHAs (by
 // position); the transient token is exchanged for that account's token and
@@ -38,9 +38,10 @@ export async function POST(request: NextRequest) {
     const p = profile.value
     await saveFlow({
       ...flow, transientToken: null, userToken: chosen.value.userToken,
-      verified: { abhaNumber: p.abhaNumber, abhaAddress: p.preferredAbhaAddress, via: 'mobile_otp', source: gw.source },
+      verified: { abhaNumber: p.abhaNumber, abhaAddress: p.preferredAbhaAddress, via: 'mobile_otp', source: gw.source, profile: identityProfileOf(p) },
     })
+    const comparison = await comparisonForFlow(flow.patientId, identityProfileOf(p))
     await logAudit(session, 'abdm: verified ABHA login', flow.patientId, `flow=${flowPrefix(flow.flowId)} route=mobile_otp`)
-    return NextResponse.json({ flowId: flow.flowId, step: 'verified', profile: profileForBrowser(p, p.preferredAbhaAddress) })
+    return NextResponse.json({ flowId: flow.flowId, step: 'verified', profile: profileForBrowser(p, p.preferredAbhaAddress), ...(comparison ? { comparison } : {}) })
   })
 }

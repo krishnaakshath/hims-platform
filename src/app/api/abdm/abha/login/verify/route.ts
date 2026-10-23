@@ -8,7 +8,7 @@ import { getFlow, saveFlow } from '@/lib/abdm/flow-store'
 import type { LoginRoute } from '@/lib/abdm/gateway'
 import { loginVerifySchema } from '@/lib/validation/abha-flow'
 import {
-  abdmErrorResponse, abhaRateLimitResponse, flowExpiredResponse, flowPrefix, maskAbhaNumber, notConfiguredResponse, profileForBrowser, withAbdmErrors,
+  abdmErrorResponse, abhaRateLimitResponse, comparisonForFlow, flowExpiredResponse, flowPrefix, identityProfileOf, maskAbhaNumber, notConfiguredResponse, profileForBrowser, withAbdmErrors,
 } from '@/lib/abdm/route-helpers'
 
 // Verify the login OTP. A mobile login answers with the ABHAs on that mobile
@@ -49,9 +49,10 @@ export async function POST(request: NextRequest) {
     const p = profile.value
     await saveFlow({
       ...flow, userToken: r.value.userToken,
-      verified: { abhaNumber: p.abhaNumber, abhaAddress: p.preferredAbhaAddress, via: route, source: gw.source },
+      verified: { abhaNumber: p.abhaNumber, abhaAddress: p.preferredAbhaAddress, via: route, source: gw.source, profile: identityProfileOf(p) },
     })
+    const comparison = await comparisonForFlow(flow.patientId, identityProfileOf(p))
     await logAudit(session, 'abdm: verified ABHA login', flow.patientId, `flow=${flowPrefix(flow.flowId)} route=${route}`)
-    return NextResponse.json({ flowId: flow.flowId, step: 'verified', profile: profileForBrowser(p, p.preferredAbhaAddress) })
+    return NextResponse.json({ flowId: flow.flowId, step: 'verified', profile: profileForBrowser(p, p.preferredAbhaAddress), ...(comparison ? { comparison } : {}) })
   })
 }

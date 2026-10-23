@@ -21,6 +21,7 @@ import {
   // SP8
   abdmConsents, abdmProfileShares, nhcxEligibilityChecks, nhcxExchanges,
   admissionCoverage, coverageVerifications, // WS12 T1
+  abhaLinkOverrides, // WS12 T5
   bookingRequests, // Wave J
   payers,
 } from '@/db/schema'
@@ -563,6 +564,7 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   await db.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
   await db.delete(nhcxExchanges).where(eq(nhcxExchanges.patientId, anonId))
   await db.delete(nhcxEligibilityChecks).where(eq(nhcxEligibilityChecks.patientId, anonId))
+  await db.delete(abhaLinkOverrides).where(eq(abhaLinkOverrides.patientId, anonId)) // WS12 T5 (append-only)
   await db.delete(abdmProfileShares).where(eq(abdmProfileShares.patientId, anonId))
   await db.delete(abdmConsents).where(eq(abdmConsents.patientId, anonId))
   await db.execute(sql`select set_config('hims.allow_document_purge', 'off', true)`)

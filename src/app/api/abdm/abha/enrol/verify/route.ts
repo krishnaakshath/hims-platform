@@ -6,7 +6,9 @@ import { ABHA_LINK_ROLES } from '@/lib/role-policy'
 import { getAbdmGateway } from '@/lib/abdm/registry'
 import { getFlow, saveFlow } from '@/lib/abdm/flow-store'
 import { enrolVerifySchema } from '@/lib/validation/abha-flow'
-import { abdmErrorResponse, abhaRateLimitResponse, flowExpiredResponse, flowPrefix, notConfiguredResponse, profileForBrowser, withAbdmErrors } from '@/lib/abdm/route-helpers'
+import {
+  abdmErrorResponse, abhaRateLimitResponse, comparisonForFlow, flowExpiredResponse, flowPrefix, identityProfileOf, notConfiguredResponse, profileForBrowser, withAbdmErrors,
+} from '@/lib/abdm/route-helpers'
 
 // Step 2 of ABHA creation: the enrolment OTP (encrypted for ABDM, never kept)
 // creates the ABHA, or returns the existing one for that national ID. The user
@@ -38,16 +40,19 @@ export async function POST(request: NextRequest) {
     const { profile } = r.value
 
     const suggestions = await gw.enrolAddressSuggestions({ txnId: r.value.txnId })
+    const identity = identityProfileOf(profile)
     await saveFlow({
       ...flow, txnId: r.value.txnId, userToken: r.value.userToken,
-      verified: { abhaNumber: profile.abhaNumber, abhaAddress: profile.preferredAbhaAddress, via: 'aadhaar_otp_enrolment', source: gw.source },
+      verified: { abhaNumber: profile.abhaNumber, abhaAddress: profile.preferredAbhaAddress, via: 'aadhaar_otp_enrolment', source: gw.source, profile: identity },
     })
+    const comparison = await comparisonForFlow(flow.patientId, identity)
     await logAudit(session, 'abdm: created ABHA', flow.patientId, `flow=${flowPrefix(flow.flowId)} step=enrol_verify new=${r.value.isNew}`)
     return NextResponse.json({
       flowId: flow.flowId,
       step: 'verified',
       profile: profileForBrowser(profile, profile.preferredAbhaAddress),
       suggestions: suggestions.ok ? suggestions.value.suggestions : [],
+      ...(comparison ? { comparison } : {}),
     })
   })
 }
