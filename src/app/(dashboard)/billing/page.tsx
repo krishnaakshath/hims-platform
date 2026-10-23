@@ -1,7 +1,7 @@
 import { formatIstDate } from '@/lib/india-time'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { IndianRupee, TrendingUp, ShieldCheck, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags, Percent, CalendarDays, Pill, FileText, ClipboardPlus, Banknote } from 'lucide-react'
+import { IndianRupee, TrendingUp, HandCoins, Receipt, Clock, CheckCircle2, AlertTriangle, BarChart3, Tags, Percent, CalendarDays, Pill, FileText, ClipboardPlus, Banknote } from 'lucide-react'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
@@ -112,9 +112,9 @@ export default async function BillingHomePage() {
           <nav className="divide-y divide-border">
             {[
               { href: '/billing/charges', icon: Receipt, label: 'Charges', sub: 'Manage & approve charges' },
-              { href: '/billing/insurance-collections', icon: ShieldCheck, label: 'Insurance Collections', sub: 'Claims & EOBs' },
               { href: '/billing/patient-collections', icon: HandCoins, label: 'Patient Collections', sub: 'Balances & statements' },
-              { href: '/billing/statements', icon: IndianRupee, label: 'Statements', sub: 'Generate patient statements' },
+              // Foundations T11: statements and insurance collections are retired; the cash desk holds the patient account.
+              { href: '/cash-desk', icon: Banknote, label: 'Cash Desk', sub: 'Payments, advances, refunds & UPI QR' },
               { href: '/billing/analytics', icon: BarChart3, label: 'Analytics', sub: 'Revenue trends & reports' },
               // Wave B P0-01: Tariffs only for the roles its page admits (TARIFF_MANAGE_ROLES).
               ...(TARIFF_MANAGE_ROLES.includes(session.role) ? [{ href: '/tariffs', icon: Tags, label: 'Tariffs', sub: 'Service catalogue & price lists' }] : []),

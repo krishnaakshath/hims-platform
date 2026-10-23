@@ -130,7 +130,6 @@ afterEach(() => {
 import { PUT as putUhidPrefix } from '@/app/api/settings/uhid-prefix/route'
 import { GET as getWorkbookFull } from '@/app/api/workbook/full/route'
 import { GET as getWorkbookExport } from '@/app/api/workbook/export/route'
-import { POST as postMockPayment } from '@/app/api/mock-payments/route'
 import { GET as listBroadcasts, POST as postBroadcast } from '@/app/api/broadcasts/route'
 import { GET as getBroadcast } from '@/app/api/broadcasts/[id]/route'
 import { GET as listBroadcastRecipients } from '@/app/api/broadcasts/recipients/route'
@@ -197,35 +196,6 @@ describe('GET /api/workbook/export', () => {
     expect(res.status).toBe(403)
     expect(buildWorkbookSpy).not.toHaveBeenCalled()
     buildWorkbookSpy.mockRestore()
-  })
-})
-
-describe('POST /api/mock-payments', () => {
-  // /billing/pay's own page gate is admin/crc/billing, matching
-  // VirtualCardPaymentForm's only POST target -- every other role 403s.
-  it('403s every role outside admin, crc, billing', async () => {
-    for (const role of deniedFor(['admin', 'crc', 'billing'])) {
-      sessionRole = role
-      const res = await postMockPayment(
-        new NextRequest('http://localhost/api/mock-payments', { method: 'POST', body: JSON.stringify({}) })
-      )
-      expect(res.status, `role ${role}`).toBe(403)
-    }
-  })
-
-  // An intentionally invalid (empty) body so an allowed role's response
-  // proves it: the gate must let admin/crc/billing through to the route's
-  // own Zod validation, which then 400s on the missing fields -- never
-  // recording a payment. Anything other than 403 here shows the gate didn't
-  // block them; the 400 itself is the route's own concern, not this test's.
-  it('does not 403 admin, crc, or billing', async () => {
-    for (const role of ['admin', 'crc', 'billing'] as const) {
-      sessionRole = role
-      const res = await postMockPayment(
-        new NextRequest('http://localhost/api/mock-payments', { method: 'POST', body: JSON.stringify({}) })
-      )
-      expect(res.status, `role ${role}`).not.toBe(403)
-    }
   })
 })
 
@@ -1300,7 +1270,7 @@ describe.each(API_GATES.filter((r) => /\/api\/(trials|workbook)\b/.test(r.name))
 // without a row fails this test; so does an exemption left behind for a
 // handler that no longer exists.
 const BESPOKE_ROWS = [
-  'GET /api/workbook/full', 'GET /api/workbook/export', 'POST /api/mock-payments',
+  'GET /api/workbook/full', 'GET /api/workbook/export',
   'GET /api/broadcasts', 'POST /api/broadcasts', 'GET /api/broadcasts/[id]', 'GET /api/broadcasts/recipients',
   'GET /api/reviews', 'POST /api/reviews', 'GET /api/reviews/[id]', 'PUT /api/reviews/[id]',
 ]

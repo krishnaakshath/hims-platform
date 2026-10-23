@@ -4,8 +4,8 @@ import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import {
   LayoutDashboard, Stethoscope, Users, ClipboardList, FlaskConical,
-  Calendar, FileText, FileSignature, MessageSquare, Wallet, Receipt, ShieldCheck, HandCoins,
-  FileBarChart, TrendingUp, BarChart3, CreditCard, FileBarChart2, FolderOpen,
+  Calendar, FileText, FileSignature, MessageSquare, Wallet, Receipt, HandCoins,
+  TrendingUp, BarChart3, FileBarChart2, FolderOpen,
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
@@ -136,11 +136,8 @@ export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon; demo?
   { href: '/billing/capture', label: 'Charge Capture', icon: ClipboardPlus },
   { href: '/billing/invoices', label: 'Invoices', icon: FileText },
   { href: '/billing/charges', label: 'Charges', icon: Receipt },
-  { href: '/billing/insurance-collections', label: 'Insurance Collections', icon: ShieldCheck },
   { href: '/billing/patient-collections', label: 'Patient Collections', icon: HandCoins },
-  { href: '/billing/statements', label: 'Statements', icon: FileBarChart },
   { href: '/billing/analytics', label: 'Analytics', icon: BarChart3 },
-  { href: '/billing/pay', label: 'Virtual Card Payment', icon: CreditCard, demo: true },
   // SP4
   { href: '/billing/rules', label: 'Rules & Settings', icon: SlidersHorizontal },
 ]

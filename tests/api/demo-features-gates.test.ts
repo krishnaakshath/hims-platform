@@ -12,7 +12,6 @@ vi.mock('@/lib/auth', async () => {
 })
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
 
-import { POST as postMockPayment } from '@/app/api/mock-payments/route'
 import { POST as postBroadcast } from '@/app/api/broadcasts/route'
 import { POST as postReview } from '@/app/api/reviews/route'
 import { PUT as putReview } from '@/app/api/reviews/[id]/route'
@@ -22,7 +21,6 @@ const req = (method: string, path: string) => new NextRequest(`http://localhost$
 const ctx = { params: Promise.resolve({ id: '2147483000' }) }
 
 const CASES: { name: string; call: () => Promise<Response>; allowed: Role; denied: Role }[] = [
-  { name: 'POST /api/mock-payments', call: () => postMockPayment(req('POST', '/api/mock-payments')), allowed: 'billing', denied: 'frontdesk' },
   { name: 'POST /api/broadcasts', call: () => postBroadcast(req('POST', '/api/broadcasts')), allowed: 'crc', denied: 'pi' },
   { name: 'POST /api/reviews', call: () => postReview(req('POST', '/api/reviews')), allowed: 'crc', denied: 'pi' },
   { name: 'PUT /api/reviews/[id]', call: () => putReview(req('PUT', '/api/reviews/2147483000'), ctx), allowed: 'admin', denied: 'labs' },

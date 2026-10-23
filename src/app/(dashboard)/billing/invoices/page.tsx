@@ -68,6 +68,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                 <th className="px-3 py-2">Patient</th>
                 <th className="px-3 py-2">Payer</th>
                 <th className="px-3 py-2 text-right">Total</th>
+                <th className="px-3 py-2 text-right">Paid</th>
+                <th className="px-3 py-2 text-right">Outstanding</th>
                 <th className="px-3 py-2">Status</th>
               </tr>
             </thead>
@@ -79,6 +81,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                   <td className="px-3 py-2">{r.patientName}<span className="block text-xs text-muted-foreground">{r.uhid ?? r.patientId}</span></td>
                   <td className="px-3 py-2">{r.payerName ?? 'Self-pay'}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{r.totalPaise === null ? '—' : formatPaise(r.totalPaise)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{r.paidPaise > 0 ? formatPaise(r.paidPaise) : '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{r.outstandingPaise === null ? '—' : formatPaise(r.outstandingPaise)}</td>
                   <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASS[r.status]}`}>{INVOICE_STATUS_LABELS[r.status]}</span></td>
                 </tr>
               ))}

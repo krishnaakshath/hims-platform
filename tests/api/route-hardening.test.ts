@@ -48,7 +48,6 @@ import { POST as transferAdmission } from '@/app/api/inpatient/admissions/[id]/t
 import { POST as blockRoom } from '@/app/api/inpatient/rooms/[id]/block/route'
 import { POST as cancelLabOrder } from '@/app/api/lab-orders/[id]/cancel/route'
 import { POST as enterLabResult } from '@/app/api/lab-orders/[id]/result/route'
-import { POST as mockPayment } from '@/app/api/mock-payments/route'
 import { POST as postCarePlan } from '@/app/api/patients/[anonId]/care-plans/route'
 import { POST as postNote } from '@/app/api/patients/[anonId]/notes/route'
 import { POST as postLabOrder } from '@/app/api/patients/[anonId]/lab-orders/route'
@@ -129,7 +128,6 @@ const JSON_GATES: JsonCase[] = [
   { name: 'POST /api/inpatient/rooms/[id]/block', call: () => blockRoom(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ADMIN },
   { name: 'POST /api/lab-orders/[id]/cancel', call: () => cancelLabOrder(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: [...LAB_ORDER_ROLES] },
   { name: 'POST /api/lab-orders/[id]/result', call: () => enterLabResult(send('POST', '/x', NOT_JSON), ctx({ id: BOGUS_ID })), allowed: [...LAB_RESULT_ENTRY_ROLES] }, // SP5: pi verifies, labs enter
-  { name: 'POST /api/mock-payments', call: () => mockPayment(send('POST', '/x', NOT_JSON)), allowed: ['admin', 'crc', 'billing'] },
   { name: 'POST /api/patients', call: () => postPatient(send('POST', '/x', NOT_JSON)), allowed: REGISTRATION_ROLES },
   { name: 'POST /api/patients/[anonId]/care-plans', call: () => postCarePlan(send('POST', '/x', NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PI_ADMIN },
   { name: 'POST /api/patients/[anonId]/notes', call: () => postNote(send('POST', '/x', NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PI_ADMIN },

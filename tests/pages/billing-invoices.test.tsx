@@ -11,7 +11,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
 }))
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
-vi.mock('@/lib/queries/invoices', () => ({ listInvoices: vi.fn(), getInvoice: vi.fn(), INVOICE_PAGE_SIZE: 50 }))
+vi.mock('@/lib/queries/invoices', () => ({ listInvoices: vi.fn(), getInvoice: vi.fn(), getInvoicePaidPaise: vi.fn(async () => 0), INVOICE_PAGE_SIZE: 50 })) // T11: + paid
 vi.mock('@/components/billing/InvoiceDocument', () => ({ InvoiceDocument: vi.fn(() => <div data-testid="doc" />) }))
 vi.mock('@/components/billing/InvoiceActions', () => ({ InvoiceActions: vi.fn(() => <div data-testid="actions" />) }))
 
