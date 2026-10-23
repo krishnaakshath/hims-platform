@@ -7,7 +7,7 @@ import { logAudit } from '@/lib/audit'
 import { createNote } from '@/lib/queries/encounter-notes'
 import { getAdmissionById } from '@/lib/queries/admissions'
 import { getAppointment } from '@/lib/queries/appointments'
-import { getEncounterById } from '@/lib/queries/encounters'
+import { checkEncounterWriter } from '@/lib/encounters/ownership'
 
 const noteSchema = z.object({
   noteType: z.enum(['progress', 'nursing', 'intake']),
@@ -52,11 +52,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
 
+  // WS1 T5 (spec ruling 3): only the visit's own doctor (or an admin) links a note to it. A late note
+  // on a completed visit is normal; a cancelled visit did not happen, so it takes no notes.
   if (parsed.data.encounterId !== undefined) {
-    const encounter = await getEncounterById(parsed.data.encounterId)
-    if (!encounter || encounter.patientId !== anonId) {
-      return NextResponse.json({ error: 'encounterId does not belong to this patient' }, { status: 400 })
-    }
+    const check = await checkEncounterWriter(session, parsed.data.encounterId, { allowClosed: true })
+    if (!check.ok && check.status === 404) return NextResponse.json({ error: 'encounterId does not belong to this patient' }, { status: 400 })
+    if (!check.ok) return NextResponse.json(check.body, { status: check.status })
+    if (check.encounter.patientId !== anonId) return NextResponse.json({ error: 'encounterId does not belong to this patient' }, { status: 400 })
+    if (check.encounter.status === 'cancelled') return NextResponse.json({ error: 'Visit is closed', code: 'visit_closed' }, { status: 409 })
   }
 
   const created = await createNote({

@@ -15,6 +15,7 @@ vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.f
 
 import { POST as postComplete } from '@/app/api/encounters/[id]/complete/route'
 import { POST as postStatus } from '@/app/api/encounters/[id]/status/route'
+import { completeEncounter } from '@/lib/queries/encounter-workspace'
 
 const PATIENT = `TWS1T5C-${Date.now()}`
 const REASON = 'Review visit only, SECRET-REASON-TEXT'
@@ -157,6 +158,16 @@ describe.skipIf(!process.env.DATABASE_URL)('completing a visit (DB)', () => {
     const other = await mk({ providerId: providerB })
     await addDiagnosis(other)
     expect((await complete(other, {})).status).toBe(200)
+  })
+
+  it('fix round 1: completeEncounter does not trust a null actingProviderId for a non-admin', async () => {
+    const id = await mk({ providerId: providerB })
+    await addDiagnosis(id)
+    const asPi = await completeEncounter(id, { role: 'pi', name: PROBE, userId: null }, { actingProviderId: null })
+    expect(asPi).toEqual({ ok: false, error: 'not_owner' })
+    expect(await statusOf(id)).toBe('in_consultation')
+    const asAdmin = await completeEncounter(id, { role: 'admin', name: PROBE, userId: null }, { actingProviderId: null })
+    expect(asAdmin.ok).toBe(true)
   })
 
   it('IPD and lab encounters are not guarded', async () => {

@@ -250,13 +250,15 @@ async function completionWarnings(encounterId: number): Promise<CompleteEncounte
 /**
  * Completes a visit through the SP3 state machine (transitionEncounter, unchanged, which re-checks
  * ownership under the row lock and audits the change). The caller ran the role gate; a pi passes
- * their own provider id. The reason is written before the transition (harmless if it then fails).
+ * their own provider id (a non-admin without one is refused as not_owner). The reason is written before the transition (harmless if it then fails).
  */
 export async function completeEncounter(
   encounterId: number,
   session: Session,
   opts: { noDiagnosisReason?: string; actingProviderId: number | null },
 ): Promise<CompleteEncounterResult> {
+  // Only an admin acts without a provider profile; a null id for anyone else is never trusted.
+  if (session.role !== 'admin' && opts.actingProviderId == null) return { ok: false, error: 'not_owner' }
   const current = await getEncounterById(encounterId)
   if (!current) return { ok: false, error: 'not_found' }
   if (opts.actingProviderId != null && current.providerId !== opts.actingProviderId) return { ok: false, error: 'not_owner' }

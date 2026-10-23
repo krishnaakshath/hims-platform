@@ -75,7 +75,7 @@ export async function signNote(noteId: number, patientId: string, input: { typed
     if (!note || note.patientId !== patientId) return { ok: false, error: 'Note not found' }
     if (note.status !== 'draft') return { ok: false, error: 'Note is already signed' }
     if (note.authorName !== session.name && !isAdmin) return { ok: false, error: 'Only the author can sign' }
-    if (typedName !== session.name && !isAdmin) return { ok: false, error: 'Typed name does not match' }
+    if (typedName !== session.name.trim() && !isAdmin) return { ok: false, error: 'Typed name does not match' }
 
     const [signature] = await tx.insert(signatures).values({
       signableType: 'encounter_note',
