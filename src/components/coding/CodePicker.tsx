@@ -4,7 +4,7 @@
 // Enter to pick, Escape to close). A superseded search is aborted. Sample (fictional) code sets
 // are labelled "Sample"; category headers that cannot be coded are shown but cannot be picked.
 import { useEffect, useId, useState } from 'react'
-import { CODE_SYSTEM_LABEL, type CodeSystemKind } from '@/lib/coding/code-systems'
+import { CODE_SYSTEM_LABEL, ICD10_ATTRIBUTION, type CodeSystemKind } from '@/lib/coding/code-systems'
 import { searchCodeSet, type CodeSearchHit, type CodeSearchResult } from './codingApi'
 
 export const CODE_SEARCH_DEBOUNCE_MS = 250
@@ -167,6 +167,7 @@ export function CodePicker({ kinds, onDate, onPick, label = 'Search codes' }: {
         </div>
         {loading && <span className="pb-1.5 text-xs text-muted-foreground" aria-live="polite">Searching…</span>}
       </div>
+      {kind === 'icd10' && <p className="text-[11px] text-muted-foreground">{ICD10_ATTRIBUTION}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   )

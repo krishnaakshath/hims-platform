@@ -67,3 +67,6 @@ export function codeMatchesExclusion(code: string, entry: string): boolean {
   const e = stripCode(entry)
   return e.length > 0 && stripCode(code).startsWith(e)
 }
+
+/** Attribution line shown wherever ICD-10 codes are searched (WHO ICD-10, 2019 release). */
+export const ICD10_ATTRIBUTION = 'WHO ICD-10 (2019)'

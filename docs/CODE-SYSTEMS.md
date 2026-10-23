@@ -97,6 +97,25 @@ the CSV with a spreadsheet or a short script, using the column mapping below.
   - `excludes`: Excludes1-style entries, as codes or prefixes.
   - `active`: `yes`.
 
+#### WHO ICD-10 (2019) loader
+
+`npm run codes:fetch-who` downloads WHO's official ClaML release
+(`https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip`, who.int hosts only;
+`--url` or `--file` override the source), converts it with
+`scripts/code-systems/convert-who-icd10.ts` and writes
+`data/code-systems/who-icd10-2019.csv` (git-ignored; never commit it). It prints the
+SHA-256 of the download and refuses when `NODE_ENV=production`. Only categories become
+codes; fourth-character subdivisions (for example `E11.9`) are expanded, optional
+fifth-character subdivisions, excludes, and sex or age edits are not. Then load it:
+
+```bash
+npm run codes:import -- --file data/code-systems/who-icd10-2019.csv --kind icd10 \
+  --version WHO-2019 --name "WHO ICD-10 (2019)" --licence "WHO ICD-10 (2019), downloaded <date>" --by "<name>"
+```
+
+Pickers never offer a `SAMPLE-` set once a licensed version of the kind is loaded, and
+ICD-10 search shows the attribution "WHO ICD-10 (2019)".
+
 ### ICD-10-PCS (`icd10pcs`)
 
 - **Source:** the CMS ICD-10-PCS release files, published yearly. Use the
