@@ -376,7 +376,7 @@ export interface OperationsInput {
   patientIds: string[]
   heroIds: string[]
   /** Demo staff sessions, by DEMO_USERS local part. */
-  sessions: Record<'admin' | 'frontdesk' | 'billing' | 'labs' | 'pathologist' | 'collector' | 'coder' | 'pharmacy' | 'crc' | 'pi' | 'rcm', Session>
+  sessions: Record<'admin' | 'frontdesk' | 'billing' | 'labs' | 'pathologist' | 'radiologist' | 'collector' | 'coder' | 'pharmacy' | 'crc' | 'pi' | 'rcm', Session>
   now?: Date
 }
 
@@ -912,13 +912,13 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     const r = await requisition(patientId, doctor.name, ['LIPID', 'URINE-RM'], earlier(50), encounterId)
     labOrderCount += r.orderIds.length
   }
-  // R6: imaging resulted and verified.
+  // R6: imaging resulted and verified -- WS4 T11: by the radiologist (Radiology reports imaging).
   {
     const r = await requisition(pid(49), 'Dr. Arjun Reddy', ['XR-CHEST-1V'], istAt(day(-6), '11:00'))
     labOrderCount += r.orderIds.length
     await collectAndReceive(r.orderIds[0], istAt(day(-6), '11:10'))
     await result(r.orderIds[0], 'No active lung lesion. Cardiac size normal.', 'normal', istAt(day(-6), '12:00'))
-    must(await verifyLabResult(r.orderIds[0], pathologist, istAt(day(-6), '12:30')), 'verify')
+    must(await verifyLabResult(r.orderIds[0], sessions.radiologist, istAt(day(-6), '12:30')), 'verify')
   }
   // Home collection (patients whose registered PIN is in the service area).
   const localPatients = await db.select({ id: patients.id, addressLine1: patients.addressLine1, city: patients.city, district: patients.district, stateCode: patients.stateCode, pinCode: patients.pinCode, phone: patients.phone })

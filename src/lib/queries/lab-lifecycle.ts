@@ -35,6 +35,11 @@ import type { LabResultFlag } from '@/lib/labs/analytes'
 import { loadActiveAnalytesForTest } from '@/lib/queries/lab-analytes'
 import { evaluateAnalyteEntries, writeAnalyteResults, type AnalyteEntryError } from '@/lib/queries/lab-result-values'
 // end WS4 T9
+// WS4 T11
+import { labTests, serviceCatalog } from '@/db/schema'
+import { verificationDenial } from '@/lib/labs/verification'
+import { resolveVerifierDepartmentId } from '@/lib/queries/lab-signoffs'
+// end WS4 T11
 
 export type LabActor = { kind: 'staff'; session: Session } | { kind: 'lis' }
 
@@ -254,9 +259,15 @@ export async function recordLabResult(
 
 export type VerifyLabResultResult =
   | { ok: true; order: LabOrderRow }
-  | { ok: false; error: 'not_found' | 'invalid_status' | 'self_verification' }
+  | { ok: false; error: 'not_found' | 'invalid_status' | 'self_verification' | 'not_linked' | 'wrong_department' }
 
+/**
+ * WS4 T11 (spec 3.4): the verifier must resolve through their staff link to a provider whose
+ * department is the department of the test's tariff service, and must not be the person who
+ * entered the result. `admin` has no implicit right (an unlinked admin is `not_linked`).
+ */
 export async function verifyLabResult(orderId: number, session: Session, now = new Date()): Promise<VerifyLabResultResult> {
+  const verifierDepartmentId = await resolveVerifierDepartmentId(session) // WS4 T11 (no lock held)
   return getDb().transaction(async (tx) => {
     const order = await lockOrder(tx, orderId)
     if (!order) return { ok: false, error: 'not_found' } as const
@@ -264,7 +275,15 @@ export async function verifyLabResult(orderId: number, session: Session, now = n
     // The result row only changes under the order lock taken above.
     const [result] = await tx.select({ resultedByUserId: labResults.resultedByUserId }).from(labResults).where(eq(labResults.labOrderId, orderId))
     if (!result) return { ok: false, error: 'invalid_status' } as const
-    if (session.userId !== null && result.resultedByUserId === session.userId) return { ok: false, error: 'self_verification' } as const
+    // WS4 T11: the test's reporting department.
+    const [test] = await tx.select({ departmentId: serviceCatalog.departmentId }).from(labTests)
+      .leftJoin(serviceCatalog, eq(serviceCatalog.id, labTests.serviceId)).where(eq(labTests.id, order.labTestId))
+    const denial = verificationDenial({
+      status: order.status, verifierDepartmentId, testDepartmentId: test?.departmentId ?? null,
+      verifierUserId: session.userId, resultedByUserId: result.resultedByUserId,
+    })
+    if (denial === 'not_resulted') return { ok: false, error: 'invalid_status' } as const
+    if (denial !== null) return { ok: false, error: denial } as const
 
     const [updated] = await tx
       .update(labOrders)

@@ -103,6 +103,9 @@ describe.skipIf(!enabled)('db:migrate against a scratch database', () => {
         // values, stays protected by NO ACTION FKs); the per-analyte result values are detail
         // rows of the one summary lab result and of its order.
         { child: 'lab_analyte_ranges', parent: 'lab_test_analytes' },
+        // WS4 T11: a doctor's acknowledgement / co-sign is detail of its lab order.
+        { child: 'lab_result_signoffs', parent: 'lab_orders' },
+        // end WS4 T11
         { child: 'lab_result_values', parent: 'lab_orders' },
         { child: 'lab_result_values', parent: 'lab_results' },
         { child: 'lab_test_analytes', parent: 'lab_tests' },

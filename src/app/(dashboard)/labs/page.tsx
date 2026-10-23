@@ -14,6 +14,7 @@ import { getLabKpis } from '@/lib/queries/hospital-kpis'
 import { KpiTile, formatMinutes } from '@/components/dashboards/KpiTile'
 import { listAnalytesForTests } from '@/lib/queries/lab-analytes' // WS4 T9
 import type { AnalyteDef } from '@/lib/labs/analytes' // WS4 T9
+import { resolveVerifierDepartmentId } from '@/lib/queries/lab-signoffs' // WS4 T11
 
 export default async function LabsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   const session = await requireSessionOrRedirect()
@@ -22,7 +23,9 @@ export default async function LabsPage({ searchParams }: { searchParams?: Promis
   if (!LAB_WORKLIST_ROLES.includes(session.role)) redirect('/')
 
   const stageParam = parseLabStage((await searchParams)?.stage)
-  const [orders, labTests, patientRoster, kpis] = await Promise.all([listWorklist(), listLabTests(), listPatientsWithLabOrders(), getLabKpis()])
+  const [orders, labTests, patientRoster, kpis, verifierDepartmentId] = await Promise.all([
+    listWorklist(), listLabTests(), listPatientsWithLabOrders(), getLabKpis(), resolveVerifierDepartmentId(session), // WS4 T11
+  ])
   await logAudit(session, session.role === 'labs' ? 'viewed labs dashboard' : 'viewed lab worklist', null)
   // WS4 T9: the analytes of every test on the worklist, for per-analyte result entry.
   const analyteMap = await listAnalytesForTests(orders.map((o) => o.testId))
@@ -78,7 +81,7 @@ export default async function LabsPage({ searchParams }: { searchParams?: Promis
           tab, not the default landing view. */}
       <Tabs initialId={stageParam ? 'worklist' : undefined} tabs={[
         { id: 'by-patient', label: <><Users className="h-4 w-4 text-primary" aria-hidden="true" />By Patient</>, content: <LabsPatientReports roster={patientRoster} /> },
-        { id: 'worklist', label: <><ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />Worklist</>, content: <LabWorklist orders={orders} labTests={labTests} role={session.role} stage={stage} analytesByTest={analytesByTest} /> },
+        { id: 'worklist', label: <><ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />Worklist</>, content: <LabWorklist orders={orders} labTests={labTests} role={session.role} stage={stage} analytesByTest={analytesByTest} verifierDepartmentId={verifierDepartmentId} userId={session.userId} /> },
       ]} />
     </div>
   )

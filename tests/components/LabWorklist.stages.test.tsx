@@ -46,6 +46,7 @@ function order(overrides: Partial<WorklistOrder> = {}): WorklistOrder {
 const RESULTED = () => order({
   status: 'resulted', sampleId: 'L26100800429', collectedAt: new Date('2099-05-01T05:00:00Z'), receivedAt: new Date('2099-05-01T06:00:00Z'),
   result: { value: '182', unit: 'mg/dL', referenceRange: '70-99', notes: 'Fasting 10 h', flag: 'abnormal', resultedByName: 'Lab Tech', amendedAt: null },
+  testDepartmentId: LAB_DEPT, // WS4 T11
 })
 const ALL = () => [
   order({ status: 'ordered' }),
@@ -55,7 +56,10 @@ const ALL = () => [
   order({ status: 'verified', testName: 'Verified test', verifiedAt: new Date('2099-05-01T08:00:00Z') }),
   order({ status: 'reported', testName: 'Reported test' }),
 ]
-const renderAs = (role: Role, orders = ALL()) => render(<LabWorklist orders={orders} labTests={[]} role={role} />)
+// WS4 T11: `verifierDepartmentId` is the viewer's staff-linked department (none by default).
+const LAB_DEPT = 5
+const renderAs = (role: Role, orders = ALL(), verifierDepartmentId: number | null = null) =>
+  render(<LabWorklist orders={orders} labTests={[]} role={role} verifierDepartmentId={verifierDepartmentId} />)
 
 describe('LabWorklist stages', () => {
   it('renders every stage section in order, and verified/reported orders stay visible', () => {
@@ -85,18 +89,18 @@ describe('LabWorklist stages', () => {
     expect(screen.getByLabelText('Flag')).toHaveValue('normal')
   })
 
-  it('labs sees Receive and Enter result but not Verify', () => {
+  it('labs (not linked to a provider) sees Receive and Enter result, and Verify disabled with the reason', () => {
     renderAs('labs')
     expect(screen.getByLabelText('Scan or type sample ID')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Enter result' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Amend' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Verify' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled() // WS4 T11
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
   })
 
-  it('pi sees Verify on resulted rows and no receive box', () => {
-    renderAs('pi')
-    expect(screen.getByRole('button', { name: 'Verify' })).toBeInTheDocument()
+  it('pi (linked to the test\'s department) sees Verify on resulted rows and no receive box', () => {
+    renderAs('pi', ALL(), LAB_DEPT)
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeEnabled()
     expect(screen.queryByLabelText('Scan or type sample ID')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Enter result' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Amend' })).toBeNull()
@@ -148,7 +152,7 @@ describe('LabWorklist stages', () => {
   it('Verify posts to the verify route and shows a refusal message', async () => {
     const o = RESULTED()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'Results must be verified by someone other than the person who entered them.' }), { status: 409 })))
-    renderAs('pi', [o])
+    renderAs('pi', [o], LAB_DEPT)
     fireEvent.click(screen.getByRole('button', { name: 'Verify' }))
     await waitFor(() => expect(screen.getByText(/someone other than the person/)).toBeInTheDocument())
     expect(fetch).toHaveBeenCalledWith(`/api/lab-orders/${o.id}/verify`, expect.objectContaining({ method: 'POST' }))

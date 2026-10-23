@@ -3195,3 +3195,28 @@ export const labResultValues = pgTable('lab_result_values', {
 ])
 export type LabResultValueRow = typeof labResultValues.$inferSelect
 // end WS4 T8
+// WS4 T11: doctor acknowledgement and co-sign of a lab result (spec 3.4, §4;
+// scripts/migrations/2026-10-24-ws4-lab-signoffs.sql). One row per (order, kind, provider).
+// lab_order_id CASCADE (pinned in tests/db/migrate-runner.test.ts): a sign-off is detail of its
+// order. provider_id / user_id stay NO ACTION (providers and users are never deleted while orders
+// reference them; the seed's clear step deletes lab_orders, and so these rows, first).
+export const LAB_SIGNOFF_KINDS = ['acknowledge', 'cosign'] as const
+export type LabSignoffKind = (typeof LAB_SIGNOFF_KINDS)[number]
+
+export const labResultSignoffs = pgTable('lab_result_signoffs', {
+  id: serial('id').primaryKey(),
+  labOrderId: integer('lab_order_id').notNull().references(() => labOrders.id, { onDelete: 'cascade' }),
+  kind: text('kind', { enum: LAB_SIGNOFF_KINDS }).notNull(),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  userId: integer('user_id').references(() => users.id),
+  signedByName: text('signed_by_name').notNull(),
+  note: text('note'),
+  signedAt: timestamp('signed_at').defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('lab_result_signoffs_order_kind_provider_unique').on(t.labOrderId, t.kind, t.providerId),
+  index('lab_result_signoffs_provider_idx').on(t.providerId),
+  check('lab_result_signoffs_kind_valid', sql`${t.kind} IN ('acknowledge', 'cosign')`),
+  check('lab_result_signoffs_note_length', sql`${t.note} IS NULL OR char_length(${t.note}) <= 300`),
+])
+export type LabResultSignoffRow = typeof labResultSignoffs.$inferSelect
+// end WS4 T11

@@ -35,7 +35,7 @@ vi.mock('@/lib/queries/appointments', () => ({
 vi.mock('@/lib/queries/hospital-kpis', () => ({
   getDoctorWorkload: vi.fn(async () => ({
     encountersToday: [{ encounterId: 77, patientId: 'RD-0501', patientName: 'Meena Iyer', uhid: 'UH-501', opdToken: 4, status: 'checked_in' }],
-    inpatients: [], resultsToVerify: [], labsAwaitingResult: 0, followUps: [], unsignedNotes: 0, draftNotes: [],
+    inpatients: [], resultsToReview: [], labsAwaitingResult: 0, followUps: [], unsignedNotes: 0, draftNotes: [],
   })),
 }))
 vi.mock('@/lib/queries/encounter-workspace', () => ({

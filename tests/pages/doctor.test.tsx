@@ -2,6 +2,11 @@ import { describe, it, expect, vi } from 'vitest'
 import DoctorPortalPage from '@/app/(dashboard)/doctor/page'
 
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam' })) }))
+// WS4 T11: the Acknowledge button (a client component) needs the app router.
+vi.mock('next/navigation', () => ({
+  redirect: (to: string) => { throw new Error(`NEXT_REDIRECT ${to}`) },
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}))
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
 vi.mock('@/lib/queries/patients', () => ({
   listPatientsWithStatus: vi.fn(async () => [
@@ -22,7 +27,7 @@ vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.f
 vi.mock('@/lib/queries/referrals', () => ({ listOpenReferralsToProvider: vi.fn(async () => []), providerDepartmentId: vi.fn(async () => null) })) // WS1 T4
 vi.mock('@/lib/queries/coding-queries', () => ({ listOpenCodingQueriesForProvider: vi.fn(async () => []) }))
 // Wave E P1-02/P1-03: the doctor's own workload; empty by default (no DB).
-const EMPTY_WORKLOAD = { encountersToday: [], inpatients: [], resultsToVerify: [], labsAwaitingResult: 0, followUps: [], unsignedNotes: 0, draftNotes: [] }
+const EMPTY_WORKLOAD = { encountersToday: [], inpatients: [], resultsToReview: [], labsAwaitingResult: 0, followUps: [], unsignedNotes: 0, draftNotes: [] }
 vi.mock('@/lib/queries/hospital-kpis', () => ({ getDoctorWorkload: vi.fn(async () => EMPTY_WORKLOAD) }))
 
 describe('PI dashboard (/doctor)', () => {
@@ -199,9 +204,10 @@ describe('PI dashboard (/doctor)', () => {
     expect(screen.getByText('Urgent')).toBeInTheDocument()
   })
 
-  // SP5 Task 9 + Wave E P1-02: results to verify are the orders this doctor PLACED (orderedByProviderId,
-  // not the free-text panel match), critical first, from the workload query.
-  it('lists results on my own orders under "Results to verify", critical first, linking to the verify stage', async () => {
+  // WS4 T11 (was SP5 Task 9 + Wave E P1-02 "Results to verify"): verified, unacknowledged results on the
+  // orders this doctor PLACED (orderedByProviderId, not the free-text panel match), critical first, each
+  // with an Acknowledge action.
+  it('lists verified results on my own orders under "Results to review", critical first, with Acknowledge', async () => {
     vi.resetModules()
     vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam', userId: null })) }))
     vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
@@ -213,7 +219,7 @@ describe('PI dashboard (/doctor)', () => {
     const getDoctorWorkload = vi.fn(async () => ({
       ...EMPTY_WORKLOAD,
       labsAwaitingResult: 4,
-      resultsToVerify: [
+      resultsToReview: [
         { orderId: 9, patientId: 'RD-0009', patientName: 'Kiran Rao', uhid: 'UH-9', testName: 'Potassium critical', flag: 'critical', resultedAt: '2026-10-08T05:00:00.000Z' },
         { orderId: 1, patientId: 'RD-0001', patientName: 'Jane Doe', uhid: 'UH-1', testName: 'HbA1c mine', flag: 'normal', resultedAt: '2026-10-08T04:00:00.000Z' },
       ],
@@ -223,13 +229,16 @@ describe('PI dashboard (/doctor)', () => {
     const { render, screen } = await import('@testing-library/react')
     render(await Page())
     expect(getDoctorWorkload).toHaveBeenCalledWith(1, 'Dr. R. Kunam')
-    expect(screen.getByRole('heading', { name: 'Results to verify' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Results to review' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Results to verify' })).toBeNull()
     expect(screen.getByText(/HbA1c mine/)).toBeInTheDocument()
     expect(screen.getByText('Critical')).toBeInTheDocument()
     expect(screen.getByText(/4 orders awaiting results/i)).toBeInTheDocument()
     // The old "Lab Reports for Review" counted merely-ordered tests: gone.
     expect(screen.queryByRole('heading', { name: /lab reports for review/i })).toBeNull()
-    for (const link of screen.getAllByRole('link', { name: 'Verify' })) expect(link.getAttribute('href')).toBe('/labs?stage=to-verify')
+    expect(screen.queryByRole('link', { name: 'Verify' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Acknowledge HbA1c mine' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Acknowledge Potassium critical' })).toBeInTheDocument()
     // Action needed = critical results + urgent/emergency assignments (1 + 0).
     const action = screen.getByText(/action needed/i).previousElementSibling
     expect(action?.textContent).toBe('1')

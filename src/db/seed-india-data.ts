@@ -107,6 +107,10 @@ export const DOCTOR_ROSTER: DoctorSeed[] = [
   { name: 'Dr. Arjun Reddy', credentials: 'MS', specialty: 'Orthopaedics', colorTag: 'chart-2', departmentCode: 'ORTHO', registrationCouncil: 'smc', registrationStateCode: 'IN-TS', registrationNumber: 'DEMO/2013/68022', consultationFeePaise: 700_00 },
   { name: 'Dr. Kavya Hegde', credentials: 'MD', specialty: 'Emergency Medicine', colorTag: 'chart-3', departmentCode: 'EMERG', registrationCouncil: 'smc', registrationStateCode: 'IN-KA', registrationNumber: 'DEMO/2016/90155', consultationFeePaise: 500_00 },
   { name: 'Dr. Suresh Babu', credentials: 'MD', specialty: 'Pathology', colorTag: 'chart-4', departmentCode: 'LAB', registrationCouncil: 'smc', registrationStateCode: 'IN-KA', registrationNumber: 'DEMO/2005/22874', consultationFeePaise: 0 },
+  // WS4 T11: the reporting radiologist (spec 3.4: imaging is verified by Radiology). The demo
+  // `radiologist` login is linked to this provider by the staff seed (src/db/seed.ts STAFF_SEED).
+  { name: 'Dr. Nandini Kulkarni', credentials: 'MD (Radiodiagnosis)', specialty: 'Radiology', colorTag: 'chart-5', departmentCode: 'RADIO', registrationCouncil: 'smc', registrationStateCode: 'IN-KA', registrationNumber: 'DEMO/2011/45126', consultationFeePaise: 0 },
+  // end WS4 T11
 ]
 
 // ---------------------------------------------------------------------------
@@ -471,6 +475,7 @@ export const DEMO_USERS: { local: string; name: string; role: 'admin' | 'crc' | 
   { local: 'billing', name: 'Alok Bansal', role: 'billing' },
   { local: 'labs', name: 'Meenakshi Sundar', role: 'labs' },
   { local: 'pathologist', name: 'Dr. Suresh Babu', role: 'labs' },
+  { local: 'radiologist', name: 'Dr. Nandini Kulkarni', role: 'labs' }, // WS4 T11: verifies imaging (Radiology)
   { local: 'collector', name: 'Ravi Kumar', role: 'collector' },
   { local: 'coder', name: 'Asha Menon', role: 'coder' },
   { local: 'rcm', name: 'Farah Siddiqui', role: 'rcm' }, // SP7

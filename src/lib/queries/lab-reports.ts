@@ -26,6 +26,7 @@ import { PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status'
 import { putPrivateBlob } from '@/lib/blob-store'
 import { createFollowUpOrder } from './follow-ups'
 import { listAnalyteResults } from './lab-result-values' // WS4 T10
+import { listSignoffs } from './lab-signoffs' // WS4 T11
 import type { WriteExecutor } from './executor'
 import { getPracticeIdentity } from './settings'
 
@@ -150,7 +151,7 @@ export async function releaseLabReport(requisitionId: number, session: Session, 
 
   // 3. Render and store, before any lock. WS4 T10: analyte values in definition order; an
   // amendment between here and the lock changes amendedAt, so the fingerprint catches it.
-  const analytes = await listAnalyteResults(snapshot.map((o) => o.id))
+  const [analytes, signoffs] = await Promise.all([listAnalyteResults(snapshot.map((o) => o.id)), listSignoffs(snapshot.map((o) => o.id))])
   const source: LabReportSource = {
     hospital: await hospitalHeader(),
     reportNumber,
@@ -167,7 +168,8 @@ export async function releaseLabReport(requisitionId: number, session: Session, 
       verifiedAt: o.verifiedAt,
       verifiedByName: o.verifiedByName,
       result: { value: o.value, unit: o.unit, referenceRange: o.referenceRange, flag: o.flag, analytes: analytes.get(o.id) ?? [] },
-      cosignedBy: [], // WS4 T10, lane ruling R5: filled from the signoffs by Task 11
+      // WS4 T11 (lane ruling R5): the co-signing providers, oldest first.
+      cosignedBy: (signoffs.get(o.id) ?? []).filter((x) => x.kind === 'cosign').map((x) => x.providerName),
     })),
   }
   const bytes = await deps.render(buildLabReportData(source, now))

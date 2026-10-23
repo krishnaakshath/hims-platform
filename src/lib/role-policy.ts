@@ -105,7 +105,9 @@ export const LAB_ORDER_ROLES: readonly Role[] = ['admin', 'pi']
 export const LAB_COLLECT_ROLES: readonly Role[] = ['admin', 'pi', 'labs']
 export const LAB_RECEIVE_ROLES: readonly Role[] = ['admin', 'labs']
 export const LAB_RESULT_ENTRY_ROLES: readonly Role[] = ['admin', 'labs']
-export const LAB_VERIFY_ROLES: readonly Role[] = ['admin', 'pi']
+// WS4 T11: + labs (the pathologist / reporting specialist). The gate only admits the role; the
+// query then requires a staff link to a provider of the test's department (src/lib/labs/verification.ts).
+export const LAB_VERIFY_ROLES: readonly Role[] = ['admin', 'labs', 'pi']
 export const LAB_REPORT_RELEASE_ROLES: readonly Role[] = ['admin', 'pi', 'labs']
 export const LAB_REPORT_READ_ROLES: readonly Role[] = ['admin', 'pi', 'crc', 'labs']
 export const LAB_LABEL_ROLES: readonly Role[] = ['admin', 'pi', 'labs', 'frontdesk']
@@ -291,3 +293,7 @@ export const DUES_VIEW_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'fro
 export const LAB_ANALYTE_READ_ROLES: readonly Role[] = [...new Set([...LAB_SETUP_ROLES, ...LAB_RESULT_ENTRY_ROLES])]
 export const LAB_ANALYTE_EDIT_ROLES: readonly Role[] = LAB_SETUP_ROLES
 // end WS4 T8
+// WS4 T11: a doctor's acknowledgement / co-sign of a lab result (spec 3.4). The route then requires
+// the session's linked provider to be the ordering doctor or the attending of the active admission.
+export const LAB_SIGNOFF_ROLES: readonly Role[] = ['pi', 'admin']
+// end WS4 T11

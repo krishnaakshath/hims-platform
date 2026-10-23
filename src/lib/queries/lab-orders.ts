@@ -10,6 +10,7 @@ import { ageInDays } from '@/lib/labs/analytes'
 import { istDateOf } from '@/lib/india-time'
 import { listAnalyteResults, rangeSexOf, type AnalyteResultRow } from '@/lib/queries/lab-result-values'
 // end WS4 T9
+import { serviceCatalog } from '@/db/schema' // WS4 T11
 
 // SP5: orders are created only as part of a requisition (createLabRequisition in
 // src/lib/queries/lab-requisitions.ts); the single-order createLabOrder was removed.
@@ -140,6 +141,10 @@ export interface WorklistRow {
   // sex (male/female, else null) and age in days on the collection date, else today (IST).
   patientSex: 'male' | 'female' | null
   ageDays: number
+  // WS4 T11: what decides who may verify (src/lib/labs/verification.ts): the department of the
+  // test's tariff service (null = unmapped) and the user who entered the result (null = LIS / none).
+  testDepartmentId: number | null
+  resultedByUserId: number | null
 }
 
 function mapWorklistRow(r: {
@@ -154,6 +159,7 @@ function mapWorklistRow(r: {
   fastingRequired: boolean | null
   patientDob: string
   patientGender: string | null
+  testDepartmentId: number | null
 }, today: string): Omit<WorklistRow, 'attachments'> {
   return {
     id: r.order.id,
@@ -184,6 +190,8 @@ function mapWorklistRow(r: {
     fastingRequired: r.fastingRequired ?? false, // WS1 T10
     patientSex: rangeSexOf(r.patientGender), // WS4 T9
     ageDays: ageInDays(r.patientDob, r.order.collectedAt ? istDateOf(r.order.collectedAt) : today), // WS4 T9
+    testDepartmentId: r.testDepartmentId, // WS4 T11
+    resultedByUserId: r.result?.resultedByUserId ?? null, // WS4 T11
   }
 }
 
@@ -212,6 +220,7 @@ export async function listWorklist(): Promise<WorklistRow[]> {
       fastingRequired: labRequisitions.fastingRequired, // WS1 T10
       patientDob: sql<string>`to_char(patients.dob, 'YYYY-MM-DD')`, // WS4 T9
       patientGender: sql<string | null>`patients.gender::text`, // WS4 T9
+      testDepartmentId: serviceCatalog.departmentId, // WS4 T11
     })
     .from(labOrders)
     .innerJoin(labTests, eq(labOrders.labTestId, labTests.id))
@@ -220,6 +229,7 @@ export async function listWorklist(): Promise<WorklistRow[]> {
     .leftJoin(homeCollectionVisits, eq(homeCollectionVisits.id, labOrders.homeCollectionVisitId)) // SP5
     .leftJoin(labResults, eq(labResults.labOrderId, labOrders.id)) // SP5
     .leftJoin(labRequisitions, eq(labRequisitions.id, labOrders.requisitionId)) // WS1 T10
+    .leftJoin(serviceCatalog, eq(serviceCatalog.id, labTests.serviceId)) // WS4 T11
     .orderBy(sql`case ${labRequisitions.priority} when 'stat' then 0 when 'urgent' then 1 else 2 end`, desc(labOrders.orderedAt), desc(labOrders.id))
 
   const today = istDateOf(new Date())

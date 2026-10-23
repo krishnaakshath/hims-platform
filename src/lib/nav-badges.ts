@@ -7,7 +7,7 @@ import { countPendingBookingRequests } from '@/lib/queries/booking-requests'
 // Wave E P1-25: work-queue badges. Each reuses the KPI loader behind the tile on the
 // page it points to (cached a few seconds), so the badge and the tile agree.
 import {
-  countResultsToVerifyForProvider, getBillingQueue, getClaimAgeing, getFollowUpBuckets, getLabKpis, getPharmacyKpis,
+  countResultsToReviewForProvider, getBillingQueue, getClaimAgeing, getFollowUpBuckets, getLabKpis, getPharmacyKpis,
 } from '@/lib/queries/hospital-kpis'
 import { listCodingWorklist } from '@/lib/queries/coding-worklist'
 import { parseCodingWorklistParams } from '@/lib/coding/worklist'
@@ -63,8 +63,8 @@ async function computeNavBadges(session: Session): Promise<NavBadges> {
     // Both pi badges hang off the matched provider row; unmatched = suppressed (null), never 0.
     const provider = resolveDoctorQueueProvider(session)
     entries.push(provider.then(async (p): Promise<[string, number | null]> => ['/doctor', p ? await countPendingAssignmentsForProvider(p.id) : null]))
-    // Wave E: results on this doctor's own orders waiting for verification (doctor home "Results to verify").
-    entries.push(provider.then(async (p): Promise<[string, number | null]> => ['/labs', p ? await countResultsToVerifyForProvider(p.id) : null]))
+    // WS4 T11: verified results on this doctor's own orders not yet acknowledged (doctor home "Results to review").
+    entries.push(provider.then(async (p): Promise<[string, number | null]> => ['/labs', p ? await countResultsToReviewForProvider(p.id) : null]))
   }
   if (DECLINE_BADGE_ROLES.includes(role)) entries.push(countUnacknowledgedDeclines().then((n) => ['/front-desk/assignments', n]))
   if (MESSAGES_BADGE_ROLES.includes(role)) entries.push(getUnreadCountForProvider().then((n) => ['/messages', n]))

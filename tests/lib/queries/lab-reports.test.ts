@@ -9,6 +9,9 @@ import { verifyLabResult } from '@/lib/queries/lab-lifecycle'
 import {
   getLabReportForDownload, listPortalLabReports, listReportsForPatient, releaseLabReport, type ReleaseDeps,
 } from '@/lib/queries/lab-reports'
+// WS4 T11: the verifier is linked to the reporting department of the tests; co-signers on the report.
+import { labResultSignoffs } from '@/db/schema'
+import { createLabDepartmentFixture, type LabDepartmentFixture } from '../../db/lab-verifier-fixtures'
 
 const RUN = `${Date.now()}`
 const PROBE = `TEST_SP5_REPORT-${RUN}`
@@ -23,6 +26,7 @@ let inactiveProviderId = 0
 let enterer = 0
 let verifierId = 0
 let VERIFIER: Session
+let dept: LabDepartmentFixture // WS4 T11
 const testIds: number[] = []
 const patientIds: string[] = []
 let seq = 0
@@ -101,7 +105,11 @@ describe.skipIf(!process.env.DATABASE_URL)('lab report release (DB)', () => {
     ]).returning()
     enterer = a.id
     verifierId = b.id
-    VERIFIER = { role: 'pi', name: PROBE_VERIFIER, userId: verifierId }
+    VERIFIER = { role: 'labs', name: PROBE_VERIFIER, userId: verifierId }
+    // WS4 T11: verification needs a staff link to a provider of the tests' department.
+    dept = await createLabDepartmentFixture(`R${RUN}`)
+    await dept.mapTests(testIds)
+    await dept.linkUsers([verifierId], `TEST_SP5 Dr Pathologist ${RUN}`)
   })
 
   afterAll(async () => {
@@ -117,6 +125,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab report release (DB)', () => {
       await db.delete(patients).where(inArray(patients.id, patientIds))
     }
     await db.delete(auditLog).where(inArray(auditLog.userName, PROBE_NAMES))
+    await dept?.cleanup() // WS4 T11
     await db.delete(users).where(inArray(users.id, [enterer, verifierId]))
     if (testIds.length > 0) await db.delete(labTests).where(inArray(labTests.id, testIds))
     await db.delete(providers).where(inArray(providers.id, [providerId, inactiveProviderId]))
@@ -191,6 +200,24 @@ describe.skipIf(!process.env.DATABASE_URL)('lab report release (DB)', () => {
     ])
     expect(rendered[0].rows[0].cosignedBy).toEqual([])
     expect(rendered[0].cosigners).toEqual([])
+  })
+
+  // WS4 T11 (lane ruling R5): each row lists its co-signing providers; the report lists them once.
+  it('lists the co-signers of each verified order under the verifier', async () => {
+    const req = await makeRequisition()
+    const o1 = await makeOrder(req, 0, 'verified')
+    const o2 = await makeOrder(req, 1, 'verified')
+    await getDb().insert(labResultSignoffs).values([
+      { labOrderId: o1.id, kind: 'cosign', providerId, signedByName: 'TEST_SP5 cosigner' },
+      { labOrderId: o2.id, kind: 'cosign', providerId, signedByName: 'TEST_SP5 cosigner' },
+      { labOrderId: o2.id, kind: 'acknowledge', providerId: inactiveProviderId, signedByName: 'TEST_SP5 acknowledger' },
+    ])
+    rendered.length = 0
+    expect((await releaseLabReport(req.id, S, deps)).ok).toBe(true)
+    const name = `TEST_SP5 Dr Report ${RUN}`
+    expect(rendered[0].rows.map((r) => r.cosignedBy)).toEqual([[name], [name]])
+    expect(rendered[0].cosigners).toEqual([name])
+    expect(rendered[0].verifiers).toEqual([PROBE_VERIFIER])
   })
 
   it('a second release (after another order is verified) supersedes v1 with a cumulative v2', async () => {

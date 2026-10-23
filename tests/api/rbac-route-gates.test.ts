@@ -662,6 +662,11 @@ import { CLINICAL_ROLES as WS3T7_CLINICAL_ROLES } from '@/lib/role-policy'
 import { GET as getLabTestAnalytes, PUT as putLabTestAnalytes } from '@/app/api/lab-tests/[id]/analytes/route'
 import { LAB_ANALYTE_READ_ROLES, LAB_ANALYTE_EDIT_ROLES } from '@/lib/role-policy'
 // end WS4 T8
+// WS4 T11
+import { POST as postLabAcknowledge } from '@/app/api/lab-orders/[id]/acknowledge/route'
+import { POST as postLabCosign } from '@/app/api/lab-orders/[id]/cosign/route'
+import { LAB_SIGNOFF_ROLES } from '@/lib/role-policy'
+// end WS4 T11
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -896,7 +901,7 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/lab-orders/[id]/collect', call: () => settle(() => postLabCollect(send('POST', `/api/lab-orders/${BOGUS_ID}/collect`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_COLLECT_ROLES] },
   { name: 'POST /api/lab-orders/receive', call: () => settle(() => postLabReceive(send('POST', '/api/lab-orders/receive'))), allowed: [...LAB_RECEIVE_ROLES] },
   { name: 'POST /api/lab-orders/[id]/result', call: () => settle(() => postLabResult(send('POST', `/api/lab-orders/${BOGUS_ID}/result`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_RESULT_ENTRY_ROLES] },
-  { name: 'POST /api/lab-orders/[id]/verify', call: () => settle(() => postLabVerify(send('POST', `/api/lab-orders/${BOGUS_ID}/verify`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_VERIFY_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/verify', call: () => settle(() => postLabVerify(send('POST', `/api/lab-orders/${BOGUS_ID}/verify`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_VERIFY_ROLES] }, // WS4 T11: now admin, labs, pi (department rule in the query)
   { name: 'POST /api/lab-orders/[id]/cancel', call: () => settle(() => postLabCancel(send('POST', `/api/lab-orders/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_ORDER_ROLES] },
   { name: 'POST /api/lab-orders/[id]/imaging', call: () => settle(() => postLabImaging(send('POST', `/api/lab-orders/${BOGUS_ID}/imaging`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_COLLECT_ROLES] },
   // SP5 home collection (Task 11): no ?patient / ?date and `{}` bodies fail validation before any query.
@@ -1185,6 +1190,11 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/lab-tests/[id]/analytes', call: () => getLabTestAnalytes(get(`/api/lab-tests/${BOGUS_ID}/analytes`), ctx({ id: BOGUS_ID })), allowed: [...LAB_ANALYTE_READ_ROLES] },
   { name: 'PUT /api/lab-tests/[id]/analytes', call: () => putLabTestAnalytes(send('PUT', `/api/lab-tests/${BOGUS_ID}/analytes`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_ANALYTE_EDIT_ROLES] },
   // end WS4 T8
+  // WS4 T11: a doctor's acknowledgement / co-sign -- LAB_SIGNOFF_ROLES; an unknown order is the 404 (acknowledge, empty
+  // body allowed) and a missing typed name the 400 (co-sign) an allowed role gets. The verify row above now admits labs.
+  { name: 'POST /api/lab-orders/[id]/acknowledge', call: () => postLabAcknowledge(send('POST', `/api/lab-orders/${BOGUS_ID}/acknowledge`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_SIGNOFF_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/cosign', call: () => postLabCosign(send('POST', `/api/lab-orders/${BOGUS_ID}/cosign`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_SIGNOFF_ROLES] },
+  // end WS4 T11
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1375,6 +1385,10 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // WS4 T8
   { name: 'PUT /api/lab-tests/[id]/analytes', call: () => putLabTestAnalytes(send('PUT', `/api/lab-tests/${BOGUS_ID}/analytes`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_ANALYTE_EDIT_ROLES },
   // end WS4 T8
+  // WS4 T11
+  { name: 'POST /api/lab-orders/[id]/acknowledge', call: () => postLabAcknowledge(send('POST', `/api/lab-orders/${BOGUS_ID}/acknowledge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SIGNOFF_ROLES },
+  { name: 'POST /api/lab-orders/[id]/cosign', call: () => postLabCosign(send('POST', `/api/lab-orders/${BOGUS_ID}/cosign`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SIGNOFF_ROLES },
+  // end WS4 T11
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {
