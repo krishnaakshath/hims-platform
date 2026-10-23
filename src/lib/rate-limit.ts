@@ -457,3 +457,28 @@ export async function checkIntakeFileUploadRateLimit(submissionId: number): Prom
   return { allowed: success }
 }
 // end WS7 T3
+
+// WS7 T5: re-authentication before signing a clinical note (lib/reauth.ts) is
+// a password / TOTP oracle for whoever holds the session, so every attempt
+// takes a token BEFORE the credential is checked: 5 per 15 minutes per user
+// (reauthIdentity), so even concurrent guesses cannot exceed the budget.
+// A successful re-authentication proves the credential, so the route then
+// clears the bucket (clearReauthRateLimit) -- a doctor signing many notes in
+// a row never runs into the limit; only failures accumulate.
+let _reauthLimiter: Ratelimit | null = null
+function getReauthLimiter() {
+  if (!_reauthLimiter) {
+    _reauthLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(5, '900 s'), prefix: 'ratelimit:reauth' })
+  }
+  return _reauthLimiter
+}
+
+export async function checkReauthRateLimit(identity: string): Promise<{ allowed: boolean }> {
+  const { success } = await getReauthLimiter().limit(identity)
+  return { allowed: success }
+}
+
+export async function clearReauthRateLimit(identity: string): Promise<void> {
+  await getReauthLimiter().resetUsedTokens(identity)
+}
+// end WS7 T5

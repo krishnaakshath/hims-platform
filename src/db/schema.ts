@@ -2103,7 +2103,10 @@ export const encounterNotes = pgTable('encounter_notes', {
   signedAt: timestamp('signed_at'),
 })
 
-export const signableTypeEnum = pgEnum('signable_type', ['form_submission', 'admission_discharge', 'policy_acceptance', 'form_submission_consent'])
+export const signableTypeEnum = pgEnum('signable_type', [
+  'form_submission', 'admission_discharge', 'policy_acceptance', 'form_submission_consent',
+  'encounter_note', // WS7 T5
+])
 
 export const policyDocumentTypeEnum = pgEnum('policy_document_type', ['npp', 'tos'])
 

@@ -1,6 +1,6 @@
 import { getDb } from '@/db/client'
-import { encounterNotes } from '@/db/schema'
-import { desc, eq } from 'drizzle-orm'
+import { encounterNotes, signatures } from '@/db/schema'
+import { and, desc, eq } from 'drizzle-orm'
 import type { Role } from '@/lib/auth'
 
 export type EncounterNote = typeof encounterNotes.$inferSelect
@@ -41,6 +41,12 @@ export interface SignNoteResult {
   error?: string
 }
 
+// WS7 T5: stored verbatim in signatures.attestation_text for every signed note.
+export const SIGN_NOTE_ATTESTATION = 'I confirm I wrote or reviewed this note and that it is accurate.'
+
+export const NOTE_NOT_FOUND = 'Note not found'
+export const NOTE_ALREADY_SIGNED = 'Note is already signed'
+
 // Only the note's own author, or an admin, may sign it -- and only while
 // it's still a draft. A row's status only ever moves draft -> signed, once;
 // there is deliberately no route anywhere that can move it back or edit a
@@ -53,12 +59,46 @@ export interface SignNoteResult {
 // with this id exists under a different patient, and it keeps the audit log
 // (which the route logs against the URL's patient) from ever attributing a
 // sign action to the wrong patient.
-export async function signNote(id: number, patientId: string, signerName: string, signerIsAdmin: boolean): Promise<SignNoteResult> {
+//
+// The sign route calls this before re-authenticating, so a refused note never
+// spends one of the signer's re-authentication attempts; signNote repeats it.
+export async function checkNoteSignable(id: number, patientId: string, signerName: string, signerIsAdmin: boolean): Promise<SignNoteResult> {
   const note = await getNoteById(id)
-  if (!note || note.patientId !== patientId) return { ok: false, error: 'Note not found' }
-  if (note.status !== 'draft') return { ok: false, error: 'Note is already signed' }
+  if (!note || note.patientId !== patientId) return { ok: false, error: NOTE_NOT_FOUND }
+  if (note.status !== 'draft') return { ok: false, error: NOTE_ALREADY_SIGNED }
   if (note.authorName !== signerName && !signerIsAdmin) return { ok: false, error: 'Only the note\'s author or an admin may sign it' }
+  return { ok: true }
+}
 
-  const result = await getDb().update(encounterNotes).set({ status: 'signed', signedAt: new Date() }).where(eq(encounterNotes.id, id)).returning({ id: encounterNotes.id })
-  return { ok: result.length > 0 }
+export interface NoteSigner {
+  name: string
+  role: string
+  isAdmin: boolean
+  typedName: string
+}
+
+// WS7 T5 (spec D12): the status flip and the signatures row
+// (signable_type = 'encounter_note') commit together or not at all. The
+// update is guarded on status = 'draft', so of two concurrent signings only
+// one flips the row and writes a signature; the other gets "already signed".
+export async function signNote(id: number, patientId: string, signer: NoteSigner): Promise<SignNoteResult> {
+  const check = await checkNoteSignable(id, patientId, signer.name, signer.isAdmin)
+  if (!check.ok) return check
+
+  return getDb().transaction(async (tx) => {
+    const flipped = await tx.update(encounterNotes)
+      .set({ status: 'signed', signedAt: new Date() })
+      .where(and(eq(encounterNotes.id, id), eq(encounterNotes.status, 'draft')))
+      .returning({ id: encounterNotes.id })
+    if (flipped.length === 0) return { ok: false, error: NOTE_ALREADY_SIGNED }
+    await tx.insert(signatures).values({
+      signableType: 'encounter_note',
+      signableId: id,
+      patientId,
+      signerTypedName: signer.typedName,
+      signerRole: signer.role,
+      attestationText: SIGN_NOTE_ATTESTATION,
+    })
+    return { ok: true }
+  })
 }

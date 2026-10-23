@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { LocalDateTime } from '@/components/LocalDateTime'
+import { SignNoteDialog, type NoteReauthMethod } from '@/components/notes/SignNoteDialog'
 
 function safeIso(value: string): string {
   const d = new Date(value)
@@ -117,19 +118,9 @@ export function NoteForm({ patientId, canWrite }: { patientId: string; canWrite:
   )
 }
 
-export function NoteCard({ note, patientId, canSign }: { note: NoteRecord; patientId: string; canSign: boolean }) {
+export function NoteCard({ note, patientId, canSign, reauthMethod = 'password' }: { note: NoteRecord; patientId: string; canSign: boolean; reauthMethod?: NoteReauthMethod }) {
   const router = useRouter()
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function sign() {
-    setSubmitting(true)
-    setError(null)
-    const res = await sendJson(`/api/patients/${patientId}/notes/${note.id}/sign`, 'PUT')
-    setSubmitting(false)
-    if (res.ok) { router.refresh(); return }
-    setError(res.error)
-  }
+  const [signing, setSigning] = useState(false)
 
   return (
     <div className="rounded-lg border border-border bg-secondary/30 px-4 py-3 text-sm">
@@ -140,12 +131,20 @@ export function NoteCard({ note, patientId, canSign }: { note: NoteRecord; patie
         <div className="flex shrink-0 items-center gap-2">
           <NoteStatusPill status={note.status} />
           {canSign && note.status === 'draft' && (
-            <Button size="xs" variant="outline" onClick={sign} disabled={submitting}>Sign</Button>
+            <Button size="xs" variant="outline" onClick={() => setSigning(true)}>Sign</Button>
+          )}
+          {signing && (
+            <SignNoteDialog
+              patientId={patientId}
+              noteId={note.id}
+              reauthMethod={reauthMethod}
+              onClose={() => setSigning(false)}
+              onSigned={() => { setSigning(false); router.refresh() }}
+            />
           )}
         </div>
       </div>
       <p className="mb-1.5 text-xs text-muted-foreground"><LocalDateTime iso={safeIso(note.createdAt)} /></p>
-      {error && <p role="alert" className="mb-1.5 text-xs text-destructive">{error}</p>}
       <dl className="space-y-1 text-xs text-foreground">
         {note.subjective && <div><dt className="inline font-semibold text-muted-foreground">Subjective: </dt><dd className="inline">{note.subjective}</dd></div>}
         {note.objective && <div><dt className="inline font-semibold text-muted-foreground">Objective: </dt><dd className="inline">{note.objective}</dd></div>}
