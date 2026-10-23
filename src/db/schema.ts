@@ -835,7 +835,12 @@ export const rooms = pgTable('rooms', {
   occupiedByPatientId: text('occupied_by_patient_id').references(() => patients.id),
   // SP2: tariff room category (nullable; rooms predate categories).
   roomCategoryId: integer('room_category_id').references(() => roomCategories.id),
-})
+  // WS3 T1
+  genderRestriction: text('gender_restriction', { enum: ['male', 'female'] }), // null = mixed ward
+  // end WS3 T1
+}, (t) => [
+  check('rooms_gender_restriction_valid', sql`${t.genderRestriction} IS NULL OR ${t.genderRestriction} IN ('male', 'female')`), // WS3 T1
+])
 
 export const doctorAssignmentVisitTypeEnum = pgEnum('doctor_assignment_visit_type', ['inpatient', 'outpatient'])
 export const doctorAssignmentUrgencyEnum = pgEnum('doctor_assignment_urgency', ['routine', 'urgent', 'emergency'])
@@ -887,7 +892,19 @@ export const admissions = pgTable('admissions', {
   dischargeSummaryNotes: text('discharge_summary_notes'),
   followUpAppointmentId: integer('follow_up_appointment_id').references(() => appointments.id),
   createdFromAssignmentId: integer('created_from_assignment_id').references(() => doctorAssignments.id),
-})
+  // WS3 T1 (payer and deposit live in admission_coverage, not here)
+  expectedStayDays: integer('expected_stay_days'),
+  attendantName: text('attendant_name'),
+  attendantRelationship: text('attendant_relationship'),
+  attendantPhone: text('attendant_phone'),
+  wardGenderOverrideReason: text('ward_gender_override_reason'),
+  wardGenderOverrideByName: text('ward_gender_override_by_name'),
+  admittedByName: text('admitted_by_name'),
+  // end WS3 T1
+}, (t) => [
+  check('admissions_expected_stay_range', sql`${t.expectedStayDays} IS NULL OR (${t.expectedStayDays} BETWEEN 1 AND 365)`), // WS3 T1
+  uniqueIndex('admissions_one_active_per_patient').on(t.patientId).where(sql`status = 'admitted'`), // WS3 T1
+])
 
 export const admissionTransfers = pgTable('admission_transfers', {
   id: serial('id').primaryKey(),
@@ -897,6 +914,7 @@ export const admissionTransfers = pgTable('admission_transfers', {
   reason: text('reason').notNull(),
   transferredByName: text('transferred_by_name').notNull(),
   transferredAt: timestamp('transferred_at').defaultNow().notNull(),
+  wardGenderOverrideReason: text('ward_gender_override_reason'), // WS3 T1
 })
 
 // SP3 encounters & follow-up (scripts/migrations/2026-10-07-sp3-encounters-follow-up.sql)

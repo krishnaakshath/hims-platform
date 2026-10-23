@@ -144,7 +144,7 @@ async function ensureCategorisedRooms(db: Db, roomCategoryIds: Map<string, numbe
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(rooms).where(sql`${rooms.roomCategoryId} is not null`)
   if (n > 0) return
   await db.insert(rooms).values(ROOM_SEED.map((r) => ({
-    ward: r.ward, roomNumber: r.roomNumber, bedNumber: r.bedNumber, status: 'available' as const, roomCategoryId: roomCategoryIds.get(r.category)!,
+    ward: r.ward, roomNumber: r.roomNumber, bedNumber: r.bedNumber, status: 'available' as const, roomCategoryId: roomCategoryIds.get(r.category)!, genderRestriction: r.genderRestriction,
   })))
 }
 

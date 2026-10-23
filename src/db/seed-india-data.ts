@@ -192,12 +192,12 @@ export const ROOM_CATEGORY_SEED = [
 
 export type RoomCategoryCode = (typeof ROOM_CATEGORY_SEED)[number]['code']
 
-export const ROOM_SEED: { ward: string; roomNumber: string; bedNumber: string; category: RoomCategoryCode }[] = [
-  ...['A', 'B', 'C', 'D'].map((bed) => ({ ward: 'General Ward (Male)', roomNumber: '101', bedNumber: bed, category: 'GEN_WARD' as const })),
-  ...['A', 'B', 'C', 'D'].map((bed) => ({ ward: 'General Ward (Female)', roomNumber: '102', bedNumber: bed, category: 'GEN_WARD' as const })),
-  ...['201', '202'].flatMap((room) => ['A', 'B'].map((bed) => ({ ward: 'Semi-Private', roomNumber: room, bedNumber: bed, category: 'SEMI_PVT' as const }))),
-  ...['301', '302', '303'].map((room) => ({ ward: 'Private', roomNumber: room, bedNumber: 'A', category: 'PRIVATE' as const })),
-  ...['1', '2', '3', '4'].map((bed) => ({ ward: 'ICU', roomNumber: 'ICU-1', bedNumber: bed, category: 'ICU' as const })),
+export const ROOM_SEED: { ward: string; roomNumber: string; bedNumber: string; category: RoomCategoryCode; genderRestriction: 'male' | 'female' | null }[] = [
+  ...['A', 'B', 'C', 'D'].map((bed) => ({ ward: 'General Ward (Male)', roomNumber: '101', bedNumber: bed, category: 'GEN_WARD' as const, genderRestriction: 'male' as const })),
+  ...['A', 'B', 'C', 'D'].map((bed) => ({ ward: 'General Ward (Female)', roomNumber: '102', bedNumber: bed, category: 'GEN_WARD' as const, genderRestriction: 'female' as const })),
+  ...['201', '202'].flatMap((room) => ['A', 'B'].map((bed) => ({ ward: 'Semi-Private', roomNumber: room, bedNumber: bed, category: 'SEMI_PVT' as const, genderRestriction: null }))),
+  ...['301', '302', '303'].map((room) => ({ ward: 'Private', roomNumber: room, bedNumber: 'A', category: 'PRIVATE' as const, genderRestriction: null })),
+  ...['1', '2', '3', '4'].map((bed) => ({ ward: 'ICU', roomNumber: 'ICU-1', bedNumber: bed, category: 'ICU' as const, genderRestriction: null })),
 ]
 
 // ---------------------------------------------------------------------------
