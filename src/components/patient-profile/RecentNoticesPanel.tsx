@@ -14,6 +14,7 @@ const TEMPLATE_LABEL: Record<string, string> = {
   video_visit_link: 'Video visit',
   booking_confirmed: 'Booking confirmed',
   appointment_reminder: 'Appointment reminder',
+  home_collection_handover_otp: 'Sample handover code', // WS6 T11
 }
 const CHANNEL_LABEL: Record<string, string> = { sms: 'SMS', whatsapp: 'WhatsApp', email: 'Email', in_app: 'In-app', log: 'Log only' }
 const STATUS_LABEL: Record<string, string> = { sent: 'Sent', failed: 'Failed', skipped: 'Skipped', log_only: 'Not delivered (log only)', queued: 'Queued' }

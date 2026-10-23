@@ -2515,6 +2515,11 @@ export const homeCollectionVisits = pgTable('home_collection_visits', {
   collectedByName: text('collected_by_name'),
   encounterId: integer('encounter_id').references(() => encounters.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  handoverOtpHash: text('handover_otp_hash'), // WS6 T11 (scrypt, never returned or logged)
+  handoverOtpExpiresAt: timestamp('handover_otp_expires_at'), // WS6 T11
+  handoverOtpAttempts: integer('handover_otp_attempts').default(0).notNull(), // WS6 T11
+  handoverVerifiedAt: timestamp('handover_verified_at'), // WS6 T11
+  handoverWaiverReason: text('handover_waiver_reason', { enum: ['no_phone', 'sms_unavailable', 'patient_declined'] }), // WS6 T11
 }, (t) => [
   uniqueIndex('home_collection_visits_patient_slot_unique').on(t.patientId, t.visitDate, t.windowId).where(sql`status = 'booked'`),
   index('home_collection_visits_date_window_idx').on(t.visitDate, t.windowId),
@@ -2522,6 +2527,7 @@ export const homeCollectionVisits = pgTable('home_collection_visits', {
   check('home_collection_visits_pin_format', sql`${t.pinCode} ~ '^[1-9][0-9]{5}$'`),
   check('home_collection_visits_cancel_reason', sql`${t.status} <> 'cancelled' OR ${t.cancelReason} IS NOT NULL`),
   check('home_collection_visits_collected_at', sql`${t.status} <> 'collected' OR ${t.collectedAt} IS NOT NULL`),
+  check('home_collection_visits_handover_waiver_reason', sql`${t.handoverWaiverReason} IS NULL OR ${t.handoverWaiverReason} IN ('no_phone', 'sms_unavailable', 'patient_declined')`), // WS6 T11
 ])
 
 // A released PDF lab report (one version per release; a re-release supersedes the previous one).

@@ -631,6 +631,9 @@ import { PATIENT_DIRECTORY_ROLES } from '@/lib/role-policy'
 // WS6 T10
 import { POST as postGenerateQueuePin } from '@/app/api/settings/queue-display-pin/generate/route'
 // end WS6 T10
+// WS6 T11
+import { POST as postHandoverOtp } from '@/app/api/home-collections/[id]/otp/route'
+// end WS6 T11
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1123,6 +1126,9 @@ export const API_GATES: ApiGateCase[] = [
   // WS6 T10: generate the lobby display PIN (a malformed body is a 400 for an admin, so no PIN is rotated).
   { name: 'POST /api/settings/queue-display-pin/generate', call: () => settle(() => postGenerateQueuePin(send('POST', '/api/settings/queue-display-pin/generate', '{not json'))), allowed: ['admin'] },
   // end WS6 T10
+  // WS6 T11: send the handover code (an unknown visit is a 404 for an allowed role; nothing is sent).
+  { name: 'POST /api/home-collections/[id]/otp', call: () => settle(() => postHandoverOtp(send('POST', `/api/home-collections/${BOGUS_ID}/otp`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
+  // end WS6 T11
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

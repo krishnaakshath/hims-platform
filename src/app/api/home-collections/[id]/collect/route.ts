@@ -2,6 +2,9 @@
 // (COLLECTOR_ROUTE_ROLES). Every ID is check-digit validated here, before any DB call; the query
 // re-validates and does the rest in one transaction (collect, release the rest, lab encounter,
 // audit). A collector may act only on a visit assigned to them: `not_assigned` is the plain 403.
+// WS6 T11: refused before the visit's IST date, and the handover is proven by the patient's code
+// or a waiver reason. OTP refusals are 409s with a `code` so the screen can react; the code itself
+// is never echoed.
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
 import { COLLECTOR_ROUTE_ROLES } from '@/lib/role-policy'
@@ -9,7 +12,7 @@ import { collectHomeVisitSchema } from '@/lib/labs/validation'
 import { displaySampleId, parseSampleId } from '@/lib/labs/sample-id'
 import { collectHomeVisit } from '@/lib/queries/home-collections'
 import { errorResponse, invalidBody, labServerError, parseId, readJsonBody } from '@/lib/labs/route-responses'
-import { INVALID_VISIT_ID, VISIT_NOT_FOUND, forbidden } from '@/lib/home-collection/route-responses'
+import { INVALID_VISIT_ID, VISIT_NOT_FOUND, forbidden, handoverOtpError, notDueResponse } from '@/lib/home-collection/route-responses'
 
 /** The input as the collector typed it is shown back only after it failed the check digit. */
 const invalidSampleId = (input: string) => errorResponse(400, `Sample ID ${input} is not valid. Re-scan or re-type it.`)
@@ -36,13 +39,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   let result: Awaited<ReturnType<typeof collectHomeVisit>>
   try {
-    result = await collectHomeVisit(visitId, parsed.data.sampleIds, session)
+    const { otp, waiverReason } = parsed.data
+    result = await collectHomeVisit(visitId, parsed.data.sampleIds, session, new Date(), {
+      ...(otp !== undefined ? { otp } : {}), ...(waiverReason !== undefined ? { waiverReason } : {}),
+    })
   } catch (err) {
     return labServerError('home collection collect', err, 'Could not save the collection')
   }
   if (!result.ok) {
     if (result.error === 'not_assigned') return forbidden()
     if (result.error === 'not_found') return errorResponse(404, VISIT_NOT_FOUND)
+    if (result.error === 'not_due') return notDueResponse(result.visitDate)
+    const otpError = handoverOtpError(result.error)
+    if (otpError) return otpError
     if (result.error === 'invalid_sample_id') return invalidSampleId((result.sampleId ?? '').slice(0, 32))
     if (result.error === 'sample_not_on_visit') {
       return errorResponse(409, `Sample ${displaySampleId(result.sampleId ?? '')} does not belong to this visit. Check the tube label.`)

@@ -5,7 +5,7 @@ import type { FollowUpInterval } from '@/lib/follow-ups/rules'
 import { isIndianStateCode, isValidPinCode } from '@/lib/india/reference'
 import { normalizePhone } from '@/lib/india/phone'
 import { SAMPLE_TYPES, SAMPLE_CONTAINERS } from '@/lib/labs/catalog'
-import { HHMM_PATTERN, RESCHEDULE_REASONS, VISIT_CANCEL_REASONS } from '@/lib/home-collection/rules'
+import { HANDOVER_WAIVER_REASONS, HHMM_PATTERN, RESCHEDULE_REASONS, VISIT_CANCEL_REASONS } from '@/lib/home-collection/rules'
 
 const positiveInt = z.number().int().positive()
 const uniqueIds = (max: number) =>
@@ -160,8 +160,14 @@ export type CancelHomeCollectionRequest = z.infer<typeof cancelHomeCollectionSch
 export const assignCollectorSchema = z.object({ collectorUserId: positiveInt.nullable() }).strict()
 
 export const collectHomeVisitSchema = z
-  .object({ sampleIds: z.array(z.string().trim().min(1).max(32)).min(1).max(20) })
+  .object({
+    sampleIds: z.array(z.string().trim().min(1).max(32)).min(1).max(20),
+    // WS6 T11: the handover proof -- the patient's 6-digit code, or why it could not be used.
+    otp: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit handover code').optional(),
+    waiverReason: z.enum(HANDOVER_WAIVER_REASONS).optional(),
+  })
   .strict()
+  .refine((v) => v.otp === undefined || v.waiverReason === undefined, 'Enter the handover code or a reason, not both')
 
 // Foundations T8: the master notices opt-out and/or per-channel switches; at least one key.
 export const notificationPreferenceSchema = z

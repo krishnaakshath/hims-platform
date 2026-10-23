@@ -3,7 +3,7 @@
 import { fetchJson } from '@/lib/client-fetch'
 import type { HomeCollectionContext, WindowAvailability } from '@/lib/queries/home-collections'
 import type { BookHomeCollectionRequest } from '@/lib/labs/validation'
-import type { RescheduleReason, VisitCancelReason } from '@/lib/home-collection/rules'
+import type { HandoverWaiverReason, RescheduleReason, VisitCancelReason } from '@/lib/home-collection/rules'
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -50,8 +50,14 @@ export function labelsHref(orderIds: number[]): string {
 }
 
 // SP5 Task 12: the collector marks a visit collected by the sample IDs of the tubes drawn.
-export function collectVisit(visitId: number, sampleIds: string[]) {
+// WS6 T11: plus the handover proof -- the patient's code, or why it could not be used.
+export function collectVisit(visitId: number, sampleIds: string[], handover: { otp?: string; waiverReason?: HandoverWaiverReason } = {}) {
   return call<{ ok: true; collectedOrderIds: number[]; notCollectedOrderIds: number[]; encounterId: number }>(
-    `/api/home-collections/${visitId}/collect`, json('POST', { sampleIds }),
+    `/api/home-collections/${visitId}/collect`, json('POST', { sampleIds, ...handover }),
   )
+}
+
+// WS6 T11: send the patient a fresh handover code. The response never carries the code.
+export function sendHandoverOtp(visitId: number) {
+  return call<{ channelStatus: 'sent' | 'log_only' | 'skipped' }>(`/api/home-collections/${visitId}/otp`, json('POST', {}))
 }

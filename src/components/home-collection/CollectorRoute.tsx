@@ -5,17 +5,22 @@
 // "Mark collected" asks for the sample ID of each tube drawn (empty = not collected) and checks
 // the check digit before posting; "Could not collect" cancels with a doorstep reason only.
 // Dates are formatted by a pure helper (no toLocale* / Intl), so SSR and the browser agree.
+// WS6 T11: "Open in Maps" per stop; the collect form sends the patient a handover code and takes
+// it back (or a reason it could not be used); Collect is disabled before the visit's day.
 import { useId, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import type { RouteStop } from '@/lib/queries/home-collections'
-import { COLLECTOR_CANCEL_REASONS, type HomeCollectionStatus } from '@/lib/home-collection/rules'
+import {
+  COLLECTOR_CANCEL_REASONS, HANDOVER_WAIVER_LABEL, HANDOVER_WAIVER_REASONS, type HandoverWaiverReason, type HomeCollectionStatus,
+} from '@/lib/home-collection/rules'
+import { mapsUrl } from '@/lib/home-collection/maps'
 import { displaySampleId, parseSampleId } from '@/lib/labs/sample-id'
 import { SAMPLE_CONTAINER_LABEL } from '@/lib/labs/catalog'
 import { GENDERS } from '@/lib/india/reference'
 import { addDaysIso } from '@/lib/follow-ups/rules'
-import { collectVisit } from '@/components/home-collection/api'
+import { collectVisit, sendHandoverOtp } from '@/components/home-collection/api'
 import { CancelVisitDialog } from '@/components/home-collection/CancelVisitDialog'
 import { FIELD } from '@/components/home-collection/WindowSelect'
 
@@ -36,7 +41,19 @@ export function routeDayLabel(dateIso: string): string {
   return `${weekday}, ${d} ${MONTHS[m - 1]} ${y}`
 }
 
+/** "24 Oct" for a YYYY-MM-DD business date. */
+export function shortDayLabel(dateIso: string): string {
+  const [, m, d] = dateIso.split('-').map(Number)
+  return `${d} ${MONTHS[m - 1]}`
+}
+
 const TAP = 'min-h-11 px-4 text-base'
+
+const CHANNEL_MESSAGE = {
+  sent: 'Code sent to the patient\'s phone. Ask for it once the samples are taken.',
+  log_only: 'SMS is not set up, so no code went out. Choose why the code could not be used.',
+  skipped: 'The code could not be sent. Choose why the code could not be used.',
+} as const
 
 function CollectForm({ stop, onDone, onCancel }: { stop: RouteStop; onDone: (text: string) => void; onCancel: () => void }) {
   const router = useRouter()
@@ -45,6 +62,19 @@ function CollectForm({ stop, onDone, onCancel }: { stop: RouteStop; onDone: (tex
   const [values, setValues] = useState<string[]>(() => tubes.map(() => ''))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [otp, setOtp] = useState('')
+  const [waiver, setWaiver] = useState<HandoverWaiverReason | ''>('')
+  const [sending, setSending] = useState(false)
+  const [otpStatus, setOtpStatus] = useState<string | null>(null)
+
+  async function sendCode() {
+    setError(null)
+    setSending(true)
+    const r = await sendHandoverOtp(stop.visitId)
+    setSending(false)
+    if (!r.ok) { setError(r.error); return }
+    setOtpStatus(CHANNEL_MESSAGE[r.data.channelStatus])
+  }
 
   async function submit() {
     setError(null)
@@ -56,8 +86,11 @@ function CollectForm({ stop, onDone, onCancel }: { stop: RouteStop; onDone: (tex
       if (!parsed || seen.has(parsed.canonical)) { setError(`Sample ID ${v} is not valid. Re-scan or re-type it.`); return }
       seen.add(parsed.canonical)
     }
+    const code = otp.trim()
+    if (code !== '' && !/^\d{6}$/.test(code)) { setError('Enter the 6-digit handover code'); return }
+    if (code === '' && waiver === '') { setError('Enter the handover code the patient received, or choose why it could not be used.'); return }
     setSubmitting(true)
-    const r = await collectVisit(stop.visitId, entered)
+    const r = await collectVisit(stop.visitId, entered, code !== '' ? { otp: code } : { waiverReason: waiver as HandoverWaiverReason })
     setSubmitting(false)
     if (!r.ok) { setError(r.error); return }
     const missed = r.data.notCollectedOrderIds.length
@@ -92,6 +125,35 @@ function CollectForm({ stop, onDone, onCancel }: { stop: RouteStop; onDone: (tex
           />
         </div>
       ))}
+      <fieldset className="space-y-2 rounded-md border border-border p-3">
+        <legend className="px-1 text-sm font-medium">Handover</legend>
+        <Button type="button" variant="outline" className={TAP} disabled={sending} onClick={() => void sendCode()}>
+          {sending ? 'Sending…' : 'Send OTP'}
+        </Button>
+        <p aria-live="polite" className="text-sm text-muted-foreground">{otpStatus}</p>
+        <label htmlFor={`${id}-otp`} className="block text-sm font-medium">Handover code from the patient</label>
+        <input
+          id={`${id}-otp`}
+          value={otp}
+          onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          className={`${FIELD} min-h-11 font-mono text-base`}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={6}
+          disabled={waiver !== ''}
+        />
+        <label htmlFor={`${id}-waiver`} className="block text-sm font-medium">Or, why the code could not be used</label>
+        <select
+          id={`${id}-waiver`}
+          value={waiver}
+          onChange={(e) => setWaiver(e.target.value as HandoverWaiverReason | '')}
+          className={`${FIELD} min-h-11 text-base`}
+          disabled={otp !== ''}
+        >
+          <option value="">Code was used</option>
+          {HANDOVER_WAIVER_REASONS.map((r) => <option key={r} value={r}>{HANDOVER_WAIVER_LABEL[r]}</option>)}
+        </select>
+      </fieldset>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button type="submit" className={TAP} disabled={submitting}>{submitting ? 'Saving…' : 'Save collection'}</Button>
@@ -101,7 +163,7 @@ function CollectForm({ stop, onDone, onCancel }: { stop: RouteStop; onDone: (tex
   )
 }
 
-function StopCard({ stop }: { stop: RouteStop }) {
+function StopCard({ stop, notDueLabel }: { stop: RouteStop; notDueLabel: string | null }) {
   const headingId = useId()
   const [collecting, setCollecting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -125,6 +187,14 @@ function StopCard({ stop }: { stop: RouteStop }) {
         <span className="block">{[a.city, a.district].filter(Boolean).join(', ')} {a.pinCode}</span>
         {a.landmark && <span className="block text-muted-foreground">Landmark: {a.landmark}</span>}
       </address>
+      <a
+        href={mapsUrl({ addressLine1: a.line1, addressLine2: a.line2, landmark: a.landmark, city: a.city, pinCode: a.pinCode })}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-2 mr-2 inline-flex min-h-11 items-center rounded-md border border-border px-4 text-base font-medium"
+      >
+        Open in Maps
+      </a>
       <a href={`tel:${stop.contactPhone}`} className="mt-2 inline-flex min-h-11 items-center rounded-md border border-border px-4 text-base font-medium">
         Call {stop.contactPhone}
       </a>
@@ -145,10 +215,11 @@ function StopCard({ stop }: { stop: RouteStop }) {
 
       {stop.status === 'booked' && !collecting && (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <Button className={TAP} onClick={() => { setMessage(null); setCollecting(true) }}>Mark collected</Button>
+          <Button className={TAP} disabled={notDueLabel !== null} onClick={() => { setMessage(null); setCollecting(true) }}>Mark collected</Button>
           <Button variant="outline" className={TAP} onClick={() => setCancelling(true)}>Could not collect</Button>
         </div>
       )}
+      {stop.status === 'booked' && notDueLabel !== null && <p className="mt-2 text-sm text-muted-foreground">{notDueLabel}</p>}
       {stop.status === 'booked' && collecting && (
         <CollectForm stop={stop} onCancel={() => setCollecting(false)} onDone={(text) => { setCollecting(false); setMessage(text) }} />
       )}
@@ -179,7 +250,7 @@ export function CollectorRoute({ date, today, canLookBack, stops }: { date: stri
       </header>
       {stops.length === 0
         ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">No visits assigned for this day.</p>
-        : stops.map((s) => <StopCard key={s.visitId} stop={s} />)}
+        : stops.map((s) => <StopCard key={s.visitId} stop={s} notDueLabel={date > today ? `Visit is on ${shortDayLabel(date)}` : null} />)}
     </div>
   )
 }
