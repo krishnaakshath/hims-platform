@@ -127,18 +127,19 @@ describe('/login', () => {
     // Near the bottom of the viewport: room above, so it opens above.
     vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({ top: 700, bottom: 744, left: 40, right: 220, width: 180, height: 44, x: 40, y: 700, toJSON: () => ({}) } as DOMRect)
     fireEvent.click(button)
-    let list = screen.getByRole('listbox')
-    expect(list).toHaveAttribute('data-side', 'above')
-    expect(list.className).toMatch(/\bleft-0\b/)
-    expect(list.className).toMatch(/\bbottom-full\b/)
-    expect(list.parentElement).toContainElement(button)
+    let popup = screen.getByRole('listbox').parentElement!
+    expect(popup).toHaveAttribute('data-side', 'above')
+    expect(popup.className).toMatch(/\bleft-0\b/)
+    expect(popup.className).toMatch(/\bbottom-full\b/)
+    // Same positioned wrapper as the trigger: anchored to it, not to the page.
+    expect(popup.parentElement).toContainElement(button)
     fireEvent.click(button)
     // Near the top: flips below and caps its height to the space there.
     vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({ top: 60, bottom: 104, left: 40, right: 220, width: 180, height: 44, x: 40, y: 60, toJSON: () => ({}) } as DOMRect)
     fireEvent.click(button)
-    list = screen.getByRole('listbox')
-    expect(list).toHaveAttribute('data-side', 'below')
-    expect(list.className).toMatch(/\btop-full\b/)
+    popup = screen.getByRole('listbox').parentElement!
+    expect(popup).toHaveAttribute('data-side', 'below')
+    expect(popup.className).toMatch(/\btop-full\b/)
   })
 
   it('posts the same payload to /api/login and shows the server error', async () => {
@@ -244,5 +245,69 @@ describe('/patient-portal/login', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Staff' }))
     expect(screen.getByLabelText('Email address')).toBeInTheDocument()
     expect(replaceState).toHaveBeenLastCalledWith(null, '', '/login')
+  })
+})
+
+describe('review-only design switch (?design=a|b|c)', () => {
+  afterEach(() => window.history.replaceState(null, '', '/login'))
+
+  it.each(['a', 'b', 'c'] as const)('design %s renders a complete sign-in with the switch and department menu', (d) => {
+    window.history.replaceState(null, '', `/login?design=${d}`)
+    const { container } = render(<LoginPage />)
+    expect(container.querySelector('[data-design]')).toHaveAttribute('data-design', d)
+    expect(screen.getByRole('radiogroup', { name: 'Sign in as' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Email address')).toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(container.textContent ?? '').not.toMatch(EMOJI_RE)
+    expect(container.textContent ?? '').not.toMatch(TRUST_COPY_RE)
+    for (const el of container.querySelectorAll('svg')) expect(el.closest('[aria-hidden="true"]')).not.toBeNull()
+    fireEvent.click(screen.getByRole('radio', { name: 'Patient' }))
+    expect(screen.getByLabelText('Email address or patient ID')).toBeInTheDocument()
+    expect(replaceState).toHaveBeenLastCalledWith(null, '', `/patient-portal/login?design=${d}`)
+  })
+
+  it('falls back to design a for an unknown value', () => {
+    window.history.replaceState(null, '', '/login?design=zzz')
+    const { container } = render(<LoginPage />)
+    expect(container.querySelector('[data-design]')).toHaveAttribute('data-design', 'a')
+  })
+
+  it('design c: the department picker is a filterable command palette', () => {
+    window.history.replaceState(null, '', '/login?design=c')
+    render(<LoginPage />)
+    fireEvent.click(departmentButton())
+    const input = screen.getByRole('combobox', { name: 'Find a department' })
+    expect(input).toHaveFocus()
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(STAFF_PORTALS.length)
+    fireEvent.change(input, { target: { value: 'pharm' } })
+    const options = within(screen.getByRole('listbox')).getAllByRole('option')
+    expect(options).toHaveLength(1)
+    expect(input).toHaveAttribute('aria-activedescendant', options[0].id)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(push).toHaveBeenCalledWith('/login/pharmacy')
+  })
+
+  it('design c: "/" opens the palette when focus is not in a field, Escape closes it', () => {
+    window.history.replaceState(null, '', '/login?design=c')
+    render(<LoginPage />)
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    fireEvent.keyDown(document.body, { key: '/' })
+    const input = screen.getByRole('combobox', { name: 'Find a department' })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('design b: department menu is keyboard operable too', () => {
+    window.history.replaceState(null, '', '/login?design=b')
+    render(<LoginPage />)
+    const button = departmentButton()
+    fireEvent.keyDown(button, { key: 'ArrowDown' })
+    const list = screen.getByRole('listbox')
+    expect(list).toHaveFocus()
+    fireEvent.keyDown(list, { key: 'ArrowDown' })
+    fireEvent.keyDown(list, { key: 'Enter' })
+    expect(push).toHaveBeenCalledWith(`/login/${STAFF_PORTALS[1].key}`)
   })
 })

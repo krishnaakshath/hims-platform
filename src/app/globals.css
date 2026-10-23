@@ -142,7 +142,7 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Sign-in experience (AuthShell and friends). Original code.
+   Sign-in experience (components/auth). Original code.
 
    Palette: everything derives from `--brand` (BRAND_PRIMARY_COLOR via
    brandThemeCss, else the stock blue), so white-label clients get their own
@@ -208,19 +208,37 @@
   100% { transform: scale(1); opacity: 1; }
 }
 
-/* Right column texture: a grid of small plus signs (the brand mark's own
-   shape) at ~6% ink, masked to fade out from the top-right corner. */
-.auth-crosses {
-  background-color: color-mix(in oklch, var(--brand) 22%, var(--foreground));
-  opacity: 0.04;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M13 9h2v4h4v2h-4v4h-2v-4H9v-2h4z' fill='%23000'/%3E%3C/svg%3E"), radial-gradient(ellipse 70% 60% at 100% 0%, #000 15%, transparent 70%);
-  -webkit-mask-composite: source-in;
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M13 9h2v4h4v2h-4v4h-2v-4H9v-2h4z' fill='%23000'/%3E%3C/svg%3E"), radial-gradient(ellipse 70% 60% at 100% 0%, #000 15%, transparent 70%);
-  mask-composite: intersect;
-  mask-size: 28px 28px, 100% 100%;
-  mask-repeat: repeat, no-repeat;
+/* Design B: ECG paper -- 8px minor and 40px major grid in the brand tint. */
+.auth-ecg-paper {
+  --minor: color-mix(in oklch, var(--brand) 9%, transparent);
+  --major: color-mix(in oklch, var(--brand) 16%, transparent);
+  background-image:
+    linear-gradient(to right, var(--major) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--major) 1px, transparent 1px),
+    linear-gradient(to right, var(--minor) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--minor) 1px, transparent 1px);
+  background-size: 40px 40px, 40px 40px, 8px 8px, 8px 8px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%);
 }
-.dark .auth-crosses { opacity: 0.06; }
+.dark .auth-ecg-paper {
+  --minor: color-mix(in oklch, var(--brand) 14%, transparent);
+  --major: color-mix(in oklch, var(--brand) 26%, transparent);
+}
+
+/* Design C: the slow animated band along the bottom edge. */
+.auth-band {
+  background: linear-gradient(90deg, color-mix(in oklch, var(--brand) 85%, black), color-mix(in oklch, var(--brand) 55%, var(--auth-glow)), color-mix(in oklch, var(--brand) 85%, black));
+  background-size: 200% 100%;
+  animation: auth-band 28s linear infinite;
+}
+@keyframes auth-band {
+  from { background-position: 0% 0; }
+  to { background-position: 200% 0; }
+}
+[data-motion="paused"] .auth-band { animation-play-state: paused; }
+[data-motion="reduce"] .auth-band { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { .auth-band { animation: none !important; } }
 
 /* Entrance choreography: staggered by --i (0, 1, 2 ...), runs once. */
 .auth-rise {

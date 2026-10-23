@@ -6,8 +6,7 @@ import { MfaEnrollStep } from '@/components/mfa/MfaEnrollStep'
 import { FloatingField } from '@/components/auth/FloatingField'
 import { PasswordField } from '@/components/auth/PasswordField'
 import { SubmitButton } from '@/components/auth/SubmitButton'
-import { PulseRule } from '@/components/auth/PulseRule'
-import { AUTH_ALERT, AUTH_SUBTITLE, AUTH_TITLE, rise } from '@/components/auth/auth-styles'
+import { DESIGN_STYLES, rise, type Design } from '@/components/auth/auth-styles'
 import type { StaffPortal } from '@/components/StaffLoginForm'
 import { sendJson } from '@/lib/client-fetch'
 
@@ -19,7 +18,16 @@ type Step =
 // The staff password + MFA state machine. `portal` (a department sign-in
 // page) only adds an eyebrow above the heading -- the role a login grants
 // always comes from the credentials, resolved server-side in POST /api/login.
-export function StaffSignInForm({ portal, below }: { portal?: StaffPortal; below?: React.ReactNode }) {
+const STEP_WRAP: Record<Design, string> = {
+  // MFA / OTP steps use the neutral surface; on the dark immersive field they
+  // sit on a card so their text keeps AA contrast.
+  a: 'rounded-xl bg-card p-5 text-card-foreground sm:p-6',
+  b: '',
+  c: 'max-w-[440px]',
+}
+
+export function StaffSignInForm({ portal, below, design = 'a' }: { portal?: StaffPortal; below?: React.ReactNode; design?: Design }) {
+  const s = DESIGN_STYLES[design]
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -67,14 +75,14 @@ export function StaffSignInForm({ portal, below }: { portal?: StaffPortal; below
 
   if (step.kind === 'enroll') {
     return (
-      <div className="auth-rise" style={rise(0)}>
+      <div className={`auth-rise ${STEP_WRAP[design]}`} style={rise(0)}>
         <MfaEnrollStep qrDataUrl={step.qrDataUrl} manualKey={step.manualKey} onSubmit={submitMfaCode} />
       </div>
     )
   }
   if (step.kind === 'verify') {
     return (
-      <div className="auth-rise" style={rise(0)}>
+      <div className={`auth-rise ${STEP_WRAP[design]}`} style={rise(0)}>
         <MfaCodeStep
           title={step.method === 'sms' ? 'Check your phone' : step.method === 'email' ? 'Check your email' : 'Enter your code'}
           description={
@@ -91,13 +99,12 @@ export function StaffSignInForm({ portal, below }: { portal?: StaffPortal; below
 
   return (
     <>
-      <div className="auth-rise mb-9" style={rise(1)}>
-        <PulseRule />
-        {portal ? <p className="mb-2 text-sm font-semibold text-primary">{portal.label}</p> : null}
-        <h1 className={AUTH_TITLE}>Sign in</h1>
-        <p className={AUTH_SUBTITLE}>Use your hospital email and password.</p>
+      <div className={`auth-rise ${s.head}`} style={rise(1)}>
+        {portal ? <p className={s.eyebrow}>{portal.label}</p> : null}
+        <h1 className={s.title}>Sign in</h1>
+        <p className={s.subtitle}>Use your hospital email and password.</p>
       </div>
-      <form onSubmit={handlePasswordSubmit} className="space-y-5">
+      <form onSubmit={handlePasswordSubmit} className={s.form}>
         <div className="auth-rise" style={rise(2)}>
           <FloatingField
             id="email"
@@ -113,21 +120,22 @@ export function StaffSignInForm({ portal, below }: { portal?: StaffPortal; below
             value={email}
             onChange={setEmail}
             invalid={!!error}
+            design={design}
           />
         </div>
         <div className="auth-rise" style={rise(3)}>
-          <PasswordField value={password} onChange={setPassword} required invalid={!!error} />
+          <PasswordField value={password} onChange={setPassword} required invalid={!!error} design={design} />
         </div>
         {error && (
-          <div role="alert" className={`${AUTH_ALERT} auth-pop-menu`}>
+          <div role="alert" className={`${s.alert} auth-pop-menu`}>
             {error}
           </div>
         )}
-        <div className="auth-rise pt-3" style={rise(4)}>
-          <SubmitButton disabled={submitting || done || !email || !password} submitting={submitting} done={done} />
+        <div className={`auth-rise ${s.submitWrap}`} style={rise(4)}>
+          <SubmitButton className={s.button} disabled={submitting || done || !email || !password} submitting={submitting} done={done} />
         </div>
       </form>
-      {below ? <div className="auth-rise mt-10" style={rise(5)}>{below}</div> : null}
+      {below ? <div className={`auth-rise ${s.below}`} style={rise(5)}>{below}</div> : null}
     </>
   )
 }

@@ -2,9 +2,9 @@ import { AUTH_PRIMARY_BUTTON } from '@/components/auth/auth-styles'
 
 // The primary "Sign in" button: fixed size in every state (idle, signing in,
 // signed in), so the label swap never changes its width or height.
-export function SubmitButton({ disabled, submitting, done, label = 'Sign in' }: { disabled: boolean; submitting: boolean; done: boolean; label?: string }) {
+export function SubmitButton({ disabled, submitting, done, label = 'Sign in', className = AUTH_PRIMARY_BUTTON }: { disabled: boolean; submitting: boolean; done: boolean; label?: string; className?: string }) {
   return (
-    <button type="submit" disabled={disabled} className={`${AUTH_PRIMARY_BUTTON} ${done ? '!opacity-100' : ''}`}>
+    <button type="submit" disabled={disabled} className={`${className} ${done ? '!opacity-100' : ''}`}>
       {done ? (
         <>
           <svg aria-hidden="true" viewBox="0 0 20 20" className="auth-pop h-5 w-5" fill="none">
