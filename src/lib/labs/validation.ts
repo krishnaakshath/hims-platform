@@ -287,3 +287,11 @@ export type AnalyteDefinitionInput = z.infer<typeof analyteDefinitionSchema>
 
 export const labTestAnalytesRequestSchema = z.object({ analytes: analyteDefinitionsSchema }).strict()
 // end WS4 T8
+
+// WS4 T13: Settings -> Lab setup -> "Add from tariff": the services picked to become lab tests.
+export const LAB_TESTS_FROM_TARIFF_MAX = 50
+export const labTestsFromTariffSchema = z.object({
+  serviceIds: z.array(z.number().int().positive().max(2_147_483_647)).min(1).max(LAB_TESTS_FROM_TARIFF_MAX)
+    .refine((ids) => new Set(ids).size === ids.length, 'Each service may be picked only once'),
+}).strict()
+// end WS4 T13

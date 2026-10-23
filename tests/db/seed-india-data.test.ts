@@ -8,6 +8,11 @@ import {
 import { LAB_ANALYTE_SEED } from '@/db/seed-india-data' // WS4 T8
 import { analyteDefinitionsSchema } from '@/lib/labs/validation' // WS4 T8
 import { DEMO_REFERENCE_RANGE_NOTE } from '@/lib/labs/analytes' // WS4 T8
+// WS4 T13
+import { WS4_LAB_TESTS, WS4_SERVICE_SEED } from '@/db/seed-india-data'
+import { SERVICE_CODE_PATTERN } from '@/lib/tariff/validation'
+import { labCategoryForService } from '@/lib/labs/catalog'
+// end WS4 T13
 import { payerProfileSchema } from '@/lib/rcm/validation'
 import { INSURER_SIDE_KINDS } from '@/lib/rcm/constants'
 import { isValidAadhaar } from '@/lib/india/aadhaar'
@@ -177,19 +182,17 @@ describe('patients', () => {
 
 // WS4 T8: demo analyte definitions and reference ranges (spec 3.3 item 21).
 describe('lab analytes (WS4 T8)', () => {
-  const catalogueCodes = new Set(['CBC-DIFF', 'TSH', 'LIPID', 'HBA1C', ...INDIA_LAB_TESTS.map((t) => t.code)])
+  const catalogueCodes = new Set(['CBC-DIFF', 'TSH', 'LIPID', 'HBA1C', ...INDIA_LAB_TESTS.map((t) => t.code), ...WS4_LAB_TESTS.map((t) => t.code)]) // WS4 T13
   const range = (test: string, code: string, sex: 'any' | 'male' | 'female' = 'any') =>
     LAB_ANALYTE_SEED[test].find((a) => a.code === code)!.ranges.find((r) => r.sex === sex)!
 
   it('covers the briefed tests, each a catalogue test, and passes the editor schema', () => {
-    expect(Object.keys(LAB_ANALYTE_SEED).sort()).toEqual(['CBC-DIFF', 'CRP', 'DENGUE-NS1', 'FBS', 'HBA1C', 'KFT', 'LFT', 'LIPID', 'TSH'])
+    expect(Object.keys(LAB_ANALYTE_SEED).sort()).toEqual(['CBC-DIFF', 'CRP', 'DENGUE-NS1', 'FBS', 'FEVER-PANEL', 'HBA1C', 'KFT', 'LFT', 'LIPID', 'TSH']) // WS4 T13: + FEVER-PANEL (R7)
     for (const [test, defs] of Object.entries(LAB_ANALYTE_SEED)) {
       expect(catalogueCodes.has(test), test).toBe(true)
       const parsed = analyteDefinitionsSchema.safeParse(defs)
       expect(parsed.success, `${test}: ${parsed.success ? '' : JSON.stringify(parsed.error.issues[0])}`).toBe(true)
     }
-    // R7: the fever panel (Task 13) is not seeded here.
-    expect(Object.keys(LAB_ANALYTE_SEED)).not.toContain('FEVER-PANEL')
   })
 
   it('CBC carries the thirteen analytes, sex-specific Hb/RBC/HCT and the briefed critical limits', () => {
@@ -218,3 +221,60 @@ describe('lab analytes (WS4 T8)', () => {
     expect(DEMO_REFERENCE_RANGE_NOTE).toBe('Demo reference ranges: the laboratory director must review before clinical use')
   })
 })
+
+// WS4 T13 (spec 3.6 item 27; lane ruling R7)
+describe('catalogue from the tariff master (WS4 T13)', () => {
+  const allServices = [...SERVICE_SEED, ...WS4_SERVICE_SEED]
+  const svc = new Map(allServices.map((s) => [s.code, s]))
+
+  it('adds the briefed services (LAB / RADIO / CARDIO, GST 0, SAC 999316), MRI with pre-authorisation, fever panel at Rs 1,200', () => {
+    expect(WS4_SERVICE_SEED.map((s) => s.code)).toEqual([
+      'LAB_FEVER_PANEL', 'LAB_WIDAL', 'LAB_ESR', 'LAB_ELECTROLYTES', 'LAB_PT_INR', 'LAB_BLOOD_GROUP', 'LAB_URINE_CULTURE',
+      'IMG_USG_PELVIS', 'IMG_USG_KUB', 'IMG_USG_OBS', 'IMG_DOPPLER_LL', 'IMG_CT_CHEST', 'IMG_MRI_BRAIN', 'IMG_MRI_LSPINE', 'IMG_TMT',
+    ])
+    const deptCodes = new Set(DEPARTMENT_SEED.map((d) => d.code))
+    for (const s of WS4_SERVICE_SEED) {
+      expect(SERVICE_CODE_PATTERN.test(s.code), s.code).toBe(true)
+      expect(deptCodes.has(s.departmentCode), s.code).toBe(true)
+      expect(s).toMatchObject({ gstRateBp: 0, hsnSac: '999316' })
+      expect(Number.isInteger(s.basePaise) && s.basePaise! > 0, s.code).toBe(true)
+      expect(s.departmentCode, s.code).toBe(s.code.startsWith('LAB_') ? 'LAB' : s.code === 'IMG_TMT' ? 'CARDIO' : 'RADIO')
+    }
+    expect(new Set(allServices.map((s) => s.code)).size).toBe(allServices.length)
+    expect(svc.get('LAB_FEVER_PANEL')?.basePaise).toBe(1_200_00)
+    expect(WS4_SERVICE_SEED.filter((s) => s.requiresPreauth).map((s) => s.code)).toEqual(['IMG_MRI_BRAIN', 'IMG_MRI_LSPINE'])
+  })
+
+  it('every WS4 test maps to a seeded, orderable service (ECG as imaging); at least 40 tests with unique codes', () => {
+    for (const t of WS4_LAB_TESTS) {
+      const s = svc.get(t.serviceCode ?? '')
+      expect(s, t.code).toBeDefined()
+      expect(labCategoryForService(s!.category, { allowProcedure: true }), t.code).toBe(t.category)
+    }
+    const mapped = new Set(WS4_LAB_TESTS.map((t) => t.serviceCode))
+    for (const s of WS4_SERVICE_SEED) expect(mapped.has(s.code), s.code).toBe(true)
+    expect(WS4_LAB_TESTS.find((t) => t.serviceCode === 'PROC_ECG')?.category).toBe('imaging')
+    expect(WS4_LAB_TESTS.find((t) => t.serviceCode === 'IMG_ECHO')?.category).toBe('imaging')
+    const codes = [...Object.keys(EXISTING_LAB_TEST_SERVICE_MAP), ...INDIA_LAB_TESTS.map((t) => t.code), ...WS4_LAB_TESTS.map((t) => t.code)]
+    expect(new Set(codes).size).toBe(codes.length)
+    expect(codes.length).toBeGreaterThanOrEqual(40)
+    // One test per service: no service backs two seeded tests.
+    const backing = [...Object.values(EXISTING_LAB_TEST_SERVICE_MAP).map((m) => m.serviceCode), ...INDIA_LAB_TESTS.map((t) => t.serviceCode), ...WS4_LAB_TESTS.map((t) => t.serviceCode)]
+    expect(new Set(backing).size).toBe(backing.length)
+  })
+
+  it('R7: the fever panel is one test with Hb, WBC, PLT (CBC ranges and critical limits) and three rapid tests', () => {
+    const panel = LAB_ANALYTE_SEED['FEVER-PANEL']
+    expect(panel.map((a) => a.code)).toEqual(['HGB', 'WBC', 'PLT', 'MAL', 'NS1', 'WIDAL'])
+    for (const c of ['HGB', 'WBC', 'PLT']) {
+      expect(panel.find((a) => a.code === c), c).toEqual(LAB_ANALYTE_SEED['CBC-DIFF'].find((a) => a.code === c))
+    }
+    expect(panel.find((a) => a.code === 'PLT')!.ranges[0]).toMatchObject({ criticalLow: 50, criticalHigh: 1000 })
+    expect(panel.find((a) => a.code === 'MAL')).toMatchObject({ valueType: 'option', options: ['Negative', 'Positive'], abnormalOptions: ['Positive'] })
+    expect(panel.find((a) => a.code === 'NS1')).toMatchObject({ valueType: 'option', options: ['Negative', 'Positive'], abnormalOptions: ['Positive'] })
+    expect(panel.find((a) => a.code === 'WIDAL')).toMatchObject({ valueType: 'option', options: ['Non-reactive', 'Reactive'], abnormalOptions: ['Reactive'] })
+    expect(analyteDefinitionsSchema.safeParse(panel).success).toBe(true)
+    expect(WS4_LAB_TESTS.find((t) => t.code === 'FEVER-PANEL')?.serviceCode).toBe('LAB_FEVER_PANEL')
+  })
+})
+

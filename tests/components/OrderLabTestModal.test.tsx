@@ -195,3 +195,48 @@ describe('OrderLabTestModal order details (WS2 T10)', () => {
     expect(screen.queryByRole('button', { name: /book home collection/i })).not.toBeInTheDocument()
   })
 })
+
+// WS4 T13: a search box and the "Laboratory" / "Imaging & diagnostics" groups (MRI and ECG are diagnostics).
+describe('OrderLabTestModal search and groups (WS4 T13)', () => {
+  const opt = (id: number, name: string, code: string, category: 'lab' | 'imaging'): LabTestOption =>
+    ({ id, name, code, defaultUnit: null, referenceRange: null, category, serviceId: id, isActive: true, priced: true, pricePaise: 10000 })
+  const CATALOGUE = [
+    opt(1, 'Fever panel', 'FEVER-PANEL', 'lab'),
+    opt(2, 'Complete Blood Count', 'CBC', 'lab'),
+    opt(3, 'MRI, brain, plain', 'MRI-BRAIN', 'imaging'),
+    opt(4, 'ECG, 12-lead', 'ECG-12', 'imaging'),
+    opt(5, 'Ultrasound, pelvis', 'US-PELVIS', 'imaging'),
+  ]
+
+  it('shows MRI and ECG under "Imaging & diagnostics" and lab tests under "Laboratory"', () => {
+    render(<OrderLabTestModal patientId="RD-0001" labTests={CATALOGUE} onClose={vi.fn()} />)
+    const lab = screen.getByRole('group', { name: 'Laboratory' })
+    const dx = screen.getByRole('group', { name: 'Imaging & diagnostics' })
+    expect(lab.textContent).toContain('Fever panel')
+    expect(lab.textContent).not.toContain('MRI')
+    expect(dx.textContent).toContain('MRI, brain, plain')
+    expect(dx.textContent).toContain('ECG, 12-lead')
+  })
+
+  it('filters by typed name or code, case-insensitively, and keeps a ticked test when it is filtered out', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ requisitionId: 1, lines: [], patientIsLocal: false }), { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<OrderLabTestModal patientId="RD-0001" labTests={CATALOGUE} onClose={vi.fn()} />)
+    const search = screen.getByRole('searchbox', { name: 'Search tests' })
+    fireEvent.change(search, { target: { value: 'ecg' } })
+    expect(screen.getByRole('checkbox', { name: /ECG, 12-lead/ })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /MRI/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Laboratory' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: /ECG, 12-lead/ }))
+    fireEvent.change(search, { target: { value: 'FEVER' } })
+    expect(screen.getByRole('checkbox', { name: /Fever panel/ })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /ECG/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: /Fever panel/ }))
+    fireEvent.change(search, { target: { value: 'zzz' } })
+    expect(screen.getByText('No tests match your search.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /order 2 tests/i }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string).labTestIds).toEqual([1, 4])
+  })
+})

@@ -86,6 +86,7 @@ export function LabOrderForm({ patientId, labTests, originatingEncounterId, bill
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('') // WS4 T13
 
   function toggle(testId: number) {
     const next = selected.includes(testId) ? selected.filter((x) => x !== testId) : [...selected, testId]
@@ -132,8 +133,11 @@ export function LabOrderForm({ patientId, labTests, originatingEncounterId, bill
   const count = chosen.length
   const total = chosen.reduce((sum, t) => sum + (t.pricePaise ?? 0), 0)
   const canSubmit = count > 0 && !submitting
-  const labOptions = labTests.filter((t) => t.category === 'lab')
-  const imagingOptions = labTests.filter((t) => t.category === 'imaging')
+  // WS4 T13: the typed text narrows the list by name or code; ticked tests stay ticked when hidden.
+  const q = query.trim().toLowerCase()
+  const visible = q ? labTests.filter((t) => t.name.toLowerCase().includes(q) || t.code.toLowerCase().includes(q)) : labTests
+  const labOptions = visible.filter((t) => t.category === 'lab')
+  const imagingOptions = visible.filter((t) => t.category === 'imaging')
 
   const options = (list: LabTestOption[]) => list.map((t) => {
     const unpriced = t.serviceId === null || !t.priced
@@ -158,6 +162,11 @@ export function LabOrderForm({ patientId, labTests, originatingEncounterId, bill
   return (
     <div className="space-y-3">
       <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+        {/* WS4 T13 */}
+        {labTests.length > 0 && (
+          <input type="search" aria-label="Search tests" placeholder="Search tests by name or code" value={query}
+            onChange={(e) => setQuery(e.target.value)} className={FIELD} />
+        )}
         {layout === 'tabs' ? (
           <div>
             <div role="tablist" aria-label="Order type" className="mb-2 flex gap-1">
@@ -175,8 +184,9 @@ export function LabOrderForm({ patientId, labTests, originatingEncounterId, bill
           </div>
         ) : (
           <>
-            {group('Labs', labOptions)}
-            {group('Imaging', imagingOptions)}
+            {group('Laboratory', labOptions)}
+            {group('Imaging & diagnostics', imagingOptions)}
+            {q && labTests.length > 0 && visible.length === 0 && <p className="text-sm text-muted-foreground">No tests match your search.</p>}
           </>
         )}
         {labTests.length === 0 && <p className="text-sm text-warning">No lab tests are available in the catalog.</p>}

@@ -314,7 +314,7 @@ export type LabTestSeed = {
   defaultUnit: string | null
   referenceRange: string | null
   sampleType: 'blood' | 'serum' | 'plasma' | 'urine' | null
-  container: 'edta_lavender' | 'plain_red' | 'sst_gold' | 'fluoride_grey' | 'urine_container' | null
+  container: 'edta_lavender' | 'plain_red' | 'sst_gold' | 'fluoride_grey' | 'urine_container' | 'citrate_blue' | null // WS4 T13: citrate (PT/INR)
   serviceCode: string | null
 }
 
@@ -549,3 +549,77 @@ export const LAB_ANALYTE_SEED: Record<string, AnalyteSeed[]> = {
   }],
 }
 // end WS4 T8
+
+// WS4 T13 (spec 3.6 item 27): the catalogue grows from the tariff master. Services for panels,
+// common chemistry and coagulation, ultrasound variants, Doppler, CT chest, MRI and TMT, and one lab
+// test per service (plus tests for the existing 2D echo and ECG services; the ECG procedure is an
+// imaging / diagnostics test). Prices are demo values. A panel (the fever panel) is one orderable
+// test with its own service and its own analytes; panels do not nest tests.
+const ws4Lab = (code: string, name: string, basePaise: number): ServiceSeed =>
+  ({ code, name, departmentCode: 'LAB', category: 'investigation_lab', hsnSac: '999316', gstRateBp: 0, basePaise })
+const ws4Img = (code: string, name: string, basePaise: number, departmentCode = 'RADIO', requiresPreauth = false): ServiceSeed =>
+  ({ code, name, departmentCode, category: 'investigation_imaging', hsnSac: '999316', gstRateBp: 0, basePaise, ...(requiresPreauth ? { requiresPreauth } : {}) })
+
+export const WS4_SERVICE_SEED: ServiceSeed[] = [
+  ws4Lab('LAB_FEVER_PANEL', 'Fever panel (CBC, malaria antigen, dengue NS1, Widal)', 1_200_00),
+  ws4Lab('LAB_WIDAL', 'Widal test (slide)', 250_00),
+  ws4Lab('LAB_ESR', 'Erythrocyte sedimentation rate (ESR)', 120_00),
+  ws4Lab('LAB_ELECTROLYTES', 'Serum electrolytes (Na, K, Cl)', 500_00),
+  ws4Lab('LAB_PT_INR', 'Prothrombin time with INR', 450_00),
+  ws4Lab('LAB_BLOOD_GROUP', 'Blood group and Rh typing', 150_00),
+  ws4Lab('LAB_URINE_CULTURE', 'Urine culture and sensitivity', 750_00),
+  ws4Img('IMG_USG_PELVIS', 'Ultrasound pelvis', 1_000_00),
+  ws4Img('IMG_USG_KUB', 'Ultrasound KUB (kidney, ureter, bladder)', 1_000_00),
+  ws4Img('IMG_USG_OBS', 'Ultrasound obstetric', 1_500_00),
+  ws4Img('IMG_DOPPLER_LL', 'Colour Doppler lower limb (venous)', 2_800_00),
+  ws4Img('IMG_CT_CHEST', 'CT chest (plain)', 4_500_00),
+  ws4Img('IMG_MRI_BRAIN', 'MRI brain (plain)', 7_500_00, 'RADIO', true),
+  ws4Img('IMG_MRI_LSPINE', 'MRI lumbosacral spine (plain)', 7_500_00, 'RADIO', true),
+  ws4Img('IMG_TMT', 'Treadmill test (TMT)', 1_800_00, 'CARDIO'),
+]
+
+const ws4Test = (code: string, name: string, serviceCode: string, sample: Pick<LabTestSeed, 'sampleType' | 'container'> | null, referenceRange: string | null = null): LabTestSeed => ({
+  name, code, category: sample ? 'lab' : 'imaging', defaultUnit: null, referenceRange,
+  sampleType: sample?.sampleType ?? null, container: sample?.container ?? null, serviceCode,
+})
+
+export const WS4_LAB_TESTS: LabTestSeed[] = [
+  ws4Test('FEVER-PANEL', 'Fever panel', 'LAB_FEVER_PANEL', { sampleType: 'blood', container: 'edta_lavender' }, 'See individual analytes'),
+  ws4Test('WIDAL', 'Widal test', 'LAB_WIDAL', { sampleType: 'serum', container: 'plain_red' }, 'Non-reactive'),
+  ws4Test('ESR', 'Erythrocyte sedimentation rate', 'LAB_ESR', { sampleType: 'blood', container: 'edta_lavender' }, '0-20 mm/hr'),
+  ws4Test('ELECTROLYTES', 'Serum electrolytes', 'LAB_ELECTROLYTES', { sampleType: 'serum', container: 'sst_gold' }, 'See individual analytes'),
+  ws4Test('PT-INR', 'Prothrombin time with INR', 'LAB_PT_INR', { sampleType: 'plasma', container: 'citrate_blue' }, 'INR 0.8-1.2'),
+  ws4Test('BLOOD-GROUP', 'Blood group and Rh typing', 'LAB_BLOOD_GROUP', { sampleType: 'blood', container: 'edta_lavender' }),
+  ws4Test('URINE-CS', 'Urine culture and sensitivity', 'LAB_URINE_CULTURE', { sampleType: 'urine', container: 'urine_container' }, 'No growth'),
+  ws4Test('US-PELVIS', 'Ultrasound, pelvis', 'IMG_USG_PELVIS', null),
+  ws4Test('US-KUB', 'Ultrasound, KUB', 'IMG_USG_KUB', null),
+  ws4Test('US-OBS', 'Ultrasound, obstetric', 'IMG_USG_OBS', null),
+  ws4Test('DOPPLER-LL', 'Colour Doppler, lower limb', 'IMG_DOPPLER_LL', null),
+  ws4Test('CT-CHEST', 'CT, chest, plain', 'IMG_CT_CHEST', null),
+  ws4Test('MRI-BRAIN', 'MRI, brain, plain', 'IMG_MRI_BRAIN', null),
+  ws4Test('MRI-LSPINE', 'MRI, lumbosacral spine, plain', 'IMG_MRI_LSPINE', null),
+  ws4Test('TMT', 'Treadmill test (TMT)', 'IMG_TMT', null),
+  ws4Test('ECHO-2D', '2D echocardiography', 'IMG_ECHO', null),
+  ws4Test('ECG-12', 'ECG, 12-lead', 'PROC_ECG', null),
+]
+
+// Lane ruling R7: the fever panel's analytes. Hb, WBC and platelets reuse the CBC definitions
+// (ranges and critical limits included); the rapid tests are choice analytes.
+const optionAnalyte = (code: string, name: string, options: [string, string], abnormal: string): AnalyteSeed => ({
+  code, name, unit: null, valueType: 'option', decimals: null, loincCode: null,
+  options: [...options], abnormalOptions: [abnormal], criticalOptions: null,
+  ranges: [{ sex: 'any', ageMinDays: 0, ageMaxDays: null, normalLow: null, normalHigh: null, criticalLow: null, criticalHigh: null, displayText: options[0] }],
+})
+const cbcAnalyte = (code: string): AnalyteSeed => {
+  const a = LAB_ANALYTE_SEED['CBC-DIFF'].find((x) => x.code === code)!
+  return { ...a, ranges: a.ranges.map((r) => ({ ...r })) }
+}
+LAB_ANALYTE_SEED['FEVER-PANEL'] = [
+  cbcAnalyte('HGB'),
+  cbcAnalyte('WBC'),
+  cbcAnalyte('PLT'),
+  optionAnalyte('MAL', 'Malaria antigen (Pf/Pv)', ['Negative', 'Positive'], 'Positive'),
+  optionAnalyte('NS1', 'Dengue NS1 antigen', ['Negative', 'Positive'], 'Positive'),
+  optionAnalyte('WIDAL', 'Widal (S. Typhi O and H)', ['Non-reactive', 'Reactive'], 'Reactive'),
+]
+// end WS4 T13

@@ -672,6 +672,9 @@ import { POST as postLabCriticalNotify } from '@/app/api/lab-orders/[id]/critica
 import { POST as postLabCriticalAck } from '@/app/api/lab-orders/[id]/critical/acknowledge/route'
 import { LAB_CRITICAL_ACK_ROLES, LAB_CRITICAL_NOTIFY_ROLES } from '@/lib/role-policy'
 // end WS4 T12
+// WS4 T13
+import { GET as getLabTestsFromTariff, POST as postLabTestsFromTariff } from '@/app/api/lab-tests/from-tariff/route'
+// end WS4 T13
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1205,6 +1208,11 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/lab-orders/[id]/critical/notify', call: () => postLabCriticalNotify(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/notify`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_CRITICAL_NOTIFY_ROLES] },
   { name: 'POST /api/lab-orders/[id]/critical/acknowledge', call: () => postLabCriticalAck(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/acknowledge`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_CRITICAL_ACK_ROLES] },
   // end WS4 T12
+  // WS4 T13: the catalogue from the tariff master -- LAB_SETUP_ROLES. GET lists the candidates (200); POST `{}`
+  // fails the strict body (400) for an allowed role.
+  { name: 'GET /api/lab-tests/from-tariff', call: () => getLabTestsFromTariff(), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'POST /api/lab-tests/from-tariff', call: () => postLabTestsFromTariff(send('POST', '/api/lab-tests/from-tariff', {})), allowed: [...LAB_SETUP_ROLES] },
+  // end WS4 T13
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1403,6 +1411,9 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/lab-orders/[id]/critical/notify', call: () => postLabCriticalNotify(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/notify`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_CRITICAL_NOTIFY_ROLES },
   { name: 'POST /api/lab-orders/[id]/critical/acknowledge', call: () => postLabCriticalAck(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/acknowledge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_CRITICAL_ACK_ROLES },
   // end WS4 T12
+  // WS4 T13
+  { name: 'POST /api/lab-tests/from-tariff', call: () => postLabTestsFromTariff(send('POST', '/api/lab-tests/from-tariff', NOT_JSON)), allowed: LAB_SETUP_ROLES },
+  // end WS4 T13
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

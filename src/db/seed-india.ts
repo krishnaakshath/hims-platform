@@ -47,6 +47,9 @@ import { admitPatient } from '../lib/queries/admit-patient' // WS3 T2
 import { labAnalyteRanges, labTestAnalytes } from './schema'
 import { LAB_ANALYTE_SEED } from './seed-india-data'
 // end WS4 T8
+// WS4 T13: the catalogue from the tariff master (services and one test per service).
+import { WS4_LAB_TESTS, WS4_SERVICE_SEED } from './seed-india-data'
+// end WS4 T13
 import { captureChargeLine } from '../lib/queries/charge-capture'
 import { voidChargeLine } from '../lib/queries/charge-capture' // WS2 T9
 import type { AutoChargeOutcome } from '../lib/queries/auto-charge' // WS2 T9
@@ -154,8 +157,13 @@ async function ensureCategorisedRooms(db: Db, roomCategoryIds: Map<string, numbe
   })))
 }
 
+// WS4 T13: the base masters plus the catalogue-from-tariff additions.
+const ALL_SERVICE_SEED = [...SERVICE_SEED, ...WS4_SERVICE_SEED]
+const ALL_INDIA_LAB_TESTS = [...INDIA_LAB_TESTS, ...WS4_LAB_TESTS]
+// end WS4 T13
+
 async function upsertServices(db: Db, deptIds: Map<string, number>): Promise<Map<string, number>> {
-  await db.insert(serviceCatalog).values(SERVICE_SEED.map((s) => ({
+  await db.insert(serviceCatalog).values(ALL_SERVICE_SEED.map((s) => ({ // WS4 T13
     code: s.code, name: s.name, departmentId: deptIds.get(s.departmentCode)!, category: s.category, hsnSac: s.hsnSac,
     gstRateBp: s.gstRateBp, requiresPreauth: s.requiresPreauth ?? false, maxQuantity: s.maxQuantity ?? null,
   }))).onConflictDoNothing({ target: serviceCatalog.code })
@@ -169,7 +177,7 @@ const TARIFF_AUTHOR = 'Demo seed (rate card)'
 async function seedTariffs(db: Db, refs: Pick<IndiaRefs, 'deptIds' | 'payerIds' | 'roomCategoryIds' | 'serviceIds'>): Promise<void> {
   const withRates = new Set((await db.select({ id: tariffRates.serviceId }).from(tariffRates)).map((r) => r.id))
   const rows: (typeof tariffRates.$inferInsert)[] = []
-  for (const s of SERVICE_SEED) {
+  for (const s of ALL_SERVICE_SEED) { // WS4 T13
     const serviceId = refs.serviceIds.get(s.code)!
     if (withRates.has(serviceId)) continue
     if (s.basePaise !== undefined) {
@@ -207,11 +215,16 @@ const FASTING_LAB_TEST_CODES = ['FBS', 'LIPID']
 // end WS2 T10
 
 async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Promise<Map<string, number>> {
-  const existing = new Set((await db.select({ code: labTests.code }).from(labTests)).map((t) => t.code))
-  const toInsert = INDIA_LAB_TESTS.filter((t) => !existing.has(t.code)).map((t) => ({
-    name: t.name, code: t.code, category: t.category, defaultUnit: t.defaultUnit, referenceRange: t.referenceRange,
-    sampleType: t.sampleType, container: t.container, serviceId: t.serviceCode ? serviceIds.get(t.serviceCode) ?? null : null,
-  }))
+  const existingRows = await db.select({ code: labTests.code, serviceId: labTests.serviceId }).from(labTests)
+  const existing = new Set(existingRows.map((t) => t.code))
+  // WS4 T13: a service an admin already turned into a test (Lab setup -> Add from tariff) gets no second one.
+  const mappedServiceIds = new Set(existingRows.map((t) => t.serviceId).filter((id): id is number => id !== null))
+  const toInsert = ALL_INDIA_LAB_TESTS
+    .filter((t) => !existing.has(t.code) && !(t.serviceCode && mappedServiceIds.has(serviceIds.get(t.serviceCode) ?? -1)))
+    .map((t) => ({
+      name: t.name, code: t.code, category: t.category, defaultUnit: t.defaultUnit, referenceRange: t.referenceRange,
+      sampleType: t.sampleType, container: t.container, serviceId: t.serviceCode ? serviceIds.get(t.serviceCode) ?? null : null,
+    }))
   if (toInsert.length > 0) await db.insert(labTests).values(toInsert)
   for (const [code, m] of Object.entries(EXISTING_LAB_TEST_SERVICE_MAP)) {
     await db.update(labTests)
@@ -220,7 +233,7 @@ async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Prom
   }
   // WS3 T2: a reset releases every lab test's service (seed.ts clear) but keeps the rows, so an
   // India test that already exists is re-linked here too (only while it has no service).
-  for (const t of INDIA_LAB_TESTS) {
+  for (const t of ALL_INDIA_LAB_TESTS) { // WS4 T13
     if (!t.serviceCode || !existing.has(t.code)) continue
     await db.update(labTests).set({ serviceId: serviceIds.get(t.serviceCode) ?? null })
       .where(and(eq(labTests.code, t.code), isNull(labTests.serviceId)))
