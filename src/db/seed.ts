@@ -47,6 +47,7 @@ import {
   billingSettings,
   refunds,
   patientPayments,
+  paymentRequests, // Foundations T11
   creditNotes,
   invoiceLines,
   invoices,
@@ -870,6 +871,7 @@ async function clearExistingData() {
     await tx.delete(preauthEvents)
     await tx.delete(preauths)
     // end SP7
+    await tx.delete(paymentRequests) // Foundations T11: references patient_payments
     await tx.delete(refunds)
     await tx.delete(patientPayments)
     await tx.delete(creditNotes)
