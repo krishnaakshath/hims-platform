@@ -33,6 +33,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
 
+  // WS7 T6 (spec D20): only a video appointment offers telemedicine. Checked after
+  // ownership so a non-owner learns nothing about the appointment.
+  if (appointment.visitMode !== 'video') {
+    return NextResponse.json({ error: 'This is an in-person appointment. Change it to a video visit to start a call.', code: 'not_video' }, { status: 409 })
+  }
+
   const result = await createTelemedicineSession(appointmentId)
   if (!result.ok) {
     // Recover the already-existing session's id/token so a staff member who

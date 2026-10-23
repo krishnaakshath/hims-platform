@@ -191,3 +191,101 @@ describe('Provider call screen page: role gate runs before any session lookup', 
     }
   })
 })
+
+// WS7 T6: the page hands the call screen the provider's join time and the
+// end-of-call next steps (fallback links until WS1's /encounters/[id] exists).
+describe('Provider call screen page passes the call clock anchor and next steps (WS7 T6)', () => {
+  it('passes providerJoinedAt and patient-scoped next-step links, never chart ids as labels', async () => {
+    vi.resetModules()
+    const captured: Record<string, unknown>[] = []
+    vi.doMock('next/navigation', () => ({ redirect: mockRedirect, notFound: mockNotFound }))
+    vi.doMock('@/components/TelemedicineCallScreen', () => ({ TelemedicineCallScreen: (props: Record<string, unknown>) => { captured.push(props); return 'call-screen-stub' } }))
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'admin', name: 'Admin' })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    const joinedAt = new Date('2026-10-23T04:30:00Z')
+    vi.doMock('@/lib/queries/telemedicine-sessions', () => ({ getSessionById: vi.fn(async () => ({ ...SESSION_ROW, status: 'in_progress', providerJoinedAt: joinedAt })) }))
+    vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => []) }))
+    const { default: TelemedicineCallPage } = await import('@/app/(dashboard)/telemedicine/[sessionId]/page')
+    const jsx = await TelemedicineCallPage({ params: Promise.resolve({ sessionId: '42' }) })
+    const { render } = await import('@testing-library/react')
+    render(jsx)
+
+    expect(captured[0]).toMatchObject({
+      role: 'provider',
+      startedAt: joinedAt.toISOString(),
+      nextSteps: {
+        completeVisitHref: '/patients/RD-0001?tab=visits',
+        writeNoteHref: '/patients/RD-0001/medical-record#notes',
+        billHref: '/cash-desk?patientId=RD-0001',
+      },
+    })
+  })
+})
+
+describe('TelemedicineCallScreen clock and end-of-call summary (WS7 T6)', () => {
+  const NOW = new Date('2026-10-23T05:00:00Z')
+
+  class FakePeerConnection {
+    connectionState = 'new'
+    ontrack = null
+    onicecandidate = null
+    onconnectionstatechange = null
+    close() {}
+    addTrack() {}
+  }
+
+  async function renderScreen(props: Record<string, unknown>) {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    vi.stubGlobal('RTCPeerConnection', FakePeerConnection)
+    // Media never resolves: no signalling starts, so only the clock runs.
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: () => new Promise(() => {}) } })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })))
+    const actual = await vi.importActual<typeof import('@/components/TelemedicineCallScreen')>('@/components/TelemedicineCallScreen')
+    const rtl = await import('@testing-library/react')
+    rtl.render(<actual.TelemedicineCallScreen role="provider" pollUrl="/api/telemedicine/42/signal" initialStatus="in_progress" {...props} />)
+    return rtl
+  }
+
+  it('shows a ticking mm:ss timer from the provider join time, then the duration and three next-step links after end', async () => {
+    const { screen, act, fireEvent, cleanup } = await renderScreen({
+      startedAt: new Date(NOW.getTime() - 12 * 60_000 - 5_000).toISOString(),
+      nextSteps: {
+        completeVisitHref: '/patients/RD-0001?tab=visits',
+        writeNoteHref: '/patients/RD-0001/medical-record#notes',
+        billHref: '/cash-desk?patientId=RD-0001',
+      },
+    })
+    try {
+      expect(screen.getByRole('timer')).toHaveTextContent('12:05')
+      await act(async () => { vi.advanceTimersByTime(2_000) })
+      expect(screen.getByRole('timer')).toHaveTextContent('12:07')
+
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /end call/i })) })
+      expect(screen.getByText('Call lasted 12 min')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Complete visit' })).toHaveAttribute('href', '/patients/RD-0001?tab=visits')
+      expect(screen.getByRole('link', { name: 'Write note' })).toHaveAttribute('href', '/patients/RD-0001/medical-record#notes')
+      expect(screen.getByRole('link', { name: 'Bill' })).toHaveAttribute('href', '/cash-desk?patientId=RD-0001')
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('without a recorded join time the clock starts from when the screen opened, and no links without next steps', async () => {
+    const { screen, act, fireEvent, cleanup } = await renderScreen({ startedAt: null })
+    try {
+      expect(screen.getByRole('timer')).toHaveTextContent('00:00')
+      await act(async () => { vi.advanceTimersByTime(3_000) })
+      expect(screen.getByRole('timer')).toHaveTextContent('00:03')
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /end call/i })) })
+      expect(screen.getByText('Call lasted under a minute')).toBeInTheDocument()
+      expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+})

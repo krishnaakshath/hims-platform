@@ -19,7 +19,7 @@ const logs = () => getDb().select().from(notificationLog).where(eq(notificationL
 describe.skipIf(!process.env.DATABASE_URL)('POST /api/appointments/[id]/telemedicine notifies', () => {
   beforeAll(async () => {
     await getDb().insert(patients).values({ id: PID, name: 'TEST_T9 Video', dob: '1980-01-01', phone: '+919845013211' })
-    const [a] = await getDb().insert(appointments).values({ patientId: PID, providerId: 1, startsAt: new Date('2099-03-04T04:30:00Z'), endsAt: new Date('2099-03-04T05:00:00Z'), visitReason: 'T9 video' }).returning()
+    const [a] = await getDb().insert(appointments).values({ patientId: PID, providerId: 1, startsAt: new Date('2099-03-04T04:30:00Z'), endsAt: new Date('2099-03-04T05:00:00Z'), visitReason: 'T9 video', visitMode: 'video' /* WS7 T6 */ }).returning()
     apptId = a.id
   })
   afterAll(async () => {

@@ -722,7 +722,10 @@ export const appointments = pgTable('appointments', {
   status: appointmentStatusEnum('status').default('scheduled').notNull(),
   notes: text('notes'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-})
+  visitMode: text('visit_mode', { enum: ['in_person', 'video'] }).default('in_person').notNull(), // WS7 T6 (scripts/migrations/2026-10-26-ws7-visit-mode.sql)
+}, (t) => [
+  check('appointments_visit_mode_valid', sql`${t.visitMode} IN ('in_person', 'video')`), // WS7 T6
+])
 
 export const telemedicineSessionStatusEnum = pgEnum('telemedicine_session_status', [
   'scheduled', 'waiting', 'in_progress', 'completed', 'failed',
@@ -775,7 +778,9 @@ export const bookingRequests = pgTable('booking_requests', {
   requestKind: text('request_kind', { enum: ['new', 'reschedule', 'cancel'] }).default('new').notNull(),
   appointmentId: integer('appointment_id').references(() => appointments.id),
   // end Wave J
+  requestedVisitMode: text('requested_visit_mode', { enum: ['in_person', 'video'] }), // WS7 T6: NULL = not stated
 }, (t) => [
+  check('booking_requests_requested_visit_mode_valid', sql`${t.requestedVisitMode} IS NULL OR ${t.requestedVisitMode} IN ('in_person', 'video')`), // WS7 T6
   // Wave J
   check('booking_requests_request_kind_valid', sql`${t.requestKind} IN ('new', 'reschedule', 'cancel')`),
   check('booking_requests_kind_shape', sql`(${t.requestKind} = 'new' AND ${t.appointmentId} IS NULL) OR (${t.requestKind} <> 'new' AND ${t.appointmentId} IS NOT NULL AND ${t.patientId} IS NOT NULL)`),

@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 const row = (over: Partial<BookingRequestRow>): BookingRequestRow => ({
   id: 5, requesterName: 'Asha Rao', requesterDob: '1980-01-01', requesterEmail: null, requesterPhone: null, preferredProviderId: null,
   preferredDateRangeStart: '2026-11-01', preferredDateRangeEnd: '2026-11-05', reason: 'Knee pain', status: 'pending', submittedAt: new Date('2026-10-08T05:00:00Z'),
-  reviewedByName: null, reviewedAt: null, declineReason: null, resultingAppointmentId: null, patientId: null, requestKind: 'new', appointmentId: null, ...over,
+  reviewedByName: null, reviewedAt: null, declineReason: null, resultingAppointmentId: null, patientId: null, requestKind: 'new', appointmentId: null, requestedVisitMode: null /* WS7 T6 */, ...over,
 })
 
 afterEach(() => { vi.unstubAllGlobals(); refresh.mockClear() })

@@ -75,6 +75,7 @@ export default async function DashboardHomePage() {
     appointmentsInRange: appointmentsInRange.map((a) => ({
       id: a.id, patientId: a.patientId, patientName: a.patientName, providerName: a.providerName,
       visitReason: a.visitReason, status: a.status, startsAt: a.startsAt.toString(),
+      visitMode: a.visitMode, telemedicine: a.telemedicine, // WS7 T6
     })),
     staffByRole,
     // spec §6's role table: only admin/pi may start a telemedicine session

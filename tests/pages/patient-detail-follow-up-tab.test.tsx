@@ -14,7 +14,7 @@ const DETAIL = {
   overallStatus: null, selectionConfirmedAt: null, chartDataAsOf: new Date('2026-01-01'), currentProvider: null, mfaEnabled: false, portalConfigured: false,
 }
 
-async function renderAs(role: string, selfId: number | null = 7) {
+async function renderAs(role: string, selfId: number | null = 7, searchParams?: Record<string, string>) {
   vi.resetModules()
   const listFollowUps = vi.fn(async (_id: string, r: string) => [{ ...FU, planNotes: ['admin', 'crc', 'pi'].includes(r) ? FU.planNotes : null }])
   vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Tester' })) }))
@@ -30,7 +30,7 @@ async function renderAs(role: string, selfId: number | null = 7) {
   vi.doMock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }), notFound: vi.fn(), redirect: vi.fn() }))
   const { default: Page } = await import('@/app/(dashboard)/patients/[anonId]/page')
   const { render, screen } = await import('@testing-library/react')
-  const jsx = await Page({ params: Promise.resolve({ anonId: 'RD-0001' }) })
+  const jsx = await Page({ params: Promise.resolve({ anonId: 'RD-0001' }), ...(searchParams ? { searchParams: Promise.resolve(searchParams) } : {}) })
   const utils = render(jsx)
   return { screen, listFollowUps, ...utils }
 }
@@ -45,6 +45,12 @@ describe('Patient detail: Visits & follow-up tab', () => {
     expect(container.innerHTML).not.toMatch(/renal panel/)
     expect(screen.queryByRole('button', { name: /set follow-up|change plan/i })).toBeNull()
     expect(screen.getByRole('button', { name: /^book$/i })).toBeInTheDocument()
+  })
+
+  // WS7 T6: the video-visit "Complete visit" link lands on this tab.
+  it('?tab=visits opens Visits & follow-up first', async () => {
+    const { screen } = await renderAs('pi', 7, { tab: 'visits' })
+    expect(screen.getByRole('button', { name: 'Visits & follow-up' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('pi sees notes and plan actions but no booking actions', async () => {

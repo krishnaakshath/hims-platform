@@ -40,7 +40,7 @@ async function makeAppointment(providerId: number) {
   const [patientRow] = await db.select().from(patients).limit(1)
   const [appt] = await db.insert(appointments).values({
     patientId: patientRow.id, providerId,
-    startsAt: new Date(), endsAt: new Date(Date.now() + 30 * 60000), visitReason: 'Telemedicine test',
+    startsAt: new Date(), endsAt: new Date(Date.now() + 30 * 60000), visitReason: 'Telemedicine test', visitMode: 'video', // WS7 T6: only video visits offer telemedicine
   }).returning()
   createdAppointmentIds.push(appt.id)
   return appt

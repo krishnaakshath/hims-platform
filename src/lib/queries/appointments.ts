@@ -1,9 +1,11 @@
 import { getDb } from '@/db/client'
-import { appointments, patients, providers } from '@/db/schema'
+import { appointments, patients, providers, telemedicineSessions } from '@/db/schema'
 import { and, asc, eq, gt, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm'
 import { publicPatientColumns, type PublicPatientRow } from '@/lib/queries/patient-columns'
+import type { TelemedicineSessionStatus } from '@/lib/queries/telemedicine-sessions'
 
 export type AppointmentStatus = 'scheduled' | 'completed' | 'cancelled' | 'no_show'
+export type VisitMode = 'in_person' | 'video' // WS7 T6
 
 export interface AppointmentWithDetails {
   id: number
@@ -17,9 +19,21 @@ export interface AppointmentWithDetails {
   visitReason: string
   status: AppointmentStatus
   notes: string | null
+  // WS7 T6 (spec D20): only video appointments offer telemedicine; `telemedicine`
+  // is the appointment's session, if one was started (so a reload can offer Rejoin).
+  visitMode: VisitMode
+  telemedicine: { sessionId: number; status: TelemedicineSessionStatus } | null
 }
 
-function mapAppointmentRow(r: { appointment: typeof appointments.$inferSelect; patient: PublicPatientRow; provider: typeof providers.$inferSelect }): AppointmentWithDetails {
+// WS7 T6: the appointment's session id and status only -- never the patient join token.
+const telemedicineColumns = { id: telemedicineSessions.id, status: telemedicineSessions.status }
+
+function mapAppointmentRow(r: {
+  appointment: typeof appointments.$inferSelect
+  patient: PublicPatientRow
+  provider: typeof providers.$inferSelect
+  telemedicine: { id: number; status: TelemedicineSessionStatus } | null
+}): AppointmentWithDetails {
   return {
     id: r.appointment.id,
     patientId: r.appointment.patientId,
@@ -32,6 +46,8 @@ function mapAppointmentRow(r: { appointment: typeof appointments.$inferSelect; p
     visitReason: r.appointment.visitReason,
     status: r.appointment.status,
     notes: r.appointment.notes,
+    visitMode: r.appointment.visitMode,
+    telemedicine: r.telemedicine ? { sessionId: r.telemedicine.id, status: r.telemedicine.status } : null,
   }
 }
 
@@ -49,10 +65,11 @@ export async function listAppointmentsInRange(start: Date, end: Date, providerId
   if (providerIds && providerIds.length > 0) conditions.push(inArray(appointments.providerId, providerIds))
 
   const rows = await getDb()
-    .select({ appointment: appointments, patient: publicPatientColumns, provider: providers })
+    .select({ appointment: appointments, patient: publicPatientColumns, provider: providers, telemedicine: telemedicineColumns })
     .from(appointments)
     .innerJoin(patients, eq(appointments.patientId, patients.id))
     .innerJoin(providers, eq(appointments.providerId, providers.id))
+    .leftJoin(telemedicineSessions, eq(telemedicineSessions.appointmentId, appointments.id))
     .where(and(...conditions))
     .orderBy(asc(appointments.startsAt))
 
@@ -61,10 +78,11 @@ export async function listAppointmentsInRange(start: Date, end: Date, providerId
 
 export async function listUpcomingAppointments(limit: number): Promise<AppointmentWithDetails[]> {
   const rows = await getDb()
-    .select({ appointment: appointments, patient: publicPatientColumns, provider: providers })
+    .select({ appointment: appointments, patient: publicPatientColumns, provider: providers, telemedicine: telemedicineColumns })
     .from(appointments)
     .innerJoin(patients, eq(appointments.patientId, patients.id))
     .innerJoin(providers, eq(appointments.providerId, providers.id))
+    .leftJoin(telemedicineSessions, eq(telemedicineSessions.appointmentId, appointments.id))
     .where(and(gte(appointments.startsAt, new Date()), eq(appointments.status, 'scheduled')))
     .orderBy(asc(appointments.startsAt))
     .limit(limit)
@@ -74,10 +92,11 @@ export async function listUpcomingAppointments(limit: number): Promise<Appointme
 
 export async function getAppointment(id: number): Promise<AppointmentWithDetails | null> {
   const [row] = await getDb()
-    .select({ appointment: appointments, patient: publicPatientColumns, provider: providers })
+    .select({ appointment: appointments, patient: publicPatientColumns, provider: providers, telemedicine: telemedicineColumns })
     .from(appointments)
     .innerJoin(patients, eq(appointments.patientId, patients.id))
     .innerJoin(providers, eq(appointments.providerId, providers.id))
+    .leftJoin(telemedicineSessions, eq(telemedicineSessions.appointmentId, appointments.id))
     .where(eq(appointments.id, id))
   return row ? mapAppointmentRow(row) : null
 }

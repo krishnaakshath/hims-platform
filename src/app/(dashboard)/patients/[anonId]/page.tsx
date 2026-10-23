@@ -66,7 +66,7 @@ function SummaryTile({ icon: Icon, value, label }: { icon: React.ComponentType<{
   )
 }
 
-export default async function PatientDetailPage({ params, searchParams }: { params: Promise<{ anonId: string }>; searchParams?: Promise<{ registered?: string | string[] }> }) {
+export default async function PatientDetailPage({ params, searchParams }: { params: Promise<{ anonId: string }>; searchParams?: Promise<{ registered?: string | string[]; tab?: string | string[] }> }) {
   // Must be the first statement — see the comment in patients/page.tsx.
   const session = await requireSessionOrRedirect()
   if (!PATIENT_DIRECTORY_ROLES.includes(session.role)) redirect('/')
@@ -81,7 +81,10 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   const showTrialData = trialsOn && !isFrontDesk
 
   const { anonId } = await params
-  const justRegistered = (await searchParams)?.registered === '1' // Wave C
+  const sp = await searchParams
+  const justRegistered = sp?.registered === '1' // Wave C
+  // WS7 T6: ?tab=visits (the video-visit "Complete visit" link) opens Visits & follow-up.
+  const initialTab = sp?.tab === 'visits' ? 'follow-up' : undefined
   const patient = await getPatientDetail(anonId)
   if (!patient) notFound()
   await logAudit(session, 'viewed patient detail', anonId)
@@ -355,7 +358,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         />
       )}
 
-      <Tabs tabs={[
+      <Tabs initialId={initialTab} tabs={[
         { id: 'profile', label: 'Profile', content: profileTab },
         ...(isFrontDesk ? [] : [
           { id: 'overview', label: 'Overview', content: overviewTab },

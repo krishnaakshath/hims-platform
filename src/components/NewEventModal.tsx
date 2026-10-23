@@ -30,6 +30,7 @@ export function NewEventModal({ providers, defaultDate, onClose, initialPatient 
   const [startTime, setStartTime] = useState('09:00')
   const [endTime, setEndTime] = useState('09:30')
   const [visitReason, setVisitReason] = useState('')
+  const [visitMode, setVisitMode] = useState<'in_person' | 'video'>('in_person') // WS7 T6
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -44,6 +45,7 @@ export function NewEventModal({ providers, defaultDate, onClose, initialPatient 
         startsAt: istSlotString(date, startTime),
         endsAt: istSlotString(date, endTime),
         visitReason,
+        visitMode,
       })
       if (res.ok) {
         router.refresh()
@@ -78,6 +80,21 @@ export function NewEventModal({ providers, defaultDate, onClose, initialPatient 
             <input value={endTime} onChange={(e) => setEndTime(e.target.value)} type="time" aria-label="End time (IST)" className="w-1/2 rounded-md border border-border px-3 py-2 text-sm" />
           </div>
           <input value={visitReason} onChange={(e) => setVisitReason(e.target.value)} placeholder="Visit reason" maxLength={VISIT_REASON_MAX_LENGTH} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+          {/* WS7 T6 (spec D20): only a video visit offers telemedicine. */}
+          <div role="radiogroup" aria-label="Visit mode" className="flex gap-2">
+            {([['in_person', 'In person'], ['video', 'Video']] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={visitMode === mode}
+                onClick={() => setVisitMode(mode)}
+                className={`w-1/2 rounded-md border px-3 py-2 text-sm ${visitMode === mode ? 'border-primary bg-primary/10 font-medium text-primary' : 'border-border text-muted-foreground'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>

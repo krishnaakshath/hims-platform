@@ -81,7 +81,7 @@ describe('PI dashboard (/doctor)', () => {
     const listAppointmentsInRange = vi.fn(async () => [{
       id: 501, patientId: 'RD-0001', patientName: 'Jane Doe', providerId: 7, providerName: 'Dr. R. Kunam',
       providerColorTag: 'chart-1', startsAt: new Date('2026-01-15T10:00:00Z'), endsAt: new Date('2026-01-15T10:30:00Z'),
-      visitReason: 'Follow-up', status: 'scheduled' as const, notes: null,
+      visitReason: 'Follow-up', status: 'scheduled' as const, notes: null, visitMode: 'video' as const, telemedicine: null,
     }])
     vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange }))
     const { default: DoctorPortalPageWithAppointments } = await import('@/app/(dashboard)/doctor/page')
@@ -112,7 +112,7 @@ describe('PI dashboard (/doctor)', () => {
     const listAppointmentsInRange = vi.fn(async () => [{
       id: 502, patientId: 'RD-0001', patientName: 'Jane Doe', providerId: 7, providerName: 'Dr. R. Kunam',
       providerColorTag: 'chart-1', startsAt: new Date('2026-01-15T10:00:00Z'), endsAt: new Date('2026-01-15T10:30:00Z'),
-      visitReason: 'Follow-up', status: 'scheduled' as const, notes: null,
+      visitReason: 'Follow-up', status: 'scheduled' as const, notes: null, visitMode: 'video' as const, telemedicine: null,
     }])
     vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange }))
     const { default: DoctorPortalPageNoMatch } = await import('@/app/(dashboard)/doctor/page')

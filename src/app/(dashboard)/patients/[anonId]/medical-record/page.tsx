@@ -314,7 +314,7 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
         )}
       </section>
 
-      <section className={SECTION}>
+      <section id="notes" className={SECTION}>{/* WS7 T6: target of the video-visit "Write note" link */}
         <div className="mb-3 flex items-center justify-between">
           <h2 className={SECTION_HEADING}>Notes</h2>
           <NoteForm patientId={anonId} canWrite={['pi', 'admin'].includes(session.role)} />

@@ -319,6 +319,8 @@ export default async function DoctorPortalPage() {
                 visitReason: a.visitReason,
                 status: a.status,
                 startsAt: a.startsAt.toISOString(),
+                visitMode: a.visitMode, // WS7 T6
+                telemedicine: a.telemedicine, // WS7 T6
               }))}
               canStartTelemedicine={Boolean(providerMatch)}
             />

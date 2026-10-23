@@ -37,7 +37,7 @@ export interface DashboardPageProps {
   data: DashboardData
   templates: { id: number; name: string }[]
   patients: { id: string; name: string }[]
-  appointmentsInRange: { id: number; patientId: string; patientName: string; providerName: string; visitReason: string; status: string; startsAt: string }[]
+  appointmentsInRange: { id: number; patientId: string; patientName: string; providerName: string; visitReason: string; status: string; startsAt: string; visitMode: DashboardAppointmentRow['visitMode']; telemedicine: DashboardAppointmentRow['telemedicine'] }[] // WS7 T6: visitMode, telemedicine
   staffByRole: { role: string; count: number }[]
   // Optional (not just AdminDashboard-only) because this interface is
   // shared with CoordinatorDashboard, which destructures its own named

@@ -17,6 +17,7 @@ const updateAppointmentSchema = z.object({
   startsAt: appointmentInstantSchema.optional(),
   endsAt: appointmentInstantSchema.optional(),
   notes: z.string().optional(),
+  visitMode: z.enum(['in_person', 'video']).optional(), // WS7 T6 (spec D20)
 }).strict()
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

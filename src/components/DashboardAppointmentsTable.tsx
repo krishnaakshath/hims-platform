@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { PatientAvatar } from '@/components/PatientAvatar'
 import { AppointmentStatusChip } from '@/components/AppointmentStatusChip'
 import { StartTelemedicineButton } from '@/components/StartTelemedicineButton'
-import type { AppointmentStatus } from '@/lib/queries/appointments'
+import type { AppointmentStatus, AppointmentWithDetails, VisitMode } from '@/lib/queries/appointments'
 
 export interface DashboardAppointmentRow {
   id: number
@@ -15,6 +15,9 @@ export interface DashboardAppointmentRow {
   visitReason: string
   status: AppointmentStatus
   startsAt: string
+  // WS7 T6 (spec D20): from the server row, so a reload still knows the session is live.
+  visitMode: VisitMode
+  telemedicine: AppointmentWithDetails['telemedicine']
 }
 
 // Same deterministic-hash approach as PatientAvatar's color assignment --
@@ -32,6 +35,10 @@ function hashString(s: string): number {
   let h = 0
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
   return h
+}
+
+function VideoChip() {
+  return <span className="ml-2 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Video</span>
 }
 
 function ReasonPill({ reason }: { reason: string }) {
@@ -100,14 +107,15 @@ export function DashboardAppointmentsTable({ appointments, canStartTelemedicine 
                         {a.patientName}
                       </Link>
                     </td>
-                    <td className="py-2.5 pr-3"><ReasonPill reason={a.visitReason} /></td>
+                    <td className="py-2.5 pr-3"><ReasonPill reason={a.visitReason} />{a.visitMode === 'video' && <VideoChip />}</td>
                     <td className="py-2.5 pr-3"><AppointmentStatusChip status={a.status} /></td>
                     <td className="py-2.5 pr-3 text-muted-foreground">{formatIstDate(startsAt)}</td>
                     <td className="py-2.5 pr-3 text-muted-foreground">{formatIstTime(startsAt)}</td>
                     <td className="py-2.5 pr-3 text-muted-foreground">{a.providerName}</td>
                     {canStartTelemedicine && (
                       <td className="py-2.5 pr-3">
-                        {a.status === 'scheduled' && <StartTelemedicineButton appointmentId={a.id} />}
+                        {/* WS7 T6: only video appointments offer telemedicine. */}
+                        {a.status === 'scheduled' && a.visitMode === 'video' && <StartTelemedicineButton appointmentId={a.id} initialSession={a.telemedicine} />}
                       </td>
                     )}
                   </tr>
