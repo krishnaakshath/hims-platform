@@ -19,6 +19,7 @@ import {
   // SP8
   abdmConsents, abdmProfileShares, nhcxEligibilityChecks, nhcxExchanges,
   bookingRequests, // Wave J
+  payers,
 } from '@/db/schema'
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
@@ -46,7 +47,16 @@ export interface CriteriaSummary {
 // `mfaEnabled` (a non-sensitive flag the staff UI shows) stays, and
 // `portalConfigured` is computed in SQL.
 
-export type PatientWithStatus = PublicPatientRow & { trialId?: string; overallStatus?: Verdict; criteriaSummary?: CriteriaSummary }
+export type PatientWithStatus = PublicPatientRow & {
+  trialId?: string
+  overallStatus?: Verdict
+  criteriaSummary?: CriteriaSummary
+  /** Latest encounter check-in, else latest past appointment (ISO string once cached); null if none. */
+  lastVisitAt: string | null
+  /** Insurer of the primary active policy; null when the patient has none. */
+  primaryPayerName: string | null
+}
+export type PatientListRow = PatientWithStatus
 
 /**
  * Shared by the /api/patients route handler and any Server Component that
@@ -123,8 +133,40 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Js
       summaryByPatient.set(row.patientId, summary)
     }
 
+    // Two grouped queries (not per patient) for the hospital list columns.
+    const visitRows = await getDb()
+      .select({ patientId: encounters.patientId, at: sql<Date | null>`max(${encounters.checkedInAt})` })
+      .from(encounters)
+      .groupBy(encounters.patientId)
+    const apptRows = await getDb()
+      .select({ patientId: appointments.patientId, at: sql<Date | null>`max(${appointments.startsAt})` })
+      .from(appointments)
+      .where(sql`${appointments.startsAt} <= now()`)
+      .groupBy(appointments.patientId)
+    const lastVisitByPatient = new Map<string, Date>()
+    for (const v of [...visitRows, ...apptRows]) {
+      if (!v.at) continue
+      // A raw max() of a timestamp-without-tz column skips drizzle's column mapping: node-postgres
+      // parses the stored UTC wall clock as local time (a Date) or leaves a string. Re-read it as UTC.
+      const at = v.at instanceof Date
+        ? new Date(Date.UTC(v.at.getFullYear(), v.at.getMonth(), v.at.getDate(), v.at.getHours(), v.at.getMinutes(), v.at.getSeconds(), v.at.getMilliseconds()))
+        : new Date(`${String(v.at).replace(' ', 'T')}Z`)
+      const prev = lastVisitByPatient.get(v.patientId)
+      if (!prev || at > prev) lastVisitByPatient.set(v.patientId, at)
+    }
+    const payerRows = await getDb()
+      .select({ patientId: patientPolicies.patientId, name: payers.name })
+      .from(patientPolicies)
+      .innerJoin(payers, eq(payers.id, patientPolicies.insurerPayerId))
+      .where(and(eq(patientPolicies.priority, 'primary'), eq(patientPolicies.status, 'active')))
+      .orderBy(patientPolicies.id)
+    const payerByPatient = new Map<string, string>()
+    for (const r of payerRows) payerByPatient.set(r.patientId, r.name) // later policy wins
+
     return rows.map((r) => ({
       ...r.patient,
+      lastVisitAt: lastVisitByPatient.get(r.patient.id)?.toISOString() ?? null,
+      primaryPayerName: payerByPatient.get(r.patient.id) ?? null,
       trialId: r.screening?.trialId,
       overallStatus: r.screening?.overallStatus,
       criteriaSummary: summaryByPatient.get(r.patient.id),

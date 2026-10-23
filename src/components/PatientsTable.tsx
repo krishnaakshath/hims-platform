@@ -5,6 +5,7 @@ import { Search, FileText, UserCheck, CalendarPlus } from 'lucide-react'
 import { StatusChip } from '@/components/StatusChip'
 import { formatPhoneForDisplay, matchesDirectoryQuery } from '@/lib/patient-directory'
 import { PatientAvatar } from '@/components/PatientAvatar'
+import { ageOnDate, formatIstDate, todayIsoIn } from '@/lib/india-time'
 
 export interface CriteriaSummaryLike {
   inclusionMet: number
@@ -25,6 +26,10 @@ export interface PatientRow {
   // Wave B P1-08 -- every PATIENT_DIRECTORY_ROLES role may see both (SP1 profile).
   uhid?: string | null
   phone?: string | null
+  // Hospital view (trials off) columns.
+  gender?: string | null
+  lastVisitAt?: string | null
+  primaryPayerName?: string | null
 }
 
 /** Server-driven mode (/patients): the page filtered and paged already; the
@@ -156,7 +161,50 @@ function PatientCard({ patient, showMedicalRecordLink, showScreening, quickActio
   )
 }
 
-export function PatientsTable({ patients, showMedicalRecordLink = true, showScreening = true, directory, quickActions }: { patients: PatientRow[]; showMedicalRecordLink?: boolean; showScreening?: boolean; directory?: DirectoryPaging; quickActions?: QuickActions }) {
+function HospitalTable({ patients, showMedicalRecordLink }: { patients: PatientRow[]; showMedicalRecordLink: boolean }) {
+  const today = todayIsoIn()
+  const TH = 'p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
+  return (
+    <div className="overflow-x-auto rounded-md border border-border bg-card">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-border bg-secondary/40 text-left">
+            <th className={TH}>UHID</th>
+            <th className={TH}>Name</th>
+            <th className={TH}>Age/Sex</th>
+            <th className={TH}>Phone</th>
+            <th className={TH}>Last visit</th>
+            <th className={TH}>Doctor</th>
+            <th className={TH}>Payer</th>
+            {showMedicalRecordLink && <th className={TH}><span className="sr-only">Medical record</span></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {patients.map((p) => {
+            const age = p.dob ? ageOnDate(String(p.dob), today) : null
+            const sex = p.gender ? p.gender.charAt(0).toUpperCase() : null
+            return (
+              <tr key={p.id} className="border-b border-border last:border-b-0 hover:bg-secondary">
+                <td className="p-3 font-mono text-xs text-muted-foreground">{p.uhid ?? p.id}</td>
+                <td className="p-3"><Link href={`/patients/${p.id}`} className="font-medium text-primary hover:underline">{p.name}</Link></td>
+                <td className="p-3 text-foreground">{[age, sex].filter((v) => v !== null && v !== '').join(' / ') || '—'}</td>
+                <td className="p-3 text-foreground">{p.phone ? formatPhoneForDisplay(p.phone) : '—'}</td>
+                <td className="p-3 text-muted-foreground">{p.lastVisitAt ? formatIstDate(p.lastVisitAt) : '—'}</td>
+                <td className="p-3 text-foreground">{p.currentProvider ?? 'Unassigned'}</td>
+                <td className="p-3 text-foreground">{p.primaryPayerName ?? 'Self-pay'}</td>
+                {showMedicalRecordLink && (
+                  <td className="p-3 text-right"><Link href={`/patients/${p.id}/medical-record`} className="text-xs font-medium text-primary hover:underline">Medical Record</Link></td>
+                )}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+export function PatientsTable({ patients, showMedicalRecordLink = true, showScreening = true, hospitalView = false, directory, quickActions }: { patients: PatientRow[]; showMedicalRecordLink?: boolean; showScreening?: boolean; hospitalView?: boolean; directory?: DirectoryPaging; quickActions?: QuickActions }) {
   const [search, setSearch] = useState('')
 
   const filtered = useMemo(() => {
@@ -183,7 +231,7 @@ export function PatientsTable({ patients, showMedicalRecordLink = true, showScre
                 type="search"
                 name="q"
                 defaultValue={directory.query}
-                placeholder="Name, UHID, mobile or anon #…"
+                placeholder="Name, UHID or chart ID, mobile…"
                 aria-label="Search patients"
                 className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none"
               />
@@ -200,7 +248,7 @@ export function PatientsTable({ patients, showMedicalRecordLink = true, showScre
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, UHID, mobile or anon #…"
+              placeholder="Search by name, UHID or chart ID, mobile…"
               aria-label="Search patients"
               className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none"
             />
@@ -221,6 +269,8 @@ export function PatientsTable({ patients, showMedicalRecordLink = true, showScre
         <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           {activeQuery ? <>No patients match &quot;{activeQuery}&quot;.</> : 'No patients yet.'}
         </p>
+      ) : hospitalView ? (
+        <HospitalTable patients={filtered} showMedicalRecordLink={showMedicalRecordLink} />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((p) => <PatientCard key={p.id} patient={p} showMedicalRecordLink={showMedicalRecordLink} showScreening={showScreening} quickActions={quickActions} />)}

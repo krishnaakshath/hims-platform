@@ -1,5 +1,5 @@
 // Skeleton for the patients data table: title + trial-filter tab bar +
-// export button toolbar, then the 7-column table (Status, Anon #, Name,
+// export button toolbar, then the 7-column table (Status, UHID or chart ID, Name,
 // DOB, Provider, Referral Type, Last Communication).
 export default function PatientsLoading() {
   const columns = 7

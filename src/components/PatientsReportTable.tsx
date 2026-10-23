@@ -46,7 +46,7 @@ const FILTER_FIELDS: DataGridFilterField[] = [
 
 const COLUMNS: ReportColumn<PatientReportRow>[] = [
   { key: 'status', label: 'Status', render: (p) => <StatusChip status={p.overallStatus ?? 'yellow'} /> },
-  { key: 'id', label: 'Anon #', render: (p) => p.id },
+  { key: 'id', label: 'UHID or chart ID', render: (p) => p.id },
   { key: 'displayName', label: 'Name', render: (p) => p.displayName },
   { key: 'dob', label: 'DOB', render: (p) => p.dob },
   { key: 'provider', label: 'Provider', render: (p) => p.currentProvider ?? '—' },

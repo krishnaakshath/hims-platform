@@ -33,6 +33,7 @@ import { nhcxEligibilityAvailable, payersOnNhcx } from '@/lib/queries/nhcx-eligi
 import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
 import { formatIstDate, todayIsoIn } from '@/lib/india-time'
 import { toAadhaarView } from '@/lib/patient-identity'
+import { trialsEnabled } from '@/lib/features'
 import { logAudit } from '@/lib/audit'
 import { getPatientDetail } from '@/lib/queries/patients'
 import { listAdmissionsForPatient } from '@/lib/queries/admissions'
@@ -70,6 +71,9 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   // only, discharge clinical fields nulled). No screening, eligibility
   // verdict, chart summary, quick glance or form-vs-chart discrepancies.
   const isFrontDesk = session.role === 'frontdesk'
+  // Trials off: no screening, eligibility or discrepancy surfaces, for any role.
+  const trialsOn = trialsEnabled()
+  const showTrialData = trialsOn && !isFrontDesk
 
   const { anonId } = await params
   const justRegistered = (await searchParams)?.registered === '1' // Wave C
@@ -189,7 +193,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         )}
       </section>
 
-      {!isFrontDesk && (
+      {showTrialData && (
         <section className={SECTION}>
           <h2 className={SECTION_HEADING}>Form vs. Chart Discrepancies</h2>
           <p className="mb-3 text-xs text-muted-foreground">Dual verification between what the patient self-reported on their intake form and what their actual chart shows.</p>
@@ -296,7 +300,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         <div className="flex items-center gap-3">
           {DEMOGRAPHICS_CORRECTION_ROLES.includes(session.role) && <CorrectDemographicsButton anonId={patient.id} name={name} dob={String(patient.dob)} />}
           {session.role === 'admin' && <DeletePatientButton patientId={patient.id} patientName={name} />}
-          {isFrontDesk ? null : patient.selectionConfirmedAt ? (
+          {!showTrialData ? null : patient.selectionConfirmedAt ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />
               <span>
@@ -306,7 +310,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
           ) : patient.overallStatus === 'green' && ['admin', 'pi', 'crc'].includes(session.role) ? (
             <ConfirmEligibilityButton anonId={patient.id} />
           ) : null}
-          {!isFrontDesk && <StatusChip status={patient.overallStatus ?? 'yellow'} />}
+          {showTrialData && <StatusChip status={patient.overallStatus ?? 'yellow'} />}
         </div>
       </div>
       {/* Wave C front-desk quick path. */}
@@ -314,7 +318,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         patientId={patient.id}
         can={{ checkIn: CHECK_IN_ROLES.includes(session.role), book: SCHEDULING_ROLES.includes(session.role), printCard: REGISTRATION_ROLES.includes(session.role) }}
       />
-      {!isFrontDesk && !patient.overallStatus && (
+      {showTrialData && !patient.overallStatus && (
         <p className="text-xs text-muted-foreground">Not currently enrolled in a trial — assign this patient to a trial to run an eligibility check.</p>
       )}
 
@@ -324,6 +328,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
           chartDataAsOf={patient.chartDataAsOf.toString()}
           identityVerified={!!patient.identityVerification?.verified}
           criteriaCount={patient.criteria.length}
+          showCriteria={trialsOn}
         />
       )}
 
@@ -331,8 +336,8 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         { id: 'profile', label: 'Profile', content: profileTab },
         ...(isFrontDesk ? [] : [
           { id: 'overview', label: 'Overview', content: overviewTab },
-          { id: 'screening', label: 'Screening', content: screeningTab },
         ]),
+        ...(showTrialData ? [{ id: 'screening', label: 'Screening', content: screeningTab }] : []),
         { id: 'identity', label: 'Verification', content: identityAndPortalTab },
         ...(FOLLOW_UP_VIEW_ROLES.includes(session.role) ? [{ id: 'follow-up', label: 'Visits & follow-up', content: followUpTab }] : []),
         ...(policiesTab ? [{ id: 'insurance', label: 'Insurance', content: policiesTab }] : []), // SP7

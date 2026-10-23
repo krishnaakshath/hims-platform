@@ -22,17 +22,19 @@ function Tile({ icon: Icon, label, value, color }: { icon: React.ComponentType<{
   )
 }
 
-export function PatientQuickGlance({ provider, chartDataAsOf, identityVerified, criteriaCount }: {
+export function PatientQuickGlance({ provider, chartDataAsOf, identityVerified, criteriaCount, showCriteria = true }: {
   provider: string | null
   chartDataAsOf: string
   identityVerified: boolean
   criteriaCount: number
+  /** False when trials are off: the screening tile is dropped. */
+  showCriteria?: boolean
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className={`grid grid-cols-2 gap-3 ${showCriteria ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
       <Tile icon={Stethoscope} label="Provider" value={provider ?? 'Unassigned'} color="primary" />
       <Tile icon={Calendar} label="Chart as of" value={formatIstDate(chartDataAsOf)} color="sky" />
-      <Tile icon={FileCheck2} label="Criteria evaluated" value={String(criteriaCount)} color="accent" />
+      {showCriteria && <Tile icon={FileCheck2} label="Criteria evaluated" value={String(criteriaCount)} color="accent" />}
       <Tile icon={ShieldAlert} label="Identity" value={identityVerified ? 'Verified' : 'Pending'} color="amber" />
     </div>
   )

@@ -5,6 +5,7 @@ import { notFound, redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { listBroadcasts } from '@/lib/queries/broadcasts'
+import { trialsEnabled } from '@/lib/features'
 import { listAllTrials } from '@/lib/queries/trials'
 import { BroadcastWizard } from '@/components/BroadcastWizard'
 import { DemoBadge } from '@/components/DemoBadge'
@@ -19,7 +20,8 @@ export default async function BroadcastsPage({ searchParams }: { searchParams: P
   const activeTab = tab === 'history' ? 'history' : 'send'
   await logAudit(session, `viewed broadcasts (${activeTab})`, null)
 
-  const trials = await listAllTrials()
+  const trialsOn = trialsEnabled()
+  const trials = trialsOn ? await listAllTrials() : []
   const broadcasts = activeTab === 'history' ? await listBroadcasts() : []
 
   return (
@@ -32,7 +34,7 @@ export default async function BroadcastsPage({ searchParams }: { searchParams: P
       </div>
 
       {activeTab === 'send' ? (
-        <BroadcastWizard trials={trials.map((t) => ({ id: t.id, condition: t.condition }))} />
+        <BroadcastWizard trials={trials.map((t) => ({ id: t.id, condition: t.condition }))} showTrialFilters={trialsOn} />
       ) : broadcasts.length === 0 ? (
         <div className="rounded-md border border-border bg-card p-8 text-center shadow-none">
           <p className="text-sm text-muted-foreground">No records found.</p>
@@ -45,7 +47,7 @@ export default async function BroadcastsPage({ searchParams }: { searchParams: P
                 <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Sent</th>
                 <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Channel</th>
                 <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message</th>
-                <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trial</th>
+                {trialsOn && <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trial</th>}
                 <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recipients</th>
                 <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Delivered</th>
                 <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Failed</th>
@@ -61,7 +63,7 @@ export default async function BroadcastsPage({ searchParams }: { searchParams: P
                     <td className="p-3 text-muted-foreground">{formatIstDate(b.sentAt)}</td>
                     <td className="p-3 text-foreground">{b.channel === 'both' ? 'SMS + Email' : b.channel === 'sms' ? 'SMS' : 'Email'}</td>
                     <td className="p-3"><Link href={`/broadcasts/${b.id}`} className="font-medium text-primary hover:underline">{b.message.length > 60 ? `${b.message.slice(0, 60)}…` : b.message}</Link></td>
-                    <td className="p-3 text-foreground">{b.trialCondition ?? 'All trials'}</td>
+                    {trialsOn && <td className="p-3 text-foreground">{b.trialCondition ?? 'All trials'}</td>}
                     <td className="p-3 text-foreground">{b.recipientCount}</td>
                     <td className="p-3 text-success">{delivered}</td>
                     <td className="p-3 text-destructive">{failed}</td>

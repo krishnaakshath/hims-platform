@@ -7,6 +7,7 @@ import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { listAllTrials } from '@/lib/queries/trials'
 import { PatientsTable } from '@/components/PatientsTable'
 import { AddPatientButton } from '@/components/AddPatientButton'
+import { trialsEnabled } from '@/lib/features'
 import { matchesDirectoryQuery, paginate, parseDirectoryParams, PATIENT_PAGE_SIZE } from '@/lib/patient-directory'
 
 export default async function PatientsPage({ searchParams }: { searchParams: Promise<{ trialId?: string; q?: string | string[]; page?: string | string[] }> }) {
@@ -24,11 +25,14 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
   // criteria counts. listPatientsWithStatus returns one row per screening,
   // so the unfiltered list is deduped to one card per patient.
   const isFrontDesk = session.role === 'frontdesk'
+  // Trials off: hospital view (no trial filter, verdicts or criteria counts), same as front desk.
+  const trialsOn = trialsEnabled()
+  const showTrialData = trialsOn && !isFrontDesk
   const sp = await searchParams
   const requestedTrialId = typeof sp.trialId === 'string' ? sp.trialId : undefined
-  const trialId = isFrontDesk ? undefined : requestedTrialId
-  const [rows, trials] = await Promise.all([listPatientsWithStatus(trialId ?? null), isFrontDesk ? Promise.resolve([]) : listAllTrials()])
-  const patients = isFrontDesk ? [...new Map(rows.map((p) => [p.id, p])).values()] : rows
+  const trialId = !showTrialData ? undefined : requestedTrialId
+  const [rows, trials] = await Promise.all([listPatientsWithStatus(trialId ?? null), showTrialData ? listAllTrials() : Promise.resolve([])])
+  const patients = !showTrialData ? [...new Map(rows.map((p) => [p.id, p])).values()] : rows
   // Wave B P1-08: filter (name / anon id / UHID / mobile) and page on the
   // server, so only one page of rows crosses to the client.
   const { q, page: requestedPage } = parseDirectoryParams(sp)
@@ -56,7 +60,7 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
         </div>
       </div>
 
-      {!isFrontDesk && (
+      {showTrialData && (
         <div className="mb-4 flex items-center gap-1 rounded-lg border border-primary/10 bg-card p-1 text-sm">
           <Link href="/patients" className={`rounded-md px-3 py-1.5 font-medium transition-colors ${!trialId ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>All Trials</Link>
           {trials.map((t) => (
@@ -81,12 +85,16 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
           currentProvider: p.currentProvider,
           referralType: p.referralType,
           lastCommunication: p.lastCommunication,
-          ...(isFrontDesk ? {} : { overallStatus: p.overallStatus, criteriaSummary: p.criteriaSummary }),
+          gender: p.gender ?? null,
+          lastVisitAt: p.lastVisitAt ?? null,
+          primaryPayerName: p.primaryPayerName ?? null,
+          ...(!showTrialData ? {} : { overallStatus: p.overallStatus, criteriaSummary: p.criteriaSummary }),
         }))}
         // Front desk sees patients, not charts -- the medical-record page
         // redirects them (CLINICAL_ROLES gate).
         showMedicalRecordLink={!isFrontDesk}
-        showScreening={!isFrontDesk}
+        showScreening={showTrialData}
+        hospitalView={!trialsOn}
         directory={{ query: q, page: page.page, pageSize: page.pageSize, total: page.total, params: trialId ? { trialId } : {} }}
         // Wave C quick path: check in / book with the patient preselected.
         quickActions={{ checkIn: CHECK_IN_ROLES.includes(session.role), book: SCHEDULING_ROLES.includes(session.role) }}
