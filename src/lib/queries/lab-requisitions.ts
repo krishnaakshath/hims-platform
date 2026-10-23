@@ -30,7 +30,7 @@ export type CreateLabRequisitionResult =
   // includesLabTest: at least one ordered test is a lab test (not imaging); the home-collection
   // notice is sent only then (Task 8 ruling).
   | { ok: true; requisition: LabRequisitionRow; lines: QuotedLine[]; patientIsLocal: boolean; includesLabTest: boolean }
-  | { ok: false; error: 'patient_not_found' | 'test_not_found' | 'encounter_not_found' | 'encounter_mismatch' }
+  | { ok: false; error: 'patient_not_found' | 'test_not_found' | 'encounter_not_found' | 'encounter_mismatch' | 'test_unmapped' | 'test_inactive' }
 
 export async function createLabRequisition(input: CreateLabRequisitionInput, session: Session, now = new Date()): Promise<CreateLabRequisitionResult> {
   const db = getDb()
@@ -43,9 +43,13 @@ export async function createLabRequisition(input: CreateLabRequisitionInput, ses
     .where(eq(patients.id, input.patientId))
   if (!patient) return { ok: false, error: 'patient_not_found' }
 
-  const testRows = await db.select({ id: labTests.id, serviceId: labTests.serviceId, category: labTests.category }).from(labTests).where(inArray(labTests.id, input.labTestIds))
+  const testRows = await db.select({ id: labTests.id, serviceId: labTests.serviceId, category: labTests.category, isActive: labTests.isActive }).from(labTests).where(inArray(labTests.id, input.labTestIds))
   const serviceByTest = new Map(testRows.map((t) => [t.id, t.serviceId]))
   if (input.labTestIds.some((id) => !serviceByTest.has(id))) return { ok: false, error: 'test_not_found' }
+  // Foundations T10 price-mapping gate: all-or-nothing, before anything is written.
+  if (testRows.some((t) => t.serviceId === null)) return { ok: false, error: 'test_unmapped' }
+  if (testRows.some((t) => !t.isActive)) return { ok: false, error: 'test_inactive' }
+  // end Foundations T10
 
   if (input.originatingEncounterId !== null) {
     const encounter = await getEncounterById(input.originatingEncounterId)

@@ -16,6 +16,8 @@ export interface LabTestOption {
   defaultUnit: string | null
   referenceRange: string | null
   category: 'lab' | 'imaging'
+  // Foundations T10: null = no tariff service, so the test has no price and cannot be ordered.
+  serviceId?: number | null
 }
 
 // SP5 messages shown after the order is placed (Ruling 3: local = registered PIN in the service area).
@@ -55,7 +57,7 @@ export function OrderLabTestModal({ patientId, labTests, onClose }: { patientId:
       followUp = { interval: { value: interval.data.value, unit: interval.data.unit as IntervalUnit }, reason: why.data }
     }
     // Catalog order, so the request (and the requisition's lines) read like the checklist.
-    const labTestIds = labTests.filter((t) => selected.includes(t.id)).map((t) => t.id)
+    const labTestIds = labTests.filter((t) => selected.includes(t.id) && t.serviceId !== null).map((t) => t.id)
     setSubmitting(true)
     const res = await sendJson<{ patientIsLocal?: boolean } | null>(`/api/patients/${patientId}/lab-orders`, 'POST', { labTestIds, followUp })
     setSubmitting(false)
@@ -78,12 +80,16 @@ export function OrderLabTestModal({ patientId, labTests, onClose }: { patientId:
     options.length > 0 && (
       <fieldset className="space-y-1">
         <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{legend}</legend>
-        {options.map((t) => (
-          <label key={t.id} className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={selected.includes(t.id)} onChange={() => toggle(t.id)} />
-            <span>{t.name} ({t.code})</span>
-          </label>
-        ))}
+        {options.map((t) => {
+          const unpriced = t.serviceId === null
+          return (
+            <label key={t.id} className={`flex items-center gap-2 text-sm ${unpriced ? 'text-muted-foreground' : ''}`}>
+              <input type="checkbox" checked={selected.includes(t.id)} disabled={unpriced} onChange={() => toggle(t.id)} />
+              <span>{t.name} ({t.code})</span>
+              {unpriced && <span className="text-xs">No price: ask billing</span>}
+            </label>
+          )
+        })}
       </fieldset>
     )
 

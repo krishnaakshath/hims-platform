@@ -26,6 +26,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         case 'not_found': return errorResponse(404, 'Lab test not found')
         case 'service_not_found': return errorResponse(400, 'Service not found')
         case 'service_not_investigation': return errorResponse(400, 'Pick a lab or imaging investigation service')
+        case 'test_unmapped': return errorResponse(422, 'This test has no price. Map it to a tariff service first.', 'test_unmapped')
+        case 'has_open_orders': return errorResponse(409, 'This test has open orders. Finish or cancel them before removing its price mapping.', 'has_open_orders')
       }
     }
     return NextResponse.json({ test: result.test })

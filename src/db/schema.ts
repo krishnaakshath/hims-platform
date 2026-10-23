@@ -2338,6 +2338,9 @@ export const labTests = pgTable('lab_tests', {
   sampleType: labSampleTypeEnum('sample_type'),
   container: labSampleContainerEnum('container'),
   serviceId: integer('service_id').references(() => serviceCatalog.id),
+  // Foundations T10: a test can be switched off; activating an unmapped test is refused.
+  isActive: boolean('is_active').default(true).notNull(),
+  // end Foundations T10
 })
 
 export const labOrders = pgTable('lab_orders', {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readJsonBody } from '@/lib/http'
 import { requireSession } from '@/lib/auth'
 import { TARIFF_MANAGE_ROLES } from '@/lib/role-policy'
-import { TariffPackageIntegrityError, getService, updateService } from '@/lib/queries/tariff'
+import { ServiceHasOpenLabOrdersError, TariffPackageIntegrityError, getService, updateService } from '@/lib/queries/tariff'
 import { getDepartmentById } from '@/lib/queries/departments'
 import { hsnSacProblem, serviceUpdateSchema } from '@/lib/tariff/validation'
 import { badRequest, conflict, forbidden, invalid, notFound, parseId, serverError } from '@/lib/tariff/route-responses'
@@ -38,7 +38,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!row) return notFound('Service not found')
     return NextResponse.json(row)
   } catch (err) {
-    if (err instanceof TariffPackageIntegrityError) return conflict(err.message)
+    if (err instanceof TariffPackageIntegrityError || err instanceof ServiceHasOpenLabOrdersError) return conflict(err.message)
     return serverError('update service', err, 'Could not update service')
   }
 }

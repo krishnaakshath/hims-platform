@@ -108,6 +108,11 @@ describe('seed', () => {
 })
 
 describe('India masters (topped up on every run)', () => {
+  it('maps every seeded lab and imaging test to a tariff service (Foundations T10)', async () => {
+    const rows = await getDb().execute(sql`select code from lab_tests where service_id is null`)
+    expect(rows.rows.map((r) => (r as { code: string }).code)).toEqual([])
+  })
+
   it('departments, Indian payers, room categories, services and every kind of tariff exist', async () => {
     const db = getDb()
     const deptCodes = new Set((await db.select({ code: departments.code }).from(departments)).map((d) => d.code))

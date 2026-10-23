@@ -4,7 +4,7 @@ import { requireSessionOrRedirect } from '@/lib/auth'
 import { getSettingsSummary } from '@/lib/queries/settings'
 import { getOwnAccount } from '@/lib/queries/own-account'
 import { AccountPanel } from '@/components/account/AccountPanel'
-import { listAllProviders } from '@/lib/queries/providers'
+import { listAllProvidersWithTariffFee } from '@/lib/queries/providers'
 import { listAllUsers } from '@/lib/queries/users'
 import { listDepartments } from '@/lib/queries/departments'
 import { AutoClassifyToggle } from '@/components/AutoClassifyToggle'
@@ -34,7 +34,7 @@ export default async function SettingsPage() {
   // role, per explicit product direction.
   if (!['admin', 'pi'].includes(session.role)) redirect('/')
   const settings = await getSettingsSummary()
-  const providers = await listAllProviders()
+  const providers = await listAllProvidersWithTariffFee()
   const staff = await listAllUsers()
   const departments = await listDepartments()
   const isAdmin = session.role === 'admin'

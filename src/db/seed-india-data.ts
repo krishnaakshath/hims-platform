@@ -247,6 +247,17 @@ export const SERVICE_SEED: ServiceSeed[] = [
   { code: 'IMG_XR_CHEST', name: 'X-ray chest PA view', departmentCode: 'RADIO', category: 'investigation_imaging', hsnSac: '999316', gstRateBp: 0, basePaise: 400_00 },
   { code: 'IMG_USG_ABD', name: 'Ultrasound abdomen and pelvis', departmentCode: 'RADIO', category: 'investigation_imaging', hsnSac: '999316', gstRateBp: 0, basePaise: 1_200_00 },
   { code: 'IMG_CT_HEAD', name: 'CT head (plain)', departmentCode: 'RADIO', category: 'investigation_imaging', hsnSac: '999316', gstRateBp: 0, basePaise: 3_500_00, requiresPreauth: true },
+  // Foundations T10: services for the base catalogue tests that had no price mapping.
+  { code: 'LAB_CMP', name: 'Comprehensive metabolic panel', departmentCode: 'LAB', category: 'investigation_lab', hsnSac: '999316', gstRateBp: 0, basePaise: 700_00 },
+  { code: 'LAB_LITHIUM', name: 'Lithium level', departmentCode: 'LAB', category: 'investigation_lab', hsnSac: '999316', gstRateBp: 0, basePaise: 500_00 },
+  { code: 'LAB_VPA', name: 'Valproic acid level', departmentCode: 'LAB', category: 'investigation_lab', hsnSac: '999316', gstRateBp: 0, basePaise: 800_00 },
+  { code: 'LAB_UDS', name: 'Urine drug screen', departmentCode: 'LAB', category: 'investigation_lab', hsnSac: '999316', gstRateBp: 0, basePaise: 600_00 },
+  { code: 'LAB_PRL', name: 'Prolactin', departmentCode: 'LAB', category: 'investigation_lab', hsnSac: '999316', gstRateBp: 0, basePaise: 550_00 },
+  { code: 'LAB_VITD', name: 'Vitamin D, 25-OH', departmentCode: 'LAB', category: 'investigation_lab', hsnSac: '999316', gstRateBp: 0, basePaise: 1_100_00 },
+  { code: 'IMG_XR_CHEST_2V', name: 'X-ray chest, 2 view', departmentCode: 'RADIO', category: 'investigation_imaging', hsnSac: '999316', gstRateBp: 0, basePaise: 600_00 },
+  { code: 'IMG_XR_WRIST', name: 'X-ray wrist', departmentCode: 'RADIO', category: 'investigation_imaging', hsnSac: '999316', gstRateBp: 0, basePaise: 450_00 },
+  { code: 'IMG_XR_KNEE', name: 'X-ray knee', departmentCode: 'RADIO', category: 'investigation_imaging', hsnSac: '999316', gstRateBp: 0, basePaise: 450_00 },
+  // end Foundations T10
   { code: 'IMG_ECHO', name: '2D echocardiography', departmentCode: 'CARDIO', category: 'investigation_imaging', hsnSac: '999316', gstRateBp: 0, basePaise: 2_000_00 },
   { code: 'PROC_ECG', name: 'ECG (12-lead)', departmentCode: 'CARDIO', category: 'procedure', hsnSac: '999312', gstRateBp: 0, basePaise: 250_00 },
   { code: 'PROC_DRESSING', name: 'Wound dressing (minor)', departmentCode: 'GEN_SURG', category: 'procedure', hsnSac: '999312', gstRateBp: 0, basePaise: 300_00, maxQuantity: 3 },
@@ -321,6 +332,17 @@ export const EXISTING_LAB_TEST_SERVICE_MAP: Record<string, { serviceCode: string
   'XR-CHEST-1V': { serviceCode: 'IMG_XR_CHEST', sampleType: null, container: null },
   'US-ABD': { serviceCode: 'IMG_USG_ABD', sampleType: null, container: null },
   'CT-HEAD-NC': { serviceCode: 'IMG_CT_HEAD', sampleType: null, container: null },
+  // Foundations T10: every seeded test is priced.
+  CMP: { serviceCode: 'LAB_CMP', sampleType: 'serum', container: 'sst_gold' },
+  LITH: { serviceCode: 'LAB_LITHIUM', sampleType: 'serum', container: 'plain_red' },
+  VPA: { serviceCode: 'LAB_VPA', sampleType: 'serum', container: 'plain_red' },
+  UDS: { serviceCode: 'LAB_UDS', sampleType: 'urine', container: 'urine_container' },
+  PRL: { serviceCode: 'LAB_PRL', sampleType: 'serum', container: 'sst_gold' },
+  VITD: { serviceCode: 'LAB_VITD', sampleType: 'serum', container: 'sst_gold' },
+  'XR-CHEST-2V': { serviceCode: 'IMG_XR_CHEST_2V', sampleType: null, container: null },
+  'XR-WRIST': { serviceCode: 'IMG_XR_WRIST', sampleType: null, container: null },
+  'XR-KNEE': { serviceCode: 'IMG_XR_KNEE', sampleType: null, container: null },
+  // end Foundations T10
 }
 
 // ---------------------------------------------------------------------------

@@ -87,3 +87,15 @@ describe('OrderLabTestModal', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 })
+
+describe('OrderLabTestModal price gate (Foundations T10)', () => {
+  it('greys out an unmapped test with "No price: ask billing"', () => {
+    render(<OrderLabTestModal patientId="P1" labTests={[
+      { id: 1, name: 'Mapped test', code: 'M1', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: 5 },
+      { id: 2, name: 'Unmapped test', code: 'U1', defaultUnit: null, referenceRange: null, category: 'lab', serviceId: null },
+    ]} onClose={() => {}} />)
+    expect(screen.getByText('No price: ask billing')).toBeInTheDocument()
+    expect(screen.getByLabelText(/Unmapped test/)).toBeDisabled()
+    expect(screen.getByLabelText(/Mapped test/)).not.toBeDisabled()
+  })
+})

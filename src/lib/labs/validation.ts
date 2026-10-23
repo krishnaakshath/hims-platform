@@ -104,6 +104,7 @@ export const labTestSetupSchema = z
     sampleType: z.enum(SAMPLE_TYPES).nullable().optional(),
     container: z.enum(SAMPLE_CONTAINERS).nullable().optional(),
     serviceId: positiveInt.nullable().optional(),
+    isActive: z.boolean().optional(), // Foundations T10
   })
   .strict()
   .refine((s) => Object.values(s).some((v) => v !== undefined), 'Nothing to change')

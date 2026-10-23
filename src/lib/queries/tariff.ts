@@ -16,6 +16,7 @@ import {
 } from '@/db/schema'
 import { and, asc, desc, eq, getTableColumns, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
+import { countOpenOrdersForService } from '@/lib/queries/lab-setup'
 import type { Session } from '@/lib/auth'
 import { normalizeWard, resolvePrice, type ServiceForPricing, type TariffRateCandidate } from '@/lib/tariff/resolve'
 import { findOverlap, planRevision, type DatedRate } from '@/lib/tariff/versions'
@@ -250,8 +251,17 @@ async function assertCategoryChangesAllowed(tx: Tx, changes: { id: number; from:
   }
 }
 
+/** Foundations T10: a service that prices a lab test with open orders cannot be deactivated. */
+export class ServiceHasOpenLabOrdersError extends Error {
+  constructor() { super('This service prices a lab or imaging test that has open orders. Finish or cancel them first.') }
+}
+
 export async function updateService(id: number, patch: ServiceUpdateInput, audit?: TariffAudit): Promise<ServiceRow | null> {
   return inTx(audit, async (tx) => {
+    if (patch.isActive === false) {
+      const [cur] = await tx.select({ isActive: serviceCatalog.isActive }).from(serviceCatalog).where(eq(serviceCatalog.id, id)).for('update')
+      if (cur?.isActive && (await countOpenOrdersForService(id, tx)) > 0) throw new ServiceHasOpenLabOrdersError()
+    }
     if (patch.category !== undefined) {
       // Lock the service (same lock as package-item writes) so the item check cannot race.
       const [cur] = await tx.select({ category: serviceCatalog.category }).from(serviceCatalog).where(eq(serviceCatalog.id, id)).for('update')

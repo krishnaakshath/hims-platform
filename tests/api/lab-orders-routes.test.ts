@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { auditLog, patients, providers, labTests, labOrders, labResults, labRequisitions } from '@/db/schema'
 
@@ -68,7 +68,7 @@ afterEach(async () => {
 
 async function seedOrder(status: 'ordered' | 'collected' | 'received') {
   const db = getDb()
-  const [test] = await db.select().from(labTests).limit(1)
+  const [test] = await db.select().from(labTests).where(isNotNull(labTests.serviceId)).limit(1)
   const [patientRow] = await db.select().from(patients).limit(1)
   const [order] = await db.insert(labOrders).values({
     patientId: patientRow.id,
@@ -87,7 +87,7 @@ describe('lab order lifecycle routes — role gating (asymmetric collect gate)',
     it('rejects frontdesk with 403', async () => {
       sessionRole = 'frontdesk'
       const [patientRow] = await getDb().select().from(patients).limit(1)
-      const [test] = await getDb().select().from(labTests).limit(1)
+      const [test] = await getDb().select().from(labTests).where(isNotNull(labTests.serviceId)).limit(1)
       const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ labTestId: test.id }) })
       const res = await createOrder(req as never, { params: Promise.resolve({ anonId: patientRow.id }) })
       expect(res.status).toBe(403)
@@ -96,7 +96,7 @@ describe('lab order lifecycle routes — role gating (asymmetric collect gate)',
     it('allows admin (201)', async () => {
       sessionRole = 'admin'
       const [patientRow] = await getDb().select().from(patients).limit(1)
-      const [test] = await getDb().select().from(labTests).limit(1)
+      const [test] = await getDb().select().from(labTests).where(isNotNull(labTests.serviceId)).limit(1)
       const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ labTestId: test.id }) })
       const res = await createOrder(req as never, { params: Promise.resolve({ anonId: patientRow.id }) })
       expect(res.status).toBe(201)
@@ -109,7 +109,7 @@ describe('lab order lifecycle routes — role gating (asymmetric collect gate)',
       sessionRole = 'pi'
       sessionName = PROBE_DR // matches the mocked provider's name below
       const [patientRow] = await getDb().select().from(patients).limit(1)
-      const [test] = await getDb().select().from(labTests).limit(1)
+      const [test] = await getDb().select().from(labTests).where(isNotNull(labTests.serviceId)).limit(1)
       const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ labTestId: test.id }) })
       const res = await createOrder(req as never, { params: Promise.resolve({ anonId: patientRow.id }) })
       expect(res.status).toBe(201)
@@ -123,7 +123,7 @@ describe('lab order lifecycle routes — role gating (asymmetric collect gate)',
       sessionRole = 'pi'
       sessionName = 'Someone Unmatched' // does not match the mocked provider's name
       const [patientRow] = await getDb().select().from(patients).limit(1)
-      const [test] = await getDb().select().from(labTests).limit(1)
+      const [test] = await getDb().select().from(labTests).where(isNotNull(labTests.serviceId)).limit(1)
       const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ labTestId: test.id }) })
       const res = await createOrder(req as never, { params: Promise.resolve({ anonId: patientRow.id }) })
       expect(res.status).toBe(403)
@@ -134,7 +134,7 @@ describe('lab order lifecycle routes — role gating (asymmetric collect gate)',
       sessionRole = 'pi'
       sessionName = PROBE_DR_SUBSTRING
       const [patientRow] = await getDb().select({ id: patients.id }).from(patients).limit(1)
-      const [test] = await getDb().select().from(labTests).limit(1)
+      const [test] = await getDb().select().from(labTests).where(isNotNull(labTests.serviceId)).limit(1)
       const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ labTestId: test.id }) })
       const res = await createOrder(req as never, { params: Promise.resolve({ anonId: patientRow.id }) })
       if (res.status === 201) createdRequisitionIds.push((await res.json()).requisitionId)

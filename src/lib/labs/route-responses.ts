@@ -9,8 +9,8 @@ export { parseId, readJsonBody } from '@/lib/http'
 
 export const WINDOW_OVERLAP_MESSAGE = 'This window overlaps another active window'
 
-export function errorResponse(status: number, error: string) {
-  return NextResponse.json({ error }, { status })
+export function errorResponse(status: number, error: string, code?: string) {
+  return NextResponse.json(code === undefined ? { error } : { error, code }, { status })
 }
 
 /**

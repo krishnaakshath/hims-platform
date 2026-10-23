@@ -23,7 +23,9 @@ let payerId = 0
 let pinId = 0
 let t1 = 0
 let t2 = 0
-let tImg = 0 // SP5 Task 8: an imaging test
+let tImg = 0
+let noRateServiceId = 0 // Foundations T10: mapped, but no tariff rate
+let tUnmapped = 0 // SP5 Task 8: an imaging test
 let encounterId = 0
 const rateIds: number[] = []
 const requisitionIds: number[] = []
@@ -55,6 +57,8 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     providerId = pr.id
     const [svc] = await db.insert(serviceCatalog).values({ code: `TR${RUN.slice(-8)}`, name: 'TEST_SP5 CBC', departmentId: d.id, category: 'investigation_lab', hsnSac: '999316' }).returning()
     serviceId = svc.id
+    const [nr] = await db.insert(serviceCatalog).values({ code: `TN${RUN.slice(-8)}`, name: 'TEST_SP5 no rate', departmentId: d.id, category: 'investigation_lab', hsnSac: '999316' }).returning()
+    noRateServiceId = nr.id
     const rates = await db.insert(tariffRates).values([
       { serviceId, scope: 'base', amountPaise: 45000, validFrom: '2099-01-01', createdByName: PROBE },
       { serviceId, scope: 'payer', payerId, amountPaise: 38000, validFrom: '2099-01-01', createdByName: PROBE },
@@ -62,12 +66,14 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     rateIds.push(...rates.map((r) => r.id))
     const [a, b] = await db.insert(labTests).values([
       { name: `TEST_SP5 mapped ${RUN}`, code: `TEST-SP5-RM-${RUN}`, serviceId },
-      { name: `TEST_SP5 unmapped ${RUN}`, code: `TEST-SP5-RU-${RUN}` },
+      { name: `TEST_SP5 no rate ${RUN}`, code: `TEST-SP5-RU-${RUN}`, serviceId: noRateServiceId },
     ]).returning()
     t1 = a.id
     t2 = b.id
-    const [img] = await db.insert(labTests).values({ name: `TEST_SP5 imaging ${RUN}`, code: `TEST-SP5-RI-${RUN}`, category: 'imaging' }).returning()
+    const [img] = await db.insert(labTests).values({ name: `TEST_SP5 imaging ${RUN}`, code: `TEST-SP5-RI-${RUN}`, category: 'imaging', serviceId: noRateServiceId }).returning()
     tImg = img.id
+    const [un] = await db.insert(labTests).values({ name: `TEST_SP5 unmapped ${RUN}`, code: `TEST-SP5-RX-${RUN}` }).returning()
+    tUnmapped = un.id
     const [pin] = await db.insert(labServiceAreaPins).values({ pinCode: PIN, createdByName: PROBE }).returning()
     pinId = pin.id
     const [enc] = await db.insert(encounters).values({
@@ -82,9 +88,9 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     await db.delete(labRequisitions).where(inArray(labRequisitions.patientId, [P, P_PAYER, P_OTHER]))
     await db.delete(encounters).where(eq(encounters.id, encounterId))
     await db.delete(labServiceAreaPins).where(eq(labServiceAreaPins.id, pinId))
-    await db.delete(labTests).where(inArray(labTests.id, [t1, t2, tImg]))
+    await db.delete(labTests).where(inArray(labTests.id, [t1, t2, tImg, tUnmapped]))
     await db.delete(tariffRates).where(inArray(tariffRates.id, rateIds))
-    await db.delete(serviceCatalog).where(eq(serviceCatalog.id, serviceId))
+    await db.delete(serviceCatalog).where(inArray(serviceCatalog.id, [serviceId, noRateServiceId]))
     await db.delete(providers).where(eq(providers.id, providerId))
     await db.delete(patients).where(inArray(patients.id, [P, P_PAYER, P_OTHER]))
     await db.delete(payers).where(eq(payers.id, payerId))
@@ -94,19 +100,19 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
 
   it('creates one requisition with one priced order per test', async () => {
     const r = await create()
-    expect(r.ok && r.lines.map((l) => [l.quotedPricePaise, l.quoteStatus])).toEqual([[45000, 'quoted'], [null, 'unmapped']])
+    expect(r.ok && r.lines.map((l) => [l.quotedPricePaise, l.quoteStatus])).toEqual([[45000, 'quoted'], [null, 'no_rate']])
     if (!r.ok) return
     expect(r.requisition).toMatchObject({ patientId: P, orderedByProviderId: providerId, followUpRequested: false, followUpIntervalValue: null, createdByName: PROBE })
     expect(r.lines.map((l) => l.labTestId)).toEqual([t1, t2])
     const full = await getRequisitionWithOrders(r.requisition.id)
     expect(full?.orders.map((o) => [o.id, o.status, o.requisitionId, o.quotedPricePaise, o.quotedTariffRateId, o.quotedOn, o.quoteStatus])).toEqual([
       [r.lines[0].orderId, 'ordered', r.requisition.id, 45000, rateIds[0], '2099-05-01', 'quoted'],
-      [r.lines[1].orderId, 'ordered', r.requisition.id, null, null, '2099-05-01', 'unmapped'],
+      [r.lines[1].orderId, 'ordered', r.requisition.id, null, null, '2099-05-01', 'no_rate'],
     ])
     const audits = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, PROBE), eq(auditLog.action, 'created lab order'), eq(auditLog.patientId, P)))
     expect(audits.map((a) => a.details)).toEqual(expect.arrayContaining([
       `order=${r.lines[0].orderId} requisition=${r.requisition.id} quote=quoted`,
-      `order=${r.lines[1].orderId} requisition=${r.requisition.id} quote=unmapped`,
+      `order=${r.lines[1].orderId} requisition=${r.requisition.id} quote=no_rate`,
     ]))
     expect(await getRequisitionWithOrders(2_000_000_000)).toBeNull()
   })
@@ -171,6 +177,13 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     expect(after).toHaveLength(before.length)
     const ok = await create({ patientId: P_OTHER, labTestIds: [t2], originatingEncounterId: encounterId })
     expect(ok.ok && ok.requisition.originatingEncounterId).toBe(encounterId)
+  })
+
+  it('refuses an unmapped test and writes nothing (Foundations T10)', async () => {
+    const before = await getDb().select({ id: labRequisitions.id }).from(labRequisitions).where(eq(labRequisitions.patientId, P))
+    expect(await create({ labTestIds: [t1, tUnmapped] })).toEqual({ ok: false, error: 'test_unmapped' })
+    const after = await getDb().select({ id: labRequisitions.id }).from(labRequisitions).where(eq(labRequisitions.patientId, P))
+    expect(after).toHaveLength(before.length)
   })
 
   it('rejects an unknown patient or test and writes nothing', async () => {

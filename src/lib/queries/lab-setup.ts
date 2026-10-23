@@ -2,10 +2,10 @@
 // decides who is a "local patient" (Ruling 3), the home-collection windows, and each lab
 // test's sample type, tube and SP2 tariff service. Every write is one transaction with its
 // audit row on the same `tx`. Audit details carry ids, counts and field names only.
-import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
-  homeCollectionWindows, labServiceAreaPins, labTests, serviceCatalog,
+  homeCollectionWindows, labOrders, labServiceAreaPins, labTests, serviceCatalog,
   type HomeCollectionWindowRow, type ServiceAreaPinRow,
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
@@ -179,6 +179,7 @@ export interface LabTestSetupRow {
   category: 'lab' | 'imaging'
   sampleType: SampleType | null
   container: SampleContainer | null
+  isActive: boolean
   serviceId: number | null
   serviceCode: string | null
   serviceName: string | null
@@ -195,12 +196,35 @@ function labTestSetupSelect(ex: Pick<WriteExecutor, 'select'>) {
       category: labTests.category,
       sampleType: labTests.sampleType,
       container: labTests.container,
+      isActive: labTests.isActive,
       serviceId: labTests.serviceId,
       serviceCode: serviceCatalog.code,
       serviceName: serviceCatalog.name,
     })
     .from(labTests)
     .leftJoin(serviceCatalog, eq(serviceCatalog.id, labTests.serviceId))
+}
+
+// Foundations T10 price-mapping gate. An order is "open" until it is reported or cancelled.
+export const CLOSED_LAB_ORDER_STATUSES = ['reported', 'cancelled'] as const
+
+/** Lab and imaging tests with no tariff service: they cannot be ordered or activated until mapped. */
+export async function unmappedTests(): Promise<{ id: number; code: string; name: string }[]> {
+  return getDb()
+    .select({ id: labTests.id, code: labTests.code, name: labTests.name })
+    .from(labTests)
+    .where(sql`${labTests.serviceId} is null`)
+    .orderBy(asc(labTests.name), asc(labTests.id))
+}
+
+/** Open orders of the tests mapped to a service (used to refuse unmapping / deactivating it). */
+export async function countOpenOrdersForService(serviceId: number, ex: Pick<WriteExecutor, 'select'> = getDb()): Promise<number> {
+  const [row] = await ex
+    .select({ n: sql<number>`count(*)::int` })
+    .from(labOrders)
+    .innerJoin(labTests, eq(labTests.id, labOrders.labTestId))
+    .where(and(eq(labTests.serviceId, serviceId), notInArray(labOrders.status, [...CLOSED_LAB_ORDER_STATUSES])))
+  return row?.n ?? 0
 }
 
 export async function listLabTestsWithSetup(): Promise<LabTestSetupRow[]> {
@@ -211,10 +235,20 @@ export async function updateLabTestSetup(
   id: number,
   patch: LabTestSetupRequest,
   session: Session,
-): Promise<{ ok: true; test: LabTestSetupRow } | { ok: false; error: 'not_found' | 'service_not_found' | 'service_not_investigation' }> {
+): Promise<{ ok: true; test: LabTestSetupRow } | { ok: false; error: 'not_found' | 'service_not_found' | 'service_not_investigation' | 'test_unmapped' | 'has_open_orders' }> {
   return getDb().transaction(async (tx) => {
-    const [current] = await tx.select({ id: labTests.id }).from(labTests).where(eq(labTests.id, id)).for('update')
+    const [current] = await tx.select({ id: labTests.id, serviceId: labTests.serviceId, isActive: labTests.isActive }).from(labTests).where(eq(labTests.id, id)).for('update')
     if (!current) return { ok: false as const, error: 'not_found' as const }
+    // Foundations T10: the gate. Unmapping a test that has open orders would leave them unpriced;
+    // activating a test with no (resulting) mapping would make it orderable at no price.
+    const resultingServiceId = patch.serviceId === undefined ? current.serviceId : patch.serviceId
+    if (patch.serviceId === null && current.serviceId !== null) {
+      const [open] = await tx.select({ id: labOrders.id }).from(labOrders)
+        .where(and(eq(labOrders.labTestId, id), notInArray(labOrders.status, [...CLOSED_LAB_ORDER_STATUSES]))).limit(1)
+      if (open) return { ok: false as const, error: 'has_open_orders' as const }
+    }
+    if (patch.isActive === true && !current.isActive && resultingServiceId === null) return { ok: false as const, error: 'test_unmapped' as const }
+    // end Foundations T10
     if (patch.serviceId !== undefined && patch.serviceId !== null) {
       const [service] = await tx.select({ category: serviceCatalog.category }).from(serviceCatalog).where(eq(serviceCatalog.id, patch.serviceId))
       if (!service) return { ok: false as const, error: 'service_not_found' as const }
@@ -226,6 +260,7 @@ export async function updateLabTestSetup(
     if (patch.sampleType !== undefined) set.sampleType = patch.sampleType
     if (patch.container !== undefined) set.container = patch.container
     if (patch.serviceId !== undefined) set.serviceId = patch.serviceId
+    if (patch.isActive !== undefined) set.isActive = patch.isActive
     const fields = Object.keys(set).sort()
     await tx.update(labTests).set(set).where(eq(labTests.id, id))
     const [test] = await labTestSetupSelect(tx).where(eq(labTests.id, id))
