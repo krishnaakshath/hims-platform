@@ -1,7 +1,7 @@
 'use client'
 import { useId, useState } from 'react'
 import { fetchJson } from '@/lib/client-fetch'
-import { localiseQuestion, type FormLang, type FormQuestion } from '@/lib/forms/question-model'
+import { localiseQuestion, type FormLang, type IntakeQuestion } from '@/lib/forms/question-model'
 
 // WS7 T3: the single per-question renderer for every question type. The intake
 // portal and the builder's read-only preview both render through this, so the
@@ -10,8 +10,7 @@ import { localiseQuestion, type FormLang, type FormQuestion } from '@/lib/forms/
 // VALUE is always the English option, so the stored answer is language-neutral
 // (spec D9) whatever language the patient reads.
 
-/** What the patient's renderer receives of a question: never scores, chart tags or the autofill source. */
-export type IntakeQuestion = Omit<FormQuestion, 'optionScores' | 'compareToChart' | 'autofillField'>
+export type { IntakeQuestion }
 
 const INPUT = 'w-full rounded-md border border-border px-3 py-2 text-sm focus:border-primary/40 focus:outline-none'
 const FILE_ACCEPT = 'application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png'

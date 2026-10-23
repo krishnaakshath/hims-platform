@@ -39,7 +39,7 @@ describe('IntakePortalForm consent pages', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
     await waitFor(() => expect(screen.getByText(/your form has been submitted/)).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/intake/tok', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ answers: {}, complete: true }) }))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/intake/tok', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ answers: {}, complete: true, language: 'en' }) }))
   })
 
   it('surfaces the sign route error text and keeps the consent unsigned', async () => {
@@ -120,7 +120,7 @@ describe('IntakePortalForm v2 renderer (WS7 T3)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
     await waitFor(() => expect(screen.getByText(/your form has been submitted/)).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/intake/tok', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ answers: { smoker: 'No' }, complete: true }) }))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/intake/tok', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ answers: { smoker: 'No' }, complete: true, language: 'en' }) }))
   })
 
   it('the language switch offers only the template\'s languages; Hindi shows Hindi labels and English where untranslated; the stored answer stays English', async () => {
@@ -139,7 +139,7 @@ describe('IntakePortalForm v2 renderer (WS7 T3)', () => {
     fireEvent.change(screen.getByLabelText(/Cigarettes per day/), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/intake/tok', expect.objectContaining({ body: JSON.stringify({ answers: { smoker: 'Yes', perDay: '2' }, complete: true }) }))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/intake/tok', expect.objectContaining({ body: JSON.stringify({ answers: { smoker: 'Yes', perDay: '2' }, complete: true, language: 'hi' }) }))
   })
 
   it('no language switch when the template offers English only', () => {
@@ -164,7 +164,7 @@ describe('IntakePortalForm v2 renderer (WS7 T3)', () => {
     fireEvent.change(screen.getByLabelText(/Your signature/), { target: { value: 'Maria Alvarez' } })
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
     await waitFor(() => expect(screen.getByText(/your form has been submitted/)).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/intake/tok', expect.objectContaining({ body: JSON.stringify({ answers: { scan: 'doc:42', sign: 'Maria Alvarez' }, complete: true }) }))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/intake/tok', expect.objectContaining({ body: JSON.stringify({ answers: { scan: 'doc:42', sign: 'Maria Alvarez' }, complete: true, language: 'en' }) }))
   })
 
   it('a rejected upload shows the route\'s message and leaves the question unanswered', async () => {
@@ -175,14 +175,14 @@ describe('IntakePortalForm v2 renderer (WS7 T3)', () => {
     expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled()
   })
 
-  it('thank-you offers the portal back-link and the signed copy (in the language used) only when portal-linked', async () => {
+  it('thank-you offers the portal back-link and the signed copy only when portal-linked', async () => {
     okFetch()
     const { unmount } = render(<IntakePortalForm token="tok" questions={[]} existingAnswers={{}} autofill={{}} languages={['en', 'hi']} signedCopyHref="/patient-portal/documents/forms/9" />)
     fireEvent.click(screen.getByRole('button', { name: 'हिन्दी' }))
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
     await waitFor(() => expect(screen.getByText(/your form has been submitted/)).toBeInTheDocument())
     expect(screen.getByRole('link', { name: 'Back to your portal' })).toHaveAttribute('href', '/patient-portal')
-    expect(screen.getByRole('link', { name: 'View signed copy' })).toHaveAttribute('href', '/patient-portal/documents/forms/9?lang=hi')
+    expect(screen.getByRole('link', { name: 'View signed copy' })).toHaveAttribute('href', '/patient-portal/documents/forms/9') // the copy reads the stored language
     unmount()
 
     render(<IntakePortalForm token="tok" questions={[]} existingAnswers={{}} autofill={{}} />)

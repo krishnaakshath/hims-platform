@@ -39,7 +39,8 @@ import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import FormsPage from '@/app/patient-portal/(authenticated)/forms/page'
 import { getPatientPortalData } from '@/lib/queries/patient-portal'
 
-const props = (submissionId: string, lang?: string) => ({ params: Promise.resolve({ submissionId }), searchParams: Promise.resolve(lang ? { lang } : {}) })
+// Opened from the portal forms list: no query string -- the language comes from the stored submission.
+const props = (submissionId: string, search: Record<string, string> = {}) => ({ params: Promise.resolve({ submissionId }), searchParams: Promise.resolve(search) })
 
 const COPY: PortalFormCopy = {
   submissionId: 9,
@@ -48,6 +49,7 @@ const COPY: PortalFormCopy = {
   patientName: 'Maria Alvarez',
   uhid: 'UH000000011',
   languages: ['en', 'hi'],
+  language: 'en',
   questions: [
     { id: 'smoker', label: 'Do you smoke?', type: 'select', options: ['Yes', 'No'], hipaaSensitive: false, required: true, i18n: { hi: { label: 'क्या आप धूम्रपान करते हैं?', options: ['हाँ', 'नहीं'] } } },
     { id: 'perDay', label: 'Cigarettes per day', type: 'number', hipaaSensitive: false, required: true, visibleIf: { questionId: 'smoker', equals: 'Yes' } },
@@ -100,17 +102,17 @@ describe('signed form copy page', () => {
     expect(logPatientPortalAction).toHaveBeenCalledWith('viewed signed form copy', 'RD-0001', 'submission=9')
   })
 
-  it('shows the answers in the language used (offered languages only), English where untranslated', async () => {
-    vi.mocked(getPortalFormCopy).mockResolvedValue(COPY)
-    render(await FormCopyPage(props('9', 'hi')))
+  it('a Hindi submission opened from the portal list renders in Hindi, English where untranslated', async () => {
+    vi.mocked(getPortalFormCopy).mockResolvedValue({ ...COPY, language: 'hi' })
+    render(await FormCopyPage(props('9')))
     expect(screen.getByText('क्या आप धूम्रपान करते हैं?')).toBeInTheDocument()
     expect(screen.getByText('हाँ')).toBeInTheDocument()
     expect(screen.getByText('Cigarettes per day')).toBeInTheDocument()
   })
 
-  it('a language the template does not offer falls back to English', async () => {
+  it('the URL cannot change the language: an English submission stays English whatever ?lang= says', async () => {
     vi.mocked(getPortalFormCopy).mockResolvedValue(COPY)
-    render(await FormCopyPage(props('9', 'kn')))
+    render(await FormCopyPage(props('9', { lang: 'hi' })))
     expect(screen.getByText('Do you smoke?')).toBeInTheDocument()
   })
 })

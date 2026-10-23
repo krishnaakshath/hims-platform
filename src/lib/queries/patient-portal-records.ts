@@ -320,6 +320,8 @@ export interface PortalFormCopy {
   patientName: string
   uhid: string | null
   languages: FormLang[]
+  /** The language the patient filled the form in, when recorded and still offered; else English. */
+  language: FormLang
   questions: FormQuestion[]
   answers: Record<string, string>
   /** Each attached consent as signed: the stored attestation text, typed name and time. */
@@ -331,7 +333,7 @@ export async function getPortalFormCopy(patientId: string, submissionId: number)
   const [row] = await getDb()
     .select({
       id: formSubmissions.id, completedDate: formSubmissions.completedDate, answers: formSubmissions.answers,
-      templateName: formTemplates.name, questions: formTemplates.questions, languages: formTemplates.languages,
+      templateName: formTemplates.name, questions: formTemplates.questions, languages: formTemplates.languages, language: formSubmissions.language,
       patientName: patients.name, uhid: patients.uhid,
     })
     .from(formSubmissions)
@@ -339,13 +341,15 @@ export async function getPortalFormCopy(patientId: string, submissionId: number)
     .innerJoin(patients, eq(patients.id, formSubmissions.patientId))
     .where(and(eq(formSubmissions.id, submissionId), eq(formSubmissions.patientId, patientId), eq(formSubmissions.status, 'completed')))
   if (!row) return null
+  const languages = formLanguages(row.languages)
   return {
     submissionId: row.id,
     templateName: row.templateName,
     completedDate: row.completedDate,
     patientName: row.patientName,
     uhid: row.uhid,
-    languages: formLanguages(row.languages),
+    languages,
+    language: languages.find((l) => l === row.language) ?? 'en',
     questions: row.questions,
     answers: row.answers ?? {},
     consents: await listConsentsForSubmission(row.id),

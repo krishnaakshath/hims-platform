@@ -43,6 +43,9 @@ export interface FormQuestion {
   i18n?: Partial<Record<TranslatedLang, { label?: string; options?: string[] }>>
 }
 
+/** What the patient's intake renderer receives of a question: never scores, chart tags or the autofill source. */
+export type IntakeQuestion = Omit<FormQuestion, 'optionScores' | 'compareToChart' | 'autofillField'>
+
 const translationSchema = z.object({
   label: z.string().optional(),
   options: z.array(z.string()).optional(),
@@ -174,7 +177,8 @@ export function visibleQuestions(qs: FormQuestion[], answers: Record<string, str
 }
 
 const NUMBER_RE = /^-?\d+(\.\d+)?$/
-const FILE_RE = /^doc:[1-9]\d*$/
+// At most 9 digits: always inside a Postgres integer (documents.id is serial).
+const FILE_RE = /^doc:[1-9]\d{0,8}$/
 
 /**
  * Validates a submission against the questions the patient could see. Answers to

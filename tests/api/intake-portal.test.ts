@@ -5,6 +5,7 @@ import { POST as sendForm } from '@/app/api/form-submissions/route'
 import { getDb } from '@/db/client'
 import { formSubmissions, formTemplates, formChartDiscrepancies, formSubmissionScores, documents, patients } from '@/db/schema'
 import type { FormQuestion } from '@/lib/forms/question-model'
+import { getPortalFormCopy } from '@/lib/queries/patient-portal-records'
 
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: 'crc', name: 'Jamie Ruiz' })) }))
 
@@ -179,8 +180,8 @@ describe('PUT /api/intake/[token] validates against the template (WS7 T3)', () =
     createdIds.push(body.id)
     return body
   }
-  const put = (token: string, answers: Record<string, string>, complete: boolean) =>
-    PUT(new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ answers, complete }) }) as never, { params: Promise.resolve({ token }) })
+  const put = (token: string, answers: Record<string, string>, complete: boolean, extra: Record<string, unknown> = {}) =>
+    PUT(new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ answers, complete, ...extra }) }) as never, { params: Promise.resolve({ token }) })
   const stored = async (id: number) => (await getDb().select().from(formSubmissions).where(eq(formSubmissions.id, id)))[0]
 
   it('GET exposes the conditions, translations and offered languages the renderer needs', async () => {
@@ -233,5 +234,33 @@ describe('PUT /api/intake/[token] validates against the template (WS7 T3)', () =
     expect(bad.status).toBe(400)
     expect((await bad.json()).errors).toEqual({ scan: 'Upload the requested document' })
     expect((await put(accessToken, { scan: `doc:${own.id}` }, false)).status).toBe(200)
+  })
+
+  it('records the language the patient filled the form in; the signed copy is then in that language', async () => {
+    const { id, accessToken } = await sendConditional()
+    expect((await put(accessToken, { smoker: 'No' }, false, { language: 'hi' })).status).toBe(200)
+    expect((await stored(id)).language).toBe('hi')
+    // A later save without a language keeps the recorded one.
+    expect((await put(accessToken, { smoker: 'No', sign: 'Maria Alvarez' }, true)).status).toBe(200)
+    expect((await stored(id)).language).toBe('hi')
+    const copy = await getPortalFormCopy('RD-0001', id)
+    expect(copy?.language).toBe('hi')
+    expect(await getPortalFormCopy('RD-0002', id)).toBeNull()
+  })
+
+  it('a language the template does not offer, or an unknown one, is a 400 and stores nothing', async () => {
+    const { id, accessToken } = await sendConditional()
+    expect((await put(accessToken, { smoker: 'No' }, false, { language: 'kn' })).status).toBe(400)
+    expect((await put(accessToken, { smoker: 'No' }, false, { language: 'fr' })).status).toBe(400)
+    const row = await stored(id)
+    expect(row.status).toBe('sent')
+    expect(row.language).toBeNull()
+  })
+
+  it('a doc id too large for an integer is a field error, not a database error', async () => {
+    const { accessToken } = await sendConditional()
+    const res = await put(accessToken, { scan: `doc:${'9'.repeat(20)}` }, false)
+    expect(res.status).toBe(400)
+    expect((await res.json()).errors).toEqual({ scan: 'Upload the requested document' })
   })
 })

@@ -179,6 +179,10 @@ describe('validateAnswers', () => {
     expect(validateAnswers(qs, { f: 'doc:42' })).toEqual({ ok: true, cleaned: { f: 'doc:42' } })
     expect(validateAnswers(qs, { f: '/uploads/x.pdf' }).ok).toBe(false)
     expect(validateAnswers(qs, { f: 'doc:abc' }).ok).toBe(false)
+    // Bounded so a huge id can never reach Postgres as an out-of-range integer (22003 -> 500).
+    expect(validateAnswers(qs, { f: 'doc:999999999' }).ok).toBe(true)
+    expect(validateAnswers(qs, { f: 'doc:1000000000' }).ok).toBe(false)
+    expect(validateAnswers(qs, { f: `doc:${'9'.repeat(30)}` }).ok).toBe(false)
   })
 
   it('signature answer is the typed name, non-empty', () => {

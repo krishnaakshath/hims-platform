@@ -1,6 +1,6 @@
 // WS7 T3: the patient's printable copy of a form they submitted -- the answers
-// in the language they used (?lang=, limited to the template's languages,
-// English otherwise and wherever a string is untranslated) and each attached
+// in the language they filled it in (form_submissions.language, recorded by the
+// intake PUT; English when not recorded, and wherever a string is untranslated) and each attached
 // consent exactly as signed (the stored attestation text, typed name, IST
 // time). Identified by UHID, never the chart id. Another patient's submission,
 // or one not yet submitted, is a 404 with no audit row; a shown copy is audited.
@@ -26,17 +26,13 @@ function answerText(q: FormQuestion, lang: FormLang, raw: string | undefined): s
   return formatAnswerDisplay(q, raw)
 }
 
-export default async function PortalFormCopyPage({ params, searchParams }: {
-  params: Promise<{ submissionId: string }>
-  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
-}) {
+export default async function PortalFormCopyPage({ params }: { params: Promise<{ submissionId: string }> }) {
   const session = await requirePortalDocumentSession()
   const submissionId = parseId((await params).submissionId)
   if (submissionId === null) notFound()
   const copy = await getPortalFormCopy(session.patientId, submissionId)
   if (!copy) notFound()
-  const requested = (await searchParams)?.lang
-  const lang: FormLang = copy.languages.find((l) => l === requested) ?? 'en'
+  const lang = copy.language
   await logPatientPortalAction('viewed signed form copy', session.patientId, `submission=${copy.submissionId}`)
 
   const shown = visibleQuestions(copy.questions, copy.answers)

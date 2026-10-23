@@ -430,7 +430,10 @@ export const formSubmissions = pgTable('form_submissions', {
   answers: jsonb('answers').$type<Record<string, string>>().default({}),
   accessToken: text('access_token').unique(),
   tokenExpiresAt: timestamp('token_expires_at'),
-})
+  language: text('language'), // WS7 T3: the FormLang the patient last saved in; null = not recorded (English)
+}, (t) => [
+  check('form_submissions_language_valid', sql`${t.language} IS NULL OR ${t.language} IN ('en', 'hi', 'kn')`), // WS7 T3
+])
 
 // Which consent documents are attached to which template. UNIQUE on
 // (formTemplateId, consentDocumentId) as a real DB unique index -- attaching

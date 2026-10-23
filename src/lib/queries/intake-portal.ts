@@ -3,8 +3,7 @@ import { documents, formSubmissions, formTemplates, patients } from '@/db/schema
 import { and, eq, inArray } from 'drizzle-orm'
 import { listConsentsForSubmission, type SubmissionConsent } from '@/lib/queries/form-submission-consents'
 import { publicPatientColumns, type PublicPatientRow } from '@/lib/queries/patient-columns'
-import { formLanguages, type FormLang, type FormQuestion } from '@/lib/forms/question-model' // WS7 T1/T3
-import type { IntakeQuestion } from '@/components/intake/QuestionField' // WS7 T3
+import { formLanguages, type FormLang, type FormQuestion, type IntakeQuestion } from '@/lib/forms/question-model' // WS7 T1/T3
 
 export type IntakePortalState = 'active' | 'expired' | 'completed' | 'not_found'
 
@@ -82,14 +81,14 @@ export async function getSubmissionPatientIdByToken(token: string): Promise<stri
 // WS7 T3 ------------------------------------------------------------------
 
 /** The submission behind a usable token (not expired, not completed) with its template's questions, else null. */
-export async function getActiveIntakeSubmission(token: string): Promise<{ id: number; patientId: string; questions: FormQuestion[] } | null> {
+export async function getActiveIntakeSubmission(token: string): Promise<{ id: number; patientId: string; questions: FormQuestion[]; languages: FormLang[] } | null> {
   const [row] = await getDb()
-    .select({ id: formSubmissions.id, patientId: formSubmissions.patientId, status: formSubmissions.status, tokenExpiresAt: formSubmissions.tokenExpiresAt, questions: formTemplates.questions })
+    .select({ id: formSubmissions.id, patientId: formSubmissions.patientId, status: formSubmissions.status, tokenExpiresAt: formSubmissions.tokenExpiresAt, questions: formTemplates.questions, languages: formTemplates.languages })
     .from(formSubmissions)
     .innerJoin(formTemplates, eq(formSubmissions.templateId, formTemplates.id))
     .where(eq(formSubmissions.accessToken, token))
   if (!row || !isSubmissionTokenValid(row)) return null
-  return { id: row.id, patientId: row.patientId, questions: row.questions }
+  return { id: row.id, patientId: row.patientId, questions: row.questions, languages: formLanguages(row.languages) }
 }
 
 /**

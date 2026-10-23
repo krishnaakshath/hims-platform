@@ -60,7 +60,7 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
     setError(null)
     const sent: Record<string, string> = {}
     for (const q of answerable) if (answers[q.id] !== undefined) sent[q.id] = answers[q.id]
-    const res = await sendJson(`/api/intake/${token}`, 'PUT', { answers: sent, complete })
+    const res = await sendJson(`/api/intake/${token}`, 'PUT', { answers: sent, complete, language: lang })
     setSubmitting(false)
     if (!res.ok) {
       const fieldErrors = (res.body as { errors?: unknown } | undefined)?.errors
@@ -93,7 +93,7 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
       <div className="text-center">
         <p className="text-sm font-medium text-foreground">Thank you — your form has been submitted.</p>
         {signedCopyHref ? (
-          <PortalLinks signedCopyHref={lang === 'en' ? signedCopyHref : `${signedCopyHref}?lang=${lang}`} />
+          <PortalLinks signedCopyHref={signedCopyHref} />
         ) : (
           <p className="mt-1 text-sm text-muted-foreground">You may close this page.</p>
         )}
