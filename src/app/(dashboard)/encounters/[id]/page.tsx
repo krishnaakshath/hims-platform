@@ -14,7 +14,7 @@ import { PatientStrip } from '@/components/encounters/PatientStrip'
 import { WorkspaceShell, WorkspaceOrdersLauncher, WorkspaceRxLauncher } from '@/components/encounters/WorkspaceShell'
 import { VitalsForm } from '@/components/encounters/VitalsForm'
 import { ConsultForm } from '@/components/encounters/ConsultForm'
-import { NoteForm } from '@/components/NoteForm'
+import { NoteForm, NoteCard } from '@/components/NoteForm'
 // WS1 T4: diagnoses, problem list, referral, advice and follow-up on the Diagnosis tab.
 import { listEncounterDiagnoses, listProblemList } from '@/lib/queries/encounter-diagnoses'
 import { listEncounterReferrals } from '@/lib/queries/referrals'
@@ -24,6 +24,9 @@ import { ProblemList } from '@/components/encounters/ProblemList'
 import { ReferralForm } from '@/components/encounters/ReferralForm'
 import { FollowUpAdvice } from '@/components/encounters/FollowUpAdvice'
 // end WS1 T4
+// WS1 T5: visit notes and the Complete visit bar.
+import { listNotesForEncounter } from '@/lib/queries/encounter-notes'
+import { CompleteVisitBar } from '@/components/encounters/CompleteVisitBar'
 
 const HEADING = 'mb-3 text-sm font-semibold text-foreground'
 const MUTED = 'text-sm text-muted-foreground'
@@ -55,10 +58,13 @@ export default async function EncounterWorkspacePage({ params }: { params: Promi
     ? await Promise.all([listMedicationsWithInventory(), listAllProviders(), listLabTests(), resolveSessionProvider(session), patientDiagnosisCodes(patient.id)])
     : [[], [], [], null, []] as const
   // WS1 T4
-  const [visitDiagnoses, problemList, visitReferrals, departmentOptions] = await Promise.all([
+  const [visitDiagnoses, problemList, visitReferrals, departmentOptions, visitNotes] = await Promise.all([
     listEncounterDiagnoses(encounter.id), listProblemList(patient.id), listEncounterReferrals(encounter.id),
     canWrite ? listDepartments({ activeOnly: true }) : Promise.resolve([]),
+    listNotesForEncounter(encounter.id), // WS1 T5
   ])
+  // WS1 T5: the author (or an admin) signs a draft, as on the medical record; signing stays open after completion.
+  const mayWriteNotes = session.role === 'pi' || session.role === 'admin'
 
   const vitalsPanel = (
     <div className="space-y-5">
@@ -173,11 +179,30 @@ export default async function EncounterWorkspacePage({ params }: { params: Promi
             : <p className={MUTED}>Tests are ordered by the visit&apos;s doctor while the visit is open. See the {chartLink}.</p>,
           notes: (
             <div className="space-y-3">
-              <NoteForm patientId={patient.id} canWrite={canWrite} />
+              <NoteForm patientId={patient.id} canWrite={canWrite} encounterId={encounter.id} />
+              {visitNotes.length > 0 && (
+                <div className="space-y-2.5">
+                  {visitNotes.map((n) => (
+                    <NoteCard
+                      key={n.id}
+                      patientId={patient.id}
+                      canSign={mayWriteNotes && n.status === 'draft' && (n.authorName === session.name || session.role === 'admin')}
+                      note={{
+                        id: n.id, noteType: n.noteType, authorName: n.authorName, authorRole: n.authorRole,
+                        subjective: n.subjective, objective: n.objective, assessment: n.assessment, plan: n.plan,
+                        status: n.status, createdAt: n.createdAt.toISOString(), signedAt: n.signedAt?.toISOString() ?? null,
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
               <p className={MUTED}>Earlier notes are on the {chartLink}.</p>
             </div>
           ),
         }}
+        footer={canWrite || encounter.status === 'completed'
+          ? <CompleteVisitBar encounterId={encounter.id} status={encounter.status} canComplete={canWrite} />
+          : undefined}
       />
     </div>
   )

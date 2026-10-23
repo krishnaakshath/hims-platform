@@ -2113,7 +2113,10 @@ export const encounterNotes = pgTable('encounter_notes', {
   status: noteStatusEnum('status').default('draft').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   signedAt: timestamp('signed_at'),
-})
+  encounterId: integer('encounter_id').references(() => encounters.id), // WS1 T5 (the visit the note was written in)
+}, (t) => [
+  index('encounter_notes_encounter_idx').on(t.encounterId), // WS1 T5
+])
 
 // WS1 T1: + encounter_note (scripts/migrations/2026-10-24-ws1-0-enum-values.sql).
 export const signableTypeEnum = pgEnum('signable_type', ['form_submission', 'admission_discharge', 'policy_acceptance', 'form_submission_consent', 'encounter_note'])

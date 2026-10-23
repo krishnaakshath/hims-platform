@@ -54,7 +54,9 @@ describe('Patient detail: Visits & follow-up tab', () => {
     expect(screen.getByText(/renal panel/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /set follow-up/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^book$/i })).toBeNull()
-    expect(screen.getByRole('button', { name: /start consultation/i })).toBeInTheDocument()
+    // WS1 T5: doctors start and complete visits in the workspace; the list links there.
+    expect(screen.getByRole('link', { name: /open workspace/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start consultation|complete visit/i })).toBeNull()
   })
 
   it('crc is read-only for follow-ups and sees the tab after Verification', async () => {

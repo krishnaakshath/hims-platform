@@ -2,11 +2,13 @@
 // consultation" step, and the doctor-home helpers that link today's schedule to its visits.
 // Reading never mutates: only startConsultation (POST .../start) moves a visit on.
 import { and, asc, desc, eq, gte, inArray, ne, or } from 'drizzle-orm'
+import { z } from 'zod'
 import { getDb } from '@/db/client'
 import {
-  admissions, departments, diagnoses, encounters, patientPolicies, patients, payers, providers,
-  type EncounterConsultRow, type EncounterVitalsRow,
+  admissions, departments, diagnoses, encounterConsults, encounterNotes, encounterVitals, encounters, patientPolicies, patients, payers, providers,
+  type EncounterConsultRow, type EncounterRow, type EncounterVitalsRow,
 } from '@/db/schema'
+import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { CLINICAL_WRITE_ROLES, VITALS_ROLES } from '@/lib/role-policy'
@@ -202,4 +204,77 @@ export async function listMyRecentPatients(providerId: number, sinceIso: string)
       lastVisitAt: lastContact.get(id)!.toISOString(), primaryPayerName: payerByPatient.get(id) ?? null,
     }]
   })
+}
+
+// WS1 T5 (spec ruling 4): completing a visit. An OPD visit needs at least one live diagnosis, or a
+// stated reason why there is none (stored on the consult record, audited without its text). IPD
+// visits complete through discharge and lab visits are exempt, so neither is guarded here.
+export const completeEncounterSchema = z.object({ noDiagnosisReason: z.string().trim().min(5).max(300).optional() }).strict()
+
+export type CompleteEncounterWarning = 'no_vitals' | 'unsigned_notes'
+export type CompleteEncounterResult =
+  | { ok: true; encounter: EncounterRow; warnings: CompleteEncounterWarning[] }
+  | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' | 'diagnosis_missing' }
+
+/** Stores the no-diagnosis reason while the visit is still open; false when it has closed meanwhile. */
+async function recordNoDiagnosisReason(encounter: EncounterRow, reason: string, session: Session): Promise<boolean> {
+  const now = new Date()
+  return getDb().transaction(async (tx) => {
+    // Share-lock: a concurrent completion (FOR UPDATE) waits for this write, as in encounter-clinical.
+    const [row] = await tx.select({ status: encounters.status }).from(encounters).where(eq(encounters.id, encounter.id)).for('share')
+    if (!row || !isOpen(row.status)) return false
+    await tx.insert(encounterConsults).values({
+      encounterId: encounter.id, patientId: encounter.patientId, noDiagnosisReason: reason, updatedAt: now, updatedByName: session.name,
+    }).onConflictDoUpdate({
+      target: encounterConsults.encounterId,
+      set: { noDiagnosisReason: reason, updatedAt: now, updatedByName: session.name },
+    })
+    // The reason is clinical free text: it stays on the consult row, never in the audit log.
+    await logAudit(session, 'recorded no-diagnosis reason', encounter.patientId, `encounter=${encounter.id}`, tx)
+    return true
+  })
+}
+
+async function completionWarnings(encounterId: number): Promise<CompleteEncounterWarning[]> {
+  const db = getDb()
+  const [[vitals], [draft]] = await Promise.all([
+    db.select({ id: encounterVitals.id }).from(encounterVitals).where(eq(encounterVitals.encounterId, encounterId)).limit(1),
+    db.select({ id: encounterNotes.id }).from(encounterNotes).where(and(eq(encounterNotes.encounterId, encounterId), eq(encounterNotes.status, 'draft'))).limit(1),
+  ])
+  const warnings: CompleteEncounterWarning[] = []
+  if (!vitals) warnings.push('no_vitals')
+  if (draft) warnings.push('unsigned_notes')
+  return warnings
+}
+
+/**
+ * Completes a visit through the SP3 state machine (transitionEncounter, unchanged, which re-checks
+ * ownership under the row lock and audits the change). The caller ran the role gate; a pi passes
+ * their own provider id. The reason is written before the transition (harmless if it then fails).
+ */
+export async function completeEncounter(
+  encounterId: number,
+  session: Session,
+  opts: { noDiagnosisReason?: string; actingProviderId: number | null },
+): Promise<CompleteEncounterResult> {
+  const current = await getEncounterById(encounterId)
+  if (!current) return { ok: false, error: 'not_found' }
+  if (opts.actingProviderId != null && current.providerId !== opts.actingProviderId) return { ok: false, error: 'not_owner' }
+
+  // A closed visit skips the guard: the transition below refuses it as invalid_transition.
+  if (current.encounterType === 'opd' && isOpen(current.status)) {
+    const [live] = await getDb().select({ id: diagnoses.id }).from(diagnoses)
+      .where(and(eq(diagnoses.encounterId, encounterId), liveDiagnosis)).limit(1)
+    if (!live) {
+      if (opts.noDiagnosisReason === undefined) return { ok: false, error: 'diagnosis_missing' }
+      if (!(await recordNoDiagnosisReason(current, opts.noDiagnosisReason, session))) return { ok: false, error: 'invalid_transition' }
+    }
+  }
+
+  const result = await transitionEncounter(encounterId, 'completed', session, { actingProviderId: opts.actingProviderId })
+  if (!result.ok) {
+    // Any other refusal (admission_active today, more later) means this visit cannot complete now.
+    return { ok: false, error: result.error === 'not_found' || result.error === 'not_owner' ? result.error : 'invalid_transition' }
+  }
+  return { ok: true, encounter: result.encounter, warnings: await completionWarnings(encounterId) }
 }

@@ -103,8 +103,8 @@ describe('FollowUpPanel', () => {
     cleanup()
     render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[ENC]} can={{ ...NONE, startOrComplete: true, cancelVisit: true }} />)
     expect(screen.getByRole('table')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /start consultation/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /complete visit/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /open workspace/i })).toHaveAttribute('href', '/encounters/90')
+    expect(screen.queryByRole('button', { name: /start consultation|complete visit/i })).toBeNull()
     expect(screen.getByRole('button', { name: /cancel visit/i })).toBeInTheDocument()
   })
 
@@ -126,15 +126,17 @@ describe('FollowUpPanel', () => {
     expect(screen.getByRole('button', { name: /cancel follow-up/i })).toBeInTheDocument()
   })
 
-  it('a pi only starts or completes their own visits', () => {
+  it('WS1 T5: a pi sees "Open workspace" linking the visit, not Start or Complete (any pi may read it)', () => {
     const can = { ...NONE, startOrComplete: true }
-    render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[ENC]} selfProviderId={7} isPi can={can} />)
-    expect(screen.getByRole('button', { name: /start consultation/i })).toBeInTheDocument()
-    cleanup()
-    render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[ENC]} selfProviderId={8} isPi can={can} />)
+    render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[ENC, { ...ENC, id: 91, status: 'in_consultation' }]} selfProviderId={8} isPi can={can} />)
+    expect(screen.getAllByRole('link', { name: /open workspace/i }).map((a) => a.getAttribute('href'))).toEqual(['/encounters/90', '/encounters/91'])
     expect(screen.queryByRole('button', { name: /start consultation|complete visit/i })).toBeNull()
     cleanup()
-    render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[ENC]} selfProviderId={null} isPi={false} can={can} />)
-    expect(screen.getByRole('button', { name: /complete visit/i })).toBeInTheDocument()
+    render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[{ ...ENC, status: 'cancelled' }]} selfProviderId={7} isPi can={can} />)
+    expect(screen.queryByRole('link', { name: /open workspace/i })).toBeNull()
+    cleanup()
+    render(<FollowUpPanel {...PROPS} followUps={[]} encounters={[ENC]} can={{ ...NONE, cancelVisit: true }} />)
+    expect(screen.queryByRole('link', { name: /open workspace/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /cancel visit/i })).toBeInTheDocument()
   })
 })
