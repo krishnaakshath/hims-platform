@@ -121,14 +121,24 @@ export const formTemplateUpdateSchema = formTemplateBodySchema.partial()
   .extend({ isActive: z.boolean().optional() })
   .strict()
 
+// The value a trigger answer is compared with in visibleIf: the same value
+// validateAnswers would store (trimmed; a phone normalised when it parses).
+function matchValue(q: FormQuestion, raw: string | undefined): string {
+  const value = typeof raw === 'string' ? raw.trim() : ''
+  return q.type === 'phone' ? (normalizePhone(value) ?? value) : value
+}
+
 /** Questions the patient currently sees, in order. A question whose trigger is hidden is hidden too. */
 export function visibleQuestions(qs: FormQuestion[], answers: Record<string, string>): FormQuestion[] {
-  const shown = new Set<string>()
+  const shown = new Map<string, FormQuestion>()
   const out: FormQuestion[] = []
   for (const q of qs) {
     const cond = q.visibleIf
-    if (cond && !(shown.has(cond.questionId) && answers[cond.questionId] === cond.equals)) continue
-    shown.add(q.id)
+    if (cond) {
+      const trigger = shown.get(cond.questionId)
+      if (!trigger || matchValue(trigger, answers[cond.questionId]) !== cond.equals) continue
+    }
+    shown.set(q.id, q)
     out.push(q)
   }
   return out
@@ -149,7 +159,16 @@ export function validateAnswers(
 ): { ok: true; cleaned: Record<string, string> } | { ok: false; errors: Record<string, string> } {
   const cleaned: Record<string, string> = {}
   const errors: Record<string, string> = {}
-  for (const q of visibleQuestions(qs, answers)) {
+  // Walk in order and judge each visibleIf against the value already stored in
+  // `cleaned` for its (earlier) trigger, so visibility and what is saved never
+  // disagree -- e.g. a trigger typed "Yes " is stored as "Yes" and opens its
+  // dependants. A trigger that failed validation stores nothing, so its
+  // dependants stay hidden (the trigger's own error already blocks the save).
+  const shown = new Set<string>()
+  for (const q of qs) {
+    const cond = q.visibleIf
+    if (cond && !(shown.has(cond.questionId) && cleaned[cond.questionId] === cond.equals)) continue
+    shown.add(q.id)
     if (q.type === 'section') continue
     const raw = answers[q.id]
     const value = typeof raw === 'string' ? raw.trim() : ''

@@ -113,6 +113,27 @@ describe('validateAnswers', () => {
     expect(r).toEqual({ ok: true, cleaned: { smoker: 'No' } })
   })
 
+  it('a trigger answer with stray whitespace opens its required dependant (review round 1)', () => {
+    const qs = [
+      q({ id: 'smoker', type: 'select', options: ['Yes', 'No'], required: true }),
+      q({ id: 'packs', type: 'number', required: true, visibleIf: { questionId: 'smoker', equals: 'Yes' } }),
+    ]
+    expect(visibleQuestions(qs, { smoker: 'Yes ' }).map((x) => x.id)).toEqual(['smoker', 'packs'])
+    const missing = validateAnswers(qs, { smoker: 'Yes ' })
+    expect(missing.ok).toBe(false)
+    if (!missing.ok) expect(Object.keys(missing.errors)).toEqual(['packs'])
+    expect(validateAnswers(qs, { smoker: ' Yes', packs: '5' })).toEqual({ ok: true, cleaned: { smoker: 'Yes', packs: '5' } })
+  })
+
+  it('a phone trigger is matched on its normalised value (review round 1)', () => {
+    const qs = [
+      q({ id: 'mob', type: 'phone' }),
+      q({ id: 'confirm', type: 'checkbox', required: true, visibleIf: { questionId: 'mob', equals: '+919845012345' } }),
+    ]
+    expect(visibleQuestions(qs, { mob: '98450 12345' }).map((x) => x.id)).toEqual(['mob', 'confirm'])
+    expect(validateAnswers(qs, { mob: '98450 12345' }).ok).toBe(false)
+  })
+
   it('drops section and unknown-key answers', () => {
     const qs = [q({ id: 's', type: 'section' }), q({ id: 'a', type: 'text' })]
     expect(validateAnswers(qs, { s: 'x', a: 'hello', zzz: '1' })).toEqual({ ok: true, cleaned: { a: 'hello' } })
