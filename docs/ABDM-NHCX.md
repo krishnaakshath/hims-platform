@@ -146,6 +146,27 @@ java -jar validator_cli.jar out/*.json -version 4.0.1 -ig ndhm.in#6.5.0
 
 The result is advisory: terminology-binding warnings for the hospital-local service codes are expected (U15).
 
+## Insurance verification (WS12)
+
+Every cover check is saved in one append-only table, `coverage_verifications`, with who, when, source, result and the limits returned. The Insurance tab, the patient header badge, the policy add flow, pre-auth creation and the charge rules all read the current verification from it.
+
+- **Sources.**
+  - `nhcx`: a real NHCX eligibility answer, written by the callback in the same transaction that settles the eligibility check.
+  - `nhcx_mock`: the sandbox mock's answer. It is labelled **Sandbox mock - not real** wherever it appears.
+  - `manual`: staff recorded a confirmation from an insurer or TPA that is not on NHCX.
+  - With NHCX unconfigured the surface says **Not configured**; no result is invented.
+- **Freshness.** An NHCX or mock result is current for 24 hours from `verified_at` (`COVERAGE_FRESH_HOURS`). After that the badge shows it as stale and the check can be re-run.
+- **Manual verification.** Recorded from the Insurance tab (`POST /api/rcm/policies/[id]/verifications`, roles admin, rcm, frontdesk). It needs a method (insurer portal, TPA portal, phone, email or letter) and may carry an insurer reference (at most 64 characters) and one PDF, JPEG or PNG document (at most 4 MB). The "valid until" date defaults to 7 days from today (IST), may be at most 30 days from today, and never later than the policy's end date. The document is stored privately and opened through an authenticated route; its URL is never returned in the coverage API.
+- **Limits.** Effective limits are the current verification's values where it gave them, otherwise the policy's own fields (sum insured, co-pay, room rent, ICU). The charge rules `room_rent_over_limit` and `sum_insured_exceeded` warn (never block) when a line goes over. The ICU limit applies for room categories ICU, HDU, NICU, PICU and CCU.
+- **ABHA identity guard.** Linking an ABHA, or resolving a Scan & Share, compares name, date of birth and gender with the chart on the server. A field ABDM did not give counts as unavailable, not a mismatch. If any field mismatches, the link is refused until the user gives a reason of 10 to 300 characters; the reason is stored in `abha_link_overrides` and the audit entry carries only the names of the mismatched fields. A flow with no stored profile counts as a name mismatch.
+- **Simulate share (mock only).** `POST /api/abdm/shares/simulate` and its button exist only when ABDM is in mock mode (`ABDM_USE_MOCKS=1`, not production, with `ALLOW_DEMO_MOCKS` and `DEMO_FEATURES` where production-like mode requires them). Otherwise the route answers 404 after the role and body checks. It writes an ordinary pending share row flagged `is_mock`, optionally copying an existing patient's name, date of birth and gender (to test the match path) or taking typed values (to test the mismatch path). No gateway is called.
+- **Limit codes.** The codes read from the eligibility response are unverified fact U21, below.
+- **Environment.** Names only: `ABDM_USE_MOCKS`, `ALLOW_DEMO_MOCKS`, `DEMO_FEATURES`, `INTEGRATION_PAYLOAD_KEY` (required for the ABHA and NHCX flows), `BLOB_DRIVER` (where verification documents are stored).
+
+### Not yet built
+
+Coverage at admission and OPD check-in (WS12 Task 9) is pending. The `admission_coverage` table exists, but the check-in and inpatient admission screens do not yet show or record a coverage verdict, so cashless admission is not yet blocked on an expired policy. This waits for the inpatient `admitPatient` work.
+
 ## Phase 2 (not built): ABDM M2/M3
 
 HIP care-context linking, consent notifications, health-record push (M2) and HIU consent requests (M3) are not needed for NHCX claims and are a separate certification track (functional test and WASA). They reuse the gateway session, the standard headers, the callback JWT check, the bridge URL, `safeLog`, gateway audit rows and the payload vault from this work. See the appendix of `docs/superpowers/plans/2026-10-07-sp8-abdm-nhcx.md`.
