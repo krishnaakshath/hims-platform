@@ -8,6 +8,7 @@ import { normalizePhone } from '@/lib/india/phone'
 import { LANGUAGES } from '@/lib/india/reference'
 import { broadcastOutcome, classifyRecipient, describeAudienceFilters, type HospitalAudienceFilters, type RecipientClass } from '@/lib/broadcasts/audience'
 import { sendNotification, type SendNotificationDeps } from '@/lib/notify/send'
+import { notArchived } from './patient-archive' // WS8 T13
 
 export interface BroadcastAudienceMember {
   id: string
@@ -75,7 +76,8 @@ async function latestFormStatusByPatient(): Promise<Map<string, string>> {
 /**
  * WS7 T10: every patient matching a broadcast's audience filters, each classified as send /
  * opted_out / no_phone. Used by the wizard preview and, again at send time, by the create route.
- * Archived charts: `patients.archived_at` arrives with WS8 T13, so `archived` is false here until then.
+ * WS8 T13: archived charts are excluded in SQL; `archived` still reads patients.archived_at so a
+ * chart archived between the query and the classification can never be classified `send`.
  * A trial filter keeps only patients with a screening for that trial; a screening-status filter
  * looks at each patient's most recent screening.
  */
@@ -86,10 +88,11 @@ export async function listBroadcastRecipientCandidates(filters: HospitalAudience
     .select({
       id: patients.id, uhid: patients.uhid, name: patients.name, phone: patients.phone, email: patients.email,
       optedOut: patients.notificationOptOut, sms: patientNotificationPreferences.sms,
+      archivedAt: patients.archivedAt, // WS8 T13
     })
     .from(patients)
     .leftJoin(patientNotificationPreferences, eq(patientNotificationPreferences.patientId, patients.id))
-    .where(conds.length > 0 ? and(...conds) : undefined)
+    .where(and(notArchived(), ...conds)) // WS8 T13
     .orderBy(asc(patients.id))
 
   let matched = rows
@@ -108,7 +111,7 @@ export async function listBroadcastRecipientCandidates(filters: HospitalAudience
       phone: r.phone ? normalizePhone(r.phone) : null,
       optedOut: r.optedOut,
       smsOff: r.sms === false,
-      archived: false, // WS8 T13 adds patients.archived_at
+      archived: r.archivedAt !== null, // WS8 T13
     }),
   }))
 }

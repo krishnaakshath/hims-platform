@@ -17,6 +17,7 @@ import { policyNotInForceMessage, rcmFail, rcmOk, type RcmWriteResult } from '@/
 import { sha256Hex } from '@/lib/rcm/hash'
 import type { PolicyInput, PolicyPatchInput } from '@/lib/rcm/validation'
 import type { WriteExecutor } from './executor'
+import { notArchived } from './patient-archive' // WS8 T13
 
 // ---- RCM patient search (the RCM minimum: no phone, email, address or identity numbers) ----
 
@@ -27,9 +28,9 @@ export async function findPatientsForRcm(q: string, now: Date = new Date()): Pro
   if (term.length < 2) return []
   const cols = { id: patients.id, name: patients.name, uhid: patients.uhid, gender: patients.gender, dob: patients.dob }
   const db = getDb()
-  const exact = await db.select(cols).from(patients).where(or(sql`upper(${patients.uhid}) = upper(${term})`, eq(patients.id, term))).limit(10)
+  const exact = await db.select(cols).from(patients).where(and(notArchived(), or(sql`upper(${patients.uhid}) = upper(${term})`, eq(patients.id, term)))).limit(10) // WS8 T13
   const escaped = term.replace(/[\\%_]/g, (c) => `\\${c}`)
-  const byName = await db.select(cols).from(patients).where(ilike(patients.name, `${escaped}%`)).orderBy(asc(patients.name), asc(patients.id)).limit(10)
+  const byName = await db.select(cols).from(patients).where(and(notArchived(), ilike(patients.name, `${escaped}%`))).orderBy(asc(patients.name), asc(patients.id)).limit(10) // WS8 T13
   const seen = new Set<string>()
   const today = todayIsoIn(undefined, now)
   const out: RcmPatientHit[] = []

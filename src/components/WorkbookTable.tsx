@@ -2,9 +2,9 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Search, Trash2 } from 'lucide-react'
+import { Archive, Search } from 'lucide-react'
 import type { WorkbookRow } from '@/lib/queries/workbook'
-import { DeletePatientDialog, type DeleteTarget } from '@/components/DeletePatientDialog'
+import { ArchivePatientDialog, type ArchiveTarget } from '@/components/ArchivePatientDialog' // WS8 T13
 
 // Same elevated-card treatment ReportTable.tsx and the rest of the app's
 // data surfaces already use.
@@ -63,7 +63,7 @@ export function WorkbookTable({ rows, isAdmin }: { rows: WorkbookRow[]; isAdmin:
   const [search, setSearch] = useState('')
   const [visibleColumns, setVisibleColumns] = useState<string[]>(COLUMNS.map((c) => c.key as string))
   const [columnsPanelOpen, setColumnsPanelOpen] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const [archiveTarget, setArchiveTarget] = useState<ArchiveTarget | null>(null)
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -149,12 +149,12 @@ export function WorkbookTable({ rows, isAdmin }: { rows: WorkbookRow[]; isAdmin:
                           {isAdmin && (
                             <button
                               type="button"
-                              onClick={() => setDeleteTarget({ id: r.id, name: r.patientName })}
-                              aria-label={`Delete ${r.patientName}`}
-                              title="Delete patient"
-                              className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => setArchiveTarget({ id: r.id, name: r.patientName })}
+                              aria-label={`Archive ${r.patientName}`}
+                              title="Archive patient"
+                              className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                             >
-                              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                              <Archive className="h-3.5 w-3.5" aria-hidden="true" />
                             </button>
                           )}
                         </div>
@@ -171,10 +171,10 @@ export function WorkbookTable({ rows, isAdmin }: { rows: WorkbookRow[]; isAdmin:
       )}
       <p className="mt-3 text-xs text-muted-foreground">{filtered.length} of {rows.length} patient{rows.length === 1 ? '' : 's'}</p>
 
-      <DeletePatientDialog
-        target={deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onDeleted={() => router.refresh()}
+      <ArchivePatientDialog
+        target={archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        onArchived={() => router.refresh()}
       />
     </div>
   )

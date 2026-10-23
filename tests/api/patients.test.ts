@@ -240,74 +240,21 @@ describe('POST /api/patients', () => {
 })
 
 describe('DELETE /api/patients/[anonId]', () => {
-  // Registration writes audit rows (as 'Test Admin') that the DELETE route
-  // does not remove; delete exactly those, by patient id and userName.
-  const auditedIds: string[] = []
-  afterEach(async () => {
-    while (auditedIds.length > 0) {
-      await getDb().delete(auditLog).where(and(eq(auditLog.patientId, auditedIds.pop()!), eq(auditLog.userName, 'Test Admin')))
-    }
-  })
-
-  async function createTestPatient(): Promise<string> {
-    vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'admin', name: 'Test Admin', userId: null })
-    const res = await createPatient(new NextRequest('http://localhost/api/patients', { method: 'POST', body: JSON.stringify(registration({ name: 'Delete Route Test', dob: '1993-03-03' })) }))
-    expect(res.status).toBe(201)
-    const body = await res.json()
-    auditedIds.push(body.id)
-    return body.id
-  }
-
+  // WS8 T13 (spec D17): patients are archived, never deleted through the API.
   it('returns 401 when there is no authenticated session', async () => {
     vi.mocked(auth.requireSession).mockResolvedValueOnce(UNAUTHORIZED())
-    const response = await deletePatientRoute(new NextRequest('http://localhost/api/patients/RD-0001', { method: 'DELETE' }), { params: Promise.resolve({ anonId: 'RD-0001' }) })
-    expect(response.status).toBe(401)
+    expect((await deletePatientRoute()).status).toBe(401)
   })
 
-  it('rejects a non-admin session -- deleting a chart is an admin-only action', async () => {
+  it('rejects a non-admin session', async () => {
     vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'crc', name: 'Test CRC', userId: null })
-    const response = await deletePatientRoute(new NextRequest('http://localhost/api/patients/RD-0001', { method: 'DELETE' }), { params: Promise.resolve({ anonId: 'RD-0001' }) })
-    expect(response.status).toBe(403)
+    expect((await deletePatientRoute()).status).toBe(403)
   })
 
-  it('returns 404 for an unknown anonymous id', async () => {
+  it('answers 405 to an admin: patients are archived, not deleted', async () => {
     vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'admin', name: 'Test Admin', userId: null })
-    const response = await deletePatientRoute(new NextRequest('http://localhost/api/patients/RD-9999/delete-test', { method: 'DELETE' }), { params: Promise.resolve({ anonId: 'RD-9999-delete-test' }) })
-    expect(response.status).toBe(404)
+    const response = await deletePatientRoute()
+    expect(response.status).toBe(405)
+    expect(await response.json()).toEqual({ error: 'Patients are archived, not deleted. Use Archive.' })
   })
-
-  it('permanently removes the patient as an admin', async () => {
-    const id = await createTestPatient()
-    vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'admin', name: 'Test Admin', userId: null })
-    const response = await deletePatientRoute(new NextRequest(`http://localhost/api/patients/${id}`, { method: 'DELETE' }), { params: Promise.resolve({ anonId: id }) })
-    expect(response.status).toBe(200)
-
-    const [row] = await getDb().select().from(patients).where(eq(patients.id, id))
-    expect(row).toBeUndefined()
-    // deletePatient() clears 17 tables as separate sequential round-trips
-    // (see its own comment on why none of these FKs cascade at the DB
-    // level) -- slower than a single-query test even with nothing to
-    // delete in most of them, so this needs more than the default 5s.
-  }, 15000)
-
-  // SP4: tax records must be kept, so a patient with a receipt cannot be deleted.
-  it('409s a patient with issued bills or receipts and deletes nothing', async () => {
-    const id = await createTestPatient()
-    const { patientPayments } = await import('@/db/schema')
-    const { purgeBillingFixtures } = await import('../db/billing-fixtures')
-    await getDb().insert(patientPayments).values({
-      receiptNumber: `RCT/99-00/DEL-${id}`, kind: 'advance', patientId: id, mode: 'cash', amountPaise: 100, financialYear: '2099-00', receiptDate: '2099-06-01', receivedByName: 'Test Admin',
-    })
-    try {
-      vi.mocked(auth.requireSession).mockResolvedValueOnce({ role: 'admin', name: 'Test Admin', userId: null })
-      const response = await deletePatientRoute(new NextRequest(`http://localhost/api/patients/${id}`, { method: 'DELETE' }), { params: Promise.resolve({ anonId: id }) })
-      expect(response.status).toBe(409)
-      expect(await response.json()).toEqual({ error: 'This patient has issued bills or receipts, which must be kept; the patient cannot be deleted' })
-      expect(await getDb().select().from(patients).where(eq(patients.id, id))).toHaveLength(1)
-    } finally {
-      await purgeBillingFixtures([id])
-      const { deletePatient } = await import('@/lib/queries/patients')
-      await deletePatient(id)
-    }
-  }, 15000)
 })

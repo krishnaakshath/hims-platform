@@ -151,7 +151,11 @@ export const patients = pgTable('patients', {
   abhaVerifiedAt: timestamp('abha_verified_at'),
   abhaVerificationSource: text('abha_verification_source', { enum: ABHA_VERIFICATION_SOURCES }),
   abhaVerifiedVia: text('abha_verified_via', { enum: ABHA_VERIFIED_VIA }),
+  archivedAt: timestamp('archived_at'), // WS8 T13: archived chart (NULL = active); hidden from every list
+  archivedByName: text('archived_by_name'), // WS8 T13
+  archiveReason: text('archive_reason'), // WS8 T13
 }, (t) => [
+  index('patients_active_uhid_idx').on(t.uhid).where(sql`${t.archivedAt} IS NULL`), // WS8 T13
   // SP8
   check('patients_abha_verification_complete', sql`(${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerificationSource} IS NULL) AND (${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerifiedVia} IS NULL)`),
   check('patients_abha_verification_source_valid', sql`${t.abhaVerificationSource} IS NULL OR ${t.abhaVerificationSource} IN ('abdm', 'abdm_sandbox_mock')`),

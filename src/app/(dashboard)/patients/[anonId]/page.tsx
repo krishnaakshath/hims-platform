@@ -10,7 +10,8 @@ import { PatientAvatar } from '@/components/PatientAvatar'
 import { PatientQuickGlance } from '@/components/PatientQuickGlance'
 import { DiscrepancyList } from '@/components/DiscrepancyList'
 import { Tabs } from '@/components/Tabs'
-import { DeletePatientButton } from '@/components/DeletePatientButton'
+import { ArchivePatientButton } from '@/components/DeletePatientButton' // WS8 T13
+import { RestorePatientButton } from '@/components/ArchivePatientDialog' // WS8 T13
 import { InpatientHistoryPanel } from '@/components/InpatientHistoryPanel'
 import { PatientProfilePanel } from '@/components/patient-profile/PatientProfilePanel'
 import { CopyUhidButton } from '@/components/patient-profile/CopyUhidButton'
@@ -87,6 +88,8 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   const initialTab = sp?.tab === 'visits' ? 'follow-up' : undefined
   const patient = await getPatientDetail(anonId)
   if (!patient) notFound()
+  // WS8 T13: an archived chart is visible to admin only (with the banner below).
+  if (patient.archivedAt && session.role !== 'admin') notFound()
   await logAudit(session, 'viewed patient detail', anonId)
 
   const [admissionHistory, availableRooms, followUps, encounterRows, activeProviders, activeDepartments, selfProvider] = await Promise.all([
@@ -310,6 +313,19 @@ export default async function PatientDetailPage({ params, searchParams }: { para
       {justRegistered && REGISTRATION_ROLES.includes(session.role) && (
         <RegisteredBanner patientId={patient.id} uhid={patient.uhid} canCheckIn={CHECK_IN_ROLES.includes(session.role)} />
       )}
+      {/* WS8 T13: archived chart banner (admin only reaches an archived chart). */}
+      {patient.archivedAt && (
+        <div role="status" data-testid="archived-banner" className="flex items-start justify-between gap-4 rounded-md border border-warning/40 bg-warning/10 p-4">
+          <div className="space-y-1 text-sm">
+            <p className="font-semibold text-foreground">This chart is archived</p>
+            <p className="text-muted-foreground">
+              Archived on {formatIstDate(patient.archivedAt)}{patient.archivedByName ? ` by ${patient.archivedByName}` : ''}. It is hidden from patient lists, search, pickers, broadcasts, the queue and portal sign-in.
+            </p>
+            {patient.archiveReason && <p className="text-foreground"><span className="font-medium">Reason:</span> {patient.archiveReason}</p>}
+          </div>
+          <RestorePatientButton patientId={patient.id} />
+        </div>
+      )}
       <div className={`${SECTION} flex items-center justify-between`}>
         <div className="flex items-center gap-4">
           <PatientAvatar name={name} size="lg" />
@@ -325,7 +341,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         </div>
         <div className="flex items-center gap-3">
           {DEMOGRAPHICS_CORRECTION_ROLES.includes(session.role) && <CorrectDemographicsButton anonId={patient.id} name={name} dob={String(patient.dob)} />}
-          {session.role === 'admin' && <DeletePatientButton patientId={patient.id} patientName={name} />}
+          {session.role === 'admin' && !patient.archivedAt && <ArchivePatientButton patientId={patient.id} patientName={name} uhid={patient.uhid ?? null} />}
           {!showTrialData ? null : patient.selectionConfirmedAt ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />

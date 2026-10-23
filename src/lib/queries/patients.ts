@@ -28,6 +28,7 @@ import {
 } from '@/db/schema'
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
+import { notArchived } from './patient-archive' // WS8 T13
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
@@ -98,6 +99,7 @@ export async function listPatientNameOptions(): Promise<PatientNameOption[]> {
   return getDb()
     .select({ id: patients.id, name: sql<string>`patients.name` })
     .from(patients)
+    .where(notArchived()) // WS8 T13
     .orderBy(sql`patients.name`)
 }
 
@@ -107,7 +109,7 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Js
       .select({ patient: publicPatientColumns, screening: patientTrialScreenings })
       .from(patients)
       .leftJoin(patientTrialScreenings, eq(patientTrialScreenings.patientId, patients.id))
-      .where(trialId ? eq(patientTrialScreenings.trialId, trialId) : undefined)
+      .where(and(notArchived(), trialId ? eq(patientTrialScreenings.trialId, trialId) : undefined)) // WS8 T13
       .orderBy(patients.id)
 
     // Single grouped query for every screening's criteria results, joined
@@ -460,7 +462,7 @@ export async function listPharmacyPatientRoster(): Promise<PharmacyRosterRow[]> 
     })
     .from(patients)
     .innerJoin(medicationEpisodes, eq(medicationEpisodes.patientId, patients.id))
-    .where(eq(medicationEpisodes.status, 'active'))
+    .where(and(eq(medicationEpisodes.status, 'active'), notArchived())) // WS8 T13
     .groupBy(patients.id, patients.name, patients.currentProvider)
     .orderBy(patients.name)
   return rows
@@ -841,7 +843,7 @@ export async function findLikelyDuplicatePatients(name: string, dob: string): Pr
   const rows = await getDb()
     .select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid })
     .from(patients)
-    .where(eq(patients.dob, dob))
+    .where(and(eq(patients.dob, dob), notArchived())) // WS8 T13
 
   const needle = name.trim().toLowerCase()
   return rows
@@ -856,6 +858,6 @@ export async function findPatientsByPhone(phone: string): Promise<LikelyDuplicat
   return getDb()
     .select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid })
     .from(patients)
-    .where(eq(patients.phone, phone))
+    .where(and(eq(patients.phone, phone), notArchived())) // WS8 T13
     .limit(10)
 }

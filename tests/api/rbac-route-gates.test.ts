@@ -620,6 +620,10 @@ import { PORTAL_SUBMISSION_REVIEW_ROLES } from '@/lib/role-policy'
 // WS8 T12
 import { GET as exportAuditLog } from '@/app/api/audit-log/export/route'
 // end WS8 T12
+// WS8 T13
+import { POST as postArchivePatient } from '@/app/api/patients/[anonId]/archive/route'
+import { POST as postRestorePatient } from '@/app/api/patients/[anonId]/restore/route'
+// end WS8 T13
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1024,7 +1028,7 @@ export const API_GATES: ApiGateCase[] = [
       { name: 'POST /api/inpatient/rooms/[id]/unblock', call: () => settle(() => unblockRoomRoute(send('POST', `/api/inpatient/rooms/${BOGUS_ID}/unblock`), ctx({ id: BOGUS_ID }))), allowed: ADMIN },
       { name: 'GET /api/labs/patients/[patientId]', call: () => settle(() => getLabsPatient(get(`/api/labs/patients/${BOGUS_PATIENT}`), ctx({ patientId: BOGUS_PATIENT }))), allowed: ['admin', 'pi', 'crc', 'labs'] },
       { name: 'GET /api/nav-badges', call: () => settle(() => getNavBadgesRoute()), allowed: [...ALL_ROLES] },
-      { name: 'DELETE /api/patients/[anonId]', call: () => settle(() => deletePatientRoute(del(`/api/patients/${BOGUS_PATIENT}`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ADMIN },
+      { name: 'DELETE /api/patients/[anonId]', call: () => settle(() => deletePatientRoute()), allowed: ADMIN }, // WS8 T13: fixed 405 after the gate
       { name: 'POST /api/patients/[anonId]/care-plans', call: () => settle(() => postCarePlanRoute(w('POST', `/api/patients/${BOGUS_PATIENT}/care-plans`), ctx({ anonId: BOGUS_PATIENT }))), allowed: PI_ADMIN },
       // Multipart upload: a non-multipart body is the 400 an allowed role gets, after the gate.
       { name: 'POST /api/patients/[anonId]/insurance-card', call: () => settle(() => postInsuranceCardRoute(w('POST', `/api/patients/${BOGUS_PATIENT}/insurance-card`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'crc', 'frontdesk'] },
@@ -1095,6 +1099,10 @@ export const API_GATES: ApiGateCase[] = [
   // WS8 T12: the audit-log CSV export -- admin only.
   { name: 'GET /api/audit-log/export', call: () => settle(() => exportAuditLog(get('/api/audit-log/export?role=superuser'))), allowed: ['admin'] },
   // end WS8 T12
+  // WS8 T13: archive and restore -- admin only; a non-JSON body still gets the plain 403 for a denied role.
+  { name: 'POST /api/patients/[anonId]/archive', call: () => settle(() => postArchivePatient(send('POST', `/api/patients/${BOGUS_PATIENT}/archive`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin'] },
+  { name: 'POST /api/patients/[anonId]/restore', call: () => settle(() => postRestorePatient(send('POST', `/api/patients/${BOGUS_PATIENT}/restore`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin'] },
+  // end WS8 T13
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

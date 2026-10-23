@@ -22,6 +22,7 @@ import { normaliseUtr } from '@/lib/payments/provider' // Foundations T11
 import { lockPatientBilling } from './charge-capture'
 import { SeriesExhaustedError, allocateDocumentNumber } from './document-numbers'
 import type { WriteExecutor } from './executor'
+import { notArchived } from './patient-archive' // WS8 T13
 
 /** Issued documents only: finalised/cancelled invoices, credit notes, advances, receipts, refunds. */
 export async function loadLedgerEntries(executor: WriteExecutor, patientId: string): Promise<LedgerEntry[]> {
@@ -115,9 +116,9 @@ export async function findPatientForCashDesk(query: string): Promise<{ id: strin
   if (q === '') return []
   const db = getDb()
   const cols = { id: patients.id, name: patients.name, uhid: patients.uhid }
-  const exact = await db.select(cols).from(patients).where(or(eq(patients.uhid, q), eq(patients.id, q))).limit(10)
+  const exact = await db.select(cols).from(patients).where(and(notArchived(), or(eq(patients.uhid, q), eq(patients.id, q)))).limit(10) // WS8 T13
   const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`)
-  const byName = await db.select(cols).from(patients).where(ilike(patients.name, `${escaped}%`)).orderBy(asc(patients.name), asc(patients.id)).limit(10)
+  const byName = await db.select(cols).from(patients).where(and(notArchived(), ilike(patients.name, `${escaped}%`))).orderBy(asc(patients.name), asc(patients.id)).limit(10) // WS8 T13
   const seen = new Set<string>()
   return [...exact, ...byName].filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true))).slice(0, 10)
 }

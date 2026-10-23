@@ -56,7 +56,7 @@ async function renderAll(env: Record<string, string>) {
   const { default: PrescriptionPrintPage } = await import('@/app/prescriptions/print/page')
   const { default: PublicBookingPage } = await import('@/app/book/page')
   const { AddClientModal } = await import('@/components/AddClientModal')
-  const { DeletePatientDialog } = await import('@/components/DeletePatientDialog')
+  const { ArchivePatientDialog } = await import('@/components/ArchivePatientDialog')
   return {
     login: render(<LoginPage />),
     portalLogin: render(<PatientPortalLoginPage />),
@@ -64,7 +64,7 @@ async function renderAll(env: Record<string, string>) {
     book: render(await PublicBookingPage()),
     // Radix dialogs portal their content, which renderToStaticMarkup does
     // not emit -- so only assert these don't throw and carry no old name.
-    dialogs: render(<><AddClientModal onClose={() => {}} /><DeletePatientDialog target={{ id: 'RD-0001', name: 'X' }} onClose={() => {}} onDeleted={() => {}} /></>),
+    dialogs: render(<><AddClientModal onClose={() => {}} /><ArchivePatientDialog target={{ id: 'RD-0001', name: 'X' }} onClose={() => {}} onArchived={() => {}} /></>),
   }
 }
 
