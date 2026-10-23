@@ -22,6 +22,7 @@ import {
   abdmConsents, abdmProfileShares, nhcxEligibilityChecks, nhcxExchanges,
   admissionCoverage, coverageVerifications, // WS12 T1
   abhaLinkOverrides, // WS12 T5
+  portalSubmissions, // WS7 T9
   bookingRequests, // Wave J
   payers,
 } from '@/db/schema'
@@ -697,6 +698,7 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // document filed to someone else (or Unfiled) that still references one of
   // this patient's admissions, which the DB permits even though the routes
   // never create it.
+  await db.delete(portalSubmissions).where(eq(portalSubmissions.patientId, anonId)) // WS7 T9: references documents
   await db.delete(documents).where(eq(documents.patientId, anonId))
   if (patientAdmissionIds.length > 0) {
     await db.update(documents).set({ admissionId: null }).where(inArray(documents.admissionId, patientAdmissionIds))

@@ -397,5 +397,6 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/billing/statements', load: () => import('@/app/(dashboard)/billing/statements/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/cash-desk'])) },
   // end Foundations T11
   // WS7 T2: the empty form builder ("Create New Form") -- CLINICAL_ROLES, same gate as /forms/[templateId].
-  { route: '/forms/new', load: () => import('@/app/(dashboard)/forms/new/page'), props: { searchParams: Promise.resolve({ folderId: '1' }) }, allowed: [...CLINICAL_ROLES] },
+  { route: '/forms/new', load: () => import('@/app/(dashboard)/forms/new/page'), props: { searchParams: Promise.resolve({ folderId: '1' }) }, allowed: [...CLINICAL_ROLES] },  // WS7 T9: LeftNav /front-desk/portal-submissions -- PORTAL_SUBMISSION_REVIEW_ROLES.
+  { route: '/front-desk/portal-submissions', load: () => import('@/app/(dashboard)/front-desk/portal-submissions/page'), allowed: ['admin', 'frontdesk', 'rcm'] },
 ]

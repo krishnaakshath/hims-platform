@@ -79,8 +79,10 @@ export async function getAadhaarStatus(anonId: string): Promise<AadhaarStatus> {
 // number/address (an omitted one becomes null) and clears the unavailable
 // reason/note; `unavailable` does the reverse. Clearing the MLC flag clears
 // its number.
-export async function updatePatientProfile(anonId: string, input: PatientProfileUpdateInput, session: Session): Promise<boolean> {
-  return getDb().transaction(async (tx) => {
+// WS7 T9: `outer` runs the write as a savepoint inside the caller's transaction (the portal
+// ABHA approval), so the profile change and the submission's decision commit together.
+export async function updatePatientProfile(anonId: string, input: PatientProfileUpdateInput, session: Session, outer?: Tx): Promise<boolean> {
+  return (outer ?? getDb()).transaction(async (tx) => {
     const before = await readIdentity(tx, anonId, true)
     if (!before) return false
 

@@ -8,6 +8,7 @@ import { checkIntakeFileUploadRateLimit } from '@/lib/rate-limit'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { invalidateCache, documentsListCacheKey, patientDetailCacheKey } from '@/lib/cache'
 import { todayIsoIn } from '@/lib/india-time'
+import { sniffUpload } from '@/lib/upload-sniff'
 
 // WS7 T3: the upload behind an intake form's file question. Deliberately NOT
 // requireSession()- or requirePatientSession()-gated -- a referred patient has
@@ -23,18 +24,6 @@ const MAX_BYTES = 5 * 1024 * 1024
 const MAX_BODY_BYTES = MAX_BYTES + 64 * 1024
 const TOO_LARGE = 'Files must be 5 MB or smaller.'
 const NOT_ALLOWED = 'Upload a PDF, JPEG or PNG file.'
-
-// The bytes decide the type, never the name or the declared MIME type: an
-// .exe renamed .pdf is still an .exe.
-const SIGNATURES: { contentType: string; fileType: string; magic: number[] }[] = [
-  { contentType: 'application/pdf', fileType: 'PDF', magic: [0x25, 0x50, 0x44, 0x46, 0x2d] }, // %PDF-
-  { contentType: 'image/jpeg', fileType: 'JPG', magic: [0xff, 0xd8, 0xff] },
-  { contentType: 'image/png', fileType: 'PNG', magic: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
-]
-
-function sniff(bytes: Uint8Array) {
-  return SIGNATURES.find((s) => s.magic.every((b, i) => bytes[i] === b)) ?? null
-}
 
 const fieldsSchema = z.object({ questionId: z.string().min(1).max(100) }).strict()
 
@@ -71,7 +60,7 @@ export const POST = withServiceGuard('intake file upload', async function POST(r
   if (file.size > MAX_BYTES) return NextResponse.json({ error: TOO_LARGE }, { status: 413 })
   if (file.size === 0) return NextResponse.json({ error: 'The file is empty.' }, { status: 400 })
   const bytes = new Uint8Array(await file.arrayBuffer())
-  const kind = sniff(bytes)
+  const kind = sniffUpload(bytes)
   if (!kind) return NextResponse.json({ error: NOT_ALLOWED }, { status: 400 })
 
   const fileName = file.name.trim().slice(0, 200) || 'Uploaded file'

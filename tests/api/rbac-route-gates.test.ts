@@ -611,6 +611,11 @@ import { COVERAGE_VERIFY_ROLES } from '@/lib/role-policy'
 // end WS12 T3
 // WS7 T4
 import { POST as postHospitalFormPack } from '@/app/api/form-templates/hospital-pack/route'
+// WS7 T9
+import { GET as getPortalSubmissions } from '@/app/api/front-desk/portal-submissions/route'
+import { POST as postPortalSubmissionDecision } from '@/app/api/front-desk/portal-submissions/[id]/decision/route'
+import { PORTAL_SUBMISSION_REVIEW_ROLES } from '@/lib/role-policy'
+// end WS7 T9
 // end WS7 T4
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
@@ -1080,7 +1085,10 @@ export const API_GATES: ApiGateCase[] = [
   // end WS12 T3
   // WS7 T4: install the hospital form pack -- admin only. Denied roles never reach the seed.
   { name: 'POST /api/form-templates/hospital-pack', call: () => settle(() => postHospitalFormPack(send('POST', '/api/form-templates/hospital-pack', NOT_JSON))), allowed: ['admin'] },
-  // end WS7 T4
+  // end WS7 T4  // WS7 T9: portal self-service submissions -- PORTAL_SUBMISSION_REVIEW_ROLES. A non-JSON body is the 400 an allowed role gets, after the gate.
+  { name: 'GET /api/front-desk/portal-submissions', call: () => settle(() => getPortalSubmissions()), allowed: [...PORTAL_SUBMISSION_REVIEW_ROLES] },
+  { name: 'POST /api/front-desk/portal-submissions/[id]/decision', call: () => settle(() => postPortalSubmissionDecision(send('POST', `/api/front-desk/portal-submissions/${BOGUS_ID}/decision`, NOT_JSON), ctx({ id: BOGUS_ID }))), allowed: [...PORTAL_SUBMISSION_REVIEW_ROLES] },
+  // end WS7 T9
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1358,6 +1366,7 @@ const UNGATED_EXEMPT: Record<string, string> = {
   'POST /api/messages/[patientId]': 'staff-or-patient dual session via getSession, not requireSession; staff roles pinned in tests/api/messages.test.ts',
   'POST /api/patient-portal/payments/upi-request': 'patient session only, own finalised bill, rate limited (tests/api/patient-portal-payments.test.ts)', // WS7 T8
   'POST /api/patient-portal/payments/[id]/reported-utr': 'patient session only, own portal request; never posts a receipt (tests/api/patient-portal-payments.test.ts)', // WS7 T8
+  'POST /api/patient-portal/self-service': 'patient session only; a pending submission the front desk reviews, never master data (tests/api/portal-submissions.test.ts)', // WS7 T9
 }
 
 function findRouteFiles(dir: string): string[] {

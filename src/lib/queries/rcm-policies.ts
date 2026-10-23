@@ -112,7 +112,11 @@ async function checkPayers(executor: WriteExecutor, insurerPayerId: number, tpaP
 
 const isActivePrimary = (p: { status: PolicyStatus; priority: PolicyPriority }) => p.status === 'active' && p.priority === 'primary'
 
-export async function createPolicy(input: PolicyInput, session: Session, now: Date = new Date()): Promise<RcmWriteResult<{ policyId: number }>> {
+type Tx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
+
+// WS7 T9: `outer` runs the write as a savepoint inside the caller's transaction (the portal
+// submission approval), so the policy and the submission's decision commit together.
+export async function createPolicy(input: PolicyInput, session: Session, now: Date = new Date(), outer?: Tx): Promise<RcmWriteResult<{ policyId: number }>> {
   // WS12 T4 (R3, R4): an 'active' policy that has already ended is refused; staff record it as
   // inactive or fix the dates. A future start is allowed (cover begins later).
   const today = todayIsoIn(undefined, now)
@@ -121,7 +125,7 @@ export async function createPolicy(input: PolicyInput, session: Session, now: Da
   }
   let result: RcmWriteResult<{ policyId: number }>
   try {
-    result = await getDb().transaction(async (tx) => {
+    const write = async (tx: Tx): Promise<RcmWriteResult<{ policyId: number }>> => {
       const [patient] = await tx.select({ id: patients.id }).from(patients).where(eq(patients.id, input.patientId)).for('update')
       if (!patient) return rcmFail('patient_not_found')
       const tpaPayerId = input.tpaPayerId ?? null
@@ -139,7 +143,8 @@ export async function createPolicy(input: PolicyInput, session: Session, now: Da
       }
       await logAudit(session, 'rcm: added policy', input.patientId, `policy=${row.id} insurer=${input.insurerPayerId} tpa=${tpaPayerId ?? 'none'} priority=${input.priority}`, tx)
       return rcmOk({ policyId: row.id })
-    })
+    }
+    result = outer ? await outer.transaction(write) : await getDb().transaction(write)
   } catch (err) {
     if (isUniqueViolation(err, 'patient_policies_one_active_primary')) return rcmFail('primary_exists')
     throw err

@@ -4,6 +4,7 @@ import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { countPendingAssignmentsForProvider, countUnacknowledgedDeclines } from '@/lib/queries/doctor-assignments'
 import { getUnreadCountForProvider } from '@/lib/queries/messages'
 import { countPendingBookingRequests } from '@/lib/queries/booking-requests'
+import { countPendingPortalSubmissions } from '@/lib/queries/portal-submissions' // WS7 T9
 // Wave E P1-25: work-queue badges. Each reuses the KPI loader behind the tile on the
 // page it points to (cached a few seconds), so the badge and the tile agree.
 import {
@@ -12,7 +13,7 @@ import {
 import { listCodingWorklist } from '@/lib/queries/coding-worklist'
 import { parseCodingWorklistParams } from '@/lib/coding/worklist'
 import { listCollectorRoute } from '@/lib/queries/home-collections'
-import { FOLLOW_UP_WORKLIST_ROLES } from '@/lib/role-policy'
+import { FOLLOW_UP_WORKLIST_ROLES, PORTAL_SUBMISSION_REVIEW_ROLES } from '@/lib/role-policy'
 import { todayIsoIn } from '@/lib/india-time'
 // end Wave E
 
@@ -95,5 +96,7 @@ async function computeNavBadges(session: Session): Promise<NavBadges> {
     entries.push(getClaimAgeing().then((c) => ['/rcm/preauths', c.preauthsOverdue]))
   }
   // end Wave E
+  // WS7 T9: portal self-service policies and ABHA numbers waiting for review.
+  if (PORTAL_SUBMISSION_REVIEW_ROLES.includes(role)) entries.push(countPendingPortalSubmissions().then((n) => ['/front-desk/portal-submissions', n]))
   return Object.fromEntries(await Promise.all(entries))
 }

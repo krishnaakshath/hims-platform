@@ -262,3 +262,9 @@ export const COVERAGE_READ_ROLES: readonly Role[] = POLICY_READ_ROLES
 export const COVERAGE_VERIFY_ROLES: readonly Role[] = POLICY_WRITE_ROLES
 export const ADMISSION_COVERAGE_ROLES: readonly Role[] = ['admin', 'frontdesk', 'crc', 'rcm']
 // end WS12 T1
+
+// WS7 T9 (spec D15): portal self-service policy and ABHA submissions -- who reviews them
+// (/front-desk/portal-submissions, its list and decision routes, the LeftNav badge). rcm sees the
+// ABHA number masked (src/lib/queries/portal-submissions.ts).
+export const PORTAL_SUBMISSION_REVIEW_ROLES: readonly Role[] = ['admin', 'frontdesk', 'rcm']
+// end WS7 T9

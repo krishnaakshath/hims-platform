@@ -15,11 +15,15 @@ vi.mock('@/lib/queries/patient-portal-records', () => ({
   getPortalAbhaStatus: vi.fn(async () => ({ abhaNumberMasked: null, abhaAddress: null, unavailableReason: null })),
 }))
 
+// WS7 T9: the insurance page's self-service submissions.
+vi.mock('@/lib/queries/portal-submissions', () => ({ listPortalSubmissionsForPatient: vi.fn(async () => []) }))
+
 import BillsPage from '@/app/patient-portal/(authenticated)/bills/page'
 import DischargePage from '@/app/patient-portal/(authenticated)/discharge-summaries/page'
 import PrescriptionsPage from '@/app/patient-portal/(authenticated)/prescriptions/page'
 import InsurancePage from '@/app/patient-portal/(authenticated)/insurance/page'
 import * as q from '@/lib/queries/patient-portal-records'
+import { listPortalSubmissionsForPatient } from '@/lib/queries/portal-submissions' // WS7 T9
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 
 beforeEach(() => {
@@ -119,7 +123,8 @@ describe('/patient-portal/insurance', () => {
     expect(screen.getByText('₹5,00,000.00')).toBeInTheDocument()
     expect(screen.getByText('Medi Assist')).toBeInTheDocument()
     expect(screen.getByText('XX-XXXX-XXXX-0123')).toBeInTheDocument()
-    expect(screen.queryByRole('button')).toBeNull()
+    // WS7 T9: the only actions are the two self-service forms; nothing edits a policy in place.
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Add a policy', 'Add my ABHA'])
     expect(logPatientPortalAction).toHaveBeenCalledWith('viewed patient portal insurance', 'RD-0001')
   })
 
@@ -128,5 +133,19 @@ describe('/patient-portal/insurance', () => {
     render(await InsurancePage())
     expect(screen.getByText(/You chose not to link one/)).toBeInTheDocument()
     expect(screen.getByText(/No insurance policy on file/)).toBeInTheDocument()
+  })
+
+  // WS7 T9: a pending submission hides that form; a rejected one shows the front desk's reason.
+  it('lists self-service submissions with their status and reason', async () => {
+    vi.mocked(listPortalSubmissionsForPatient).mockResolvedValueOnce([
+      { id: 2, kind: 'policy', status: 'pending', summary: 'Star Health · P-123', submittedAt: new Date('2026-10-20T05:00:00Z'), reviewedAt: null, rejectReason: null },
+      { id: 1, kind: 'abha', status: 'rejected', summary: 'ABHA XX-XXXX-XXXX-0123', submittedAt: new Date('2026-10-19T05:00:00Z'), reviewedAt: new Date('2026-10-19T09:00:00Z'), rejectReason: 'The number does not match the card' },
+    ])
+    render(await InsurancePage())
+    expect(listPortalSubmissionsForPatient).toHaveBeenCalledWith('RD-0001')
+    expect(screen.getByText(/Policy: Star Health · P-123/)).toBeInTheDocument()
+    expect(screen.getByText(/Waiting for the front desk to check/)).toBeInTheDocument()
+    expect(screen.getByText('Reason: The number does not match the card')).toBeInTheDocument()
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Add my ABHA'])
   })
 })

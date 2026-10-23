@@ -2916,3 +2916,32 @@ export const abhaLinkOverrides = pgTable('abha_link_overrides', {
 
 export type AbhaLinkOverrideRow = typeof abhaLinkOverrides.$inferSelect
 // end WS12 T5
+// WS7 T9
+// A patient's self-service policy or ABHA from the portal (spec D15). It waits here as 'pending'
+// until the front desk approves it (the real policy via createPolicy, or the ABHA recorded on the
+// chart as not verified with ABDM) or rejects it with a reason the patient sees. One pending row
+// per patient and kind. `payload` holds the patient's typed fields; it never reaches audit or logs.
+// Migration: scripts/migrations/2026-10-26-ws7-portal-submissions.sql.
+export type PortalSubmissionPolicyPayload = { insurerName: string; policyNumber: string; validFrom: string; validTo: string; sumInsuredPaise?: number }
+export type PortalSubmissionAbhaPayload = { abhaNumber: string; abhaAddress?: string }
+export const portalSubmissions = pgTable('portal_submissions', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  kind: text('kind', { enum: ['policy', 'abha'] }).notNull(),
+  payload: jsonb('payload').$type<PortalSubmissionPolicyPayload | PortalSubmissionAbhaPayload>().notNull(),
+  documentId: integer('document_id').references(() => documents.id),
+  status: text('status', { enum: ['pending', 'approved', 'rejected'] }).default('pending').notNull(),
+  submittedAt: timestamp('submitted_at').defaultNow().notNull(),
+  reviewedByName: text('reviewed_by_name'),
+  reviewedAt: timestamp('reviewed_at'),
+  rejectReason: text('reject_reason'),
+}, (t) => [
+  uniqueIndex('portal_submissions_one_pending_per_kind').on(t.patientId, t.kind).where(sql`status = 'pending'`),
+  index('portal_submissions_status_idx').on(t.status, t.submittedAt),
+  check('portal_submissions_kind_valid', sql`${t.kind} IN ('policy', 'abha')`),
+  check('portal_submissions_status_valid', sql`${t.status} IN ('pending', 'approved', 'rejected')`),
+  check('portal_submissions_reviewed', sql`(${t.status} = 'pending') = (${t.reviewedAt} IS NULL)`),
+  check('portal_submissions_reject_reason', sql`(${t.status} = 'rejected') = (${t.rejectReason} IS NOT NULL) AND (${t.rejectReason} IS NULL OR char_length(${t.rejectReason}) BETWEEN 5 AND 300)`),
+])
+export type PortalSubmissionRow = typeof portalSubmissions.$inferSelect
+// end WS7 T9
