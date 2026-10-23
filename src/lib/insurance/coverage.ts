@@ -123,7 +123,9 @@ export function evaluateCoverage(i: { policy: CoveragePolicyFacts | null; verifi
     : null
   if (policyState) {
     const severity = blockOrWarn(context, emergency)
-    const label = policyState === 'policy_inactive' ? 'Policy marked inactive' : policyState === 'policy_expired' ? 'Policy expired' : 'Policy not yet valid'
+    const label = policyState === 'policy_inactive' ? 'Policy marked inactive'
+      : policyState === 'policy_expired' ? `Policy expired on ${formatCalendarDate(policy.validTo)}`
+      : `Policy not valid until ${formatCalendarDate(policy.validFrom)}`
     const reason = policyState === 'policy_inactive' ? 'This policy is marked inactive' : `This policy is not valid on ${formatCalendarDate(onDate)} (${range})`
     const next = context === 'ipd_admission' && emergency ? 'Emergency admission: proceed, and settle cover or self-pay later'
       : severity === 'block' ? 'Fix the policy dates or status, or treat as self-pay'

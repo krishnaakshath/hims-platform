@@ -51,6 +51,21 @@ export type NhcxResponseSummary = {
   paymentAmountPaise: number | null
   paymentDate: string | null
   hasQueryText: boolean
+  /**
+   * WS12 R6: limits an eligibility answer reported (CoverageEligibilityResponse.insurance[0]);
+   * paise, basis points and an ISO date only. Null when the answer carried none.
+   */
+  coverage?: NhcxCoverageLimits | null
+}
+
+/** WS12 R6: what an eligibility answer said about the cover. Codes UNVERIFIED (docs/ABDM-NHCX.md U21). */
+export type NhcxCoverageLimits = {
+  sumInsuredPaise: number | null
+  balancePaise: number | null
+  copayBp: number | null
+  roomRentLimitPaise: number | null
+  icuLimitPaise: number | null
+  benefitPeriodEnd: string | null
 }
 
 // ---- Protocol (Task 7) ----
