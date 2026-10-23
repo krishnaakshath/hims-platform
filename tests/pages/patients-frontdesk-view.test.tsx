@@ -108,7 +108,7 @@ function mockCommon(role: Role) {
   // SP7: the Insurance tab's loaders
   vi.doMock('@/lib/queries/rcm-policies', () => ({ listPatientPolicies: async () => [], legacyPolicyPrefill: async () => null }))
   vi.doMock('@/lib/queries/rcm-payers', () => ({ listRcmPayers: async () => [] }))
-  vi.doMock('@/lib/queries/notification-log', () => ({ getPatientChannelPreferences: async () => ({ optOut: false, sms: true, whatsapp: true, email: true }) })) // Foundations T8
+  vi.doMock('@/lib/queries/notification-log', () => ({ getPatientChannelPreferences: async () => ({ optOut: false, sms: true, whatsapp: true, email: true }), listPatientNotices: async () => [] })) // Foundations T8, T9
   return spies
 }
 

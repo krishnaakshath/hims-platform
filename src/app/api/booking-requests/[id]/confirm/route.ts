@@ -6,6 +6,9 @@ import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { brand } from '@/lib/brand' // Foundations T9
+import { istDateOf, formatIstTime } from '@/lib/india-time' // Foundations T9
+import { sendPatientNotice } from '@/lib/queries/notifications' // Foundations T9
 import { getBookingRequestById, confirmBookingRequest, confirmCancelRequest } from '@/lib/queries/booking-requests'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
 import { appointmentInstantSchema, invalidAppointmentTime, isTimeFieldError } from '@/lib/appointment-time'
@@ -85,5 +88,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 })
 
   await logAudit(session, existing.requestKind === 'reschedule' ? 'confirmed appointment reschedule request' : 'confirmed booking request', parsed.data.patientId) // Wave J
+  // Foundations T9: booking_confirmed (hospital name, date and time only). Keyed by the request, so a
+  // retried confirm never notifies twice. Never throws.
+  await sendPatientNotice({
+    patientId: parsed.data.patientId,
+    templateKey: 'booking_confirmed',
+    vars: { hospitalName: brand.name, visitDate: istDateOf(startsAt), timeLabel: formatIstTime(startsAt) },
+    dedupeKey: `booking:${requestId}`,
+  })
+  // end Foundations T9
   return NextResponse.json(result)
 }

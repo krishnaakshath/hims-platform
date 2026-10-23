@@ -89,6 +89,7 @@ import { GET as getNhcxPayload } from '@/app/api/rcm/nhcx/exchanges/[id]/payload
 import { POST as postNhcxReview } from '@/app/api/rcm/nhcx/exchanges/[id]/review/route'
 import { POST as postIntegrationTest } from '@/app/api/settings/integrations/test/route'
 import { PUT as putNotificationTemplates } from '@/app/api/settings/notification-templates/route' // Foundations T8
+import { GET as getPatientNotices } from '@/app/api/patients/[anonId]/notices/route' // Foundations T9
 // end SP8
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
@@ -1072,6 +1073,7 @@ export const API_GATES: ApiGateCase[] = [
   })(),
   // end Wave I
   { name: 'PUT /api/settings/notification-templates', call: () => settle(() => putNotificationTemplates(send('PUT', '/api/settings/notification-templates'))), allowed: ['admin'] }, // Foundations T8
+  { name: 'GET /api/patients/[anonId]/notices', call: () => getPatientNotices(get(`/api/patients/${BOGUS_PATIENT}/notices`), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'crc', 'pi', 'frontdesk'] }, // Foundations T9
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

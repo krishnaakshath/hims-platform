@@ -28,7 +28,8 @@ import { listRcmPayers } from '@/lib/queries/rcm-payers'
 import { POLICY_READ_ROLES, POLICY_WRITE_ROLES } from '@/lib/role-policy'
 import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
 import { NOTIFICATION_PREFERENCE_ROLES } from '@/lib/role-policy' // SP5
-import { getPatientChannelPreferences } from '@/lib/queries/notification-log' // Foundations T8
+import { getPatientChannelPreferences, listPatientNotices } from '@/lib/queries/notification-log' // Foundations T8, T9
+import { RecentNoticesPanel } from '@/components/patient-profile/RecentNoticesPanel' // Foundations T9
 import { ABHA_LINK_ROLES, NHCX_ELIGIBILITY_ROLES } from '@/lib/role-policy' // SP8
 import { nhcxEligibilityAvailable, payersOnNhcx } from '@/lib/queries/nhcx-eligibility' // SP8
 import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
@@ -99,6 +100,9 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   const aadhaarView = toAadhaarView(patient.aadhaar, session.role)
   // Foundations T8: per-channel notice preferences (read live, not from the cached detail).
   const channelPrefs = NOTIFICATION_PREFERENCE_ROLES.includes(session.role) ? await getPatientChannelPreferences(patient.id) : null
+  // Foundations T9: recent notices (no bodies), same roles as GET /api/patients/[anonId]/notices.
+  const canSeeNotices = ['admin', 'crc', 'pi', 'frontdesk'].includes(session.role)
+  const notices = canSeeNotices ? (await listPatientNotices(patient.id, 10)).map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })) : []
   const profileTab = (
     <PatientProfilePanel
       patient={{
@@ -213,6 +217,13 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         <h2 className={SECTION_HEADING}>Patient Portal Access</h2>
         <PatientPortalAccessPanel anonId={patient.id} initialConfigured={patient.portalConfigured} mfaEnabled={patient.mfaEnabled} isAdmin={session.role === 'admin'} />
       </section>
+
+      {canSeeNotices && (
+        <section className={SECTION}>
+          <h2 className={SECTION_HEADING}>Recent notices</h2>
+          <RecentNoticesPanel items={notices} />
+        </section>
+      )}
     </div>
   )
 
