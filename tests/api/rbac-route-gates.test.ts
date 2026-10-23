@@ -1267,6 +1267,21 @@ describe.each(API_GATES)('$name', (c) => {
   })
 })
 
+// ENABLE_TRIALS off: the trial and workbook routes answer 404 to every role.
+describe.each(API_GATES.filter((r) => /\/api\/(trials|workbook)\b/.test(r.name)))('$name (ENABLE_TRIALS off)', (c) => {
+  it('404s every role', async () => {
+    vi.stubEnv('ENABLE_TRIALS', '')
+    try {
+      for (const role of ALL_ROLES) {
+        sessionRole = role
+        const res = await c.call()
+        expect.soft(res.status, `${c.name} for ${role}`).toBe(404)
+        expect.soft(await res.json()).toEqual({ error: 'Not found' })
+      }
+    } finally { vi.unstubAllEnvs() }
+  })
+})
+
 // Wave I (P2-14): every exported handler of every src/app/api/**/route.ts is
 // pinned here -- an API_GATES row, a deny-before-parse row, one of the bespoke
 // describe blocks at the top of this file -- or carries a documented exemption

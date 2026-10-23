@@ -5,6 +5,8 @@ import { desc, eq } from 'drizzle-orm'
 import { buildWorkbookXlsx, WORKBOOK_EXPORT_CONCURRENCY, type ExportablePatient } from '@/lib/excel-export'
 import { mapWithConcurrency } from '@/lib/concurrency'
 import { logAudit } from '@/lib/audit'
+import { trialsEnabled } from '@/lib/features'
+import { trialsOffResponse } from '@/lib/features-gate'
 import { requireSession } from '@/lib/auth'
 import { WORKBOOK_EXPORT_ROLES } from '@/lib/role-policy'
 import { getPatientDetail, listPatientsWithStatus } from '@/lib/queries/patients'
@@ -13,6 +15,7 @@ import { listAllTrials } from '@/lib/queries/trials'
 export async function GET() {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
+  if (!trialsEnabled()) return trialsOffResponse()
 
   // The complete 30-column pre-screening workbook for every patient: admin
   // and crc only (WORKBOOK_EXPORT_ROLES). Narrower than the /workbook page,

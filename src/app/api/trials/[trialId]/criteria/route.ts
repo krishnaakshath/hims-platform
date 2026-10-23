@@ -5,6 +5,8 @@ import { getDb } from '@/db/client'
 import { trials } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
+import { trialsEnabled } from '@/lib/features'
+import { trialsOffResponse } from '@/lib/features-gate'
 import { requireSession } from '@/lib/auth'
 import { TRIAL_CRITERIA_EDIT_ROLES } from '@/lib/role-policy'
 
@@ -33,6 +35,7 @@ const criteriaUpdateSchema = z
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ trialId: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
+  if (!trialsEnabled()) return trialsOffResponse()
 
   // Eligibility criteria define who can enroll, so editing them is a protocol
   // decision: PI/admin only, not coordinators.

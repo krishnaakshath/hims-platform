@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
+import { trialsEnabled } from '@/lib/features'
+import { trialsOffResponse } from '@/lib/features-gate'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { listAdverseEvents, createAdverseEvent, markAdverseEventNotified } from '@/lib/queries/trial-compliance'
@@ -28,6 +30,7 @@ const notifySchema = z.object({
 export async function GET(request: NextRequest, { params }: { params: Promise<{ trialId: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
+  if (!trialsEnabled()) return trialsOffResponse()
   if (!ALLOWED_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { trialId } = await params
@@ -38,6 +41,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ trialId: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
+  if (!trialsEnabled()) return trialsOffResponse()
   if (!ALLOWED_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { trialId } = await params
@@ -54,6 +58,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ trialId: string }> }) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
+  if (!trialsEnabled()) return trialsOffResponse()
   if (!ALLOWED_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { trialId } = await params

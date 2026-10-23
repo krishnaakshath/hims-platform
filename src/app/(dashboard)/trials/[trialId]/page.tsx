@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { FlaskConical, CheckCircle2, XCircle, Users, AlertTriangle, Pill, FileCheck2 } from 'lucide-react'
+import { redirectUnlessTrials } from '@/lib/features-gate'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { listAllTrials } from '@/lib/queries/trials'
@@ -35,6 +36,7 @@ function CriterionRow({ criterion }: { criterion: { criterionText: string; evide
 export default async function TrialDetailPage({ params }: { params: Promise<{ trialId: string }> }) {
   // Must be the first statement — see the comment in patients/page.tsx.
   const session = await requireSessionOrRedirect()
+  redirectUnlessTrials() // ENABLE_TRIALS off: this area is hidden
   if (!CLINICAL_ROLES.includes(session.role)) redirect('/')
 
   const { trialId } = await params

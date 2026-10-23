@@ -5,6 +5,7 @@ import { LeftNav } from '@/components/LeftNav'
 import { SessionTimeoutWarning } from '@/components/SessionTimeoutWarning'
 import { getNavBadges } from '@/lib/nav-badges'
 import { demoFeaturesEnabled } from '@/lib/demo-features'
+import { trialsEnabled } from '@/lib/features'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession()
@@ -26,7 +27,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           not 0, so without this a tall child could grow this row past the
           screen instead of each side scrolling independently within it. */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <LeftNav role={session.role} badges={badges} demoFeatures={demoFeaturesEnabled()} />
+        <LeftNav role={session.role} badges={badges} demoFeatures={demoFeaturesEnabled()} trials={trialsEnabled()} />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>
