@@ -2,7 +2,7 @@
 // the failure in a role="alert" element and leave the control usable.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { CLIENT_ERROR_MESSAGES, mockFetch, mockFetchReject } from './helpers'
+import { CLIENT_ERROR_MESSAGES, mockFetch, mockFetchReject, pickPatient } from './helpers'
 
 const router = { refresh: vi.fn(), push: vi.fn() }
 vi.mock('next/navigation', () => ({ useRouter: () => router }))
@@ -14,19 +14,19 @@ import { StaffLoginForm } from '@/components/StaffLoginForm'
 import { StaffManagementPanel } from '@/components/settings/StaffManagementPanel'
 import { TelemedicineCallScreen } from '@/components/TelemedicineCallScreen'
 
-function fillSendForm() {
+async function fillSendForm() {
+  await pickPatient()
   const selects = screen.getByRole('dialog').querySelectorAll('select')
-  fireEvent.change(selects[0], { target: { value: 'RD-0001' } })
-  fireEvent.change(selects[1], { target: { value: '1' } })
+  fireEvent.change(selects[0], { target: { value: '1' } })
 }
 
 describe('SendFormModal', () => {
-  const props = { templates: [{ id: 1, name: 'Intake' }], patients: [{ id: 'RD-0001', name: 'Jane' }] }
+  const props = { templates: [{ id: 1, name: 'Intake' }], }
   it('shows a failed send in an alert, keeps the dialog open and Send enabled', async () => {
     mockFetch(500, { error: 'insert failed: duplicate key' })
     const onClose = vi.fn()
     render(<SendFormModal {...props} onClose={onClose} />)
-    fillSendForm()
+    await fillSendForm()
     fireEvent.click(screen.getByRole('button', { name: 'Send Form' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
     expect(screen.getByRole('alert')).not.toHaveTextContent('duplicate key')
@@ -38,7 +38,7 @@ describe('SendFormModal', () => {
     mockFetch(201, { id: 9, accessToken: 'tok123' })
     const onClose = vi.fn()
     render(<SendFormModal {...props} onClose={onClose} />)
-    fillSendForm()
+    await fillSendForm()
     fireEvent.click(screen.getByRole('button', { name: 'Send Form' }))
     const link = await screen.findByLabelText('Intake link')
     expect((link as HTMLInputElement).value).toMatch(/\/intake\/tok123$/)

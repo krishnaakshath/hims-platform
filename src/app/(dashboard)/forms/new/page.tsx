@@ -28,7 +28,6 @@ export default async function NewFormTemplatePage({ searchParams }: { searchPara
       folders={folders.map((f) => ({ id: f.id, name: f.name }))}
       attachedConsents={[]}
       allConsentDocuments={[]}
-      patients={[]}
     />
   )
 }

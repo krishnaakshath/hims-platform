@@ -1,7 +1,7 @@
 'use client'
 import { sendJson } from '@/lib/client-fetch'
 import { formatIstTime } from '@/lib/india-time'
-import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowUp, ArrowDown, Trash2, Plus, ShieldAlert } from 'lucide-react'
@@ -135,7 +135,7 @@ const COMMON_ACTIONS = [
 ]
 
 export function FormBuilderEditor({
-  templateId, initial, initialIsActive, folders, attachedConsents, allConsentDocuments, patients,
+  templateId, initial, initialIsActive, folders, attachedConsents, allConsentDocuments,
 }: {
   // null on /forms/new: nothing exists until the first edit creates it (spec D11).
   templateId: number | null
@@ -151,8 +151,6 @@ export function FormBuilderEditor({
   folders: { id: number; name: string }[]
   attachedConsents: AttachedConsentRow[]
   allConsentDocuments: { id: number; name: string }[]
-  // Forwarded untouched to SendFormModal; its element shape is that component's.
-  patients: ComponentProps<typeof SendFormModal>['patients']
 }) {
   const router = useRouter()
   const [name, setName] = useState(initial.name)
@@ -550,7 +548,7 @@ export function FormBuilderEditor({
       )}
     </aside>
 
-    {showSend && templateId !== null && <SendFormModal templates={[{ id: templateId, name }]} patients={patients} onClose={() => setShowSend(false)} />}
+    {showSend && templateId !== null && <SendFormModal templates={[{ id: templateId, name }]} onClose={() => setShowSend(false)} />}
     {showPreview && <FormTemplatePreviewModal name={name} questions={questions} onClose={() => setShowPreview(false)} />}
     </div>
   )

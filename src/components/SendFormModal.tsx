@@ -4,15 +4,16 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { sendJson } from '@/lib/client-fetch'
+import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
 
-export function SendFormModal({ templates, patients, onClose }: {
+export function SendFormModal({ templates, onClose, initialPatient = null }: {
   templates: { id: number; name: string }[]
-  patients: { id: string; name: string }[]
   onClose: () => void
+  initialPatient?: PickedPatient | null
 }) {
   const router = useRouter()
   const [templateId, setTemplateId] = useState<number | ''>('')
-  const [patientId, setPatientId] = useState('')
+  const [patient, setPatient] = useState<PickedPatient | null>(initialPatient)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // After a successful send, the intake link to hand the patient.
@@ -21,7 +22,7 @@ export function SendFormModal({ templates, patients, onClose }: {
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const result = await sendJson<{ accessToken?: string | null }>('/api/form-submissions', 'POST', { templateId, patientId })
+    const result = await sendJson<{ accessToken?: string | null }>('/api/form-submissions', 'POST', { templateId, patientId: patient?.id ?? '' })
     setSubmitting(false)
     if (!result.ok) { setError(result.error); return }
     router.refresh()
@@ -42,10 +43,7 @@ export function SendFormModal({ templates, patients, onClose }: {
           </div>
         ) : (
         <div className="space-y-3">
-          <select value={patientId} onChange={(e) => setPatientId(e.target.value)} className="w-full rounded-md border border-border px-3 py-2 text-sm">
-            <option value="">Select a client…</option>
-            {patients.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
-          </select>
+          <PatientPicker value={patient} onChange={setPatient} />
           <select value={templateId} onChange={(e) => setTemplateId(Number(e.target.value))} className="w-full rounded-md border border-border px-3 py-2 text-sm">
             <option value="">Select a form…</option>
             {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -59,7 +57,7 @@ export function SendFormModal({ templates, patients, onClose }: {
           ) : (
             <>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={submit} disabled={submitting || !templateId || !patientId}>{submitting ? 'Sending…' : 'Send Form'}</Button>
+              <Button onClick={submit} disabled={submitting || !templateId || !patient}>{submitting ? 'Sending…' : 'Send Form'}</Button>
             </>
           )}
         </DialogFooter>

@@ -25,6 +25,9 @@ const RULES: { name: string; re: RegExp; allowIn?: Set<string> }[] = [
   { name: '$ label', re: /['"`(]\s*\$\s*(per\b|\)|['"`])/ },
   { name: '$ literal amount', re: /(^|[\s'"`>(])\$\s?\d[\d,]*\.\d{2}\b/ },
   { name: 'USD', re: /\bUSD\b/ },
+  // Task 11: US wording. (J3490 joins this list once WS2 has merged.)
+  { name: 'US term Wound VAC', re: /Wound VAC/ },
+  { name: 'US term Fax History', re: /Fax History/ },
 ]
 
 function walk(dir: string): string[] {
@@ -57,7 +60,7 @@ describe('no US locale / dollar formatting in src/', () => {
   it('the guard itself catches each banned form', () => {
     const samples = [
       "d.toLocaleDateString()", "x.toLocaleString('en-IN')", "fmt('en-US')", "new Intl.DateTimeFormat('en-IN')",
-      "`$${v}`", "<p>Total: ${(cents / 100).toFixed(2)}</p>", 'placeholder="$ per unit"', "currency: 'USD'", "'Copay $45.00'",
+      "`$${v}`", "<p>Total: ${(cents / 100).toFixed(2)}</p>", 'placeholder="$ per unit"', "currency: 'USD'", "'Copay $45.00'", "'Wound VAC'", "label: 'Fax History (Demo)'",
     ]
     for (const s of samples) expect(RULES.some((r) => r.re.test(s)), s).toBe(true)
     for (const ok of ['formatPaise(cents)', '`${a}-${b}`', "s.replace(/x/g, '$1 ')", 'typeof t.$inferSelect']) {

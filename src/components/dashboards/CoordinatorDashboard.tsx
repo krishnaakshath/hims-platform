@@ -208,7 +208,7 @@ export function CoordinatorDashboard({ session, data, templates, patients, appoi
           <h1 className="text-3xl font-bold text-foreground">Hello, {session.name}!</h1>
           <p className="text-sm text-muted-foreground">Here&apos;s what needs your attention today.</p>
         </div>
-        <DashboardHomeClient templates={templates} patients={patients} canAddPatient={false} />
+        <DashboardHomeClient templates={templates} canAddPatient={false} />
       </div>
 
       {/* Wave E P1-07: live hospital KPIs (scoped to crc: no claim ageing). */}

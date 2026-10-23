@@ -36,7 +36,7 @@ export interface DashboardPageProps {
   session: Session
   data: DashboardData
   templates: { id: number; name: string }[]
-  patients: { id: string; name: string }[]
+  patients?: { id: string; name: string }[]
   appointmentsInRange: { id: number; patientId: string; patientName: string; providerName: string; visitReason: string; status: string; startsAt: string; visitMode: DashboardAppointmentRow['visitMode']; telemedicine: DashboardAppointmentRow['telemedicine'] }[] // WS7 T6: visitMode, telemedicine
   staffByRole: { role: string; count: number }[]
   // Optional (not just AdminDashboard-only) because this interface is
@@ -105,7 +105,7 @@ function formatExpiryPhrase(daysUntilExpiry: number): string {
 // cached object can predate `totalPatients`. Fall back to the distinct
 // patient ids in the picker list (a patient x screening join, so deduped)
 // rather than rendering NaN or a blank tile.
-export function resolveTotalPatients(data: { totalPatients?: number }, patients: { id: string }[]): number {
+export function resolveTotalPatients(data: { totalPatients?: number }, patients: { id: string }[] = []): number {
   return data.totalPatients ?? new Set(patients.map((p) => p.id)).size
 }
 
@@ -331,7 +331,7 @@ export function AdminDashboard({ session, data, templates, patients, appointment
           <h1 className="text-3xl font-bold text-foreground">Hello, {session.name}!</h1>
           <p className="text-sm text-muted-foreground">Here&apos;s what&apos;s happening across the hospital today.</p>
         </div>
-        <DashboardHomeClient templates={templates} patients={patients} />
+        <DashboardHomeClient templates={templates} />
       </div>
 
       {/* Wave E P1-07: live hospital KPIs first; the trial widgets move to the Research tab. */}

@@ -107,7 +107,7 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
           <div className="space-y-2">
             <input value={dischargeDiagnosis} onChange={(e) => setDischargeDiagnosis(e.target.value)} placeholder="Diagnosis" aria-label="Diagnosis" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
             <input value={dischargeDrugs} onChange={(e) => setDischargeDrugs(e.target.value)} placeholder="Drugs (discharge medications)" aria-label="Drugs" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-            <input value={dischargeDevices} onChange={(e) => setDischargeDevices(e.target.value)} placeholder="Devices (e.g. None, or Wound VAC)" aria-label="Devices" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+            <input value={dischargeDevices} onChange={(e) => setDischargeDevices(e.target.value)} placeholder="Devices (e.g. none, urinary catheter, NPWT dressing)" aria-label="Devices" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
             <input value={dischargeDiet} onChange={(e) => setDischargeDiet(e.target.value)} placeholder="Diet" aria-label="Diet" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
             <textarea value={dischargeSummaryNotes} onChange={(e) => setDischargeSummaryNotes(e.target.value)} placeholder="Discharge summary notes" aria-label="Discharge summary notes" className="w-full rounded-md border border-border px-3 py-2 text-sm" rows={3} />
           </div>

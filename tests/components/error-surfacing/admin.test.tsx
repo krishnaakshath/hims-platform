@@ -186,7 +186,7 @@ import { FormBuilderEditor } from '@/components/FormBuilderEditor'
 describe('FormBuilderEditor', () => {
   it('shows a failed save in an alert', async () => {
     mockFetch(500, { error: LEAK })
-    render(<FormBuilderEditor templateId={1} initialIsActive folders={[]} attachedConsents={[]} allConsentDocuments={[]} patients={[]}
+    render(<FormBuilderEditor templateId={1} initialIsActive folders={[]} attachedConsents={[]} allConsentDocuments={[]}
       initial={{ name: 'F', category: 'C', diagnosisTag: 'D', folderId: null, languages: ['en'], questions: [{ id: 'q1', label: 'Name', type: 'text', hipaaSensitive: false, required: true }] }} />)
     fireEvent.change(screen.getAllByRole('textbox')[0], { target: { value: 'Renamed form' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Form' }))
@@ -197,7 +197,7 @@ describe('FormBuilderEditor', () => {
 
   it('shows a failed create on /forms/new in an alert', async () => {
     mockFetch(500, { error: LEAK })
-    render(<FormBuilderEditor templateId={null} initialIsActive folders={[]} attachedConsents={[]} allConsentDocuments={[]} patients={[]}
+    render(<FormBuilderEditor templateId={null} initialIsActive folders={[]} attachedConsents={[]} allConsentDocuments={[]}
       initial={{ name: '', category: '', diagnosisTag: '', folderId: null, languages: ['en'], questions: [] }} />)
     fireEvent.change(screen.getAllByRole('textbox')[0], { target: { value: 'New form' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Form' }))

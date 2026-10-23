@@ -3,7 +3,6 @@ import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getDashboardData } from '@/lib/queries/dashboard'
 import { listFormTemplates } from '@/lib/queries/form-templates'
-import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { listAppointmentsInRange } from '@/lib/queries/appointments'
 import { listAllUsers } from '@/lib/queries/users'
 import { listExpiringOrExpiredCredentials } from '@/lib/queries/staff-credentials'
@@ -51,10 +50,9 @@ export default async function DashboardHomePage() {
   const rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
   const rangeEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
 
-  const [data, templates, patients, appointmentsInRange, allStaff, expiringCredentials, hospital] = await Promise.all([
+  const [data, templates, appointmentsInRange, allStaff, expiringCredentials, hospital] = await Promise.all([
     getDashboardData(),
     listFormTemplates(),
-    listPatientsWithStatus(null),
     listAppointmentsInRange(rangeStart, rangeEnd),
     listAllUsers(),
     listExpiringOrExpiredCredentials(),
@@ -71,7 +69,6 @@ export default async function DashboardHomePage() {
     session,
     data,
     templates: templates.map((t) => ({ id: t.id, name: t.name })),
-    patients: patients.map((p) => ({ id: p.id, name: p.name })),
     appointmentsInRange: appointmentsInRange.map((a) => ({
       id: a.id, patientId: a.patientId, patientName: a.patientName, providerName: a.providerName,
       visitReason: a.visitReason, status: a.status, startsAt: a.startsAt.toString(),
