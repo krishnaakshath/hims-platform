@@ -9,6 +9,7 @@ import { createSignature } from '@/lib/queries/signatures'
 import { followUpPlanFieldsSchema, offsetDateTimeSchema } from '@/lib/follow-ups/validation'
 import { notifyFollowUpSafely } from '@/lib/follow-ups/notifier'
 import { errorResponse, followUpServerError, readJsonBody } from '@/lib/follow-ups/route-responses'
+import { invalidateCache, patientDetailCacheKey } from '@/lib/cache' // WS3 T6
 
 const DISCHARGE_ATTESTATION = 'I attest that this discharge summary is accurate and complete.'
 const MAX_INT = 2_147_483_647
@@ -26,6 +27,8 @@ const dischargeSchema = z.object({
   followUpEndsAt: offsetDateTimeSchema.optional(),
   followUp: followUpPlanFieldsSchema.optional(),
   typedName: z.string().trim().min(1),
+  // WS3 T6: the discharge ICD-10 codes; first = primary, rest secondary (spec 3.2 item 14).
+  diagnosisCodeIds: z.array(z.number().int().positive().max(MAX_INT)).max(5).refine((ids) => new Set(ids).size === ids.length).optional(),
 }).strict().refine((b) => (b.followUpStartsAt === undefined) === (b.followUpEndsAt === undefined))
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -89,6 +92,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       followUpPlan: plan
         ? { timing: plan.timing, windowDaysBefore: plan.windowDaysBefore, windowDaysAfter: plan.windowDaysAfter, reason: plan.reason, planNotes: plan.planNotes ?? null }
         : null,
+      diagnosisCodeIds: parsed.data.diagnosisCodeIds ?? [], // WS3 T6
     }, session)
   } catch (err) {
     // 40P01 / 40001 -> 409 "try again" (nothing was written); else a generic 500.
@@ -103,9 +107,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       case 'provider_not_found': return errorResponse(409, 'The attending doctor is inactive, so a follow-up cannot be recorded.')
       // WS3 T5: the discharge dues gate (paise amounts only).
       case 'dues_outstanding': return NextResponse.json({ error: 'Dues are outstanding. Ask billing to clear or override them.', code: 'dues_outstanding', dues: result.dues }, { status: 409 })
+      // WS3 T6: a refused discharge code (nothing was written). Fixed messages, never the code id.
+      case 'code_not_found': return NextResponse.json({ error: 'A diagnosis code was not found. Pick it again from the list.', code: 'code_not_found' }, { status: 422 })
+      case 'code_not_current': return NextResponse.json({ error: 'A diagnosis code is not in the current ICD-10 version.', code: 'code_not_current' }, { status: 422 })
+      case 'code_not_valid_for_patient': return NextResponse.json({ error: "A diagnosis code does not fit this patient's sex or age.", code: 'code_not_valid_for_patient' }, { status: 422 })
+      case 'coding_locked': return NextResponse.json({ error: 'Coding for this stay is locked. Raise a coding query instead.', code: 'coding_locked' }, { status: 409 })
+      case 'no_ipd_encounter': return NextResponse.json({ error: 'This stay has no inpatient visit to record diagnoses on.', code: 'no_ipd_encounter' }, { status: 409 })
       default: return errorResponse(409, 'This admission has already been discharged')
     }
   }
+
+  // WS3 T6: the chart's diagnosis list changed (as the workspace's diagnosis writes do).
+  if (parsed.data.diagnosisCodeIds?.length) await invalidateCache(patientDetailCacheKey(admission.patientId))
 
   // Insert the discharge signature as a SEPARATE step after the committed
   // discharge transaction above. If this insert throws, the admission is

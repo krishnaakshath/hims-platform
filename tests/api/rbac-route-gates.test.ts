@@ -650,6 +650,9 @@ import { MASTER_DATA_ADMIN_ROLES as WS3T4_MASTER_DATA_ADMIN_ROLES } from '@/lib/
 import { GET as getDuesClearance, POST as postDuesClearance } from '@/app/api/inpatient/admissions/[id]/dues-clearance/route'
 import { DUES_VIEW_ROLES, BILLING_AUTHORITY_ROLES as WS3T5_BILLING_AUTHORITY_ROLES } from '@/lib/role-policy'
 // end WS3 T5
+// WS3 T6
+import { GET as getDischargeContext } from '@/app/api/inpatient/admissions/[id]/discharge-context/route'
+// end WS3 T6
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1159,6 +1162,9 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/inpatient/admissions/[id]/dues-clearance', call: () => getDuesClearance(get(`/api/inpatient/admissions/${BOGUS_ID}/dues-clearance`), ctx({ id: BOGUS_ID })), allowed: [...DUES_VIEW_ROLES] },
   { name: 'POST /api/inpatient/admissions/[id]/dues-clearance', call: () => postDuesClearance(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/dues-clearance`, { overrideReason: 'x' }), ctx({ id: BOGUS_ID })), allowed: [...WS3T5_BILLING_AUTHORITY_ROLES] },
   // end WS3 T5
+  // WS3 T6: the discharge dialog's context -- DISCHARGE_ROLES (an unknown admission is the 404 an allowed role gets).
+  { name: 'GET /api/inpatient/admissions/[id]/discharge-context', call: () => getDischargeContext(get(`/api/inpatient/admissions/${BOGUS_ID}/discharge-context`), ctx({ id: BOGUS_ID })), allowed: [...DISCHARGE_ROLES] },
+  // end WS3 T6
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

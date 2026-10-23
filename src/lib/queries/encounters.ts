@@ -75,6 +75,8 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
     const encounterDate = istDateOf(now)
 
     // Global lock order (I1): follow-up order -> appointment -> OPD token -> encounter -> patient billing lock (last).
+    // Discharge (dischargeAdmission, WS3 T6) keeps the same encounter -> billing prefix: IPD encounter
+    // FOR UPDATE -> patient billing lock -> admission row -> room -> the encounter's coding row.
     // bookFollowUp / unbookFollowUp / cancelFollowUpOrder lock the order first and
     // then the appointment, so check-in must too, or the two deadlock (40P01).
     // A writer that unbooked meanwhile set appointment_id to null: Postgres

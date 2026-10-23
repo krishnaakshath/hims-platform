@@ -1,6 +1,6 @@
 import { getDb } from '@/db/client'
-import { admissions, admissionTransfers, rooms, appointments, encounters, patients } from '@/db/schema'
-import { and, desc, eq } from 'drizzle-orm'
+import { admissions, admissionTransfers, rooms, appointments, encounters, patients, diagnoses } from '@/db/schema'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { ageOnDate, istDateOf } from '@/lib/india-time'
@@ -13,6 +13,8 @@ import { createFollowUpOrder } from '@/lib/queries/follow-ups'
 import { loadAdmissionDues } from '@/lib/queries/admission-dues' // WS3 T5
 import { lockPatientBilling } from '@/lib/queries/billing-lock' // WS3 T5
 import { clearanceIsCurrent, type DischargeDues } from '@/lib/inpatient/dues' // WS3 T5
+import { addEncounterDiagnosisInTx, lockEncounterCoding } from '@/lib/queries/coding' // WS3 T6
+import type { WriteExecutor } from '@/lib/queries/executor' // WS3 T6
 
 export type Admission = typeof admissions.$inferSelect
 
@@ -207,7 +209,15 @@ export interface DischargeInput {
   followUp: { startsAt: Date; endsAt: Date } | null
   /** SP3: the clinical follow-up plan (becomes a `discharge` follow-up order). */
   followUpPlan: DischargeFollowUpPlan | null
+  /**
+   * WS3 T6: the discharge ICD-10 codes (at most 5, unique), first = primary, rest secondary,
+   * written as `proposed` diagnoses on the IPD encounter. Omitted / [] writes none.
+   */
+  diagnosisCodeIds?: number[]
 }
+
+/** WS3 T6: refusals of the coded discharge diagnoses (the whole discharge rolls back). */
+export type DischargeDiagnosisError = 'code_not_found' | 'code_not_current' | 'code_not_valid_for_patient' | 'coding_locked' | 'no_ipd_encounter'
 
 export const DISCHARGE_FOLLOW_UP_REASON = 'Post-discharge follow-up'
 
@@ -220,6 +230,7 @@ export interface DischargeResult {
    * 'due_date_invalid' (fixed `message`) and 'provider_not_found' (the
    * attending doctor is inactive, so no follow-up can be prescribed),
    * WS3 T5: 'dues_outstanding' (with `dues`).
+   * WS3 T6: a DischargeDiagnosisError (nothing was written).
    */
   error?: string
   message?: string
@@ -227,6 +238,43 @@ export interface DischargeResult {
   followUpAppointmentId?: number
   followUpOrderId?: number
   followUpDueDate?: string
+}
+
+/**
+ * WS3 T6: writes the discharge codes as SP6 diagnoses on the IPD encounter, under the encounter's
+ * coding lock. A code already live on the encounter as primary/secondary is not written twice (the
+ * dialog pre-fills the stay's codes); the first NEW code is `primary` unless a live primary
+ * exists, every other one `secondary`. A provisional row stays as it is (the provisional and the
+ * final diagnosis are separate facts). Any refusal throws DischargeRollback.
+ */
+async function writeDischargeDiagnoses(tx: WriteExecutor, encounterId: number, codeIds: number[], session: Session, now: Date): Promise<void> {
+  await lockEncounterCoding(tx, encounterId)
+  const live = await tx.select({ codeId: diagnoses.codeId, type: diagnoses.diagnosisType }).from(diagnoses)
+    .where(and(eq(diagnoses.encounterId, encounterId), isNull(diagnoses.voidedAt), inArray(diagnoses.diagnosisType, ['primary', 'secondary'])))
+  const recorded = new Set(live.map((d) => d.codeId).filter((id): id is number => id !== null))
+  let primaryTaken = live.some((d) => d.type === 'primary')
+  for (const codeId of codeIds) {
+    if (recorded.has(codeId)) continue
+    const type = primaryTaken ? 'secondary' : 'primary'
+    primaryTaken = true
+    const r = await addEncounterDiagnosisInTx(tx, encounterId, { type, codeId }, session, now, { asDoctor: true, currentIcd10Version: true })
+    if (r.ok) continue
+    throw new DischargeRollback({ ok: false, error: dischargeDiagnosisError(r.error, r.issues?.map((i) => i.code) ?? []) })
+  }
+}
+
+function dischargeDiagnosisError(error: string, issueCodes: string[]): DischargeDiagnosisError {
+  switch (error) {
+    case 'code_not_found': return 'code_not_found'
+    case 'code_not_current':
+    case 'sample_code': return 'code_not_current'
+    case 'code_invalid': return issueCodes.some((c) => c === 'sex_mismatch' || c === 'age_out_of_range') ? 'code_not_valid_for_patient' : 'code_not_current'
+    case 'locked': return 'coding_locked'
+    case 'not_found':
+    case 'encounter_cancelled': return 'no_ipd_encounter'
+    // primary_exists cannot happen: the live rows were read under the coding lock held here.
+    default: throw new Error(`unexpected coding outcome ${error}`)
+  }
 }
 
 /** Thrown inside the transaction to roll it back; mapped to a result outside. */
@@ -241,11 +289,16 @@ class DischargeRollback extends Error {
  * transactions; the old "sequential, not transactional" posture is gone):
  *
  * 1. Lock the admission row `for update` and check it is still admitted.
- *    WS3 T5: the patient's billing lock is taken first (the billing writers' order: lock, then
- *    rows), so no charge or payment lands between the dues check and the commit. Then the
- *    dues gate: outstanding dues refuse the discharge (`dues_outstanding`) unless billing's
- *    latest clearance is still current (clearanceIsCurrent). The only discharge dues gate.
+ *    Lock order (WS3 T5/T6): the admission's IPD encounter row FOR UPDATE, then the patient's
+ *    billing lock, then the admission row, then the room, then (T6) the encounter's coding row.
+ *    The encounter goes first because orderProcedure/cancelProcedure hold it FOR SHARE before
+ *    they take the billing lock; taking billing first here would let the two cycle (40P01).
+ *    The billing lock means no charge or payment lands between the dues check and the commit.
+ *    Then the dues gate: outstanding dues refuse the discharge (`dues_outstanding`) unless
+ *    billing's latest clearance is still current (clearanceIsCurrent). The only discharge dues gate.
  * 2. Store the five Ds and the discharge fields; free the room to `dirty`.
+ *    WS3 T6: then write the coded discharge diagnoses through SP6 (addEncounterDiagnosisInTx, as
+ *    the doctor: `proposed`, current ICD-10 only). A refused code rolls back the whole discharge.
  * 3. With a slot: take the per-provider booking lock (the same key as
  *    bookFollowUp), run the conflict check on the tx, insert the appointment
  *    and link it as `followUpAppointmentId`.
@@ -264,6 +317,9 @@ export async function dischargeAdmission(admissionId: number, input: DischargeIn
       // 1.
       const [pre] = await tx.select({ patientId: admissions.patientId }).from(admissions).where(eq(admissions.id, admissionId)).limit(1) // WS3 T5
       if (!pre) return { ok: false, error: 'Admission not found' } // WS3 T5
+      // WS3 T6: the IPD encounter row first (global lock order I1: encounter -> billing).
+      const [ipdEncounter] = await tx.select({ id: encounters.id }).from(encounters)
+        .where(and(eq(encounters.admissionId, admissionId), eq(encounters.encounterType, 'ipd'))).for('update')
       await lockPatientBilling(tx, pre.patientId) // WS3 T5
       const [admission] = await tx.select().from(admissions).where(eq(admissions.id, admissionId)).for('update')
       if (!admission) return { ok: false, error: 'Admission not found' }
@@ -289,6 +345,13 @@ export async function dischargeAdmission(admissionId: number, input: DischargeIn
 
       if (admission.currentRoomId !== null) {
         await tx.update(rooms).set({ status: 'dirty', occupiedByPatientId: null }).where(eq(rooms.id, admission.currentRoomId))
+      }
+
+      // WS3 T6: the coded discharge diagnoses (after the gate, inside the discharge).
+      const codeIds = input.diagnosisCodeIds ?? []
+      if (codeIds.length > 0) {
+        if (!ipdEncounter) throw new DischargeRollback({ ok: false, error: 'no_ipd_encounter' })
+        await writeDischargeDiagnoses(tx, ipdEncounter.id, codeIds, session, dischargedAt)
       }
 
       // 3.

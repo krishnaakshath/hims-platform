@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest'
-import { eq, ne, and, like, or } from 'drizzle-orm'
+import { eq, ne, and, like, or, inArray, isNull } from 'drizzle-orm'
 import { POST } from '@/app/api/inpatient/admissions/[id]/discharge/route'
 import { getDb } from '@/db/client'
 import { admissions, patients, appointments, providers, signatures, auditLog, followUpOrders } from '@/db/schema'
 import { admissionDuesClearances, chargeLines, encounters, serviceCatalog } from '@/db/schema' // WS3 T5
 import { createAdmission } from '@/lib/queries/admissions'
 import { recordDuesClearance } from '@/lib/queries/admission-dues' // WS3 T5
+import { codeSystems, codes, diagnoses, encounterCoding, encounterCodingEvents } from '@/db/schema' // WS3 T6
+import { istDateOf } from '@/lib/india-time' // WS3 T6
 
 let sessionRole: 'admin' | 'pi' | 'frontdesk' = 'pi'
 let sessionName = 'Dr. Chen'
@@ -419,5 +421,96 @@ describe.skipIf(!process.env.DATABASE_URL)('POST /api/inpatient/admissions/[id]/
     const rows = await getDb().select().from(admissionDuesClearances).where(eq(admissionDuesClearances.admissionId, adm.id))
     expect(rows).toEqual([])
     expect((await post(adm.id)).status).toBe(200)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WS3 T6: coded discharge diagnoses (spec 3.2 item 14). The picked ICD-10 codes
+// are written as `diagnoses` rows on the IPD encounter (first primary, rest
+// secondary, proposed), inside the discharge transaction; an unknown code id
+// rolls back the whole discharge.
+// ---------------------------------------------------------------------------
+describe.skipIf(!process.env.DATABASE_URL)('POST /api/inpatient/admissions/[id]/discharge -- coded diagnoses (WS3 T6)', () => {
+  const RUN = `${Date.now() % 1e8}${Math.floor(Math.random() * 1e3)}`
+  const PID = `TEST-WS3T6-DIS-${RUN}`
+  const FIVE = { dischargeDiagnosis: 'A', dischargeDrugs: 'B', dischargeDevices: 'C', dischargeDiet: 'D', dischargeSummaryNotes: 'E', typedName: 'Dr. Chen' }
+  const post = (admissionId: number, extra: Record<string, unknown>) =>
+    POST(new Request('http://localhost', { method: 'POST', body: JSON.stringify({ ...FIVE, ...extra }) }) as never, { params: Promise.resolve({ id: String(admissionId) }) })
+  let picks: { id: number; code: string }[] = []
+
+  async function admitWithEncounter() {
+    // One active stay per patient: close whatever an earlier (possibly failed) test left open.
+    await getDb().update(admissions).set({ status: 'discharged', dischargedAt: new Date() }).where(and(eq(admissions.patientId, PID), eq(admissions.status, 'admitted')))
+    const adm = await createAdmission({ patientId: PID, roomId: null, attendingProviderId: 1, admissionType: 'elective', createdFromAssignmentId: null })
+    const [enc] = await getDb().insert(encounters).values({
+      patientId: PID, encounterType: 'ipd', status: 'checked_in', encounterDate: istDateOf(new Date()), providerId: 1, admissionId: adm.id, checkedInByName: 'TEST_WS3T6',
+    }).returning()
+    await getDb().insert(diagnoses).values({
+      patientId: PID, code: '', description: 'TEST_WS3T6 fever for evaluation', date: istDateOf(new Date()), encounterId: enc.id,
+      diagnosisType: 'provisional', codingStatus: 'uncoded', createdByName: 'TEST_WS3T6', createdAt: new Date(),
+    })
+    return { admissionId: adm.id, encounterId: enc.id }
+  }
+
+  beforeAll(async () => {
+    await getDb().insert(patients).values({ id: PID, name: 'TEST_WS3T6 Discharge Patient', dob: '1985-01-01', gender: 'male' })
+    picks = await getDb().select({ id: codes.id, code: codes.code }).from(codes)
+      .innerJoin(codeSystems, eq(codeSystems.id, codes.codeSystemId))
+      .where(and(eq(codeSystems.kind, 'icd10'), eq(codeSystems.isCurrent, true), eq(codes.selectable, true), eq(codes.active, true), isNull(codes.sexRestriction), isNull(codes.ageMinYears), isNull(codes.ageMaxYears)))
+      .orderBy(codes.id).limit(2)
+  })
+
+  afterAll(async () => {
+    const db = getDb()
+    const encIds = (await db.select({ id: encounters.id }).from(encounters).where(eq(encounters.patientId, PID))).map((e) => e.id)
+    const ids = (await db.select({ id: admissions.id }).from(admissions).where(eq(admissions.patientId, PID))).map((a) => a.id)
+    await db.delete(diagnoses).where(eq(diagnoses.patientId, PID))
+    if (encIds.length) {
+      await db.delete(encounterCodingEvents).where(inArray(encounterCodingEvents.encounterId, encIds))
+      await db.delete(encounterCoding).where(inArray(encounterCoding.encounterId, encIds))
+    }
+    for (const id of ids) await db.delete(signatures).where(and(eq(signatures.signableType, 'admission_discharge'), eq(signatures.signableId, id)))
+    await db.delete(encounters).where(eq(encounters.patientId, PID))
+    await db.delete(admissions).where(eq(admissions.patientId, PID))
+    await db.delete(auditLog).where(eq(auditLog.patientId, PID))
+    await db.delete(patients).where(eq(patients.id, PID))
+  })
+
+  it('writes one primary and one secondary proposed diagnosis on the IPD encounter', async () => {
+    expect(picks).toHaveLength(2)
+    const { admissionId, encounterId } = await admitWithEncounter()
+    const res = await post(admissionId, { diagnosisCodeIds: [picks[0].id, picks[1].id] })
+    expect(res.status).toBe(200)
+    const rows = await getDb().select().from(diagnoses).where(and(eq(diagnoses.encounterId, encounterId), ne(diagnoses.diagnosisType, 'provisional'))).orderBy(diagnoses.id)
+    expect(rows.map((r) => [r.codeId, r.diagnosisType, r.codingStatus, r.voidedAt])).toEqual([
+      [picks[0].id, 'primary', 'proposed', null],
+      [picks[1].id, 'secondary', 'proposed', null],
+    ])
+    const [adm] = await getDb().select().from(admissions).where(eq(admissions.id, admissionId))
+    expect(adm.status).toBe('discharged')
+    const [enc] = await getDb().select().from(encounters).where(eq(encounters.id, encounterId))
+    expect(enc.status).toBe('completed')
+  })
+
+  it('an unknown code id is 422 code_not_found and nothing is discharged or written', async () => {
+    const { admissionId, encounterId } = await admitWithEncounter()
+    const res = await post(admissionId, { diagnosisCodeIds: [picks[0].id, 2_147_483_000] })
+    expect(res.status).toBe(422)
+    const body = await res.json()
+    expect(body.code).toBe('code_not_found')
+    expect(JSON.stringify(body)).not.toContain('2147483000')
+    const [adm] = await getDb().select().from(admissions).where(eq(admissions.id, admissionId))
+    expect(adm.status).toBe('admitted')
+    const rows = await getDb().select().from(diagnoses).where(and(eq(diagnoses.encounterId, encounterId), ne(diagnoses.diagnosisType, 'provisional')))
+    expect(rows).toEqual([])
+    const [enc] = await getDb().select().from(encounters).where(eq(encounters.id, encounterId))
+    expect(enc.status).toBe('checked_in')
+  })
+
+  it('refuses more than five, duplicate or non-integer code ids with 400', async () => {
+    const { admissionId } = await admitWithEncounter()
+    for (const bad of [[1, 2, 3, 4, 5, 6], [picks[0].id, picks[0].id], ['x'], [0]]) {
+      expect((await post(admissionId, { diagnosisCodeIds: bad })).status).toBe(400)
+    }
   })
 })
