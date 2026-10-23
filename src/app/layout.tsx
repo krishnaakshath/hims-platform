@@ -1,19 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+// Fonts ship inside the `geist` npm package (next/font/local): no request to
+// Google Fonts at build or run time, so the image builds and runs offline.
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrandProvider } from "@/components/BrandProvider";
 import { brand, brandThemeCss, publicBrand } from "@/lib/brand";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 // Next escapes metadata values when it writes <title>/<meta>, and brand.ts has
 // already stripped control characters and capped the lengths.
@@ -29,7 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased`}
     >
       {themeCss ? (
         <head>
