@@ -11,7 +11,7 @@ import type { NhcxResponseSummary } from '@/lib/nhcx/constants'
 import { parseClaimResponseBundle, parseCommunicationRequestTaskBundle, parsePaymentNoticeTaskBundle, buildPaymentAckTaskBundle } from '@/lib/fhir/nhcx/responses'
 import { recipientCodeFor } from '@/lib/nhcx/claim-gateway'
 import { lockPatientBilling } from './charge-capture'
-import { defaultSchedule, dispatchExchange, listExchangesFor, senderCode, type OutboundBuild } from './nhcx-exchanges'
+import { defaultSchedule, dispatchExchange, latestPreauthSnapshotEvent, listExchangesFor, liveSnapshotSide, senderCode, staleSnapshotReason, type OutboundBuild } from './nhcx-exchanges'
 import { loadPolicyContext, loadSnapshotHospital } from './rcm-context'
 
 // SP8 Task 15: an RCM user reviews each insurer response (ruling 6). The
@@ -124,16 +124,24 @@ export async function claimNhcxChannel(claimId: number): Promise<{ enabled: bool
   return { enabled: true, label: cfg.state === 'mock' ? 'NHCX (sandbox mock - not real)' : 'NHCX' }
 }
 
-/** Whether a pre-auth can be sent through NHCX now. */
-export async function preauthNhcxState(preauthId: number): Promise<{ canSend: boolean; reason: string | null }> {
+/**
+ * Whether a pre-auth can be sent through NHCX now, read the way createPreauthExchange sends it:
+ * from the latest saved snapshot. A snapshot saved before the payer's NHCX code or the hospital
+ * IDs were added is stale (WS12 T7, R11) and the reason says to refresh it.
+ */
+export async function preauthNhcxState(preauthId: number): Promise<{ canSend: boolean; reason: string | null; snapshotStale: boolean }> {
   const cfg = readNhcxConfig()
-  if (cfg.state === 'not_configured') return { canSend: false, reason: 'NHCX not connected' }
-  const [p] = await getDb().select({ status: preauths.status, policyId: preauths.policyId }).from(preauths).where(eq(preauths.id, preauthId)).limit(1)
-  if (!p) return { canSend: false, reason: null }
-  const ctx = await loadPolicyContext(getDb(), p.policyId)
-  if (!ctx || !recipientCodeFor(ctx.policy)) return { canSend: false, reason: 'This insurer or TPA has no NHCX participant code' }
-  if (p.status !== 'requested' && p.status !== 'enhancement_requested') return { canSend: false, reason: 'Only a requested pre-authorisation can be sent' }
-  return { canSend: true, reason: null }
+  if (cfg.state === 'not_configured') return { canSend: false, reason: 'NHCX not connected', snapshotStale: false }
+  const db = getDb()
+  const [p] = await db.select({ status: preauths.status, policyId: preauths.policyId }).from(preauths).where(eq(preauths.id, preauthId)).limit(1)
+  if (!p) return { canSend: false, reason: null, snapshotStale: false }
+  const live = await liveSnapshotSide(db, p.policyId)
+  if (!live || !recipientCodeFor(live.policy)) return { canSend: false, reason: 'This insurer or TPA has no NHCX participant code', snapshotStale: false }
+  if (p.status !== 'requested' && p.status !== 'enhancement_requested') return { canSend: false, reason: 'Only a requested pre-authorisation can be sent', snapshotStale: false }
+  const ev = await latestPreauthSnapshotEvent(db, preauthId)
+  const stale = ev?.snapshot ? staleSnapshotReason(ev.snapshot, live) : null
+  if (stale) return { canSend: false, reason: stale, snapshotStale: true }
+  return { canSend: true, reason: null, snapshotStale: false }
 }
 
 /** The last exchanges for the settings page (ids, actions and states only). */

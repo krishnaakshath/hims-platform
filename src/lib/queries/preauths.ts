@@ -3,10 +3,10 @@
 // in one transaction: the SP4 per-patient billing lock first, then the pre-auth row FOR UPDATE,
 // then the event and the audit row. Audit details carry ids, numbers, statuses and paise only.
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, ilike, inArray, ne, notInArray, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
-import { admissions, encounters, patients, payerProfiles, payers, preauthDocuments, preauthEvents, preauths, providers, rcmQueries, rcmQueryResponses, rcmReasonCodes, type PreauthRow } from '@/db/schema'
+import { admissions, encounters, nhcxExchanges, patients, payerProfiles, payers, preauthDocuments, preauthEvents, preauths, providers, rcmQueries, rcmQueryResponses, rcmReasonCodes, type PreauthRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { lineTaxablePaise, sumPaise } from '@/lib/billing/amounts'
@@ -218,6 +218,25 @@ export async function applyPreauthAction(preauthId: number, req: PreauthActionRe
           if (await preauthOnLiveClaim(tx, preauthId)) return rcmFail('preauth_in_use')
           event.note = req.note
           break
+        case 'refresh_snapshot': {
+          // WS12 T7 (R10): a new snapshot of the request still with the insurer; the old event stays
+          // as it was sent. Read under the pre-auth row lock, so concurrent refreshes serialise.
+          const [latest] = await tx.select().from(preauthEvents)
+            .where(and(eq(preauthEvents.preauthId, preauthId), inArray(preauthEvents.action, ['request', 'request_enhancement', 'refresh_snapshot'])))
+            .orderBy(desc(preauthEvents.id)).limit(1)
+          if (!latest?.snapshot) return rcmFail('invalid_transition')
+          const [withNhcx] = await tx.select({ id: nhcxExchanges.id }).from(nhcxExchanges).where(and(
+            eq(nhcxExchanges.preauthEventId, latest.id), eq(nhcxExchanges.direction, 'outbound'), notInArray(nhcxExchanges.state, ['send_failed', 'error']),
+          )).limit(1)
+          if (withNhcx) return rcmFail('preauth_in_use', 'Already sent through NHCX; the insurer has this version')
+          const snapshot = await buildRequestSnapshot(tx, p, latest.snapshot.kind, p.requestedPaise, now)
+          // preparedAt always differs; "changed" means anything else differs.
+          if (snapshotSha256({ ...snapshot, preparedAt: latest.snapshot.preparedAt }) === latest.snapshotSha256) {
+            return rcmFail('not_ready', 'Nothing has changed since this request was prepared')
+          }
+          Object.assign(event, { snapshot, snapshotSha256: snapshotSha256(snapshot) })
+          break
+        }
       }
 
       await tx.update(preauths).set(set).where(eq(preauths.id, preauthId))

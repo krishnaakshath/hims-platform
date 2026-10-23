@@ -8,6 +8,7 @@ export type PreauthStatus = (typeof PREAUTH_STATUSES)[number]
 
 export const PREAUTH_ACTIONS = [
   'request', 'record_query', 'respond_query', 'approve', 'reject', 'request_enhancement', 'approve_enhancement', 'reject_enhancement', 'cancel',
+  'refresh_snapshot', // WS12 T7: a fresh snapshot of a request still with the insurer; the status does not move
 ] as const
 export type PreauthAction = (typeof PREAUTH_ACTIONS)[number]
 
@@ -60,6 +61,8 @@ export function nextPreauthStatus(from: PreauthStatus, action: PreauthAction, ct
       return ctx?.enhancedBefore ? 'enhanced' : 'approved'
     case 'cancel':
       return from === 'rejected' || from === 'cancelled' ? null : 'cancelled'
+    case 'refresh_snapshot':
+      return from === 'requested' || from === 'enhancement_requested' ? from : null
     default:
       return null
   }

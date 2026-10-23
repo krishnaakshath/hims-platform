@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { and, eq, like } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { auditLog, claims, preauthEvents, preauths, rcmQueries } from '@/db/schema'
+import { randomUUID } from 'node:crypto'
+import { auditLog, claims, nhcxExchanges, payerProfiles, preauthEvents, preauths, rcmQueries } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 
 vi.mock('@/lib/blob-store', () => ({ putPrivateBlob: vi.fn(async (path: string) => ({ url: `https://blob.test/${path}` })), streamPrivateBlob: vi.fn() }))
@@ -9,6 +10,7 @@ import { applyPreauthAction, createPreauth, estimatePreauth, getPreauthDetail, g
 import { snapshotSha256 } from '@/lib/rcm/hash'
 import type { PreauthCreateInput } from '@/lib/rcm/validation'
 import { makePreauthWorld, destroyPreauthWorld, type PreauthWorld } from './preauth-world'
+import { purgeSp8Fixtures } from '../../db/sp8-fixtures'
 
 const RUN = `${Date.now()}`.slice(-7)
 const PROBE = `TEST-SP7-${RUN} Preauth Probe`
@@ -23,6 +25,7 @@ describe.skipIf(!process.env.DATABASE_URL)('pre-authorisations (DB)', () => {
   })
   beforeAll(async () => { w = await makePreauthWorld(RUN, 'A') })
   afterAll(async () => {
+    await purgeSp8Fixtures([w.patientId])
     await destroyPreauthWorld(w)
     await getDb().delete(auditLog).where(eq(auditLog.userName, PROBE))
   })
@@ -127,6 +130,80 @@ describe.skipIf(!process.env.DATABASE_URL)('pre-authorisations (DB)', () => {
     expect(rows.length).toBeGreaterThan(5)
     for (const r of rows) expect(`${r.details}`).not.toMatch(/AR\/|scan|stay|patient left|needed/i)
     expect(rows.find((r) => r.action === 'rcm: pre-authorisation approve')?.details).toMatch(/^preauth=\d+ from=(requested|queried) to=approved amount=8000000$/)
+  })
+
+  // ---- WS12 T7: refresh_snapshot -------------------------------------------------------------
+  const LATER = new Date(NOW.getTime() + 60_000)
+  const REFRESH = { action: 'refresh_snapshot' as const }
+  const setTpaCode = (code: string | null) => getDb().update(payerProfiles).set({ nhcxParticipantCode: code }).where(eq(payerProfiles.payerId, w.tpaId))
+  const eventsOf = async (id: number) => (await getDb().select().from(preauthEvents).where(eq(preauthEvents.preauthId, id))).sort((a, b) => a.id - b.id)
+  const outbound = async (id: number, eventId: number, state: 'sent' | 'send_failed' | 'pending_send' | 'error') => (await getDb().insert(nhcxExchanges).values({
+    entityType: 'preauth', direction: 'outbound', action: 'preauth/submit', correlationId: randomUUID(), apiCallId: randomUUID(), senderCode: 'sandbox-mock@sbx',
+    recipientCode: 'TPA-OLD@sbx', state, patientId: w.patientId, policyId: w.policyId, preauthId: id, preauthEventId: eventId, bodySha256: 'a'.repeat(64), isMock: true,
+  }).returning())[0]
+
+  it('refresh_snapshot appends a fresh snapshot with the status unchanged; nothing changed is not_ready', async () => {
+    await setTpaCode(null)
+    const id = await newPreauth()
+    expect(await applyPreauthAction(id, REFRESH, RCM, NOW)).toEqual({ ok: false, error: 'invalid_transition' })
+    await applyPreauthAction(id, { action: 'request' }, RCM, NOW)
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: false, error: 'not_ready', message: 'Nothing has changed since this request was prepared' })
+    await setTpaCode(`TPA${RUN}R1@sbx`)
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: true, value: { status: 'requested' } })
+    const events = await eventsOf(id)
+    expect(events.map((e) => e.action)).toEqual(['request', 'refresh_snapshot'])
+    const [req, ref] = events
+    expect(ref).toMatchObject({ fromStatus: 'requested', toStatus: 'requested', amountPaise: null })
+    expect(ref.snapshot?.kind).toBe('initial'); expect(ref.snapshot?.requestedPaise).toBe(req.snapshot?.requestedPaise)
+    expect(ref.snapshot?.policy.tpa?.nhcxParticipantCode).toBe(`TPA${RUN}R1@sbx`); expect(req.snapshot?.policy.tpa?.nhcxParticipantCode).toBeNull()
+    expect(ref.snapshotSha256).toBe(snapshotSha256(ref.snapshot)); expect(ref.snapshotSha256).not.toBe(req.snapshotSha256)
+    const [row] = await getDb().select().from(preauths).where(eq(preauths.id, id))
+    expect(row).toMatchObject({ status: 'requested', requestedPaise: 100_000_00 })
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: false, error: 'not_ready', message: 'Nothing has changed since this request was prepared' })
+    const [a] = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, PROBE), eq(auditLog.action, 'rcm: pre-authorisation refresh_snapshot')))
+    expect(a.details).toBe(`preauth=${id} from=requested to=requested`)
+    await applyPreauthAction(id, approve(`AR/${RUN}/R1`), RCM, LATER)
+    await setTpaCode(`TPA${RUN}R1b@sbx`)
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: false, error: 'invalid_transition' })
+  })
+
+  it('refresh_snapshot is refused once NHCX has the latest snapshot, and allowed after a failed send', async () => {
+    await setTpaCode(null)
+    const id = await newPreauth()
+    await applyPreauthAction(id, { action: 'request' }, RCM, NOW)
+    const [req] = await eventsOf(id)
+    const x = await outbound(id, req.id, 'sent')
+    await setTpaCode(`TPA${RUN}R2@sbx`)
+    for (const state of ['sent', 'pending_send'] as const) {
+      await getDb().update(nhcxExchanges).set({ state }).where(eq(nhcxExchanges.id, x.id))
+      expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: false, error: 'preauth_in_use', message: 'Already sent through NHCX; the insurer has this version' })
+    }
+    await getDb().update(nhcxExchanges).set({ state: 'send_failed' }).where(eq(nhcxExchanges.id, x.id))
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: true, value: { status: 'requested' } })
+  })
+
+  it('an enhancement request refreshes as an enhancement with the same amount', async () => {
+    await setTpaCode(null)
+    const id = await newPreauth()
+    await applyPreauthAction(id, { action: 'request' }, RCM, NOW)
+    await applyPreauthAction(id, approve(`AR/${RUN}/R3`), RCM, NOW)
+    await applyPreauthAction(id, { action: 'request_enhancement', requestedPaise: 1_00_000_00, note: 'longer stay' }, RCM, NOW)
+    await setTpaCode(`TPA${RUN}R3@sbx`)
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: true, value: { status: 'enhancement_requested' } })
+    const ref = (await eventsOf(id)).at(-1)!
+    expect(ref).toMatchObject({ action: 'refresh_snapshot', fromStatus: 'enhancement_requested', toStatus: 'enhancement_requested' })
+    expect(ref.snapshot).toMatchObject({ kind: 'enhancement', requestedPaise: 1_00_000_00 })
+  })
+
+  it('two concurrent refreshes append one event; the other finds nothing changed', async () => {
+    await setTpaCode(null)
+    const id = await newPreauth()
+    await applyPreauthAction(id, { action: 'request' }, RCM, NOW)
+    await setTpaCode(`TPA${RUN}R4@sbx`)
+    const [x, y] = await Promise.all([applyPreauthAction(id, REFRESH, RCM, LATER), applyPreauthAction(id, REFRESH, RCM, LATER)])
+    expect([x.ok, y.ok].sort()).toEqual([false, true])
+    expect(x.ok ? y : x).toMatchObject({ ok: false, error: 'not_ready' })
+    expect((await eventsOf(id)).filter((e) => e.action === 'refresh_snapshot')).toHaveLength(1)
   })
 
   it('stores a pre-auth document by hash and reads the detail and list without URLs', async () => {

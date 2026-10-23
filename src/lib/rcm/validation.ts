@@ -178,6 +178,7 @@ export const preauthActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('approve_enhancement'), approvedPaise: positivePaise, validUntil: isoDate, approvalReference: reference.optional(), decidedOn: isoDate }).strict(),
   z.object({ action: z.literal('reject_enhancement'), reasonCode, note: z.string().trim().max(1000).optional(), decidedOn: isoDate }).strict(),
   z.object({ action: z.literal('cancel'), note: trimmed(5, 500) }).strict(),
+  z.object({ action: z.literal('refresh_snapshot') }).strict(), // WS12 T7
 ]).superRefine((v, ctx) => {
   if (v.action === 'record_query' && v.dueOn < v.raisedOn) ctx.addIssue({ code: 'custom', path: ['dueOn'], message: 'The due date is before the query date' })
   if ((v.action === 'approve' || v.action === 'approve_enhancement') && v.validUntil < v.decidedOn) {

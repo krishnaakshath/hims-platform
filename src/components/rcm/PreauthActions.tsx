@@ -8,6 +8,11 @@ import { Field, FormError, Panel, buttonClass, inputClass } from './ui'
 const LABEL: Record<PreauthAction, string> = {
   request: 'Send request', record_query: 'Record insurer query', respond_query: 'Respond to query', approve: 'Record approval', reject: 'Record rejection',
   request_enhancement: 'Request enhancement', approve_enhancement: 'Record enhancement approval', reject_enhancement: 'Record enhancement rejection', cancel: 'Cancel',
+  refresh_snapshot: 'Refresh snapshot',
+}
+
+const HELP: Partial<Record<PreauthAction, string>> = {
+  refresh_snapshot: 'Saves the request again with today\'s insurer, TPA and hospital details (amount unchanged). Use it before sending through NHCX when those details were added after the request.',
 }
 
 type F = { name: string; label: string; type?: 'date' | 'textarea' | 'rupees'; options?: { value: string; label: string }[] }
@@ -21,6 +26,7 @@ const FIELDS: Record<PreauthAction, F[]> = {
   approve_enhancement: [{ name: 'approvedPaise', label: 'New approved total (₹)', type: 'rupees' }, { name: 'approvalReference', label: 'New approval reference (optional)' }, { name: 'validUntil', label: 'Valid until', type: 'date' }, { name: 'decidedOn', label: 'Decided on', type: 'date' }],
   reject_enhancement: [{ name: 'reasonCode', label: 'Reason' }, { name: 'note', label: 'Note', type: 'textarea' }, { name: 'decidedOn', label: 'Decided on', type: 'date' }],
   cancel: [{ name: 'note', label: 'Why it is cancelled', type: 'textarea' }],
+  refresh_snapshot: [],
 }
 
 function ActionForm({ preauthId, action, openQueryId, reasons }: { preauthId: number; action: PreauthAction; openQueryId: number | null; reasons: { value: string; label: string }[] }) {
@@ -40,6 +46,7 @@ function ActionForm({ preauthId, action, openQueryId, reasons }: { preauthId: nu
   }
   return (
     <form onSubmit={submit} className="space-y-2">
+      {HELP[action] && <p className="text-xs text-muted-foreground">{HELP[action]}</p>}
       <div className="grid gap-2 sm:grid-cols-2">
         {FIELDS[action].map((f) => (
           <Field key={f.name} label={f.label}>

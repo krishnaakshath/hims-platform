@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { NextRequest } from 'next/server'
 import type { Role } from '@/lib/auth'
 
@@ -16,7 +16,11 @@ vi.mock('next/server', async () => {
 })
 
 import { getDb } from '@/db/client'
-import { auditLog, claimEvents, claims, nhcxExchanges } from '@/db/schema'
+import { auditLog, billingSettings, claimEvents, claims, nhcxExchanges, patients, payerProfiles, preauthEvents, providers } from '@/db/schema'
+import { applyPreauthAction, createPreauth } from '@/lib/queries/preauths'
+import { createPreauthExchange, staleSnapshotReason } from '@/lib/queries/nhcx-exchanges'
+import { preauthNhcxState } from '@/lib/queries/nhcx-review'
+import { makePreauthWorld, destroyPreauthWorld, type PreauthWorld } from '../lib/queries/preauth-world'
 import { sealPayload } from '@/lib/integrations/payload-vault'
 import { GET as payload } from '@/app/api/rcm/nhcx/exchanges/[id]/payload/route'
 import { POST as review } from '@/app/api/rcm/nhcx/exchanges/[id]/review/route'
@@ -93,5 +97,82 @@ describe.skipIf(!process.env.DATABASE_URL)('NHCX response review (DB)', () => {
     expect(body.reviewState).toBe('confirmed'); expect(body.ackExchangeId).toEqual(expect.any(Number))
     const [ack] = await getDb().select().from(nhcxExchanges).where(eq(nhcxExchanges.id, body.ackExchangeId))
     expect(ack).toMatchObject({ action: 'paymentnotice/on_request', direction: 'outbound', state: 'pending_send', correlationId: x.correlationId, recipientCode: 'TPA1@sbx', relatedExchangeId: x.id })
+  })
+})
+
+// ---- WS12 T7: a pre-auth requested before the TPA got its NHCX code ---------------------------
+const STALE_PAYER = 'This request was saved before the insurer\'s NHCX code was added. Use "Refresh snapshot", then send.'
+const STALE_HOSPITAL = 'This request was saved before the hospital\'s HFR or ROHINI ID was added. Use "Refresh snapshot", then send.'
+
+describe('staleSnapshotReason (WS12 T7)', () => {
+  const payer = (code: string | null) => ({ payerId: 1, name: 'P', kind: 'insurer' as const, irdaiRegistrationNo: null, nhcxParticipantCode: code })
+  const hospital = (hfrId: string | null) => ({ legalName: 'H', gstin: null, stateCode: null, rohiniId: null, hfrId })
+  const side = (code: string | null, hfr: string | null) => ({ policy: { insurer: payer(null), tpa: payer(code) }, hospital: hospital(hfr) })
+  it('names the payer code first, then the hospital IDs; nothing when the snapshot is current or live data lacks them too', () => {
+    expect(staleSnapshotReason(side(null, null), side('T@sbx', 'IN1'))).toBe(STALE_PAYER)
+    expect(staleSnapshotReason(side('T@sbx', null), side('T@sbx', 'IN1'))).toBe(STALE_HOSPITAL)
+    expect(staleSnapshotReason(side('T@sbx', 'IN1'), side('T@sbx', 'IN1'))).toBeNull()
+    expect(staleSnapshotReason(side(null, null), side(null, null))).toBeNull()
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('pre-auth NHCX state and refresh (DB, WS12 T7)', () => {
+  const SESSION = { role: 'rcm' as const, name: `TEST-WS12-T7-${RUN}`, userId: null }
+  const NOW = new Date('2099-06-01T06:00:00Z')
+  let w: PreauthWorld
+  let preauthId = 0
+  let savedSettings: { hfrId: string | null; rohiniId: string | null } | null = null
+  let savedReg: { council: 'nmc' | 'smc' | null; number: string | null } | null = null
+  const saved = process.env.ABDM_USE_MOCKS
+  beforeAll(async () => {
+    process.env.INTEGRATION_PAYLOAD_KEY = process.env.INTEGRATION_PAYLOAD_KEY || randomBytes(32).toString('base64')
+    w = await makePreauthWorld(RUN, 'T7')
+    await getDb().update(patients).set({ uhid: `UHT${RUN}T7` }).where(eq(patients.id, w.patientId))
+    const [pr] = await getDb().select({ council: providers.registrationCouncil, number: providers.registrationNumber }).from(providers).where(eq(providers.id, w.providerId))
+    savedReg = { council: pr.council, number: pr.number }
+    if (!pr.number) await getDb().update(providers).set({ registrationCouncil: 'nmc', registrationNumber: `T${RUN}` }).where(eq(providers.id, w.providerId))
+    const [s] = await getDb().select({ hfrId: billingSettings.hfrId, rohiniId: billingSettings.rohiniId }).from(billingSettings).where(eq(billingSettings.id, 1))
+    savedSettings = s ?? null
+    await getDb().update(billingSettings).set({ hfrId: 'IN2710000123' }).where(eq(billingSettings.id, 1))
+    await getDb().update(payerProfiles).set({ nhcxParticipantCode: null }).where(inArray(payerProfiles.payerId, [w.insurerId, w.tpaId]))
+    const created = await createPreauth({
+      policyId: w.policyId, claimType: 'opd', encounterId: w.encounterId, plannedAdmissionDate: '2026-10-01', expectedLengthOfStayDays: 1,
+      treatingProviderId: w.providerId, diagnosisCodeIds: [w.dxId], procedureCodeIds: [w.pxId], estimate: [{ serviceId: w.pricedServiceId, quantity: 1 }],
+    }, SESSION, NOW)
+    if (!created.ok) throw new Error(created.error)
+    preauthId = created.value.preauthId
+    const r = await applyPreauthAction(preauthId, { action: 'request' }, SESSION, NOW)
+    if (!r.ok) throw new Error(r.error)
+  })
+  afterAll(async () => {
+    if (saved === undefined) delete process.env.ABDM_USE_MOCKS; else process.env.ABDM_USE_MOCKS = saved
+    if (savedReg) await getDb().update(providers).set({ registrationCouncil: savedReg.council, registrationNumber: savedReg.number }).where(eq(providers.id, w.providerId))
+    if (savedSettings) await getDb().update(billingSettings).set(savedSettings).where(eq(billingSettings.id, 1))
+    await getDb().delete(auditLog).where(eq(auditLog.userName, SESSION.name))
+    await purgeSp8Fixtures([w.patientId])
+    await destroyPreauthWorld(w)
+  })
+  beforeEach(() => { process.env.ABDM_USE_MOCKS = '1' })
+
+  it('says the snapshot is stale once the TPA has a code, sends the refreshed snapshot after "Refresh snapshot"', async () => {
+    delete process.env.ABDM_USE_MOCKS
+    expect(await preauthNhcxState(preauthId)).toEqual({ canSend: false, reason: 'NHCX not connected', snapshotStale: false })
+    process.env.ABDM_USE_MOCKS = '1'
+    expect(await preauthNhcxState(preauthId)).toEqual({ canSend: false, reason: 'This insurer or TPA has no NHCX participant code', snapshotStale: false })
+
+    await getDb().update(payerProfiles).set({ nhcxParticipantCode: `TPA${RUN}T7@sbx` }).where(eq(payerProfiles.payerId, w.tpaId))
+    expect(await preauthNhcxState(preauthId)).toEqual({ canSend: false, reason: STALE_PAYER, snapshotStale: true })
+    const schedule = vi.fn()
+    expect(await createPreauthExchange(preauthId, SESSION, { now: () => NOW, schedule })).toEqual({ ok: false, error: 'not_ready', message: STALE_PAYER })
+
+    expect(await applyPreauthAction(preauthId, { action: 'refresh_snapshot' }, SESSION, NOW)).toEqual({ ok: true, value: { status: 'requested' } })
+    expect(await preauthNhcxState(preauthId)).toEqual({ canSend: true, reason: null, snapshotStale: false })
+    const sent = await createPreauthExchange(preauthId, SESSION, { now: () => NOW, schedule })
+    expect(sent.ok).toBe(true); if (!sent.ok) return
+    expect(schedule).toHaveBeenCalledTimes(1)
+    const [refresh] = await getDb().select().from(preauthEvents)
+      .where(and(eq(preauthEvents.preauthId, preauthId), eq(preauthEvents.action, 'refresh_snapshot')))
+    const [x] = await getDb().select().from(nhcxExchanges).where(eq(nhcxExchanges.id, sent.value.exchangeId))
+    expect(x).toMatchObject({ recipientCode: `TPA${RUN}T7@sbx`, preauthEventId: refresh.id, state: 'pending_send', isMock: true, action: 'preauth/submit' })
   })
 })
