@@ -14,7 +14,7 @@ Sources cited in code comments are S1 to S6 in `docs/superpowers/plans/2026-10-0
   The real ABDM and NHCX *sandboxes* (`dev.abdm.gov.in`, `abhasbx.abdm.gov.in`, `apisbx.abdm.gov.in`) go through these same adapters, with sandbox URLs in env.
 - **Mocked.** The mocks (the ABDM sandbox mock and the NHCX mock transport) run only when both of these hold:
   - `ABDM_USE_MOCKS=1`;
-  - neither `NODE_ENV` nor `VERCEL_ENV` is `production`.
+  - `NODE_ENV` is not `production` (the Docker image always runs with `production`, so there the mocks also need `DEMO_FEATURES` set on and `ALLOW_DEMO_MOCKS=true`: an explicit demo stack).
   Every mock row is flagged (`is_mock = true` or source `abdm_sandbox_mock`), and every screen that shows one shows the badge **Sandbox mock - not real**. A mock never invents an approval amount.
 - **Neither.** With no credentials and no mock flag:
   - every capability reports **Not configured**;
@@ -37,7 +37,7 @@ This is owner and legal work (spec section 7). The steps:
 
 ## Environment variables
 
-`.env.example` lists every variable, with empty values. Store the values with `vercel env add`, and never commit them.
+`.env.docker.example` lists every variable, with empty values. Store the values in the host's `.env.docker` (gitignored), and never commit them.
 
 | Variable | Required for | Notes |
 |---|---|---|
@@ -80,7 +80,7 @@ base64 < nhcx.key | tr -d '\n'   # NHCX_ENCRYPTION_PRIVATE_KEY
 base64 < nhcx.crt | tr -d '\n'   # NHCX_ENCRYPTION_CERT
 ```
 
-1. Store each one-line value with `vercel env add`.
+1. Store each one-line value in `.env.docker`, then `docker compose up -d` to apply it.
 2. Upload `nhcx.crt` to the NHCX participant record.
 3. Delete both local files.
 
@@ -116,13 +116,12 @@ The NHCX sweep needs a scheduler. Its jobs are:
 - optional status polling;
 - the retention purges.
 
-On Vercel, add a `crons` entry to `vercel.json`:
+The Docker stack has no scheduler of its own. Call the sweep from the host's
+cron every 15 minutes, with `CRON_SECRET` set in `.env.docker`:
 
-```json
-{ "crons": [{ "path": "/api/cron/nhcx-sweep", "schedule": "*/15 * * * *" }] }
+```cron
+*/15 * * * * curl -fsS -H "Authorization: Bearer <CRON_SECRET>" http://127.0.0.1:3001/api/cron/nhcx-sweep > /dev/null
 ```
-
-Set `CRON_SECRET` too. The repository does not ship a `vercel.json`, because adding one changes the deployment configuration; that is the owner's decision (A3).
 
 ## Rollback
 

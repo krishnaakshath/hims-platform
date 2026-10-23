@@ -65,7 +65,8 @@ transaction, or none is.
 Every set is loaded the same way once it is in the CSV shape above:
 
 ```bash
-npm run codes:import -- --file /path/to/file.csv --kind <kind> --version <version> \
+docker compose run --rm -v /path/to/file.csv:/in/codes.csv:ro migrate \
+  npm run codes:import -- --file /in/codes.csv --kind <kind> --version <version> \
   --name "<name>" --licence "<licence ref>" --by "<your name>" --make-current
 ```
 
@@ -76,8 +77,9 @@ npm run codes:import -- --file /path/to/file.csv --kind <kind> --version <versio
 - `--make-current` makes this version the one coders search. Without it, the version becomes current only when the kind has no current version yet, or when the current version is a `SAMPLE-` set (a licensed set always replaces a sample).
 - Run with `--dry-run` first. It validates the file, prints the issue count and any line-numbered issues, and loads nothing.
 
-The command reads `DATABASE_URL` from `.env.local`. Point that file at the
-client's database, for example with `vercel env pull .env.local`.
+Run through the `migrate` service as above, the command uses the stack's own
+database (`DATABASE_URL` set by `docker-compose.yml`). It never reads a dotenv
+file; on a host it uses only the `DATABASE_URL` you export.
 
 Converters from the publishers' release formats are not built yet. Prepare
 the CSV with a spreadsheet or a short script, using the column mapping below.
@@ -99,6 +101,8 @@ the CSV with a spreadsheet or a short script, using the column mapping below.
 
 #### WHO ICD-10 (2019) loader
 
+`docker compose --profile codes run --rm codes` downloads and imports it in one
+step (the only internet use of the stack; see docs/DEPLOYING.md). Underneath,
 `npm run codes:fetch-who` downloads WHO's official ClaML release
 (`https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip`, who.int hosts only;
 `--url` or `--file` override the source), converts it with

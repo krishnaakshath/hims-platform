@@ -34,20 +34,20 @@ A referred patient's information genuinely comes from two different places in th
 ```
 Next.js 16 (App Router, TypeScript)
     │
-    ├── Server Components ──► shared query functions (src/lib/queries/*.ts) ──► Drizzle ORM ──► Neon Postgres
+    ├── Server Components ──► shared query functions (src/lib/queries/*.ts) ──► Drizzle ORM ──► Postgres 15
     │        (never fetch() the app's own API from a Server Component — a closed real vulnerability, see §4)
     │
     ├── API routes (src/app/api/**) ──► same query functions, gated by requireSession()
     │
     ├── Client Components ──► fetch() the API routes for interactivity (forms, toggles, live search)
     │
-    └── Upstash Redis ──► read-through cache for expensive list/detail queries (30s–60s TTL)
+    └── Redis (Upstash-compatible REST) ──► read-through cache for expensive list/detail queries (30s–60s TTL)
 
-Deployment: Vercel (serverless functions, not containers)
-Storage: Neon Postgres (via Vercel Marketplace) + Upstash Redis (via Vercel Marketplace) + Vercel Blob (provisioned, not yet wired to a real upload flow)
+Deployment: Docker only (docker-compose.yml: postgres, redis, migrate job, app), one stack per client host
+Storage: Postgres (volume hims_pg) + Redis (volume hims_redis, disposable) + local-disk file store (volume hims_blobs)
 ```
 
-**Why this stack:** Vercel + Neon + Upstash was chosen because it's the fastest path to a real, working pilot with zero infrastructure to manage, and because Vercel's Marketplace integrations provision both databases with working credentials in minutes. Next.js's App Router lets Server Components query Postgres directly (no separate backend API layer to keep in sync) while still supporting real client-side interactivity where it's needed (modals, live search, forms).
+**Why this stack:** the product runs entirely from Docker on one host per client, so every record and file stays where the client runs that host (data residency by hosting choice) and nothing depends on a cloud service. The pilot started on hosted services; the Docker-only runtime replaced them. Next.js's App Router lets Server Components query Postgres directly (no separate backend API layer to keep in sync) while still supporting real client-side interactivity where it's needed (modals, live search, forms).
 
 ### Data model, in brief
 
@@ -112,8 +112,8 @@ Deliberately built last: both depend on data models Phases 2 and 3 are still fin
 Being direct about what *isn't* done, and why, matters as much as what is:
 
 - **Login is real but minimal.** There's a genuine email/password form backed by a scrypt-hashed credential (no more one-click role picker) — but only a single admin account exists right now. CRC/PI accounts, and real SSO against IPMG's own identity provider, are the next step before any real patient data flows through the system.
-- **No per-branch database isolation yet.** All in-progress phases share one live Neon database. This caused a real, confirmed data-corruption incident mid-build (a destructive reseed cycle colliding with sibling branches' foreign keys) — now fixed at the source (seeding is guarded against re-running on an already-populated database), but proper isolation (a Neon branch per worktree) is still a one-time setup step away, pending the right Neon account access.
-- **File storage is provisioned, not wired.** Vercel Blob is set up but no real upload flow uses it yet.
+- **Test isolation.** The in-Docker test runner uses its own throwaway `hims_test` database and Redis logical database 1, never the app's data. Test files still share that one test database and run sequentially.
+- **File storage** is the local-disk store on the `hims_blobs` volume; back it up with the database (docs/OPERATIONS.md).
 - **Read-only JSON API without a UI caller (kept, deliberately).** These `GET` handlers have no in-app `fetch()` caller because Server Components read the query layer directly; they stay as the documented, role-gated JSON API for integrations and scripts (each is pinned by the RBAC route tests): `/api/trials`, `/api/lab-orders`, `/api/appointments`, `/api/broadcasts`, `/api/charges`, `/api/consent-documents`, `/api/departments`, `/api/form-submissions`, `/api/form-templates`, `/api/form-template-folders`, `/api/patients`, `/api/pharmacy/medications`, `/api/reviews`, `/api/staff`, `/api/users`, `/api/tariff/*`. Every route answers a malformed JSON body with a fixed 400 and a non-numeric/out-of-range id with 400/404 (src/lib/http.ts), after its role gate.
 - **Google sign-in is wired but not offered.** `/api/auth/google/start` and `/callback` answer 503 until the Google OAuth credentials are configured, and the login page shows no Google button; enabling it is a deployment decision (credentials + a button), not a code gap.
 - **Mock-only by design, not by accident:** payments (Phase 3) and broadcast delivery (Phase 5) are permanently simulated. This is a pre-screening pilot, not a billing or messaging platform — real money and real SMS/email integrations are explicitly out of scope.
