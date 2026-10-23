@@ -264,11 +264,11 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
     const v = await makeVisit('2099-05-12')
     const o1 = await makeOrder({ status: 'scheduled', homeCollectionVisitId: v.id })
     const o2 = await makeOrder({ status: 'scheduled', homeCollectionVisitId: v.id })
-    expect(await cancelLabOrder(o1.id, 'doctor changed plan', S, NOW)).toEqual({ ok: true, patientId: P, cancelledVisitId: null })
+    expect(await cancelLabOrder(o1.id, 'doctor changed plan', S, NOW)).toEqual({ ok: true, patientId: P, cancelledVisitId: null, billing: 'none' }) // WS2 T10: no line
     const [still] = await getDb().select().from(homeCollectionVisits).where(eq(homeCollectionVisits.id, v.id))
     expect(still.status).toBe('booked')
     expect(await getLabOrder(o1.id)).toMatchObject({ status: 'cancelled', homeCollectionVisitId: null, cancelReason: 'doctor changed plan', cancelledByName: PROBE })
-    expect(await cancelLabOrder(o2.id, 'doctor changed plan', S, NOW)).toEqual({ ok: true, patientId: P, cancelledVisitId: v.id })
+    expect(await cancelLabOrder(o2.id, 'doctor changed plan', S, NOW)).toEqual({ ok: true, patientId: P, cancelledVisitId: v.id, billing: 'none' })
     const [gone] = await getDb().select().from(homeCollectionVisits).where(eq(homeCollectionVisits.id, v.id))
     expect(gone).toMatchObject({ status: 'cancelled', cancelReason: 'tests_cancelled', cancelledByName: PROBE })
     const audits = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, PROBE), eq(auditLog.action, 'cancelled lab order'), inArray(auditLog.details, [`order=${o1.id}`, `order=${o2.id} visit=${v.id}`])))

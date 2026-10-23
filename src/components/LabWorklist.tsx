@@ -46,6 +46,9 @@ export interface WorklistOrder {
   patientUhid: string | null
   result: { value: string; unit: string | null; referenceRange?: string | null; notes?: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
   // end SP5
+  // WS1 T10: from the requisition (listWorklist sorts stat, then urgent, first).
+  priority?: 'routine' | 'urgent' | 'stat'
+  fastingRequired?: boolean
 }
 
 export interface LabTestOption {
@@ -70,6 +73,13 @@ const STATUS_CONFIG: Record<LabOrderStatus, { label: string; dotClassName: strin
   verified: { label: LAB_STATUS_LABEL.verified, dotClassName: 'bg-success', textClassName: 'text-success' },
   reported: { label: LAB_STATUS_LABEL.reported, dotClassName: 'bg-success', textClassName: 'text-success' },
   cancelled: { label: LAB_STATUS_LABEL.cancelled, dotClassName: 'bg-muted-foreground', textClassName: 'text-muted-foreground' },
+}
+
+// WS1 T10: only stat and urgent orders carry a chip.
+function PriorityChip({ priority }: { priority: WorklistOrder['priority'] }) {
+  if (priority === 'stat') return <span className="inline-flex rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">STAT</span>
+  if (priority === 'urgent') return <span className="inline-flex rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning">Urgent</span>
+  return null
 }
 
 function LabStatusPill({ status }: { status: WorklistOrder['status'] }) {
@@ -166,6 +176,8 @@ function LabRow({
           )}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <PriorityChip priority={o.priority} />
+          {o.fastingRequired && <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-foreground">Fasting</span>}
           <LabStatusPill status={o.status} />
           {o.status === 'ordered' && caps.canCollect && (
             <Button size="xs" onClick={() => onMarkCollected(o.id)} disabled={busy}>Mark collected</Button>

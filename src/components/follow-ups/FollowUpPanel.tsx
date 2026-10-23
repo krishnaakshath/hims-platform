@@ -122,7 +122,7 @@ export function FollowUpPanel({ patientId, followUps, encounters, providers, dep
 
       <section aria-labelledby="visits-heading">
         <h2 id="visits-heading" className="mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Visits</h2>
-        <EncounterList encounters={encounters} can={{ startOrComplete: can.startOrComplete, cancelVisit: can.cancelVisit }} ownProviderOnly={isPi} selfProviderId={selfProviderId} />
+        <EncounterList encounters={encounters} can={{ startOrComplete: can.startOrComplete, cancelVisit: can.cancelVisit }} />
       </section>
 
       {dialog?.kind === 'create' && (

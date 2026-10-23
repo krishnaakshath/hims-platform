@@ -31,18 +31,19 @@ export default async function PharmacyBillingPage() {
   const dispenses = await listAllDispensesWithBilling()
   await logAudit(session, 'viewed pharmacy billing', null)
 
-  const unbilled = dispenses.filter((d) => d.charge === null)
-  const billedCents = dispenses.reduce((sum, d) => sum + (d.charge?.amountCents ?? 0), 0)
+  // WS2 T8: status from charge lines; "awaiting" = no live line, no free-dispense reason, no old bill.
+  const unbilled = dispenses.filter((d) => d.billing.status === 'unbilled' || d.billing.status === 'voided')
+  const billedPaise = dispenses.reduce((sum, d) => sum + (d.billing.status === 'billed' ? d.billing.totalPaise : d.billing.status === 'legacy_charge' ? d.billing.amountPaise : 0), 0)
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Pharmacy Billing</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Charges generated from dispensed medications only -- not the practice&apos;s general revenue cycle.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Every dispense bills itself at MRP. Older dispenses made before that can be billed here at the current price.</p>
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <StatTile value={formatPaise(billedCents)} label="Total Billed" icon={IndianRupee} tone="bg-success/10 text-success" />
+        <StatTile value={formatPaise(billedPaise)} label="Total Billed" icon={IndianRupee} tone="bg-success/10 text-success" />
         <StatTile value={String(unbilled.length)} label="Awaiting Billing" icon={Clock} tone="bg-warning/10 text-warning" />
         <StatTile value={String(dispenses.length)} label="Total Dispenses" icon={Receipt} tone="bg-primary/10 text-primary" />
       </div>
@@ -54,11 +55,12 @@ export default async function PharmacyBillingPage() {
           dispenseId: d.dispenseId,
           patientId: d.patientId,
           patientName: d.patientName,
+          uhid: d.uhid,
           medicationName: d.medicationName,
           quantity: d.quantity,
           dispensedByName: d.dispensedByName,
           dispensedAt: d.dispensedAt.toISOString(),
-          charge: d.charge,
+          billing: d.billing,
         }))} />
       )}
     </div>

@@ -58,7 +58,8 @@ beforeEach(() => {
 })
 
 describe('POST /api/home-collections (book)', () => {
-  it.each(['pi', 'crc', 'billing', 'pharmacy', 'collector'] as const)('%s cannot book (403 before parse)', async (r) => {
+  // WS1 T1: pi books home collections from the workspace (HOME_COLLECTION_BOOKING_ROLES).
+  it.each(['crc', 'billing', 'pharmacy', 'collector'] as const)('%s cannot book (403 before parse)', async (r) => {
     role = r
     const res = await BOOK(send('POST', '{not json'))
     expect(res.status).toBe(403)
@@ -161,7 +162,21 @@ describe('GET /api/home-collections/context and /availability', () => {
     expect(listWindowAvailability).toHaveBeenCalledWith('2099-07-02')
   })
 
-  it.each(['pi', 'crc', 'collector'] as const)('%s cannot read the booking context or availability', async (r) => {
+  it('pi may book: a bad body passes the role gate and is refused by the parser', async () => {
+    role = 'pi'
+    expect((await BOOK(send('POST', '{not json'))).status).toBe(400)
+    expect(bookHomeCollection).not.toHaveBeenCalled()
+  })
+
+  it('pi may read the booking context and availability (WS1 T1)', async () => {
+    role = 'pi'
+    vi.mocked(getHomeCollectionContext).mockResolvedValue({ patient: { id: 'RD-0001' }, isLocal: true, bookableOrders: [], bookableOrderCount: 0, activeVisits: [] } as never)
+    vi.mocked(listWindowAvailability).mockResolvedValue([])
+    expect((await CONTEXT(get('/api/home-collections/context?patient=UH-1'))).status).toBe(200)
+    expect((await AVAILABILITY(get('/api/home-collections/availability?date=2099-07-02'))).status).toBe(200)
+  })
+
+  it.each(['crc', 'collector'] as const)('%s cannot read the booking context or availability', async (r) => {
     role = r
     expect((await CONTEXT(get('/api/home-collections/context?patient=UH-1'))).status).toBe(403)
     expect((await AVAILABILITY(get('/api/home-collections/availability?date=2099-07-02'))).status).toBe(403)

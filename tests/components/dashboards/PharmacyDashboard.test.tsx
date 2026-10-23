@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { deadLinks } from '../../pages/dashboard-link-gates'
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }), usePathname: () => '/pharmacy' }))
@@ -9,7 +9,7 @@ vi.mock('@/components/AddMedicationModal', () => ({ AddMedicationModal: () => nu
 import { PharmacyDashboard } from '@/components/dashboards/PharmacyDashboard'
 
 // Wave E P1-18: the pharmacy home is no longer a dead end.
-const med = (id: number, name: string, quantityOnHand: number, reorderThreshold = 5) => ({ id, name, genericName: null, medicationClass: 'Test', commonDose: null, form: 'tablet' as const, quantityOnHand, reorderThreshold, unit: 'tabs' })
+const med = (id: number, name: string, quantityOnHand: number, reorderThreshold = 5) => ({ id, name, genericName: null, medicationClass: 'Test', commonDose: null, form: 'tablet' as const, quantityOnHand, reorderThreshold, unit: 'tabs', mrpPerUnitPaise: null, gstRateBp: null, hsn: null, effectiveGstRateBp: 500 /* WS2 T8 */ })
 const MEDS = [med(1, 'Paracetamol 500', 0), med(2, 'Amoxicillin 250', 3), med(3, 'Metformin 500', 100)]
 const KPIS = { outOfStock: 1, lowStock: 1, dispensedToday: 7, unbilledDispenses: 4 }
 const props = (role: 'pharmacy' | 'admin' | 'pi' | 'crc', stockFilter: 'out' | 'low' | null = null) => ({
@@ -63,5 +63,32 @@ describe('PharmacyDashboard (Wave E P1-18)', () => {
   it.each(['pharmacy', 'admin'] as const)('no dead links for %s', (role) => {
     const { container } = render(<PharmacyDashboard {...props(role)} />)
     expect(deadLinks(container, role)).toEqual([])
+  })
+
+  // WS2 T8: the MRP column, editable by the pricing roles only.
+  it('shows each MRP; a pricing role edits it through the price route', async () => {
+    const priced = [{ ...med(1, 'Paracetamol 500', 50), mrpPerUnitPaise: 350 }, med(2, 'Amoxicillin 250', 30)]
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ medication: {} }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      render(<PharmacyDashboard {...props('pharmacy')} medications={priced} canEditPrice />)
+      expect(screen.getByRole('columnheader', { name: 'MRP' })).toBeInTheDocument()
+      expect(screen.getByText('₹3.50')).toBeInTheDocument()
+      expect(screen.getByText('No price')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Edit price of Amoxicillin 250' }))
+      fireEvent.change(screen.getByLabelText(/MRP per unit in rupees/), { target: { value: '12.40' } })
+      fireEvent.change(screen.getByLabelText('GST rate'), { target: { value: '1200' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+      expect(url).toBe('/api/pharmacy/medications/2/price')
+      expect(JSON.parse(init.body as string)).toEqual({ mrpPerUnitPaise: 1240, gstRateBp: 1200, hsn: null })
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('a non-pricing role sees the MRP without an edit button', () => {
+    render(<PharmacyDashboard {...props('pi')} medications={[{ ...med(1, 'Paracetamol 500', 50), mrpPerUnitPaise: 350 }]} />)
+    expect(screen.getByText('₹3.50')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /edit price/i })).toBeNull()
   })
 })

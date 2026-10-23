@@ -5,7 +5,7 @@ import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { BILLING_AUTHORITY_ROLES, CHARGE_CAPTURE_ROLES } from '@/lib/role-policy'
 import { formatPaise } from '@/lib/format'
-import { formatIsoDate, todayIsoIn } from '@/lib/india-time'
+import { formatIsoDate, formatIstDateTime, todayIsoIn } from '@/lib/india-time'
 import {
   getCaptureHeader, getPharmacyCaptureView, listCaptureContexts, listChargeLinesForContext, listUnbilledPharmacyPatients, type ChargeContextRef,
 } from '@/lib/queries/charge-capture'
@@ -14,6 +14,7 @@ import { ChargeCaptureForm } from '@/components/billing/ChargeCaptureForm'
 import { ChargeLinesTable, type ChargeLineView } from '@/components/billing/ChargeLinesTable'
 import { RoomRentButton } from '@/components/billing/RoomRentButton'
 import { BackLink } from '@/components/BackLink'
+import { listUnbilledOrders, type UnbilledOrder } from '@/lib/queries/invoice-ready' // WS2 T12
 
 const ID = /^[1-9]\d{0,9}$/
 
@@ -31,6 +32,8 @@ function parseRef(sp: { encounterId?: string; admissionId?: string; patientId?: 
   if (!ID.test(raw) || Number(raw) > 2_147_483_647) return null
   return encounterId !== undefined ? { encounterId: Number(raw) } : { admissionId: Number(raw) }
 }
+
+const UNBILLED_KIND: Record<UnbilledOrder['kind'], string> = { lab_order: 'Lab test', procedure: 'Procedure', dispense: 'Dispense' } // WS2 T12
 
 function PageTitle({ subtitle }: { subtitle: string }) {
   return (
@@ -62,7 +65,7 @@ export default async function ChargeCapturePage({ searchParams }: { searchParams
 
   if (ref === 'none') {
     const today = todayIsoIn()
-    const [{ encounters, admissions }, pharmacy] = await Promise.all([listCaptureContexts(today), listUnbilledPharmacyPatients()])
+    const [{ encounters, admissions }, pharmacy, unbilled] = await Promise.all([listCaptureContexts(today), listUnbilledPharmacyPatients(), listUnbilledOrders()])
     return (
       <div>
         <PageTitle subtitle={`Choose a visit or an admitted patient to add charges. Today is ${formatIsoDate(today)}.`} />
@@ -117,6 +120,23 @@ export default async function ChargeCapturePage({ searchParams }: { searchParams
                     </span>
                     <span className="tabular-nums">{formatPaise(p.taxablePaise)}</span>
                   </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {unbilled.length > 0 && (
+          <section className="mt-6">
+            <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Orders not billed</h2>
+            <p className="mb-2 text-xs text-muted-foreground">Tests and procedures ordered with no charge on the bill (no rate, a billing rule, or no visit or stay). Add the charge on the visit or stay.</p>
+            <ul className="divide-y divide-border rounded-md border border-border">
+              {unbilled.map((o) => (
+                <li key={`${o.kind}-${o.id}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                  <span>
+                    <span className="font-medium">{o.patientName}</span>
+                    <span className="block text-xs text-muted-foreground">{o.uhid ?? 'UHID —'} · {UNBILLED_KIND[o.kind]} · {o.itemName}</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">{formatIstDateTime(o.createdAt)}</span>
                 </li>
               ))}
             </ul>

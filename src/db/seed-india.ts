@@ -43,6 +43,8 @@ import { raiseCodingQuery } from '../lib/queries/coding-queries'
 import { nextUhid } from '../lib/queries/uhid'
 import { checkInVisit } from '../lib/queries/encounters'
 import { captureChargeLine } from '../lib/queries/charge-capture'
+import { voidChargeLine } from '../lib/queries/charge-capture' // WS2 T9
+import type { AutoChargeOutcome } from '../lib/queries/auto-charge' // WS2 T9
 import { createDraftInvoice, finaliseInvoice, cancelInvoice } from '../lib/queries/invoices'
 import { recordPayment, issueRefund } from '../lib/queries/patient-ledger'
 import { postRoomRent } from '../lib/queries/room-rent'
@@ -51,7 +53,7 @@ import { createLabRequisition } from '../lib/queries/lab-requisitions'
 import { collectLabOrder, receiveLabSample, recordLabResult, verifyLabResult, cancelLabOrder } from '../lib/queries/lab-lifecycle'
 import { bookHomeCollection, assignCollector, collectHomeVisit, cancelHomeCollection } from '../lib/queries/home-collections'
 import { releaseLabReport } from '../lib/queries/lab-reports'
-import { dispenseMedication, createChargeForDispense } from '../lib/queries/medication-dispenses'
+import { dispenseMedication } from '../lib/queries/medication-dispenses' // WS2 T8: a dispense bills itself
 import { createTelemedicineSession } from '../lib/queries/telemedicine-sessions'
 import { setPayerNetworks, upsertPayerProfile } from '../lib/queries/rcm-payers'
 import { createPolicy } from '../lib/queries/rcm-policies'
@@ -194,6 +196,10 @@ async function seedTariffs(db: Db, refs: Pick<IndiaRefs, 'deptIds' | 'payerIds' 
   await db.insert(servicePackageItems).values(pkgRows).onConflictDoNothing()
 }
 
+// WS2 T10: the catalog tests that need a fasting sample (FBS here, LIPID from the base catalog).
+const FASTING_LAB_TEST_CODES = ['FBS', 'LIPID']
+// end WS2 T10
+
 async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Promise<Map<string, number>> {
   const existing = new Set((await db.select({ code: labTests.code }).from(labTests)).map((t) => t.code))
   const toInsert = INDIA_LAB_TESTS.filter((t) => !existing.has(t.code)).map((t) => ({
@@ -206,6 +212,9 @@ async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Prom
       .set({ serviceId: serviceIds.get(m.serviceCode) ?? null, sampleType: m.sampleType, container: m.container })
       .where(and(eq(labTests.code, code), isNull(labTests.serviceId)))
   }
+  // WS2 T10: fasting blood sugar and the lipid profile need a fasting sample (lane ruling R3).
+  await db.update(labTests).set({ fastingRequired: true }).where(inArray(labTests.code, FASTING_LAB_TEST_CODES))
+  // end WS2 T10
   const rows = await db.select({ id: labTests.id, code: labTests.code }).from(labTests)
   return new Map(rows.map((r) => [r.code, r.id]))
 }
@@ -217,6 +226,9 @@ async function seedBillingSettings(db: Db, serviceIds: Map<string, number>): Pro
   const patch: Partial<typeof billingSettings.$inferInsert> = {}
   if (!s.legalName) Object.assign(patch, { legalName: DEMO_HOSPITAL.legalName, gstin: DEMO_HOSPITAL.gstin, stateCode: DEMO_HOSPITAL.stateCode, address: DEMO_HOSPITAL.address, ipdDepositThresholdPaise: DEMO_HOSPITAL.ipdDepositThresholdPaise })
   if (s.roomRentServiceId === null) patch.roomRentServiceId = serviceIds.get('ROOM_RENT') ?? null
+  // WS2 T9: the registration fee is billed automatically at a patient's first visit.
+  if (s.registrationServiceId === null) patch.registrationServiceId = serviceIds.get('REG_FEE') ?? null
+  // end WS2 T9
   if (Object.keys(patch).length > 0) await db.update(billingSettings).set({ ...patch, updatedByName: 'Demo seed', updatedAt: new Date() }).where(eq(billingSettings.id, 1))
 }
 
@@ -476,6 +488,14 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     return r
   }
 
+  // WS2 T9: OPD check-in captures the consultation (self-pay) and, at the first visit, the
+  // registration fee; the seed bills those lines instead of capturing them again.
+  const autoLine = (ci: { charges: AutoChargeOutcome[] }, source: 'consultation' | 'registration'): number | null => {
+    const c = ci.charges.find((o) => o.source === source)
+    return c?.ok ? c.lineId : null
+  }
+  // end WS2 T9
+
   async function setEncounterStatus(encounterId: number, status: 'in_consultation' | 'completed', at: Date, byName: string) {
     await db.update(encounters).set({ status, statusChangedAt: at, statusChangedByName: byName, ...(status === 'completed' ? { completedAt: at } : {}) }).where(eq(encounters.id, encounterId))
   }
@@ -527,7 +547,14 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     // No pre-auth reference: none of these services needs one, and a reference that does not
     // match a real pre-authorisation is blocked at capture (preauth_invalid).
     const billAt = plusMinutes(start, 40)
-    const lines = [await capture({ encounterId }, CONSULT_BY_DEPT[v.doctor.departmentCode], date, billAt, { billTo })]
+    // WS2 T9: a payer visit re-bills the self-pay consultation to the payer (void, then capture);
+    // a self-pay visit bills the automatic consultation and registration lines.
+    const autoConsult = autoLine(ci, 'consultation')
+    const autoRegistration = autoLine(ci, 'registration')
+    if (hasPayer && autoConsult !== null) must(await voidChargeLine(autoConsult, 'Re-billed to the patient\'s payer', sessions.billing), 'void auto consultation')
+    const consultLine = !hasPayer && autoConsult !== null ? autoConsult : await capture({ encounterId }, CONSULT_BY_DEPT[v.doctor.departmentCode], date, billAt, { billTo })
+    const lines = [consultLine, ...(!hasPayer && autoRegistration !== null ? [autoRegistration] : [])]
+    // end WS2 T9
     if (v.i % 3 === 0) lines.push(await capture({ encounterId }, 'LAB_CBC', date, billAt, { billTo }))
     if (v.doctor.departmentCode === 'CARDIO') lines.push(await capture({ encounterId }, 'PROC_ECG', date, billAt, { billTo }))
     if (v.i % 7 === 3) lines.push(await capture({ encounterId }, 'MED_CERT', date, billAt, { billTo }))
@@ -713,7 +740,7 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
         await setEncounterStatus(ci.encounter.id, 'completed', plusMinutes(checkInAt, 30), doctor.name)
         await db.update(appointments).set({ status: 'completed' }).where(eq(appointments.id, appointmentId))
         todayCompleted.push(ci.encounter.id)
-        const line = await capture({ encounterId: ci.encounter.id }, CONSULT_BY_DEPT[doctor.departmentCode], today, plusMinutes(checkInAt, 35))
+        const line = autoLine(ci, 'consultation') ?? await capture({ encounterId: ci.encounter.id }, CONSULT_BY_DEPT[doctor.departmentCode], today, plusMinutes(checkInAt, 35)) // WS2 T9
         if (i === 0) {
           const inv = await invoice([line], plusMinutes(checkInAt, 40))
           must(await recordPayment({ patientId, kind: 'receipt', invoiceId: inv.invoiceId, mode: 'upi', reference: `UPI-DEMO-${inv.invoiceId}`, amountPaise: await invoiceTotal(inv.invoiceId) }, sessions.billing, plusMinutes(checkInAt, 42)), 'today receipt')
@@ -761,7 +788,10 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   const labs = sessions.labs
   const pathologist = sessions.pathologist
   async function requisition(patientId: string, doctorName: string, codes: string[], at: Date, encounterId: number | null = null) {
-    const r = must(await createLabRequisition({ patientId, orderedByProviderId: doctorId(doctorName), labTestIds: codes.map(t), followUp: null, originatingEncounterId: encounterId }, doctorSession(doctorName), at), 'lab requisition')
+    const r = must(await createLabRequisition({
+      patientId, orderedByProviderId: doctorId(doctorName), labTestIds: codes.map(t), followUp: null, originatingEncounterId: encounterId,
+      priority: 'routine', clinicalNotes: null, fastingRequired: null, // WS2 T10 (fasting follows the tests)
+    }, doctorSession(doctorName), at), 'lab requisition')
     return { requisitionId: r.requisition.id, orderIds: r.lines.map((l) => l.orderId) }
   }
   async function collectAndReceive(orderId: number, at: Date) {
@@ -872,11 +902,26 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
 
   const formulary = await db.select({ id: medications.id, name: medications.name }).from(medications)
   const med = (name: string) => formulary.find((m) => m.name === name)?.id
-  const rx: { patientId: string; doctor: string; name: string; cls: string; dose: string; perDay: number; days: number; qty: number; paise: number }[] = [
-    { patientId: pastVisits[0].patientId, doctor: pastVisits[0].doctor.name, name: 'Paracetamol 650 mg', cls: 'Analgesic / antipyretic', dose: '650 mg', perDay: 3, days: 3, qty: 9, paise: 2_00 },
-    { patientId: pid(12), doctor: 'Dr. Ananya Rao', name: 'Pantoprazole 40 mg', cls: 'Proton pump inhibitor', dose: '40 mg', perDay: 1, days: 5, qty: 5, paise: 8_50 },
-    { patientId: pastVisits[3].patientId, doctor: pastVisits[3].doctor.name, name: 'Metformin 500 mg', cls: 'Biguanide', dose: '500 mg', perDay: 2, days: 30, qty: 60, paise: 2_50 },
-    { patientId: pastVisits[4].patientId, doctor: pastVisits[4].doctor.name, name: 'Amoxicillin + Clavulanic acid 625 mg', cls: 'Antibiotic', dose: '625 mg', perDay: 2, days: 5, qty: 10, paise: 22_00 },
+  // WS2 T8: a GST-inclusive MRP per dispensing unit for every seeded formulary item (demo figures,
+  // not a price list); dispensing bills itself at MRP with the pharmacy GST default.
+  const MRP_PAISE: Record<string, number> = {
+    'Sertraline': 6_50, 'Escitalopram': 7_20, 'Venlafaxine': 12_40, 'Bupropion': 14_00, 'Trazodone': 5_80, 'Mirtazapine': 9_60,
+    'Aripiprazole': 8_90, 'Quetiapine': 7_50, 'Risperidone': 4_20, 'Lorazepam': 3_10, 'Clonazepam': 3_40, 'Methylphenidate ER': 24_00,
+    'Amphetamine/dextroamphetamine': 30_00, 'Lithium': 2_90, 'Esketamine': 1_250_00,
+    'Paracetamol 650 mg': 2_00, 'Pantoprazole 40 mg': 8_50, 'Metformin 500 mg': 2_50, 'Amlodipine 5 mg': 3_20, 'Atorvastatin 10 mg': 6_40,
+    'Amoxicillin + Clavulanic acid 625 mg': 22_00, 'Azithromycin 500 mg': 24_50, 'Cetirizine 10 mg': 1_80, 'Ceftriaxone 1 g injection': 58_00,
+    'Ondansetron 4 mg injection': 14_50, 'Oral rehydration salts (WHO)': 21_00, 'Salbutamol 100 mcg inhaler': 155_00,
+  }
+  for (const m of formulary) {
+    const mrp = MRP_PAISE[m.name]
+    if (mrp !== undefined) await db.update(medications).set({ mrpPerUnitPaise: mrp }).where(eq(medications.id, m.id))
+  }
+  // end WS2 T8
+  const rx: { patientId: string; doctor: string; name: string; cls: string; dose: string; perDay: number; days: number; qty: number }[] = [
+    { patientId: pastVisits[0].patientId, doctor: pastVisits[0].doctor.name, name: 'Paracetamol 650 mg', cls: 'Analgesic / antipyretic', dose: '650 mg', perDay: 3, days: 3, qty: 9 },
+    { patientId: pid(12), doctor: 'Dr. Ananya Rao', name: 'Pantoprazole 40 mg', cls: 'Proton pump inhibitor', dose: '40 mg', perDay: 1, days: 5, qty: 5 },
+    { patientId: pastVisits[3].patientId, doctor: pastVisits[3].doctor.name, name: 'Metformin 500 mg', cls: 'Biguanide', dose: '500 mg', perDay: 2, days: 30, qty: 60 },
+    { patientId: pastVisits[4].patientId, doctor: pastVisits[4].doctor.name, name: 'Amoxicillin + Clavulanic acid 625 mg', cls: 'Antibiotic', dose: '625 mg', perDay: 2, days: 5, qty: 10 },
   ]
   for (const [k, r] of rx.entries()) {
     const medicationId = med(r.name)
@@ -886,14 +931,13 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
       frequencyPerDay: r.perDay, durationDays: r.days, instructions: 'After food', prescribedByProviderId: doctorId(r.doctor), enteredByName: r.doctor, prescribedAt: istAt(day(-1), '12:00'),
     }).returning({ id: medicationEpisodes.id })
     if (k === rx.length - 1) continue // left in the pharmacy queue, not yet dispensed
-    const d = await dispenseMedication({ patientId: r.patientId, medicationId, medicationEpisodeId: episode.id, quantity: r.qty, dispensedByName: sessions.pharmacy.name, notes: null })
-    if (!d.ok || d.dispenseId === undefined) throw new Error(`Seed step failed: dispense (${d.error})`)
-    must(await createChargeForDispense({
-      dispenseId: d.dispenseId, patientId: r.patientId, providerName: r.doctor, dateOfService: today,
-      diagnosisCode: { code: '', description: 'Dispensed against prescription' },
-      procedureCode: { code: `RX-${medicationId}`, description: r.name, units: r.qty, chargeCents: r.paise },
-      amountCents: r.qty * r.paise, serviceDate: today, createdByName: sessions.pharmacy.name,
-    }, sessions.pharmacy), 'dispense charge')
+    // WS2 T8: the dispense bills itself (MRP line, batch/expiry snapshot); allergies were checked at prescribing.
+    const d = await dispenseMedication({
+      patientId: r.patientId, medicationId, medicationEpisodeId: episode.id, quantity: r.qty,
+      batchNo: `DEMO${String(k + 1).padStart(3, '0')}`, expiryMonth: `${Number(today.slice(0, 4)) + 1}-06`, allergyAcknowledged: true,
+    }, sessions.pharmacy, realNow)
+    must(d, 'dispense')
+    // end WS2 T8
   }
 
   // ---- 9. Booking requests, messages, portal ---------------------------------------------------

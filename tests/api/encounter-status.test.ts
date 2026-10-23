@@ -5,10 +5,13 @@ let role = 'frontdesk'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role, name: 'Probe User', userId: null })) }))
 vi.mock('@/lib/queries/encounters', () => ({ transitionEncounter: vi.fn() }))
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn() }))
+// WS1 T5: to:'completed' goes through completeEncounter (the diagnosis guard; DB cases in encounter-complete.test.ts).
+vi.mock('@/lib/queries/encounter-workspace', () => ({ completeEncounter: vi.fn() }))
 
 import { POST } from '@/app/api/encounters/[id]/status/route'
 import { transitionEncounter } from '@/lib/queries/encounters'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
+import { completeEncounter } from '@/lib/queries/encounter-workspace'
 import { RETRY_MESSAGE } from '@/lib/db-errors'
 
 const send = (body: unknown) => new NextRequest('http://localhost/api/encounters/3/status', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) })
@@ -31,6 +34,7 @@ beforeEach(() => {
   vi.mocked(transitionEncounter).mockReset()
   vi.mocked(transitionEncounter).mockResolvedValue({ ok: true, encounter: ENCOUNTER as never })
   vi.mocked(resolveDoctorQueueProvider).mockReset().mockResolvedValue({ id: 4, name: 'Dr. K' })
+  vi.mocked(completeEncounter).mockReset().mockResolvedValue({ ok: true, encounter: ENCOUNTER as never, warnings: ['no_vitals'], charges: [] })
 })
 
 describe('POST /api/encounters/[id]/status', () => {
@@ -38,9 +42,10 @@ describe('POST /api/encounters/[id]/status', () => {
     role = 'frontdesk'
     expect((await POST(send({ to: 'completed' }), ctx('3'))).status).toBe(403)
     expect(transitionEncounter).not.toHaveBeenCalled()
+    expect(completeEncounter).not.toHaveBeenCalled()
     const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ encounter: PROJECTED })
+    expect(await res.json()).toEqual({ encounter: PROJECTED, charges: [] })
     expect(transitionEncounter).toHaveBeenCalledWith(3, 'cancelled', expect.objectContaining({ role: 'frontdesk' }), { cancelReason: 'left', actingProviderId: null })
   })
 
@@ -56,7 +61,7 @@ describe('POST /api/encounters/[id]/status', () => {
   it('answers with an explicit projection: no cancel reason, no assignment id, no check-in clerk (M7)', async () => {
     role = 'admin'
     const body = await (await POST(send({ to: 'completed' }), ctx('3'))).json()
-    expect(body).toEqual({ encounter: PROJECTED })
+    expect(body).toEqual({ encounter: PROJECTED, charges: [] })
     expect(JSON.stringify(body)).not.toContain('FREE-TEXT-SECRET')
   })
 
@@ -64,7 +69,7 @@ describe('POST /api/encounters/[id]/status', () => {
     role = 'pi'
     await POST(send({ to: 'in_consultation' }), ctx('3'))
     expect(transitionEncounter).toHaveBeenLastCalledWith(3, 'in_consultation', expect.objectContaining({ role: 'pi' }), { cancelReason: undefined, actingProviderId: 4 })
-    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'not_owner' })
+    vi.mocked(completeEncounter).mockResolvedValueOnce({ ok: false, error: 'not_owner' })
     const notMine = await POST(send({ to: 'completed' }), ctx('3'))
     expect(notMine.status).toBe(403)
     expect(await notMine.json()).toEqual({ error: 'Forbidden' })
@@ -74,12 +79,14 @@ describe('POST /api/encounters/[id]/status', () => {
     expect(unlinked.status).toBe(403)
     expect(await unlinked.json()).toEqual({ error: 'Forbidden' })
     expect(transitionEncounter).not.toHaveBeenCalled()
+    expect(completeEncounter).toHaveBeenCalledTimes(1)
   })
 
-  it('admin is not bound to a provider', async () => {
+  it('admin is not bound to a provider; completing goes through completeEncounter with no reason (WS1 T5)', async () => {
     role = 'admin'
     await POST(send({ to: 'completed' }), ctx('3'))
-    expect(transitionEncounter).toHaveBeenLastCalledWith(3, 'completed', expect.objectContaining({ role: 'admin' }), { cancelReason: undefined, actingProviderId: null })
+    expect(completeEncounter).toHaveBeenLastCalledWith(3, expect.objectContaining({ role: 'admin' }), { actingProviderId: null })
+    expect(transitionEncounter).not.toHaveBeenCalled()
     expect(resolveDoctorQueueProvider).not.toHaveBeenCalled()
   })
 
@@ -92,13 +99,54 @@ describe('POST /api/encounters/[id]/status', () => {
 
   it('maps invalid_transition to 409 and not_found to 404', async () => {
     role = 'admin'
-    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'invalid_transition' })
+    vi.mocked(completeEncounter).mockResolvedValueOnce({ ok: false, error: 'invalid_transition' })
     const conflict = await POST(send({ to: 'completed' }), ctx('3'))
     expect(conflict.status).toBe(409)
     expect(await conflict.json()).toEqual({ error: 'This visit can no longer change to that status.' })
-    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'not_found' })
+    vi.mocked(completeEncounter).mockResolvedValueOnce({ ok: false, error: 'not_found' })
     const missing = await POST(send({ to: 'completed' }), ctx('3'))
     expect(missing.status).toBe(404)
+    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'invalid_transition' })
+    const started = await POST(send({ to: 'in_consultation' }), ctx('3'))
+    expect(started.status).toBe(409)
+  })
+
+  // WS2 T14: the visit charges ride along; a billed visit names its invoice; performed orders are generic.
+  it('completing returns the automatic charge outcomes (consultation on the bill)', async () => {
+    role = 'admin'
+    const charge = { ok: true, source: 'consultation', lineId: 77, itemName: 'Consultation', taxablePaise: 60000, billTo: 'self', existing: false } as const
+    vi.mocked(completeEncounter).mockResolvedValueOnce({ ok: true, encounter: ENCOUNTER as never, warnings: [], charges: [charge] })
+    const res = await POST(send({ to: 'completed' }), ctx('3'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ encounter: PROJECTED, charges: [charge] })
+  })
+
+  it('maps visit_billed to 409 naming the invoice (WS2 T14)', async () => {
+    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'visit_billed', invoiceNumber: 'INV/2026-27/000042' })
+    const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'This visit is on invoice INV/2026-27/000042. Cancel that invoice first.', code: 'visit_billed' })
+    role = 'admin'
+    vi.mocked(completeEncounter).mockResolvedValueOnce({ ok: false, error: 'visit_billed', invoiceNumber: 'INV/2026-27/000043' })
+    const completing = await POST(send({ to: 'completed' }), ctx('3'))
+    expect(completing.status).toBe(409)
+    expect(await completing.json()).toEqual({ error: 'This visit is on invoice INV/2026-27/000043. Cancel that invoice first.', code: 'visit_billed' })
+  })
+
+  it('maps visit_has_performed_orders to 409 with a message that fits tests and procedures (WS2 T14)', async () => {
+    vi.mocked(transitionEncounter).mockResolvedValueOnce({ ok: false, error: 'visit_has_performed_orders' })
+    const res = await POST(send({ to: 'cancelled', cancelReason: 'left' }), ctx('3'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'Tests or procedures on this visit have already been performed; it cannot be cancelled.', code: 'visit_has_performed_orders' })
+  })
+
+  it('maps diagnosis_missing to 409 with its code (WS1 T5, spec ruling 4)', async () => {
+    role = 'pi'
+    vi.mocked(completeEncounter).mockResolvedValueOnce({ ok: false, error: 'diagnosis_missing' })
+    const res = await POST(send({ to: 'completed' }), ctx('3'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'Add a diagnosis or give a reason before completing the visit.', code: 'diagnosis_missing' })
+    expect(completeEncounter).toHaveBeenLastCalledWith(3, expect.objectContaining({ role: 'pi' }), { actingProviderId: 4 })
   })
 
   it('403s a role outside the gate before parsing the body', async () => {

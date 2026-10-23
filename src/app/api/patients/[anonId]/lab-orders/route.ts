@@ -5,9 +5,14 @@ import { listActiveProviders } from '@/lib/queries/providers'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 // SP5: the doctor's order is a requisition of one or more tests, priced from the tariff master.
 import { brand } from '@/lib/brand'
-import { LAB_ORDER_ROLES } from '@/lib/role-policy'
+import { HOME_COLLECTION_BOOKING_ROLES, LAB_ORDER_ROLES, WORKSPACE_READ_ROLES } from '@/lib/role-policy'
 import { createLabRequisitionSchema } from '@/lib/labs/validation'
-import { createLabRequisition } from '@/lib/queries/lab-requisitions'
+import { createLabRequisition, labOrderBillTo, listEncounterLabOrders, openOpdEncounterFor } from '@/lib/queries/lab-requisitions'
+import { getEncounterById } from '@/lib/queries/encounters' // WS2 T10
+import { checkEncounterWriter } from '@/lib/encounters/ownership' // final fix wave (item 2)
+import { logAudit } from '@/lib/audit' // WS2 T10
+import { DEFAULT_TIMEZONE, todayIsoIn } from '@/lib/india-time' // WS2 T10
+import { z } from 'zod' // WS2 T10
 import { notifyPatientSafely, type NotifyOutcome } from '@/lib/queries/notifications'
 import { errorResponse, invalidBody, labServerError, readJsonBody } from '@/lib/labs/route-responses'
 
@@ -61,7 +66,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // SP5: one transaction (requisition + orders + audits), then the notice after commit.
   let result: Awaited<ReturnType<typeof createLabRequisition>>
   try {
-    result = await createLabRequisition({ ...parsed.data, patientId: anonId, orderedByProviderId }, session)
+    // WS2 T10: an order placed outside a visit page belongs to the patient's open OPD visit with
+    // the ordering doctor today, if there is one (the order is then billed to that visit).
+    // Final fix wave (item 2): a visit named in the body is written by its doctor (or admin) only,
+    // and must be open; the query re-checks it under a share lock (refused if it closed since). An
+    // inferred visit that closed meanwhile is dropped instead: the order goes ahead with no visit.
+    const namedVisitId = parsed.data.originatingEncounterId
+    if (namedVisitId !== null) {
+      const check = await checkEncounterWriter(session, namedVisitId)
+      if (!check.ok) return NextResponse.json(check.body, { status: check.status })
+    }
+    const originatingEncounterId = namedVisitId
+      ?? await openOpdEncounterFor(anonId, orderedByProviderId, todayIsoIn(DEFAULT_TIMEZONE))
+    result = await createLabRequisition({
+      ...parsed.data, originatingEncounterId, patientId: anonId, orderedByProviderId, closedVisit: namedVisitId !== null ? 'refuse' : 'drop',
+    }, session)
   } catch (err) {
     return labServerError('lab requisition create', err, 'Could not order the tests')
   }
@@ -70,6 +89,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (result.error === 'test_unpriced') return errorResponse(422, 'This test has no price. Map it to a tariff service first.', 'test_unpriced')
     if (result.error === 'test_inactive') return errorResponse(422, 'This test is not active.', 'test_inactive')
     if (result.error === 'encounter_mismatch') return errorResponse(409, 'That visit belongs to a different patient.')
+    if (result.error === 'visit_closed') return NextResponse.json({ error: 'Visit is closed', code: 'visit_closed' }, { status: 409 })
     return errorResponse(404, NOT_FOUND_MESSAGE[result.error])
   }
 
@@ -85,6 +105,31 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       dedupeKey: `lab_tests_ordered:requisition=${requisitionId}`,
     })
   }
-  return NextResponse.json({ requisitionId, lines: result.lines, patientIsLocal: result.patientIsLocal, notification }, { status: 201 })
+  // WS2 T10: the order lines (one outcome per order) and whether this user can book the home visit now.
+  const homeCollectionEligible = result.patientIsLocal && result.includesLabTest && HOME_COLLECTION_BOOKING_ROLES.includes(session.role)
+  return NextResponse.json({ requisitionId, lines: result.lines, charges: result.charges, patientIsLocal: result.patientIsLocal, homeCollectionEligible, notification }, { status: 201 })
   // end SP5
+}
+
+// WS2 T10: a visit's orders (the workspace Orders panel) and who a new order would be billed to.
+const encounterOrdersQuerySchema = z.object({ encounterId: z.coerce.number().int().positive().max(2147483647) }).strict()
+
+export async function GET(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
+  const session = await requireSession()
+  if (session instanceof NextResponse) return session
+  if (!WORKSPACE_READ_ROLES.includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { anonId } = await params
+  const parsed = encounterOrdersQuerySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams))
+  if (!parsed.success) return errorResponse(400, 'Invalid visit id')
+  const { encounterId } = parsed.data
+  try {
+    const encounter = await getEncounterById(encounterId)
+    if (!encounter || encounter.patientId !== anonId) return errorResponse(404, 'Visit not found')
+    const [orders, billTo] = await Promise.all([listEncounterLabOrders(encounterId), labOrderBillTo(anonId, encounterId)])
+    await logAudit(session, 'viewed visit lab orders', anonId, `encounter=${encounterId}`)
+    return NextResponse.json({ orders, billTo })
+  } catch (err) {
+    return labServerError('visit lab orders', err, 'Could not load the orders')
+  }
 }

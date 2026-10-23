@@ -1,5 +1,6 @@
 import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, unique, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
+import { smallint } from 'drizzle-orm/pg-core' // WS1 T2
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
@@ -149,12 +150,14 @@ export const patients = pgTable('patients', {
   abhaVerifiedAt: timestamp('abha_verified_at'),
   abhaVerificationSource: text('abha_verification_source', { enum: ABHA_VERIFICATION_SOURCES }),
   abhaVerifiedVia: text('abha_verified_via', { enum: ABHA_VERIFIED_VIA }),
+  allergyStatus: text('allergy_status', { enum: ['unknown', 'none_known', 'recorded'] }).default('unknown').notNull(), // WS1 T1
 }, (t) => [
   // SP8
   check('patients_abha_verification_complete', sql`(${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerificationSource} IS NULL) AND (${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerifiedVia} IS NULL)`),
   check('patients_abha_verification_source_valid', sql`${t.abhaVerificationSource} IS NULL OR ${t.abhaVerificationSource} IN ('abdm', 'abdm_sandbox_mock')`),
   // abha_verified_via is checked in TypeScript only (ABHA_VERIFIED_VIA): the SP8 migration carries no
   // Aadhaar-named literal, which its static test pins.
+  check('patients_allergy_status_valid', sql`${t.allergyStatus} IN ('unknown', 'none_known', 'recorded')`), // WS1 T1
 ])
 
 // SP6 clinical coding enums (scripts/migrations/2026-10-07-sp6-b-clinical-coding.sql). Declared
@@ -192,6 +195,7 @@ export const diagnoses = pgTable('diagnoses', {
   createdByName: text('created_by_name'),
   createdAt: timestamp('created_at'),
   // end SP6
+  onProblemList: boolean('on_problem_list').default(false).notNull(), // WS1 T4
 }, (t) => [
   // SP6
   index('diagnoses_encounter_id_idx').on(t.encounterId),
@@ -224,7 +228,20 @@ export const medicationEpisodes = pgTable('medication_episodes', {
   prescribedByProviderId: integer('prescribed_by_provider_id').references(() => providers.id),
   enteredByName: text('entered_by_name'),
   prescribedAt: timestamp('prescribed_at'),
-})
+  prescriptionId: integer('prescription_id').references(() => prescriptions.id), // WS1 T6
+  dosePattern: text('dose_pattern'), // WS1 T6 ('1-0-1'; parseDosePattern label)
+  route: text('route', { enum: ['oral', 'iv', 'im', 'sc', 'topical', 'inhaled', 'sublingual', 'rectal', 'vaginal', 'eye', 'ear', 'nasal', 'other'] }), // WS1 T6
+  foodTiming: text('food_timing', { enum: ['before_food', 'after_food', 'with_food', 'any'] }), // WS1 T6
+  isSos: boolean('is_sos').default(false).notNull(), // WS1 T6
+  quantityPrescribed: integer('quantity_prescribed'), // WS1 T6
+  allergyOverrideReason: text('allergy_override_reason'), // WS1 T6
+}, (t) => [ // WS1 T6
+  index('medication_episodes_prescription_idx').on(t.prescriptionId), // WS1 T6
+  check('medication_episodes_route_valid', sql`${t.route} IS NULL OR ${t.route} IN ('oral', 'iv', 'im', 'sc', 'topical', 'inhaled', 'sublingual', 'rectal', 'vaginal', 'eye', 'ear', 'nasal', 'other')`), // WS1 T6
+  check('medication_episodes_food_timing_valid', sql`${t.foodTiming} IS NULL OR ${t.foodTiming} IN ('before_food', 'after_food', 'with_food', 'any')`), // WS1 T6
+  check('medication_episodes_quantity_prescribed_positive', sql`${t.quantityPrescribed} IS NULL OR ${t.quantityPrescribed} > 0`), // WS1 T6
+  check('medication_episodes_allergy_override_reason_len', sql`${t.allergyOverrideReason} IS NULL OR char_length(${t.allergyOverrideReason}) BETWEEN 5 AND 300`), // WS1 T6
+]) // WS1 T6
 
 export const patientTrialScreenings = pgTable('patient_trial_screenings', {
   id: serial('id').primaryKey(),
@@ -541,6 +558,9 @@ export const allergies = pgTable('allergies', {
   allergen: text('allergen').notNull(),
   reaction: text('reaction'),
   severity: severityEnum('severity').notNull(),
+  recordedByName: text('recorded_by_name'), // WS1 T1
+  recordedAt: timestamp('recorded_at'), // WS1 T1
+  inactivatedAt: timestamp('inactivated_at'), // WS1 T1 (active = inactivated_at IS NULL)
 })
 
 export const identityVerifications = pgTable('identity_verifications', {
@@ -986,7 +1006,8 @@ export type FollowUpContactAttemptRow = typeof followUpContactAttempts.$inferSel
 // Money: per-unit prices and configured amounts are int4 paise capped at MAX_AMOUNT_PAISE;
 // every computed amount is bigint paise (mode 'number', capped at MAX_DOCUMENT_PAISE < 2^53).
 // No SP4 FK has an ON DELETE action: deletePatient clears a patient's lines explicitly.
-export const chargeLineSourceEnum = pgEnum('charge_line_source', ['manual', 'room_rent', 'pharmacy'])
+// WS2 T1: + registration, consultation, lab_order, procedure (scripts/migrations/2026-10-24-ws2-0-enum-values.sql).
+export const chargeLineSourceEnum = pgEnum('charge_line_source', ['manual', 'room_rent', 'pharmacy', 'registration', 'consultation', 'lab_order', 'procedure'])
 export const chargeLineStatusEnum = pgEnum('charge_line_status', ['captured', 'invoiced', 'void'])
 export const PRICE_SOURCES = ['base', 'department', 'payer', 'manual', 'pharmacy'] as const
 
@@ -1009,11 +1030,14 @@ export const billingSettings = pgTable('billing_settings', {
   rohiniId: text('rohini_id'),
   hfrId: text('hfr_id'),
   // end SP7
+  registrationServiceId: integer('registration_service_id').references(() => serviceCatalog.id), // WS2 T9
+  freeReviewDays: integer('free_review_days').default(0).notNull(), // WS2 T9
 }, (t) => [
   check('billing_settings_singleton', sql`${t.id} = 1`),
   check('billing_settings_consultation_window_range', sql`${t.consultationWindowDays} BETWEEN 1 AND 365`),
   check('billing_settings_deposit_threshold_range', sql`${t.ipdDepositThresholdPaise} BETWEEN 0 AND 1000000000`),
   check('billing_settings_pharmacy_gst_allowed', sql`${t.pharmacyGstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`),
+  check('billing_settings_free_review_days_range', sql`${t.freeReviewDays} BETWEEN 0 AND 30`), // WS2 T9
 ])
 
 // One row per configured rule (rule_code from CHARGE_RULE_CODES); a missing row = table defaults.
@@ -1067,6 +1091,8 @@ export const chargeLines = pgTable('charge_lines', {
   // SP7 (ruling 7): the approved pre-auth a payer line was validated against
   // (scripts/migrations/2026-10-09-sp7-c-preauth-claims.sql).
   preauthId: integer('preauth_id').references(() => preauths.id),
+  labOrderId: integer('lab_order_id').references(() => labOrders.id).unique(), // WS2 T9
+  encounterProcedureId: integer('encounter_procedure_id').references(() => encounterProcedures.id).unique(), // WS2 T9
 }, (t) => [
   index('charge_lines_patient_idx').on(t.patientId),
   index('charge_lines_encounter_idx').on(t.encounterId),
@@ -1082,6 +1108,9 @@ export const chargeLines = pgTable('charge_lines', {
   check('charge_lines_manual_reason', sql`${t.priceSource} <> 'manual' OR ${t.priceOverrideReason} IS NOT NULL`),
   check('charge_lines_void_reason', sql`${t.status} <> 'void' OR ${t.voidReason} IS NOT NULL`),
   index('charge_lines_invoice_idx').on(t.invoiceId),
+  // WS2 T9: automatic visit charges are idempotent (backstops; capture checks under the billing lock first).
+  uniqueIndex('charge_lines_one_consultation_per_encounter').on(t.encounterId).where(sql`source = 'consultation' AND status <> 'void'`), // WS2 T9
+  uniqueIndex('charge_lines_one_registration_per_patient').on(t.patientId).where(sql`source = 'registration' AND status <> 'void'`), // WS2 T9
 ])
 
 // Migration B: scripts/migrations/2026-10-08-sp4-b-invoices-ledger.sql (documents and ledger).
@@ -1312,11 +1341,13 @@ export const encounterProcedures = pgTable('encounter_procedures', {
   codedAt: timestamp('coded_at'),
   voidedAt: timestamp('voided_at'),
   voidedByName: text('voided_by_name'),
+  orderNotes: text('order_notes'), // WS2 T11: the doctor's note on a procedure ordered from the workspace
 }, (t) => [
   index('encounter_procedures_encounter_id_idx').on(t.encounterId),
   index('encounter_procedures_patient_id_idx').on(t.patientId),
   check('encounter_procedures_code_required', sql`${t.codingStatus} = 'uncoded' OR (${t.codeId} IS NOT NULL AND ${t.code} IS NOT NULL)`),
   check('encounter_procedures_code_kind_pair', sql`(${t.codeId} IS NULL) = (${t.codeSystemKind} IS NULL)`),
+  check('encounter_procedures_order_notes_length', sql`${t.orderNotes} IS NULL OR char_length(${t.orderNotes}) <= 300`), // WS2 T11
 ])
 
 // The coding status of one encounter; no row = uncoded.
@@ -2109,9 +2140,13 @@ export const encounterNotes = pgTable('encounter_notes', {
   status: noteStatusEnum('status').default('draft').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   signedAt: timestamp('signed_at'),
-})
+  encounterId: integer('encounter_id').references(() => encounters.id), // WS1 T5 (the visit the note was written in)
+}, (t) => [
+  index('encounter_notes_encounter_idx').on(t.encounterId), // WS1 T5
+])
 
-export const signableTypeEnum = pgEnum('signable_type', ['form_submission', 'admission_discharge', 'policy_acceptance', 'form_submission_consent'])
+// WS1 T1: + encounter_note (scripts/migrations/2026-10-24-ws1-0-enum-values.sql).
+export const signableTypeEnum = pgEnum('signable_type', ['form_submission', 'admission_discharge', 'policy_acceptance', 'form_submission_consent', 'encounter_note'])
 
 export const policyDocumentTypeEnum = pgEnum('policy_document_type', ['npp', 'tos'])
 
@@ -2176,7 +2211,13 @@ export const medications = pgTable('medications', {
   medicationClass: text('medication_class').notNull(),
   commonDose: text('common_dose'),
   form: medicationFormEnum('form').default('tablet').notNull(),
-})
+  mrpPerUnitPaise: integer('mrp_per_unit_paise'), // WS2 T8 (GST-inclusive MRP per dispensing unit; null = unpriced)
+  gstRateBp: integer('gst_rate_bp'), // WS2 T8 (null = billing_settings.pharmacy_gst_rate_bp)
+  hsn: text('hsn'), // WS2 T8 (null = billing_settings.pharmacy_hsn)
+}, (t) => [ // WS2 T8
+  check('medications_mrp_range', sql`${t.mrpPerUnitPaise} IS NULL OR ${t.mrpPerUnitPaise} BETWEEN 0 AND 1000000000`), // WS2 T8
+  check('medications_gst_rate_allowed', sql`${t.gstRateBp} IS NULL OR ${t.gstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`), // WS2 T8
+]) // WS2 T8
 
 export const medicationInventory = pgTable('medication_inventory', {
   id: serial('id').primaryKey(),
@@ -2205,7 +2246,13 @@ export const medicationDispenses = pgTable('medication_dispenses', {
   // (Postgres does not treat NULLs as equal) for the many dispenses that are
   // samples or in-office doses and are never billed.
   chargeId: integer('charge_id').references(() => charges.id).unique(),
-})
+  batchNo: text('batch_no'), // WS2 T8 (snapshot text; stock by batch is WS5)
+  expiryMonth: text('expiry_month'), // WS2 T8 ('YYYY-MM')
+  noChargeReason: text('no_charge_reason'), // WS2 T8 (a free dispense; never audited)
+  unitMrpPaise: integer('unit_mrp_paise'), // WS2 T8 (MRP snapshot at dispense)
+}, (t) => [ // WS2 T8
+  check('medication_dispenses_expiry_month_format', sql`${t.expiryMonth} IS NULL OR ${t.expiryMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`), // WS2 T8
+]) // WS2 T8
 
 export const marStatusEnum = pgEnum('mar_status', ['scheduled', 'given', 'held', 'refused'])
 
@@ -2345,6 +2392,7 @@ export const labTests = pgTable('lab_tests', {
   // Foundations T10: a test can be switched off; activating an unmapped test is refused.
   isActive: boolean('is_active').default(true).notNull(),
   // end Foundations T10
+  fastingRequired: boolean('fasting_required').default(false).notNull(), // WS1 T10
 })
 
 export const labOrders = pgTable('lab_orders', {
@@ -2463,9 +2511,14 @@ export const labRequisitions = pgTable('lab_requisitions', {
   createdByName: text('created_by_name').notNull(),
   createdByUserId: integer('created_by_user_id').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  priority: text('priority', { enum: ['routine', 'urgent', 'stat'] }).default('routine').notNull(), // WS1 T10
+  clinicalNotes: text('clinical_notes'), // WS1 T10
+  fastingRequired: boolean('fasting_required').default(false).notNull(), // WS1 T10
 }, (t) => [
   check('lab_requisitions_follow_up_fields', sql`(NOT ${t.followUpRequested} AND ${t.followUpIntervalValue} IS NULL AND ${t.followUpIntervalUnit} IS NULL) OR (${t.followUpRequested} AND ${t.followUpIntervalValue} BETWEEN 1 AND 365 AND ${t.followUpIntervalUnit} IS NOT NULL)`),
   index('lab_requisitions_patient_idx').on(t.patientId),
+  check('lab_requisitions_priority_valid', sql`${t.priority} IN ('routine', 'urgent', 'stat')`), // WS1 T10
+  check('lab_requisitions_clinical_notes_length', sql`${t.clinicalNotes} IS NULL OR char_length(${t.clinicalNotes}) <= 500`), // WS1 T10
 ])
 
 // One home sample-collection trip: a slot (IST date + window snapshot), an address snapshot
@@ -2911,3 +2964,110 @@ export const abhaLinkOverrides = pgTable('abha_link_overrides', {
 
 export type AbhaLinkOverrideRow = typeof abhaLinkOverrides.$inferSelect
 // end WS12 T5
+// WS1 T2: vitals and the consultation record, both per encounter. encounter_vitals is the ONE
+// vitals table for the product (lane ruling R1; IPD nursing reuses it). Values are integers in
+// base units (mmHg, bpm, deci-degrees C, %, per minute, grams, millimetres).
+export const encounterVitals = pgTable('encounter_vitals', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  recordedAt: timestamp('recorded_at').defaultNow().notNull(),
+  recordedByName: text('recorded_by_name').notNull(),
+  recordedByUserId: integer('recorded_by_user_id').references(() => users.id),
+  systolicMmhg: integer('systolic_mmhg'),
+  diastolicMmhg: integer('diastolic_mmhg'),
+  pulseBpm: integer('pulse_bpm'),
+  tempDeciC: integer('temp_deci_c'),
+  spo2Pct: integer('spo2_pct'),
+  respRate: integer('resp_rate'),
+  weightG: integer('weight_g'),
+  heightMm: integer('height_mm'),
+  painScore: smallint('pain_score'),
+  notes: text('notes'),
+}, (t) => [
+  index('encounter_vitals_encounter_idx').on(t.encounterId),
+  check('encounter_vitals_systolic_range', sql`${t.systolicMmhg} IS NULL OR ${t.systolicMmhg} BETWEEN 50 AND 300`),
+  check('encounter_vitals_diastolic_range', sql`${t.diastolicMmhg} IS NULL OR ${t.diastolicMmhg} BETWEEN 20 AND 200`),
+  check('encounter_vitals_pulse_range', sql`${t.pulseBpm} IS NULL OR ${t.pulseBpm} BETWEEN 20 AND 250`),
+  check('encounter_vitals_temp_range', sql`${t.tempDeciC} IS NULL OR ${t.tempDeciC} BETWEEN 300 AND 450`),
+  check('encounter_vitals_spo2_range', sql`${t.spo2Pct} IS NULL OR ${t.spo2Pct} BETWEEN 50 AND 100`),
+  check('encounter_vitals_resp_range', sql`${t.respRate} IS NULL OR ${t.respRate} BETWEEN 4 AND 80`),
+  check('encounter_vitals_weight_range', sql`${t.weightG} IS NULL OR ${t.weightG} BETWEEN 300 AND 400000`),
+  check('encounter_vitals_height_range', sql`${t.heightMm} IS NULL OR ${t.heightMm} BETWEEN 300 AND 2500`),
+  check('encounter_vitals_pain_range', sql`${t.painScore} IS NULL OR ${t.painScore} BETWEEN 0 AND 10`),
+  check('encounter_vitals_notes_len', sql`${t.notes} IS NULL OR char_length(${t.notes}) <= 300`),
+  check('encounter_vitals_bp_order', sql`${t.systolicMmhg} IS NULL OR ${t.diastolicMmhg} IS NULL OR ${t.diastolicMmhg} < ${t.systolicMmhg}`),
+  check('encounter_vitals_any_measurement', sql`num_nonnulls(${t.systolicMmhg}, ${t.diastolicMmhg}, ${t.pulseBpm}, ${t.tempDeciC}, ${t.spo2Pct}, ${t.respRate}, ${t.weightG}, ${t.heightMm}, ${t.painScore}) > 0`),
+])
+
+export const encounterConsults = pgTable('encounter_consults', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().unique().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  chiefComplaint: text('chief_complaint'),
+  historyPresentIllness: text('history_present_illness'),
+  pastHistory: text('past_history'),
+  familyHistory: text('family_history'),
+  personalHistory: text('personal_history'),
+  examination: text('examination'),
+  advice: text('advice'),
+  noDiagnosisReason: text('no_diagnosis_reason'),
+  updatedAt: timestamp('updated_at').notNull(),
+  updatedByName: text('updated_by_name').notNull(),
+}, (t) => [
+  check('encounter_consults_text_len', sql`coalesce(char_length(${t.chiefComplaint}), 0) <= 4000 AND coalesce(char_length(${t.historyPresentIllness}), 0) <= 4000 AND coalesce(char_length(${t.pastHistory}), 0) <= 4000 AND coalesce(char_length(${t.familyHistory}), 0) <= 4000 AND coalesce(char_length(${t.personalHistory}), 0) <= 4000 AND coalesce(char_length(${t.examination}), 0) <= 4000 AND coalesce(char_length(${t.advice}), 0) <= 4000`),
+  check('encounter_consults_reason_len', sql`${t.noDiagnosisReason} IS NULL OR char_length(${t.noDiagnosisReason}) <= 300`),
+])
+
+export type EncounterVitalsRow = typeof encounterVitals.$inferSelect
+export type EncounterConsultRow = typeof encounterConsults.$inferSelect
+// end WS1 T2
+
+// WS1 T4: referrals written from the consultation workspace. Internal referrals name a department
+// and/or a doctor; external ones name a facility. The reason is clinical text (never audited).
+export const referrals = pgTable('referrals', {
+  id: serial('id').primaryKey(),
+  encounterId: integer('encounter_id').notNull().references(() => encounters.id),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  kind: text('kind', { enum: ['internal', 'external'] }).notNull(),
+  toDepartmentId: integer('to_department_id').references(() => departments.id),
+  toProviderId: integer('to_provider_id').references(() => providers.id),
+  externalFacility: text('external_facility'),
+  externalDoctor: text('external_doctor'),
+  reason: text('reason').notNull(),
+  urgency: text('urgency', { enum: ['routine', 'urgent', 'emergency'] }).notNull(),
+  status: text('status', { enum: ['open', 'seen', 'closed'] }).default('open').notNull(),
+  createdByName: text('created_by_name').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('referrals_encounter_idx').on(t.encounterId),
+  index('referrals_to_provider_open_idx').on(t.toProviderId).where(sql`${t.status} = 'open'`),
+  index('referrals_to_department_open_idx').on(t.toDepartmentId).where(sql`${t.status} = 'open'`),
+  check('referrals_kind_valid', sql`${t.kind} IN ('internal', 'external')`),
+  check('referrals_urgency_valid', sql`${t.urgency} IN ('routine', 'urgent', 'emergency')`),
+  check('referrals_status_valid', sql`${t.status} IN ('open', 'seen', 'closed')`),
+  check('referrals_target', sql`(${t.kind} = 'internal' AND (${t.toDepartmentId} IS NOT NULL OR ${t.toProviderId} IS NOT NULL)) OR (${t.kind} = 'external' AND ${t.externalFacility} IS NOT NULL)`),
+  check('referrals_text_len', sql`char_length(${t.reason}) <= 1000 AND coalesce(char_length(${t.externalFacility}), 0) <= 200 AND coalesce(char_length(${t.externalDoctor}), 0) <= 120`),
+])
+
+export type ReferralRow = typeof referrals.$inferSelect
+// end WS1 T4
+// WS1 T6: prescription header (scripts/migrations/2026-10-24-ws1-prescriptions-v2.sql). Groups the
+// drugs written together on one visit; each drug stays a medication_episodes row (prescription_id).
+export const prescriptions = pgTable('prescriptions', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  encounterId: integer('encounter_id').references(() => encounters.id),
+  prescribedByProviderId: integer('prescribed_by_provider_id').notNull().references(() => providers.id),
+  advice: text('advice'),
+  enteredByName: text('entered_by_name').notNull(),
+  enteredByUserId: integer('entered_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('prescriptions_patient_idx').on(t.patientId),
+  index('prescriptions_encounter_idx').on(t.encounterId),
+  check('prescriptions_advice_len', sql`${t.advice} IS NULL OR char_length(${t.advice}) <= 1000`),
+])
+export type PrescriptionRow = typeof prescriptions.$inferSelect
+// end WS1 T6

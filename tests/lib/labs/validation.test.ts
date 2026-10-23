@@ -8,13 +8,20 @@ import {
 
 describe('SP5 validation', () => {
   it('createLabRequisitionSchema accepts the legacy body and normalises it', () => {
-    expect(createLabRequisitionSchema.parse({ labTestId: 3 })).toEqual({ labTestIds: [3], followUp: null, originatingEncounterId: null })
+    expect(createLabRequisitionSchema.parse({ labTestId: 3 })).toEqual({ labTestIds: [3], followUp: null, originatingEncounterId: null, priority: 'routine', clinicalNotes: null, fastingRequired: null })
     expect(createLabRequisitionSchema.safeParse({ labTestIds: [3, 3] }).success).toBe(false)
     expect(createLabRequisitionSchema.safeParse({ labTestIds: [] }).success).toBe(false)
     expect(createLabRequisitionSchema.safeParse({ labTestIds: Array.from({ length: 21 }, (_, i) => i + 1) }).success).toBe(false)
     expect(createLabRequisitionSchema.safeParse({ labTestIds: [3], followUp: { interval: { value: 2, unit: 'weeks' }, reason: 'Review LFT' } }).success).toBe(true)
     expect(createLabRequisitionSchema.parse({ labTestIds: [3, 4], originatingEncounterId: 7 }))
-      .toEqual({ labTestIds: [3, 4], followUp: null, originatingEncounterId: 7 })
+      .toEqual({ labTestIds: [3, 4], followUp: null, originatingEncounterId: 7, priority: 'routine', clinicalNotes: null, fastingRequired: null })
+    // WS1 T10: priority, clinical notes (trimmed, at most 500; blank is none) and fasting.
+    expect(createLabRequisitionSchema.parse({ labTestIds: [3], priority: 'stat', clinicalNotes: ' Chest pain ', fastingRequired: false }))
+      .toEqual({ labTestIds: [3], followUp: null, originatingEncounterId: null, priority: 'stat', clinicalNotes: 'Chest pain', fastingRequired: false })
+    expect(createLabRequisitionSchema.parse({ labTestIds: [3], clinicalNotes: '   ' }).clinicalNotes).toBeNull()
+    expect(createLabRequisitionSchema.safeParse({ labTestIds: [3], priority: 'asap' }).success).toBe(false)
+    expect(createLabRequisitionSchema.safeParse({ labTestIds: [3], clinicalNotes: 'x'.repeat(501) }).success).toBe(false)
+    expect(createLabRequisitionSchema.safeParse({ labTestId: 3, priority: 'stat' }).success).toBe(false)
     expect(createLabRequisitionSchema.parse({ labTestIds: [3], followUp: { interval: { value: 2, unit: 'weeks' }, reason: ' Review LFT ' } }).followUp)
       .toEqual({ interval: { value: 2, unit: 'weeks' }, reason: 'Review LFT' })
     expect(createLabRequisitionSchema.safeParse({ labTestId: 3, extra: 1 }).success).toBe(false)

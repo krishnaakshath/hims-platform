@@ -92,7 +92,7 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   // results; explicit product direction removed their prior worklist access).
   { href: '/labs', label: 'Labs', icon: TestTube2, roles: ['admin', 'crc', 'pi', 'labs'] as Role[] },
   // SP5: home-collection day board (HOME_COLLECTION_BOOKING_ROLES): booking logistics, no lab results.
-  { href: '/home-collections', label: 'Home Collection', icon: House, roles: ['admin', 'frontdesk', 'labs'] as Role[] },
+  { href: '/home-collections', label: 'Home Collection', icon: House, roles: ['admin', 'frontdesk', 'labs', 'pi'] as Role[] }, // WS2 T1: + pi
   // SP5: the collector's own route for the day (COLLECTOR_ROUTE_ROLES).
   { href: '/collections', label: 'My Route', icon: Route, roles: [...COLLECTOR_ROUTE_ROLES] },
   // end SP5

@@ -1,12 +1,20 @@
-import { and, asc, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { admissions, appointments, departments, doctorAssignments, encounters, followUpOrders, providers, type EncounterRow } from '@/db/schema'
+import { admissions, appointments, departments, doctorAssignments, encounters, followUpOrders, homeCollectionVisits, labOrders, labRequisitions, providers, type EncounterRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { istDateOf, startOfIstDay } from '@/lib/india-time'
 import { canTransitionEncounter, defaultEncounterVisitType, type EncounterStatus, type EncounterType, type EncounterVisitType } from '@/lib/encounters/status'
 import type { DoctorAssignmentRow } from './doctor-assignments'
+import { captureVisitChargesInTx, ensureConsultationChargeInTx, voidAutoLinesForEncounterInTx, type AutoChargeOutcome } from './auto-charge' // WS2 T9
 import type { WriteExecutor } from './executor'
+import { cancelLabOrderInTx } from './lab-lifecycle' // WS2 T10
+import type { LabOrderStatus } from '@/lib/labs/status' // WS2 T10
+import { lockVisitProceduresInTx, voidVisitProceduresInTx } from './procedure-orders' // WS2 T11
+
+// WS2 T10 (fix round 1): lab orders still waiting for their sample; anything later was performed.
+const LAB_PENDING_STATUSES: readonly LabOrderStatus[] = ['ordered', 'scheduled']
+const VISIT_CANCELLED_ORDER_REASON = 'Visit cancelled'
 
 export type Encounter = EncounterRow
 
@@ -53,7 +61,7 @@ export interface CheckInVisitInput {
 export type CheckInVisitError = 'appointment_not_found' | 'appointment_mismatch' | 'appointment_not_scheduled' | 'appointment_not_today' | 'appointment_already_checked_in'
 
 export type CheckInVisitResult =
-  | { ok: true; assignment: DoctorAssignmentRow; encounter: Encounter; admissionId: number | null; completedFollowUpOrderId: number | null }
+  | { ok: true; assignment: DoctorAssignmentRow; encounter: Encounter; admissionId: number | null; completedFollowUpOrderId: number | null; charges: AutoChargeOutcome[] }
   | { ok: false; error: CheckInVisitError }
 
 /**
@@ -67,7 +75,7 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
   return getDb().transaction(async (tx): Promise<CheckInVisitResult> => {
     const encounterDate = istDateOf(now)
 
-    // Global lock order (I1): follow-up order -> appointment -> OPD token -> encounter.
+    // Global lock order (I1): follow-up order -> appointment -> OPD token -> encounter -> patient billing lock (last).
     // bookFollowUp / unbookFollowUp / cancelFollowUpOrder lock the order first and
     // then the appointment, so check-in must too, or the two deadlock (40P01).
     // A writer that unbooked meanwhile set appointment_id to null: Postgres
@@ -150,17 +158,36 @@ export async function checkInVisit(input: CheckInVisitInput, session: Session, n
     await logAudit(session, `checked in patient (${input.visitType})`, input.patientId, `encounter=${encounter.id} token=${token}`, tx)
     if (order) await logAudit(session, 'completed follow-up at check-in', input.patientId, `followUp=${order.id} encounter=${encounter.id}`, tx)
 
-    return { ok: true, assignment, encounter, admissionId, completedFollowUpOrderId: order?.id ?? null }
+    // WS2 T9: the visit charges (OPD consultation, first-visit registration), billing lock last.
+    // Never blocks the check-in: an unpriced or blocked charge comes back as an outcome.
+    const charges = await captureVisitChargesInTx(tx, encounter, session, now)
+
+    return { ok: true, assignment, encounter, admissionId, completedFollowUpOrderId: order?.id ?? null, charges }
   })
 }
 
-export type TransitionEncounterResult = { ok: true; encounter: Encounter } | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' | 'admission_active' }
+export type TransitionEncounterResult =
+  | { ok: true; encounter: Encounter; charges?: AutoChargeOutcome[] }
+  | { ok: false; error: 'not_found' | 'not_owner' | 'invalid_transition' | 'admission_active' }
+  | { ok: false; error: 'visit_billed'; invoiceNumber: string } // WS2 T9
+  | { ok: false; error: 'visit_has_performed_orders' } // WS2 T10: a lab order of the visit is collected or later
 
+/**
+ * WS2 T9: completing an OPD visit captures its consultation if still missing (`charges`);
+ * cancelling voids its consultation and lab-order lines and its registration line (WS2 T10: moved
+ * to another live visit of the patient instead, when there is one), and is refused (`visit_billed`,
+ * nothing changed) while one of them is on a finalised invoice. WS2 T10: cancelling also cancels the
+ * visit's pending lab orders, and is refused (`visit_has_performed_orders`, nothing changed) when one
+ * is collected or later. WS2 T11: cancelling also voids the visit's procedure lines and soft-voids
+ * its procedures that are not coded. Lock order: follow-up orders -> encounter -> lab orders
+ * (ascending id) -> their home collection visits (ascending id) -> procedures (ascending id) ->
+ * patient billing lock (last).
+ */
 export async function transitionEncounter(
   id: number,
   to: 'in_consultation' | 'completed' | 'cancelled',
   session: Session,
-  opts: { cancelReason?: string; actingProviderId?: number | null } = {},
+  opts: { cancelReason?: string; actingProviderId?: number | null; now?: Date } = {},
 ): Promise<TransitionEncounterResult> {
   return getDb().transaction(async (tx): Promise<TransitionEncounterResult> => {
     // Global lock order (I1): follow-up orders before the encounter. Only a
@@ -180,7 +207,50 @@ export async function transitionEncounter(
       const [adm] = await tx.select({ status: admissions.status }).from(admissions).where(eq(admissions.id, current.admissionId))
       if (adm?.status === 'admitted') return { ok: false, error: 'admission_active' }
     }
-    const at = new Date()
+    // WS2 T10: the visit's lab orders, then their home visits, are locked before the billing lock
+    // (the lab lifecycle order: order rows, home visit, billing). A sample already taken (collected
+    // or later) means the test was performed: the visit cannot be cancelled. Checked before any write.
+    const pendingOrders: number[] = []
+    if (to === 'cancelled') {
+      const visitOrders = await tx.select({ id: labOrders.id, status: labOrders.status, homeVisitId: labOrders.homeCollectionVisitId }).from(labOrders)
+        .innerJoin(labRequisitions, eq(labRequisitions.id, labOrders.requisitionId))
+        .where(and(eq(labRequisitions.originatingEncounterId, id), ne(labOrders.status, 'cancelled')))
+        .orderBy(asc(labOrders.id))
+        .for('update', { of: labOrders })
+      if (visitOrders.some((o) => !LAB_PENDING_STATUSES.includes(o.status))) return { ok: false, error: 'visit_has_performed_orders' }
+      pendingOrders.push(...visitOrders.map((o) => o.id))
+      // Fix round 2: the pending orders' home visits, ascending id, before voidAutoLines takes the billing lock.
+      const homeVisitIds = [...new Set(visitOrders.map((o) => o.homeVisitId).filter((v): v is number => v !== null))].sort((a, b) => a - b)
+      if (homeVisitIds.length > 0) {
+        await tx.select({ id: homeCollectionVisits.id }).from(homeCollectionVisits)
+          .where(inArray(homeCollectionVisits.id, homeVisitIds)).orderBy(asc(homeCollectionVisits.id)).for('update')
+      }
+    }
+    // WS2 T11: the visit's live procedures, ascending id, after the home visits and before the
+    // billing lock (cancelProcedure: encounter, procedure row, billing). Uncoded/proposed ones are
+    // soft-voided with the visit; their lines are voided by voidAutoLinesForEncounterInTx below.
+    // WS2 T12 (controller ruling): a coded live procedure was performed, like a collected sample,
+    // so the cancel is refused with visit_has_performed_orders before any write.
+    const proceduresToVoid: number[] = []
+    if (to === 'cancelled') {
+      const procs = await lockVisitProceduresInTx(tx, id)
+      if (procs.some((p) => p.codingStatus === 'coded')) return { ok: false, error: 'visit_has_performed_orders' }
+      proceduresToVoid.push(...procs.map((p) => p.id))
+    }
+    // WS2 T9: refuse the cancel before any write when a visit charge is already invoiced.
+    if (to === 'cancelled') {
+      const v = await voidAutoLinesForEncounterInTx(tx, id, session)
+      if (!v.ok) return v
+    }
+    const at = opts.now ?? new Date()
+    // WS2 T10 (fix round 1): the pending orders go with the visit (order-cancel semantics: a home
+    // visit left with no test is cancelled; a line not voided above, e.g. one billed to a stay, is
+    // voided or reported as needing a credit note).
+    for (const orderId of pendingOrders) {
+      const c = await cancelLabOrderInTx(tx, orderId, VISIT_CANCELLED_ORDER_REASON, session, at)
+      if (!c.ok) throw new Error(`visit cancel: lab order ${orderId} ${c.error}`)
+    }
+    if (proceduresToVoid.length > 0) await voidVisitProceduresInTx(tx, id, current.patientId, proceduresToVoid, session, at) // WS2 T11
     const [updated] = await tx.update(encounters).set({
       status: to,
       statusChangedAt: at,
@@ -199,6 +269,11 @@ export async function transitionEncounter(
         .where(eq(followUpOrders.id, o.id))
       await logAudit(session, 'reopened follow-up after visit cancelled', current.patientId, `followUp=${o.id} encounter=${id}`, tx)
     }
+    if (to === 'completed') {
+      const outcome = await ensureConsultationChargeInTx(tx, updated, session, at)
+      return { ok: true, encounter: updated, charges: outcome ? [outcome] : [] }
+    }
+    if (to === 'cancelled') return { ok: true, encounter: updated, charges: [] }
     return { ok: true, encounter: updated }
   })
 }

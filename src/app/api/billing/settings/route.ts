@@ -19,7 +19,11 @@ export async function PUT(request: NextRequest) {
 
   try {
     const result = await updateBillingSettings(parsed.data, session)
-    if (!result.ok) return billingError(400, 'Choose a room-rent service from the Room rent category')
+    if (!result.ok) {
+      return billingError(400, result.error === 'registration_service_invalid' // WS2 T9
+        ? 'Choose an active registration service from the Other category'
+        : 'Choose a room-rent service from the Room rent category')
+    }
     return NextResponse.json({ ok: true })
   } catch (err) {
     return billingServerError('update settings', err, 'Could not save the billing settings')

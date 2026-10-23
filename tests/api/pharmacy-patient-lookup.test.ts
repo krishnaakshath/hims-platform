@@ -63,8 +63,10 @@ describe('GET /api/pharmacy/patients/[patientId]', () => {
   it('never leaks the rest of the chart', async () => {
     const body = await (await GET(req() as never, ctx('RD-0001'))).json()
     expect(Object.keys(body).sort()).toEqual(
-      ['activeMedications', 'currentProvider', 'diagnoses', 'dispenses', 'dob', 'id', 'name', 'pastMedications', 'uhid']
+      // WS2 T8: + allergies (allergen and severity only), for the dispense allergy banner.
+      ['activeMedications', 'allergies', 'currentProvider', 'diagnoses', 'dispenses', 'dob', 'id', 'name', 'pastMedications', 'uhid']
     )
+    for (const a of body.allergies) expect(Object.keys(a).sort()).toEqual(['allergen', 'severity'])
     const serialized = JSON.stringify(body)
     for (const forbidden of ['criteria', 'overallStatus', 'identityVerification', 'discrepancies', 'portalPasswordHash', 'portalConfigured', 'mfaSecretEncrypted', 'intakeqClientIdRef', 'reviewerNotes']) {
       expect(serialized).not.toContain(forbidden)

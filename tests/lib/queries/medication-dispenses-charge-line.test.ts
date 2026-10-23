@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 
-// SP4 Task 13: billing a dispense writes the legacy charge AND one pharmacy charge line, atomically.
-describe.skipIf(!process.env.DATABASE_URL)('pharmacy dispense charge line (DB)', () => {
+// SP4 Task 13 → WS2 T8: billing a legacy dispense writes ONE pharmacy charge line at the current
+// MRP (no legacy `charges` row, no diagnosis, no HCPCS code), atomically with its audit row.
+describe.skipIf(!process.env.DATABASE_URL)('pharmacy legacy dispense charge line (DB)', () => {
   const RUN = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`
   const PID = `TEST-SP4-${RUN}`
-  const fx = { medId: 0, dispenses: [] as number[], charges: [] as number[], admissionId: 0, providerId: 0 }
+  const fx = { medId: 0, dispenses: [] as number[], admissionId: 0, providerId: 0 }
+  const session = { userId: null, name: 'Test Pharmacist', role: 'pharmacy' as const }
   let savedSettings: Record<string, unknown> | null = null
 
   const m = async () => ({
@@ -20,20 +22,21 @@ describe.skipIf(!process.env.DATABASE_URL)('pharmacy dispense charge line (DB)',
     await db.update(billingSettings).set({ pharmacyGstRateBp: 1200, pharmacyHsn: '30049099' }).where(eq(billingSettings.id, 1))
     const [prov] = await db.select({ id: providers.id }).from(providers).orderBy(providers.id).limit(1)
     fx.providerId = prov.id
-    const [med] = await db.insert(medications).values({ name: `Test SP4 Med ${RUN}`, medicationClass: 'Test', form: 'tablet' }).returning()
+    // No own GST rate or HSN: the billing settings defaults apply.
+    const [med] = await db.insert(medications).values({ name: `Test SP4 Med ${RUN}`, medicationClass: 'Test', form: 'tablet', mrpPerUnitPaise: 280 }).returning()
     fx.medId = med.id
     await db.insert(medicationInventory).values({ medicationId: med.id, quantityOnHand: 100, reorderThreshold: 5, unit: 'tablets' })
     await db.insert(patients).values({ id: PID, name: 'Test SP4 Pharmacy', dob: '1990-01-01' })
   })
 
   afterEach(async () => {
-    const { getDb, medicationDispenses, charges, admissions, inArray, eq } = await m()
+    const { getDb, medicationDispenses, admissions, auditLog, inArray, eq } = await m()
     const { purgeBillingFixtures } = await import('../../db/billing-fixtures')
     const db = getDb()
     await purgeBillingFixtures([PID])
     if (fx.dispenses.length) await db.delete(medicationDispenses).where(inArray(medicationDispenses.id, fx.dispenses.splice(0)))
-    if (fx.charges.length) await db.delete(charges).where(inArray(charges.id, fx.charges.splice(0)))
     if (fx.admissionId) { await db.delete(admissions).where(eq(admissions.id, fx.admissionId)); fx.admissionId = 0 }
+    await db.delete(auditLog).where(eq(auditLog.patientId, PID))
   })
 
   afterAll(async () => {
@@ -52,89 +55,94 @@ describe.skipIf(!process.env.DATABASE_URL)('pharmacy dispense charge line (DB)',
     return d
   }
 
-  async function bill(d: { id: number; quantity: number }, serviceDate = '2099-06-01') {
-    const { md } = await m()
-    const r = await md.createChargeForDispense({
-      dispenseId: d.id, patientId: PID, providerName: 'Dr Test', dateOfService: serviceDate, serviceDate, createdByName: 'Test Pharmacist',
-      diagnosisCode: { code: 'I10', description: 'Hypertension' },
-      procedureCode: { code: 'J3490', description: 'Unclassified drugs - Sertraline', units: d.quantity, chargeCents: 250 },
-      amountCents: d.quantity * 250,
-    })
-    if (r.ok && r.chargeId) fx.charges.push(r.chargeId)
-    return r
-  }
-
   async function linesOf(dispenseId: number) {
     const { getDb, chargeLines, eq } = await m()
     return getDb().select().from(chargeLines).where(eq(chargeLines.medicationDispenseId, dispenseId))
   }
 
-  it('creates the legacy charge and one pharmacy charge line in one transaction', async () => {
+  it('creates one pharmacy charge line at the current MRP with the settings GST/HSN, and no legacy charge', async () => {
+    const { md, getDb, charges, eq } = await m()
     const d = await dispense()
-    const r = await bill(d)
+    const r = await md.billLegacyDispense(d.id, session)
     expect(r).toMatchObject({ ok: true })
     const lines = await linesOf(d.id)
     expect(lines).toHaveLength(1)
+    // ₹2.80 × 6 at 12%: unit 250 → taxable 1500, GST 180, total 1680 = MRP × 6.
     expect(lines[0]).toMatchObject({
-      patientId: PID, source: 'pharmacy', priceSource: 'pharmacy', serviceId: null, serviceCategory: null, itemCode: 'J3490', itemName: 'Unclassified drugs - Sertraline',
+      patientId: PID, source: 'pharmacy', priceSource: 'pharmacy', serviceId: null, serviceCategory: null, itemCode: `MED-${fx.medId}`, itemName: `Test SP4 Med ${RUN}`,
       quantity: 6, unitPricePaise: 250, taxablePaise: 1500, gstRateBp: 1200, hsnSac: '30049099', admissionId: null, encounterId: null,
-      legacyChargeId: r.chargeId, medicationDispenseId: d.id, serviceDate: '2099-06-01', createdByName: 'Test Pharmacist', status: 'captured',
+      legacyChargeId: null, medicationDispenseId: d.id, serviceDate: '2099-06-01', createdByName: 'Test Pharmacist', status: 'captured',
     })
-    expect(r.lineId).toBe(lines[0].id)
+    expect(r.ok && r.lineId).toBe(lines[0].id)
+    expect(await getDb().select().from(charges).where(eq(charges.patientId, PID))).toEqual([])
   })
 
-  it('a second bill of the same dispense creates neither', async () => {
-    const { getDb, charges, eq } = await m()
+  it('a second bill of the same dispense creates nothing', async () => {
+    const { md } = await m()
     const d = await dispense()
-    await bill(d)
-    const before = await getDb().select().from(charges).where(eq(charges.patientId, PID))
-    expect(await bill(d)).toEqual({ ok: false, error: 'This dispense has already been billed' })
-    expect(await getDb().select().from(charges).where(eq(charges.patientId, PID))).toHaveLength(before.length)
+    await md.billLegacyDispense(d.id, session)
+    expect(await md.billLegacyDispense(d.id, session)).toEqual({ ok: false, error: 'already_billed' })
     expect(await linesOf(d.id)).toHaveLength(1)
   })
 
   it('the line attaches to the active admission', async () => {
-    const { getDb, admissions } = await m()
+    const { getDb, admissions, md } = await m()
     const [a] = await getDb().insert(admissions).values({ patientId: PID, attendingProviderId: fx.providerId, admittedAt: new Date('2099-05-30T06:00:00Z') }).returning()
     fx.admissionId = a.id
     const d = await dispense()
-    await bill(d)
+    await md.billLegacyDispense(d.id, session)
     expect((await linesOf(d.id))[0].admissionId).toBe(a.id)
   })
 
   it('service date is the IST date of the dispense (18:40Z → next day)', async () => {
-    const { istDateOf } = await import('@/lib/india-time')
+    const { md } = await m()
     const d = await dispense(2, new Date('2099-06-01T18:40:00Z'))
-    const serviceDate = istDateOf(d.dispensedAt)
-    expect(serviceDate).toBe('2099-06-02')
-    await bill(d, serviceDate)
+    await md.billLegacyDispense(d.id, session)
     expect((await linesOf(d.id))[0].serviceDate).toBe('2099-06-02')
   })
 
   it('a dispense over the per-line quantity limit is refused and nothing is written', async () => {
-    const { getDb, charges, eq } = await m()
+    const { md } = await m()
     const d = await dispense(1001)
-    const r = await bill(d)
-    expect(r).toEqual({ ok: false, error: 'This dispense is too large to bill as one line (more than 1000 units)' })
-    expect(await getDb().select().from(charges).where(eq(charges.patientId, PID))).toEqual([])
+    expect(await md.billLegacyDispense(d.id, session)).toEqual({ ok: false, error: 'quantity_too_large' })
+    expect(await linesOf(d.id)).toEqual([])
   })
 
   it('writes its audit row on the same transaction, only when the bill is created', async () => {
-    const { getDb, auditLog, eq, asc } = await m()
-    const session = { userId: null, name: 'Test Pharmacist', role: 'pharmacy' as const }
+    const { getDb, auditLog, eq, asc, md } = await m()
     const d = await dispense()
-    const { md } = await m()
-    const input = {
-      dispenseId: d.id, patientId: PID, providerName: 'Dr Test', dateOfService: '2099-06-01', serviceDate: '2099-06-01', createdByName: 'Test Pharmacist',
-      diagnosisCode: { code: 'I10', description: 'Hypertension' },
-      procedureCode: { code: 'J3490', description: 'Unclassified drugs', units: d.quantity, chargeCents: 250 },
-      amountCents: d.quantity * 250,
-    }
-    const r = await md.createChargeForDispense(input, session)
-    if (r.ok && r.chargeId) fx.charges.push(r.chargeId)
-    expect(await md.createChargeForDispense(input, session)).toMatchObject({ ok: false })
+    const r = await md.billLegacyDispense(d.id, session)
+    expect(await md.billLegacyDispense(d.id, session)).toMatchObject({ ok: false })
     const rows = await getDb().select().from(auditLog).where(eq(auditLog.patientId, PID)).orderBy(asc(auditLog.id))
-    expect(rows.map((a) => `${a.action}|${a.details}`)).toEqual([`logged a bill for a dispensed medication|charge=${r.chargeId} line=${r.lineId}`])
-    await getDb().delete(auditLog).where(eq(auditLog.patientId, PID))
+    expect(rows.map((a) => `${a.action}|${a.details}`)).toEqual([`billed a legacy dispense|dispense=${d.id} line=${r.ok ? r.lineId : 0}`])
+  })
+  // Fix round 1: the patient billing lock is taken LAST. With the billing lock held elsewhere, a
+  // legacy bill must already hold the medication row (FOR SHARE) while it waits, so a price edit's
+  // FOR UPDATE cannot slip in between and close a deadlock cycle with a concurrent dispense.
+  it('takes the dispense and medication locks before the patient billing lock', async () => {
+    const { getDb, medications, eq, md } = await m()
+    const { lockPatientBilling } = await import('@/lib/queries/charge-capture')
+    const db = getDb()
+    const d = await dispense()
+    let release!: () => void
+    const held = new Promise<void>((r) => { release = r })
+    let locked!: () => void
+    const isLocked = new Promise<void>((r) => { locked = r })
+    const holder = db.transaction(async (tx) => { await lockPatientBilling(tx, PID); locked(); await held })
+    await isLocked
+    const bill = md.billLegacyDispense(d.id, session)
+    await new Promise((r) => setTimeout(r, 300))
+    let code: unknown = null
+    try {
+      await db.transaction(async (tx) => { await tx.select({ id: medications.id }).from(medications).where(eq(medications.id, fx.medId)).for('update', { noWait: true }) })
+    } catch (e) {
+      const err = e as { code?: unknown; cause?: { code?: unknown } }
+      code = err.cause?.code ?? err.code
+    }
+    release()
+    await holder
+    expect(await bill).toMatchObject({ ok: true })
+    expect(code).toBe('55P03') // lock_not_available: the bill already held the medication row
   })
 })
+

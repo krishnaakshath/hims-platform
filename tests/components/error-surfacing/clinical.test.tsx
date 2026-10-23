@@ -21,7 +21,7 @@ import { DischargeAdmissionModal } from '@/components/DischargeAdmissionModal'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
 import { EnterLabResultModal } from '@/components/EnterLabResultModal'
 import { LabWorklist } from '@/components/LabWorklist'
-import { LogDispenseBillModal } from '@/components/LogDispenseBillModal'
+import { BillLegacyDispenseButton } from '@/components/PharmacyBillingTable' // WS2 T8
 import { MedicationAdministrationPanel } from '@/components/MedicationAdministrationPanel'
 import { MedicationHistorySection } from '@/components/MedicationHistorySection'
 import { NoteForm } from '@/components/NoteForm'
@@ -29,7 +29,7 @@ import { OrderLabTestModal } from '@/components/OrderLabTestModal'
 import { TransferAdmissionModal } from '@/components/TransferAdmissionModal'
 
 const LEAK = 'duplicate key value violates unique constraint "x"'
-const med = { id: 1, name: 'Paracetamol', genericName: null, medicationClass: 'Analgesic', commonDose: '500mg', form: 'tablet' as const, quantityOnHand: 10, reorderThreshold: 2, unit: 'tab' }
+const med = { id: 1, name: 'Paracetamol', genericName: null, medicationClass: 'Analgesic', commonDose: '500mg', form: 'tablet' as const, quantityOnHand: 10, reorderThreshold: 2, unit: 'tab', mrpPerUnitPaise: 350, gstRateBp: null, hsn: null, effectiveGstRateBp: 500 /* WS2 T8 */ }
 
 type Case = { name: string; ui: () => ReactElement; before?: () => Promise<void> | void; submit: RegExp; status?: number }
 const CASES: Case[] = [
@@ -40,7 +40,9 @@ const CASES: Case[] = [
   { name: 'OrderLabTestModal', ui: () => <OrderLabTestModal patientId="RD-1" labTests={[{ id: 3, name: 'CBC', code: 'CBC', category: 'lab' } as never]} onClose={vi.fn()} />,
     before: () => { fireEvent.click(screen.getByRole('checkbox', { name: /CBC/ })) }, submit: /^Order 1 test$/ },
   { name: 'TransferAdmissionModal', ui: () => <TransferAdmissionModal admissionId={1} availableRooms={[{ id: 2, ward: 'A', roomNumber: '1', bedNumber: 'B' }]} onClose={vi.fn()} />, submit: /^Transfer$/ },
-  { name: 'DispenseMedicationModal', ui: () => <DispenseMedicationModal medication={med} onClose={vi.fn()} />, before: pickPatient, submit: /^Dispense$/ },
+  { name: 'DispenseMedicationModal', ui: () => <DispenseMedicationModal medication={med} onClose={vi.fn()} />, submit: /^Dispense$/,
+    // WS2 T8: a charged dispense needs an expiry month (fillAll cannot type a month input).
+    before: async () => { await pickPatient(); fireEvent.change(screen.getByLabelText('Expiry month'), { target: { value: '2099-12' } }) } },
   { name: 'EnterLabResultModal', ui: () => <EnterLabResultModal orderId={1} testName="CBC" defaultUnit="g/dL" defaultReferenceRange="12-16" category="lab" attachments={[]} onClose={vi.fn()} />, submit: /^Save result$/ },
   { name: 'DeletePatientDialog', ui: () => <DeletePatientDialog target={{ id: 'RD-1', name: 'P' }} onClose={vi.fn()} onDeleted={vi.fn()} />, submit: /delete/i },
   { name: 'CheckInModal', ui: () => <CheckInModal providers={[{ id: 1, name: 'Dr A' }]} rooms={[]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} />, submit: /^Check In$/ },
@@ -96,14 +98,13 @@ describe('DischargeAdmissionModal', () => {
   })
 })
 
-describe('LogDispenseBillModal', () => {
+describe('BillLegacyDispenseButton', () => { // WS2 T8
   it('shows the 409 already-billed message', async () => {
     mockFetch(409, { error: 'This dispense has already been billed' })
-    render(<LogDispenseBillModal dispense={{ id: 1, patientId: 'RD-1', medicationName: 'X', quantity: 2 } as never} diagnoses={[{ id: 1, code: 'J00', description: 'Cold' }] as never} onClose={vi.fn()} />)
-    await fillAll()
-    const button = screen.getByRole('button', { name: 'Log bill' })
-    fireEvent.click(button)
+    render(<BillLegacyDispenseButton dispenseId={1} onBilled={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Bill at current price' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('already been billed')
+    expect(screen.getByRole('button', { name: 'Bill at current price' })).toBeEnabled()
   })
 })
 
@@ -125,7 +126,7 @@ describe('MedicationAdministrationPanel', () => {
 describe('MedicationHistorySection', () => {
   it('shows a failed stop in an alert', async () => {
     mockFetch(500, { error: LEAK })
-    const episode = { id: 1, patientId: 'RD-1', name: 'X', medicationClass: 'Y', dose: null, startDate: '2026-01-01', stopDate: null, status: 'active', medicationId: null, frequencyPerDay: null, durationDays: null, instructions: null, prescribedByProviderId: null, enteredByName: null, prescribedAt: null } as const
+    const episode = { id: 1, patientId: 'RD-1', name: 'X', medicationClass: 'Y', dose: null, startDate: '2026-01-01', stopDate: null, status: 'active', medicationId: null, frequencyPerDay: null, durationDays: null, instructions: null, prescribedByProviderId: null, enteredByName: null, prescribedAt: null, prescriptionId: null, dosePattern: null, route: null, foodTiming: null, isSos: false, quantityPrescribed: null, allergyOverrideReason: null } as const
     render(<MedicationHistorySection patientId="RD-1" episodes={[episode]} prescriberById={{}} catalog={[]} specialties={[]} activeProviders={[]} needsOnBehalfOf={false} diagnosisCodes={[]} canPrescribe />)
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
@@ -135,11 +136,12 @@ describe('MedicationHistorySection', () => {
 import { PharmacyBillingTable } from '@/components/PharmacyBillingTable'
 
 describe('PharmacyBillingTable', () => {
-  it('shows a failed chart load instead of silently doing nothing', async () => {
+  // WS2 T8: billing a legacy dispense at the current price; a 500 shows the fixed message.
+  it('shows a failed bill instead of silently doing nothing', async () => {
     mockFetch(500, { error: LEAK })
-    render(<PharmacyBillingTable rows={[{ dispenseId: 1, patientId: 'RD-1', patientName: 'P', medicationName: 'X', quantity: 1, dispensedByName: 'Ph', dispensedAt: '2026-10-08T04:00:00Z', charge: null }]} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Log bill' }))
+    render(<PharmacyBillingTable rows={[{ dispenseId: 1, patientId: 'RD-1', patientName: 'P', uhid: null, medicationName: 'X', quantity: 1, dispensedByName: 'Ph', dispensedAt: '2026-10-08T04:00:00Z', billing: { status: 'unbilled' } }]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Bill at current price' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
-    expect(screen.getByRole('button', { name: 'Log bill' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Bill at current price' })).toBeEnabled()
   })
 })

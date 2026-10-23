@@ -1,4 +1,4 @@
-// SP5: the home-collection day board. Gate HOME_COLLECTION_BOOKING_ROLES (admin, frontdesk, labs),
+// SP5: the home-collection day board. Gate HOME_COLLECTION_BOOKING_ROLES (admin, frontdesk, labs; WS2: + pi),
 // checked before any query; the collector select is for HOME_COLLECTION_DISPATCH_ROLES only.
 // The day is an IST business date: a valid ?date=YYYY-MM-DD, else today in IST.
 import { redirect } from 'next/navigation'

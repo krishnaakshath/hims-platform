@@ -9,6 +9,7 @@ import {
 import { readMigration, idempotencyProblems, missingColumns } from './migration-sql'
 
 const MIGRATION = '2026-10-08-sp4-a-charge-lines.sql'
+const WS2_AUTO_CHARGES = '2026-10-24-ws2-auto-charges.sql' // WS2 T9
 const TABLES = [billingSettings, chargeRuleConfigs, chargeLines] as const
 
 describe('SP4 migration A (charge lines)', () => {
@@ -17,9 +18,14 @@ describe('SP4 migration A (charge lines)', () => {
     expect(idempotencyProblems(s)).toEqual([])
     // charge_lines.invoice_id (and its FK and index) arrive with migration B (Task 5).
     // SP7 adds billing_settings.rohini_id / hfr_id (sp7 migration B) and charge_lines.preauth_id (sp7 migration C).
-    const later = new Set(['invoice_id', 'preauth_id', 'rohini_id', 'hfr_id'])
+    // WS2 T9 adds charge_lines.lab_order_id / encounter_procedure_id and billing_settings.registration_service_id /
+    // free_review_days in 2026-10-24-ws2-auto-charges.sql (tested below with the constraint names).
+    const later = new Set(['invoice_id', 'preauth_id', 'rohini_id', 'hfr_id', 'lab_order_id', 'encounter_procedure_id', 'registration_service_id', 'free_review_days'])
     for (const t of TABLES) expect(missingColumns(t, s).filter((c) => !later.has(c))).toEqual([])
     for (const c of ['requires_preauth', 'max_quantity', 'gstin', 'state_code']) expect(s).toContain(c)
+    const ws2 = readMigration(WS2_AUTO_CHARGES)
+    expect(idempotencyProblems(ws2)).toEqual([])
+    for (const t of TABLES) expect(missingColumns(t, s + ws2).filter((c) => !['invoice_id', 'preauth_id', 'rohini_id', 'hfr_id'].includes(c))).toEqual([])
   })
 
   it('pins every named constraint', () => {
@@ -30,6 +36,7 @@ describe('SP4 migration A (charge lines)', () => {
 
   it('every FK, unique, check and index name of the new tables is in the SQL and fits 63 chars', () => {
     const s = readMigration(MIGRATION) + readMigration('2026-10-08-sp4-b-invoices-ledger.sql') + readMigration('2026-10-09-sp7-c-preauth-claims.sql') // SP7: charge_lines.preauth_id
+      + readMigration(WS2_AUTO_CHARGES) // WS2 T9: order links, visit-charge backstops, registration service, free review days
     for (const t of [...TABLES, serviceCatalog]) {
       const c = getTableConfig(t)
       const names = [
@@ -58,11 +65,13 @@ describe('SP4 migration A (charge lines)', () => {
 
   it('creates each enum type with every value', () => {
     const s = readMigration(MIGRATION)
-    expect(chargeLineSourceEnum.enumValues).toEqual(['manual', 'room_rent', 'pharmacy'])
+    // WS2 T1 appends registration, consultation, lab_order, procedure in its own enum-values file
+    // (tests/db/ws-enum-values.test.ts); this SP4 migration creates the first three.
+    expect(chargeLineSourceEnum.enumValues.slice(0, 3)).toEqual(['manual', 'room_rent', 'pharmacy'])
     expect(chargeLineStatusEnum.enumValues).toEqual(['captured', 'invoiced', 'void'])
     expect(PRICE_SOURCES).toEqual(['base', 'department', 'payer', 'manual', 'pharmacy'])
-    for (const e of [chargeLineSourceEnum, chargeLineStatusEnum]) {
-      expect(s, e.enumName).toContain(`CREATE TYPE ${e.enumName} AS ENUM (${e.enumValues.map((v) => `'${v}'`).join(', ')});`)
+    for (const [name, values] of [[chargeLineSourceEnum.enumName, chargeLineSourceEnum.enumValues.slice(0, 3)], [chargeLineStatusEnum.enumName, chargeLineStatusEnum.enumValues]] as const) {
+      expect(s, name).toContain(`CREATE TYPE ${name} AS ENUM (${values.map((v) => `'${v}'`).join(', ')});`)
     }
   })
 
