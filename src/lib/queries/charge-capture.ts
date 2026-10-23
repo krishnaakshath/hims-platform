@@ -23,6 +23,7 @@ import { DEFAULT_TIMEZONE, formatIsoDate, istDateOf, todayIsoIn } from '@/lib/in
 import { resolvePrice, type PriceResolution, type ServiceForPricing, type TariffRateCandidate } from '@/lib/tariff/resolve'
 import { loadPricingContext } from './tariff'
 import { validatePreauthReference } from './preauth-reference' // SP7
+import { coverageLimitsForCharge } from './coverage-limits' // WS12 T10
 import { getBillingSettings, getRuleConfig } from './billing-settings'
 import { loadMappedProcedureCodes } from './service-code-lookup'
 import type { WriteExecutor } from './executor'
@@ -245,6 +246,13 @@ async function evaluate(
     ? await validatePreauthReference(executor, { patientId: context.patientId, payerId, reference, serviceDate: input.serviceDate })
     : null
   // end SP7
+  // WS12 T10 (spec R7, R8): a priced payer line is checked against the policy limits and the
+  // admission's insured running total; self-pay (and unpriced) lines carry no coverage.
+  const limits = payerId !== null && taxablePaise !== null
+    ? await coverageLimitsForCharge(executor, { patientId: context.patientId, admissionId: context.admissionId, payerId, now })
+    : null
+  const coverage: ChargeRuleInput['coverage'] = limits === null || taxablePaise === null ? null
+    : { ...limits, roomCategoryCode: context.roomCategoryCode, lineTaxablePaise: taxablePaise }
   const ruleInput: ChargeRuleInput = {
     service: svc ? { id: svc.id, departmentId: svc.departmentId, category: svc.category, isActive: svc.isActive, requiresPreauth: svc.requiresPreauth, maxQuantity: svc.maxQuantity } : null,
     quantity: input.quantity,
@@ -260,6 +268,7 @@ async function evaluate(
     mappedProcedureCodes: mapped,
     requestedProcedureCodes: requested,
     preAuthCheck: preauth?.status ?? null, // SP7
+    coverage, // WS12 T10
   }
   const violations = evaluateChargeRules(ruleInput, {
     consultationWindowDays: settings.consultationWindowDays, ipdDepositThresholdPaise: settings.ipdDepositThresholdPaise,

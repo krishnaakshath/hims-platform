@@ -7,11 +7,13 @@ import type { ServiceCategory } from '@/lib/tariff/validation'
 import { chargeProcedureCodeProblems } from '@/lib/coding/service-codes'
 import type { CodeSystemKind } from '@/lib/coding/code-systems'
 import type { PreauthReferenceStatus } from '@/lib/rcm/preauth-status' // SP7
+import { ICU_ROOM_CATEGORY_CODES } from '@/lib/insurance/coverage' // WS12 T10
 
 export const CHARGE_RULE_CODES = ['service_not_found', 'service_inactive', 'price_unresolved', 'date_outside_encounter',
   'department_mismatch', 'consultation_required', 'deposit_below_threshold', 'duplicate_charge', 'preauth_required',
   'quantity_limit', 'procedure_code_not_mapped',
-  'preauth_invalid', // SP7 (ruling 7): last, so existing rule ids and configs keep their order
+  'preauth_invalid', // SP7 (ruling 7): appended, so existing rule ids and configs keep their order
+  'room_rent_over_limit', 'sum_insured_exceeded', // WS12 T10 (spec R8): appended after preauth_invalid
 ] as const
 export type ChargeRuleCode = (typeof CHARGE_RULE_CODES)[number]
 export type RuleSeverity = 'block' | 'warn'
@@ -36,6 +38,9 @@ export const CHARGE_RULES: readonly ChargeRuleDefinition[] = [
   { code: 'procedure_code_not_mapped', label: 'Procedure codes are mapped to the service', defaultSeverity: 'block', configurable: true, overridable: false, field: 'procedureCodes' },
   // SP7
   { code: 'preauth_invalid', label: 'Pre-authorisation reference is valid', defaultSeverity: 'block', configurable: true, overridable: false, field: 'preAuthReference' },
+  // WS12 T10 (spec R8): the insurer's adjudication remains the truth, so these warn by default.
+  { code: 'room_rent_over_limit', label: 'Room rent within the policy limit', defaultSeverity: 'warn', configurable: true, overridable: false, field: 'context' },
+  { code: 'sum_insured_exceeded', label: 'Insured total within the available sum insured', defaultSeverity: 'warn', configurable: true, overridable: false, field: 'context' },
 ]
 
 export interface RuleConfigEntry { enabled: boolean; severity: RuleSeverity | null }
@@ -59,6 +64,16 @@ export interface ChargeRuleInput {
   requestedProcedureCodes: ProcedureCodeRef[]
   // SP7: the typed reference checked against the patient's pre-auths (null = not checked: self-pay or no reference)
   preAuthCheck: PreauthReferenceStatus | null
+  // WS12 T10 (spec R7, R8): a payer line's effective policy limits and the admission's insured
+  // running total (non-void lines, same admission and payer); null = self-pay or no policy.
+  coverage: {
+    roomCategoryCode: string | null
+    roomRentLimitPaise: number | null
+    icuLimitPaise: number | null
+    balancePaise: number | null
+    insuredRunningPaise: number
+    lineTaxablePaise: number
+  } | null
 }
 
 type Service = NonNullable<ChargeRuleInput['service']>
@@ -105,6 +120,24 @@ const PREDICATES: Record<Exclude<ChargeRuleCode, 'service_not_found' | 'service_
   preauth_invalid: (i) => {
     if (i.payer === null || !i.preAuthReference?.trim() || i.preAuthCheck === null || i.preAuthCheck === 'valid') return []
     return [PREAUTH_INVALID_MESSAGE[i.preAuthCheck]]
+  },
+  // WS12 T10 (spec R7): the per-day price (line amount over the days) against the ICU limit for
+  // ICU-type rooms, else the room-rent limit. No proportionate-deduction maths (R8).
+  room_rent_over_limit: (i, s) => {
+    const c = i.coverage
+    if (c === null || s.category !== 'room_rent' || i.quantity < 1) return []
+    const icu = c.roomCategoryCode !== null && (ICU_ROOM_CATEGORY_CODES as readonly string[]).includes(c.roomCategoryCode.toUpperCase())
+    const limit = icu ? c.icuLimitPaise : c.roomRentLimitPaise
+    if (limit === null) return []
+    const perDay = Math.round(c.lineTaxablePaise / i.quantity)
+    return perDay > limit
+      ? [`Room rent ${formatPaise(perDay)}/day is above the policy limit ${formatPaise(limit)}/day; the insurer may deduct proportionately`] : []
+  },
+  sum_insured_exceeded: (i) => {
+    const c = i.coverage
+    if (c === null || c.balancePaise === null) return []
+    const total = c.insuredRunningPaise + c.lineTaxablePaise
+    return total > c.balancePaise ? [`This takes the insured total to ${formatPaise(total)}, above the available sum insured ${formatPaise(c.balancePaise)}`] : []
   },
 }
 

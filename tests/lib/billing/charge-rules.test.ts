@@ -8,7 +8,7 @@ const base: ChargeRuleInput = { service: { id: 1, departmentId: 10, category: 'p
   quantity: 1, serviceDate: '2026-10-20', today: '2026-10-20',
   context: { departmentId: 10, startDate: '2026-10-20', endDate: null, isInpatient: false, isEmergencyAdmission: false },
   payer: null, preAuthReference: null, priceResolved: true, consultationDates: ['2026-10-20'], admissionDepositPaise: null,
-  sameDayDuplicates: 0, mappedProcedureCodes: [], requestedProcedureCodes: [], preAuthCheck: null }
+  sameDayDuplicates: 0, mappedProcedureCodes: [], requestedProcedureCodes: [], preAuthCheck: null, coverage: null }
 const S = { consultationWindowDays: 30, ipdDepositThresholdPaise: 0 }
 const codes = (v: ChargeViolation[]) => v.map((x) => x.code)
 const svc = (over: Partial<NonNullable<ChargeRuleInput['service']>>) => ({ ...base.service!, ...over })
@@ -171,6 +171,65 @@ describe('SP7 preauth_invalid rule', () => {
     expect(evaluateChargeRules({ ...v, preAuthCheck: 'payer_mismatch' }, S, { preauth_invalid: { enabled: false, severity: null } })).toEqual([])
     expect(evaluateChargeRules({ ...v, payer: null, preAuthCheck: 'not_found' }, S, {})).toEqual([])
   })
-  it('CHARGE_RULES still has one row per code in order', () => { expect(CHARGE_RULES.map((r) => r.code)).toEqual([...CHARGE_RULE_CODES]); expect(CHARGE_RULE_CODES.at(-1)).toBe('preauth_invalid') })
+  it('CHARGE_RULES still has one row per code in order', () => { expect(CHARGE_RULES.map((r) => r.code)).toEqual([...CHARGE_RULE_CODES]); expect(CHARGE_RULE_CODES[11]).toBe('preauth_invalid') })
 })
 // end SP7
+
+// WS12 T10 (spec R7, R8): room-rent and sum-insured limits, warn by default, configurable, not overridable.
+describe('WS12 coverage limit rules', () => {
+  type Coverage = NonNullable<ChargeRuleInput['coverage']>
+  const cov = (over: Partial<Coverage> = {}): Coverage => ({
+    roomCategoryCode: 'GEN', roomRentLimitPaise: 3_000_00, icuLimitPaise: 6_000_00, balancePaise: null, insuredRunningPaise: 0, lineTaxablePaise: 5_000_00, ...over,
+  })
+  const room = { ...base, service: svc({ category: 'room_rent' }), payer: { id: 7, requiresPreauth: false }, consultationDates: [] }
+
+  it('the first 12 codes and their rule rows are unchanged; the two new codes come last', () => {
+    expect(CHARGE_RULE_CODES.slice(0, 12)).toEqual(['service_not_found', 'service_inactive', 'price_unresolved', 'date_outside_encounter',
+      'department_mismatch', 'consultation_required', 'deposit_below_threshold', 'duplicate_charge', 'preauth_required',
+      'quantity_limit', 'procedure_code_not_mapped', 'preauth_invalid'])
+    expect(CHARGE_RULE_CODES.slice(12)).toEqual(['room_rent_over_limit', 'sum_insured_exceeded'])
+    expect(CHARGE_RULES.map((r) => r.code)).toEqual([...CHARGE_RULE_CODES])
+    for (const code of ['room_rent_over_limit', 'sum_insured_exceeded'] as const) {
+      expect(CHARGE_RULES.find((r) => r.code === code)).toMatchObject({ defaultSeverity: 'warn', configurable: true, overridable: false, field: 'context' })
+    }
+  })
+  it('a room-rent line at ₹5,000/day over a ₹3,000/day limit warns once', () => {
+    const v = evaluateChargeRules({ ...room, coverage: cov() }, S, {})
+    expect(v).toEqual([{ code: 'room_rent_over_limit', severity: 'warn', field: 'context', overridable: false,
+      message: 'Room rent ₹5,000.00/day is above the policy limit ₹3,000.00/day; the insurer may deduct proportionately' }])
+  })
+  it('the per-day price is the line amount over the days', () => {
+    expect(evaluateChargeRules({ ...room, quantity: 3, coverage: cov({ lineTaxablePaise: 9_000_00 }) }, S, {})).toEqual([])
+    expect(codes(evaluateChargeRules({ ...room, quantity: 2, coverage: cov({ lineTaxablePaise: 8_000_00 }) }, S, {}))).toEqual(['room_rent_over_limit'])
+  })
+  it('an ICU room uses the ICU limit', () => {
+    expect(evaluateChargeRules({ ...room, coverage: cov({ roomCategoryCode: 'ICU' }) }, S, {})).toEqual([])
+    const v = evaluateChargeRules({ ...room, coverage: cov({ roomCategoryCode: 'NICU', lineTaxablePaise: 7_000_00 }) }, S, {})
+    expect(v.map((x) => x.message)).toEqual(['Room rent ₹7,000.00/day is above the policy limit ₹6,000.00/day; the insurer may deduct proportionately'])
+  })
+  it('no limits, a non-room service or self-pay: no violation', () => {
+    expect(evaluateChargeRules({ ...room, coverage: cov({ roomRentLimitPaise: null, icuLimitPaise: null }) }, S, {})).toEqual([])
+    expect(evaluateChargeRules({ ...room, coverage: cov({ roomCategoryCode: 'ICU', icuLimitPaise: null }) }, S, {})).toEqual([])
+    expect(evaluateChargeRules({ ...base, consultationDates: ['2026-10-20'], coverage: cov() }, S, {})).toEqual([])
+    expect(evaluateChargeRules({ ...room, payer: null, coverage: null }, S, {})).toEqual([])
+  })
+  it('config enabled: false suppresses it; severity block makes it block (still not overridable)', () => {
+    expect(evaluateChargeRules({ ...room, coverage: cov() }, S, { room_rent_over_limit: { enabled: false, severity: null } })).toEqual([])
+    const v = evaluateChargeRules({ ...room, coverage: cov() }, S, { room_rent_over_limit: { enabled: true, severity: 'block' } })
+    expect(v[0]).toMatchObject({ code: 'room_rent_over_limit', severity: 'block', overridable: false })
+    expect(unresolvedBlocks(v, [{ code: 'room_rent_over_limit', reason: 'family agreed' }], true)).toHaveLength(1)
+  })
+  it('a running total of ₹4,80,000 plus ₹30,000 against a ₹5,00,000 balance warns', () => {
+    const v = evaluateChargeRules({ ...base, payer: { id: 7, requiresPreauth: false }, coverage: cov({ balancePaise: 5_00_000_00, insuredRunningPaise: 4_80_000_00, lineTaxablePaise: 30_000_00 }) }, S, {})
+    expect(v).toEqual([{ code: 'sum_insured_exceeded', severity: 'warn', field: 'context', overridable: false,
+      message: 'This takes the insured total to ₹5,10,000.00, above the available sum insured ₹5,00,000.00' }])
+    // Exactly at the balance is fine; no balance known is fine.
+    expect(evaluateChargeRules({ ...base, coverage: cov({ balancePaise: 5_00_000_00, insuredRunningPaise: 4_70_000_00, lineTaxablePaise: 30_000_00 }) }, S, {})).toEqual([])
+    expect(evaluateChargeRules({ ...base, coverage: cov({ balancePaise: null, insuredRunningPaise: 9_00_000_00 }) }, S, {})).toEqual([])
+    expect(evaluateChargeRules({ ...base, coverage: cov({ balancePaise: 5_00_000_00, insuredRunningPaise: 4_80_000_00, lineTaxablePaise: 30_000_00 }) }, S, { sum_insured_exceeded: { enabled: false, severity: null } })).toEqual([])
+  })
+  it('a room-rent line can raise both, in table order', () => {
+    expect(codes(evaluateChargeRules({ ...room, coverage: cov({ balancePaise: 1_000_00 }) }, S, {}))).toEqual(['room_rent_over_limit', 'sum_insured_exceeded'])
+  })
+})
+// end WS12 T10
