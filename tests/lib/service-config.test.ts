@@ -47,7 +47,7 @@ describe('withServiceGuard', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const res = await withServiceGuard('lab report download', async () => { throw new ServiceNotConfiguredError('blob') })()
     expect(res.status).toBe(503)
-    expect(await res.json()).toEqual({ error: SERVICE_UNAVAILABLE_MESSAGE })
+    expect(await res.json()).toEqual({ error: 'File storage is not set up. Ask your administrator.', code: 'storage_not_configured' })
     expect(log.mock.calls).toEqual([['[config] BLOB_READ_WRITE_TOKEN not configured: lab report download is unavailable']])
   })
 

@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { getBlobDriver } from '@/lib/blob-store'
+import { serviceUnavailableBody, type Service } from '@/lib/http/service-message'
 
 // The backing services a request can depend on, and what a route answers when
 // one is missing or unreachable: a generic 503 for the client, and ONE log
@@ -10,7 +12,7 @@ import { NextResponse } from 'next/server'
 // limited routes are unavailable. There is deliberately no in-memory fallback
 // (it would reset per serverless instance and stop protecting anything).
 
-export type Service = 'database' | 'redis' | 'blob'
+export type { Service }
 
 export const SERVICE_UNAVAILABLE_MESSAGE = 'Service temporarily unavailable'
 
@@ -54,11 +56,13 @@ export function isBlobConfigured(env: Record<string, string | undefined> = proce
 
 /** Throws ServiceNotConfiguredError('blob') before any stored-file read or write when there is no store. */
 export function requireBlobStore(): void {
-  if (!isBlobConfigured()) throw new ServiceNotConfiguredError('blob')
+  if (!getBlobDriver()) throw new ServiceNotConfiguredError('blob')
 }
 
-export function serviceUnavailableResponse(): NextResponse {
-  return NextResponse.json({ error: SERVICE_UNAVAILABLE_MESSAGE }, { status: 503, headers: { 'Retry-After': '30' } })
+/** 503 for a missing service. Only a missing file store carries a `code` (the UI explains it); the rest keep the generic body. */
+export function serviceUnavailableResponse(service?: Service): NextResponse {
+  const body = service === 'blob' ? serviceUnavailableBody('blob') : { error: SERVICE_UNAVAILABLE_MESSAGE }
+  return NextResponse.json(body, { status: 503, headers: { 'Retry-After': '30' } })
 }
 
 /**
@@ -89,7 +93,7 @@ export function withServiceGuard<A extends unknown[], R extends Response>(
 export function serviceErrorResponse(e: unknown, feature: string): NextResponse | null {
   if (e instanceof ServiceNotConfiguredError) {
     console.error(`[config] ${SERVICE_LABEL[e.service]} not configured: ${feature} is unavailable`)
-    return serviceUnavailableResponse()
+    return serviceUnavailableResponse(e.service)
   }
   const code = databaseUnavailableCode(e)
   if (code) {

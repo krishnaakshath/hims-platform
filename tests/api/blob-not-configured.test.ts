@@ -47,6 +47,8 @@ let log: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
   vi.stubEnv('BLOB_STORE_ID', '')
+  vi.stubEnv('BLOB_DRIVER', '')
+  vi.stubEnv('NODE_ENV', 'production')
   log = vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
@@ -58,7 +60,7 @@ afterEach(() => {
 async function expect503(res: Response, feature: string) {
   expect(res.status).toBe(503)
   const body = await res.json()
-  expect(body).toEqual({ error: 'Service temporarily unavailable' })
+  expect(body).toEqual({ error: 'File storage is not set up. Ask your administrator.', code: 'storage_not_configured' })
   expect(JSON.stringify(body)).not.toMatch(ENV_NAMES)
   expect(log).toHaveBeenCalledTimes(1)
   expect(log.mock.calls[0][0]).toBe(`[config] BLOB_READ_WRITE_TOKEN not configured: ${feature} is unavailable`)

@@ -6,12 +6,51 @@
 // [config] log line (src/lib/service-config.ts) instead of a 500.
 import { NextResponse } from 'next/server'
 import { get, put } from '@vercel/blob'
-import { requireBlobStore } from '@/lib/service-config'
+import { ServiceNotConfiguredError } from '@/lib/service-config'
+import { createLocalBlobDriver, type BlobDriver } from '@/lib/blob-local'
+
+export type { BlobDriver }
+
+function vercelDriver(): BlobDriver {
+  return {
+    async put(path, body, contentType) {
+      const res = await put(path, Buffer.from(body), { access: 'private', contentType, addRandomSuffix: false })
+      return { url: res.url }
+    },
+    async get(url) {
+      try {
+        const blob = await get(url, { access: 'private' })
+        if (!blob || blob.statusCode !== 200 || !blob.stream) return null
+        const bytes = new Uint8Array(await new Response(blob.stream).arrayBuffer())
+        return { bytes, contentType: blob.blob.contentType || 'application/octet-stream' }
+      } catch (err) {
+        console.warn(`[blob-store] read failed (${err instanceof Error ? err.name : 'UnknownError'})`)
+        return null
+      }
+    },
+  }
+}
+
+/**
+ * The active driver: Vercel Blob when a token (or OIDC store id) exists; the local-disk driver
+ * when BLOB_DRIVER=local, or when there is no store and this is not production; otherwise null.
+ */
+export function getBlobDriver(env: Record<string, string | undefined> = process.env): BlobDriver | null {
+  if ((env.BLOB_READ_WRITE_TOKEN ?? '').trim() !== '' || (env.BLOB_STORE_ID ?? '').trim() !== '') return vercelDriver()
+  if (env.BLOB_DRIVER === 'local' || env.NODE_ENV !== 'production') {
+    return createLocalBlobDriver((env.BLOB_LOCAL_DIR ?? '').trim() || './data/blobs')
+  }
+  return null
+}
+
+function requireDriver(): BlobDriver {
+  const d = getBlobDriver()
+  if (!d) throw new ServiceNotConfiguredError('blob')
+  return d
+}
 
 export async function putPrivateBlob(path: string, body: Uint8Array, contentType: string): Promise<{ url: string }> {
-  requireBlobStore()
-  const res = await put(path, Buffer.from(body), { access: 'private', contentType, addRandomSuffix: false })
-  return { url: res.url }
+  return requireDriver().put(path, body, contentType)
 }
 
 /** A quoted-string-safe filename for Content-Disposition (ASCII letters, digits, `.`, `-`, `_`). */
@@ -29,18 +68,14 @@ export async function streamPrivateBlob(
   url: string,
   opts: { filename: string; disposition: 'inline' | 'attachment' },
 ): Promise<Response | null> {
-  requireBlobStore()
-  let blob: Awaited<ReturnType<typeof get>>
-  try {
-    blob = await get(url, { access: 'private' })
-  } catch (err) {
+  const found = await requireDriver().get(url).catch((err) => {
     console.warn(`[blob-store] read failed (${err instanceof Error ? err.name : 'UnknownError'})`)
     return null
-  }
-  if (!blob || blob.statusCode !== 200 || !blob.stream) return null
-  return new NextResponse(blob.stream, {
+  })
+  if (!found) return null
+  return new NextResponse(Buffer.from(found.bytes), {
     headers: {
-      'Content-Type': blob.blob.contentType || 'application/octet-stream',
+      'Content-Type': found.contentType || 'application/octet-stream',
       'Content-Disposition': `${opts.disposition}; filename="${safeFilename(opts.filename)}"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
@@ -51,9 +86,8 @@ export async function streamPrivateBlob(
 // SP8: the bytes of a private blob (NHCX attachments), or null when it cannot be read. Server only.
 export async function getPrivateBlobBytes(url: string): Promise<Uint8Array | null> {
   try {
-    const blob = await get(url, { access: 'private' })
-    if (!blob || blob.statusCode !== 200 || !blob.stream) return null
-    return new Uint8Array(await new Response(blob.stream).arrayBuffer())
+    const found = await getBlobDriver()?.get(url)
+    return found ? found.bytes : null
   } catch (err) {
     console.warn(`[blob-store] read failed (${err instanceof Error ? err.name : 'UnknownError'})`)
     return null
