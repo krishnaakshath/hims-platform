@@ -24,12 +24,12 @@ afterAll(async () => {
 })
 
 describe('listAllDispensesWithBilling', () => {
-  it('includes an unbilled dispense with charge: null, scoped to dispenses only (not the general charges table)', async () => {
+  it('includes an unbilled dispense with billing status unbilled (WS2 T8: read from charge_lines), scoped to dispenses only (not the general charges table)', async () => {
     const rows = await listAllDispensesWithBilling()
     const row = rows.find((r) => r.dispenseId === dispenseId)
     expect(row).toBeDefined()
     expect(row?.patientName).toBe('Pharmacy Billing Test Patient')
     expect(row?.quantity).toBe(5)
-    expect(row?.charge).toBeNull()
+    expect(row?.billing).toEqual({ status: 'unbilled' })
   })
 })

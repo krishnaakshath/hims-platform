@@ -5,7 +5,7 @@ import { AddPrescriptionModal } from '@/components/AddPrescriptionModal'
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 afterEach(() => { vi.unstubAllGlobals() })
 
-const catalog = [{ id: 7, name: 'Amoxil', genericName: 'Amoxicillin', medicationClass: 'Antibiotic', commonDose: '500 mg', form: 'capsule' as const, quantityOnHand: 5, reorderThreshold: 1, unit: 'cap' }]
+const catalog = [{ id: 7, name: 'Amoxil', genericName: 'Amoxicillin', medicationClass: 'Antibiotic', commonDose: '500 mg', form: 'capsule' as const, quantityOnHand: 5, reorderThreshold: 1, unit: 'cap', mrpPerUnitPaise: null, gstRateBp: null, hsn: null, effectiveGstRateBp: 500 /* WS2 T8 */ }]
 const conflictBody = { error: 'This prescription conflicts with a recorded allergy.', code: 'allergy_conflict', conflicts: [{ allergen: 'Penicillin', severity: 'severe', matchedOn: 'cross_reactivity' }] }
 
 function setup() {

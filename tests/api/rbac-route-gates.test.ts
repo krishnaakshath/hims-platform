@@ -94,6 +94,8 @@ import { GET as getPatientNotices } from '@/app/api/patients/[anonId]/notices/ro
 import { PRESCRIBE_ROLES, MEDICATION_SEARCH_ROLES } from '@/lib/role-policy' // WS1 T6
 import { POST as postEncounterPrescriptions } from '@/app/api/encounters/[id]/prescriptions/route' // WS1 T6
 import { GET as searchMedicationsRoute } from '@/app/api/medications/search/route' // WS1 T6
+import { PATCH as patchMedicationPriceRoute } from '@/app/api/pharmacy/medications/[id]/price/route' // WS2 T8
+import { MEDICATION_PRICE_ROLES } from '@/lib/role-policy' // WS2 T8
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
 // + importActual pattern from tests/api/patients.test.ts:27-29, except the
@@ -1059,6 +1061,8 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/encounters/[id]/prescriptions', call: () => settle(() => postEncounterPrescriptions(send('POST', `/api/encounters/${BOGUS_ID}/prescriptions`), ctx({ id: BOGUS_ID }))), allowed: [...PRESCRIBE_ROLES] },
   { name: 'GET /api/medications/search', call: () => settle(() => searchMedicationsRoute(get('/api/medications/search'))), allowed: [...MEDICATION_SEARCH_ROLES] },
   // end WS1 T6
+  // WS2 T8: medicine MRP/GST/HSN (an empty body is the 400 an allowed role gets).
+  { name: 'PATCH /api/pharmacy/medications/[id]/price', call: () => settle(() => patchMedicationPriceRoute(send('PATCH', `/api/pharmacy/medications/${BOGUS_ID}/price`), ctx({ id: BOGUS_ID }))), allowed: [...MEDICATION_PRICE_ROLES] },
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1217,6 +1221,7 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // end Foundations T11
   { name: 'PUT /api/settings/notification-templates', call: () => putNotificationTemplates(send('PUT', '/api/settings/notification-templates', NOT_JSON)), allowed: ['admin'] }, // Foundations T8
   { name: 'POST /api/encounters/[id]/prescriptions', call: () => postEncounterPrescriptions(send('POST', `/api/encounters/${BOGUS_ID}/prescriptions`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PRESCRIBE_ROLES }, // WS1 T6
+  { name: 'PATCH /api/pharmacy/medications/[id]/price', call: () => patchMedicationPriceRoute(send('PATCH', `/api/pharmacy/medications/${BOGUS_ID}/price`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MEDICATION_PRICE_ROLES }, // WS2 T8
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

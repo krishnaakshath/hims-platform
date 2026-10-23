@@ -51,7 +51,7 @@ import { createLabRequisition } from '../lib/queries/lab-requisitions'
 import { collectLabOrder, receiveLabSample, recordLabResult, verifyLabResult, cancelLabOrder } from '../lib/queries/lab-lifecycle'
 import { bookHomeCollection, assignCollector, collectHomeVisit, cancelHomeCollection } from '../lib/queries/home-collections'
 import { releaseLabReport } from '../lib/queries/lab-reports'
-import { dispenseMedication, createChargeForDispense } from '../lib/queries/medication-dispenses'
+import { dispenseMedication } from '../lib/queries/medication-dispenses' // WS2 T8: a dispense bills itself
 import { createTelemedicineSession } from '../lib/queries/telemedicine-sessions'
 import { setPayerNetworks, upsertPayerProfile } from '../lib/queries/rcm-payers'
 import { createPolicy } from '../lib/queries/rcm-policies'
@@ -872,11 +872,26 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
 
   const formulary = await db.select({ id: medications.id, name: medications.name }).from(medications)
   const med = (name: string) => formulary.find((m) => m.name === name)?.id
-  const rx: { patientId: string; doctor: string; name: string; cls: string; dose: string; perDay: number; days: number; qty: number; paise: number }[] = [
-    { patientId: pastVisits[0].patientId, doctor: pastVisits[0].doctor.name, name: 'Paracetamol 650 mg', cls: 'Analgesic / antipyretic', dose: '650 mg', perDay: 3, days: 3, qty: 9, paise: 2_00 },
-    { patientId: pid(12), doctor: 'Dr. Ananya Rao', name: 'Pantoprazole 40 mg', cls: 'Proton pump inhibitor', dose: '40 mg', perDay: 1, days: 5, qty: 5, paise: 8_50 },
-    { patientId: pastVisits[3].patientId, doctor: pastVisits[3].doctor.name, name: 'Metformin 500 mg', cls: 'Biguanide', dose: '500 mg', perDay: 2, days: 30, qty: 60, paise: 2_50 },
-    { patientId: pastVisits[4].patientId, doctor: pastVisits[4].doctor.name, name: 'Amoxicillin + Clavulanic acid 625 mg', cls: 'Antibiotic', dose: '625 mg', perDay: 2, days: 5, qty: 10, paise: 22_00 },
+  // WS2 T8: a GST-inclusive MRP per dispensing unit for every seeded formulary item (demo figures,
+  // not a price list); dispensing bills itself at MRP with the pharmacy GST default.
+  const MRP_PAISE: Record<string, number> = {
+    'Sertraline': 6_50, 'Escitalopram': 7_20, 'Venlafaxine': 12_40, 'Bupropion': 14_00, 'Trazodone': 5_80, 'Mirtazapine': 9_60,
+    'Aripiprazole': 8_90, 'Quetiapine': 7_50, 'Risperidone': 4_20, 'Lorazepam': 3_10, 'Clonazepam': 3_40, 'Methylphenidate ER': 24_00,
+    'Amphetamine/dextroamphetamine': 30_00, 'Lithium': 2_90, 'Esketamine': 1_250_00,
+    'Paracetamol 650 mg': 2_00, 'Pantoprazole 40 mg': 8_50, 'Metformin 500 mg': 2_50, 'Amlodipine 5 mg': 3_20, 'Atorvastatin 10 mg': 6_40,
+    'Amoxicillin + Clavulanic acid 625 mg': 22_00, 'Azithromycin 500 mg': 24_50, 'Cetirizine 10 mg': 1_80, 'Ceftriaxone 1 g injection': 58_00,
+    'Ondansetron 4 mg injection': 14_50, 'Oral rehydration salts (WHO)': 21_00, 'Salbutamol 100 mcg inhaler': 155_00,
+  }
+  for (const m of formulary) {
+    const mrp = MRP_PAISE[m.name]
+    if (mrp !== undefined) await db.update(medications).set({ mrpPerUnitPaise: mrp }).where(eq(medications.id, m.id))
+  }
+  // end WS2 T8
+  const rx: { patientId: string; doctor: string; name: string; cls: string; dose: string; perDay: number; days: number; qty: number }[] = [
+    { patientId: pastVisits[0].patientId, doctor: pastVisits[0].doctor.name, name: 'Paracetamol 650 mg', cls: 'Analgesic / antipyretic', dose: '650 mg', perDay: 3, days: 3, qty: 9 },
+    { patientId: pid(12), doctor: 'Dr. Ananya Rao', name: 'Pantoprazole 40 mg', cls: 'Proton pump inhibitor', dose: '40 mg', perDay: 1, days: 5, qty: 5 },
+    { patientId: pastVisits[3].patientId, doctor: pastVisits[3].doctor.name, name: 'Metformin 500 mg', cls: 'Biguanide', dose: '500 mg', perDay: 2, days: 30, qty: 60 },
+    { patientId: pastVisits[4].patientId, doctor: pastVisits[4].doctor.name, name: 'Amoxicillin + Clavulanic acid 625 mg', cls: 'Antibiotic', dose: '625 mg', perDay: 2, days: 5, qty: 10 },
   ]
   for (const [k, r] of rx.entries()) {
     const medicationId = med(r.name)
@@ -886,14 +901,13 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
       frequencyPerDay: r.perDay, durationDays: r.days, instructions: 'After food', prescribedByProviderId: doctorId(r.doctor), enteredByName: r.doctor, prescribedAt: istAt(day(-1), '12:00'),
     }).returning({ id: medicationEpisodes.id })
     if (k === rx.length - 1) continue // left in the pharmacy queue, not yet dispensed
-    const d = await dispenseMedication({ patientId: r.patientId, medicationId, medicationEpisodeId: episode.id, quantity: r.qty, dispensedByName: sessions.pharmacy.name, notes: null })
-    if (!d.ok || d.dispenseId === undefined) throw new Error(`Seed step failed: dispense (${d.error})`)
-    must(await createChargeForDispense({
-      dispenseId: d.dispenseId, patientId: r.patientId, providerName: r.doctor, dateOfService: today,
-      diagnosisCode: { code: '', description: 'Dispensed against prescription' },
-      procedureCode: { code: `RX-${medicationId}`, description: r.name, units: r.qty, chargeCents: r.paise },
-      amountCents: r.qty * r.paise, serviceDate: today, createdByName: sessions.pharmacy.name,
-    }, sessions.pharmacy), 'dispense charge')
+    // WS2 T8: the dispense bills itself (MRP line, batch/expiry snapshot); allergies were checked at prescribing.
+    const d = await dispenseMedication({
+      patientId: r.patientId, medicationId, medicationEpisodeId: episode.id, quantity: r.qty,
+      batchNo: `DEMO${String(k + 1).padStart(3, '0')}`, expiryMonth: `${Number(today.slice(0, 4)) + 1}-06`, allergyAcknowledged: true,
+    }, sessions.pharmacy, realNow)
+    must(d, 'dispense')
+    // end WS2 T8
   }
 
   // ---- 9. Booking requests, messages, portal ---------------------------------------------------

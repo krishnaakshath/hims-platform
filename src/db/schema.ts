@@ -2192,7 +2192,13 @@ export const medications = pgTable('medications', {
   medicationClass: text('medication_class').notNull(),
   commonDose: text('common_dose'),
   form: medicationFormEnum('form').default('tablet').notNull(),
-})
+  mrpPerUnitPaise: integer('mrp_per_unit_paise'), // WS2 T8 (GST-inclusive MRP per dispensing unit; null = unpriced)
+  gstRateBp: integer('gst_rate_bp'), // WS2 T8 (null = billing_settings.pharmacy_gst_rate_bp)
+  hsn: text('hsn'), // WS2 T8 (null = billing_settings.pharmacy_hsn)
+}, (t) => [ // WS2 T8
+  check('medications_mrp_range', sql`${t.mrpPerUnitPaise} IS NULL OR ${t.mrpPerUnitPaise} BETWEEN 0 AND 1000000000`), // WS2 T8
+  check('medications_gst_rate_allowed', sql`${t.gstRateBp} IS NULL OR ${t.gstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`), // WS2 T8
+]) // WS2 T8
 
 export const medicationInventory = pgTable('medication_inventory', {
   id: serial('id').primaryKey(),
@@ -2221,7 +2227,13 @@ export const medicationDispenses = pgTable('medication_dispenses', {
   // (Postgres does not treat NULLs as equal) for the many dispenses that are
   // samples or in-office doses and are never billed.
   chargeId: integer('charge_id').references(() => charges.id).unique(),
-})
+  batchNo: text('batch_no'), // WS2 T8 (snapshot text; stock by batch is WS5)
+  expiryMonth: text('expiry_month'), // WS2 T8 ('YYYY-MM')
+  noChargeReason: text('no_charge_reason'), // WS2 T8 (a free dispense; never audited)
+  unitMrpPaise: integer('unit_mrp_paise'), // WS2 T8 (MRP snapshot at dispense)
+}, (t) => [ // WS2 T8
+  check('medication_dispenses_expiry_month_format', sql`${t.expiryMonth} IS NULL OR ${t.expiryMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`), // WS2 T8
+]) // WS2 T8
 
 export const marStatusEnum = pgEnum('mar_status', ['scheduled', 'given', 'held', 'refused'])
 

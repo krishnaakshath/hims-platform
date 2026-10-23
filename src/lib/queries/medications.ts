@@ -1,5 +1,5 @@
 import { getDb } from '@/db/client'
-import { medications, medicationInventory, medicationEpisodes } from '@/db/schema'
+import { medications, medicationInventory, medicationEpisodes, billingSettings } from '@/db/schema'
 import { asc, desc, eq, sql } from 'drizzle-orm'
 
 export interface MedicationWithInventory {
@@ -12,6 +12,12 @@ export interface MedicationWithInventory {
   quantityOnHand: number
   reorderThreshold: number
   unit: string
+  // WS2 T8: GST-inclusive MRP per unit (null = unpriced), own GST slab/HSN (null = the billing
+  // settings default) and the slab that applies.
+  mrpPerUnitPaise: number | null
+  gstRateBp: number | null
+  hsn: string | null
+  effectiveGstRateBp: number
 }
 
 export async function listMedicationsWithInventory(): Promise<MedicationWithInventory[]> {
@@ -20,9 +26,12 @@ export async function listMedicationsWithInventory(): Promise<MedicationWithInve
       id: medications.id, name: medications.name, genericName: medications.genericName,
       medicationClass: medications.medicationClass, commonDose: medications.commonDose, form: medications.form,
       quantityOnHand: medicationInventory.quantityOnHand, reorderThreshold: medicationInventory.reorderThreshold, unit: medicationInventory.unit,
+      mrpPerUnitPaise: medications.mrpPerUnitPaise, gstRateBp: medications.gstRateBp, hsn: medications.hsn, // WS2 T8
+      effectiveGstRateBp: sql<number>`coalesce(${medications.gstRateBp}, ${billingSettings.pharmacyGstRateBp}, 500)::int`, // WS2 T8
     })
     .from(medications)
     .innerJoin(medicationInventory, eq(medicationInventory.medicationId, medications.id))
+    .leftJoin(billingSettings, eq(billingSettings.id, 1)) // WS2 T8
     .orderBy(asc(medications.name))
   return rows
 }
