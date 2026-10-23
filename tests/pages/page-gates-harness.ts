@@ -396,4 +396,8 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/billing/insurance-collections', load: () => import('@/app/(dashboard)/billing/insurance-collections/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/rcm/claims'])) },
   { route: '/billing/statements', load: () => import('@/app/(dashboard)/billing/statements/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/cash-desk'])) },
   // end Foundations T11
+  // WL T8: Settings > Branding -- BRAND_SETTINGS_ROLES (admin); linked from the Practice tab, no nav entry.
+  // A denied role is sent back to /settings (which itself redirects roles it does not admit).
+  { route: '/settings/branding', load: () => import('@/app/(dashboard)/settings/branding/page'), allowed: ['admin'], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/settings'])) },
+  // end WL T8
 ]
