@@ -32,7 +32,7 @@
     "exceljs": "^4.4.0",
     "jose": "^6.2.12",
     "lucide-react": "^1.46.0",
-    "next": "^16.3.8",
+    "next": "^16.4.1",
     "nodemailer": "^10.0.10",
     "ogl": "^1.0.11",
     "otpauth": "^9.5.2",
@@ -64,8 +64,8 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
     "typescript": "^5",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   },
   "overrides": {
     "esbuild": "^0.28.2",
