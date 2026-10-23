@@ -7,6 +7,8 @@ import { nextUhid } from '../lib/queries/uhid'
 import { setPatientPortalPassword } from '../lib/queries/patient-portal'
 import { addDaysIso } from '../lib/follow-ups/rules'
 import { todayIsoIn } from '../lib/india-time'
+import { encounterVitals, encounterConsults } from './schema' // WS1 T2
+import { referrals } from './schema' // WS1 T4
 import {
   // SP6
   codingQueryResponses, codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures, serviceProcedureCodes,
@@ -14,6 +16,7 @@ import {
   patients,
   diagnoses,
   medicationEpisodes,
+  prescriptions, // WS1 T6
   patientTrialScreenings,
   screeningCriteriaResults,
   users,
@@ -490,11 +493,11 @@ async function seedTrialCompliance() {
 // Lab test catalog -- standalone reference data (like the payer directory),
 // independent of whether the rest of the DB has been seeded. Wave D adds the
 // common Indian OPD panels (seed-india-data.ts INDIA_LAB_TESTS) on top.
-const LAB_TESTS_SEED: { name: string; code: string; category: 'lab' | 'imaging'; defaultUnit: string | null; referenceRange: string | null }[] = [
+const LAB_TESTS_SEED: { name: string; code: string; category: 'lab' | 'imaging'; defaultUnit: string | null; referenceRange: string | null; fastingRequired?: boolean }[] = [
   { name: 'CBC with differential', code: 'CBC-DIFF', category: 'lab', defaultUnit: 'cells/mcL', referenceRange: '4.5-11.0 x10^3/mcL' },
   { name: 'Comprehensive Metabolic Panel', code: 'CMP', category: 'lab', defaultUnit: null, referenceRange: 'See individual analytes' },
   { name: 'TSH', code: 'TSH', category: 'lab', defaultUnit: 'mIU/L', referenceRange: '0.4-4.0' },
-  { name: 'Lipid Panel', code: 'LIPID', category: 'lab', defaultUnit: 'mg/dL', referenceRange: 'Total chol <200' },
+  { name: 'Lipid Panel', code: 'LIPID', category: 'lab', defaultUnit: 'mg/dL', referenceRange: 'Total chol <200', fastingRequired: true }, // WS2 T10
   { name: 'HbA1c', code: 'HBA1C', category: 'lab', defaultUnit: '%', referenceRange: '4.0-5.6' },
   { name: 'Lithium level', code: 'LITH', category: 'lab', defaultUnit: 'mEq/L', referenceRange: '0.6-1.2' },
   { name: 'Valproic acid level', code: 'VPA', category: 'lab', defaultUnit: 'mcg/mL', referenceRange: '50-100' },
@@ -921,6 +924,7 @@ async function clearExistingData() {
   await db.delete(screeningCriteriaResults)
   await db.delete(patientTrialScreenings)
   await db.delete(medicationEpisodes)
+  await db.delete(prescriptions) // WS1 T6: after its episodes, before encounters/patients
   await db.delete(diagnoses)
   await db.delete(formSubmissionScores)
   await db.delete(formChartDiscrepancies)
@@ -966,6 +970,13 @@ async function clearExistingData() {
   await db.delete(encounterCoding)
   await db.delete(encounterProcedures)
   // end SP6
+  // WS1 T2: vitals and consult records reference encounters and patients.
+  await db.delete(encounterVitals)
+  await db.delete(encounterConsults)
+  // end WS1 T2
+  // WS1 T4: referrals reference encounters and patients.
+  await db.delete(referrals)
+  // end WS1 T4
   await db.delete(encounters)
   // Wave D: an admission references its doctor assignment, appointment and room.
   await db.delete(admissions)

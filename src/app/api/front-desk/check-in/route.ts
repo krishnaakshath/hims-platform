@@ -114,7 +114,8 @@ export async function POST(request: NextRequest) {
       const mapped = CHECK_IN_ERRORS[result.error]
       return NextResponse.json({ error: mapped.error }, { status: mapped.status })
     }
-    return NextResponse.json({ ...result.assignment, encounterId: result.encounter.id, opdToken: result.encounter.opdToken }, { status: 201 })
+    // WS2 T9: the automatic visit charges (or why one was not captured) for the ticket and "Collect now".
+    return NextResponse.json({ ...result.assignment, encounterId: result.encounter.id, opdToken: result.encounter.opdToken, charges: result.charges }, { status: 201 })
   } catch (err) {
     if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     console.error(`[check-in] failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)

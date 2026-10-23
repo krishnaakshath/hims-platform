@@ -1,216 +1,107 @@
-import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
-import { eq, inArray } from 'drizzle-orm'
+// WS2 T8 (spec ruling 7): POST /api/pharmacy/dispenses/[dispenseId]/charge bills a legacy unbilled
+// dispense (one made before dispensing billed itself) once, at the medicine's current MRP.
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { POST } from '@/app/api/pharmacy/dispenses/[dispenseId]/charge/route'
 import { getDb } from '@/db/client'
-import { medications, medicationInventory, medicationDispenses, diagnoses, charges, chargeLines } from '@/db/schema'
+import { auditLog, charges, chargeLines, medications, medicationInventory, medicationDispenses, patients } from '@/db/schema'
+import { purgeBillingFixtures } from '../db/billing-fixtures'
 
-let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' = 'pharmacy'
-vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Pharmacy Tester' })) }))
+let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' | 'billing' = 'pharmacy'
+vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Pharmacy Tester', userId: null })) }))
 
-const createdDispenseIds: number[] = []
-const createdChargeIds: number[] = []
-const createdMedIds: number[] = []
-
-afterEach(async () => {
-  sessionRole = 'pharmacy'
-  // Order matters: dispenses (which may point at a charge via chargeId)
-  // before charges before inventory before medications, matching the FK
-  // dependency chain.
-  // SP4: billing also writes a pharmacy charge line referencing both the dispense and the charge.
-  if (createdDispenseIds.length > 0) await getDb().delete(chargeLines).where(inArray(chargeLines.medicationDispenseId, createdDispenseIds))
-  while (createdDispenseIds.length > 0) await getDb().delete(medicationDispenses).where(eq(medicationDispenses.id, createdDispenseIds.pop()!))
-  while (createdChargeIds.length > 0) await getDb().delete(charges).where(eq(charges.id, createdChargeIds.pop()!))
-  while (createdMedIds.length > 0) {
-    const id = createdMedIds.pop()!
-    await getDb().delete(medicationInventory).where(eq(medicationInventory.medicationId, id))
-    await getDb().delete(medications).where(eq(medications.id, id))
-  }
-})
-
-// Two distinct seeded patients that each have at least one diagnoses row --
-// found dynamically (rather than hardcoded ids) since seed data can shift.
-let patientAId: string
-let patientBId: string
-let dxA: { id: number; code: string; description: string }
-let dxB: { id: number; code: string; description: string }
+const TAG = `TWS2T8L-${Date.now()}`
+const PID = `${TAG}-P`
+const med = { priced: 0, unpriced: 0 }
+const chargeIds: number[] = []
 
 beforeAll(async () => {
   const db = getDb()
-  // Scoped column select, not `.select()` -- the live diagnoses table is
-  // missing the `source` column the Drizzle schema still declares, so a
-  // whole-row select 500s.
-  const distinctPatientRows = await db
-    .select({ patientId: diagnoses.patientId })
-    .from(diagnoses)
-    .groupBy(diagnoses.patientId)
-    .limit(2)
-  ;[patientAId, patientBId] = distinctPatientRows.map((r) => r.patientId)
-
-  const dxRowsA = await db.select({ id: diagnoses.id, code: diagnoses.code, description: diagnoses.description }).from(diagnoses).where(eq(diagnoses.patientId, patientAId)).limit(1)
-  dxA = dxRowsA[0]
-  const dxRowsB = await db.select({ id: diagnoses.id, code: diagnoses.code, description: diagnoses.description }).from(diagnoses).where(eq(diagnoses.patientId, patientBId)).limit(1)
-  dxB = dxRowsB[0]
+  await db.insert(patients).values({ id: PID, name: 'TEST legacy dispense', dob: '1990-01-01' })
+  const rows = await db.insert(medications).values([
+    { name: `${TAG} Priced`, medicationClass: 'Test', form: 'tablet', mrpPerUnitPaise: 350, gstRateBp: 1200, hsn: '30049099' },
+    { name: `${TAG} Unpriced`, medicationClass: 'Test', form: 'tablet' },
+  ]).returning()
+  ;[med.priced, med.unpriced] = rows.map((r) => r.id)
+  await db.insert(medicationInventory).values(rows.map((r) => ({ medicationId: r.id, quantityOnHand: 50, unit: 'tablets' })))
 })
 
-async function makeMedWithStock(qty: number) {
+afterEach(async () => {
+  sessionRole = 'pharmacy'
+  await purgeBillingFixtures([PID])
+  await getDb().delete(medicationDispenses).where(eq(medicationDispenses.patientId, PID))
+  if (chargeIds.length) await getDb().delete(charges).where(inArray(charges.id, chargeIds.splice(0)))
+})
+
+afterAll(async () => {
   const db = getDb()
-  const [med] = await db.insert(medications).values({ name: `Charge Test Med ${Date.now()}`, medicationClass: 'Test', form: 'tablet' }).returning()
-  createdMedIds.push(med.id)
-  await db.insert(medicationInventory).values({ medicationId: med.id, quantityOnHand: qty, reorderThreshold: 5, unit: 'tablets' })
-  return med
-}
+  const ids = Object.values(med)
+  await db.delete(medicationInventory).where(inArray(medicationInventory.medicationId, ids))
+  await db.delete(medications).where(inArray(medications.id, ids))
+  await db.delete(patients).where(eq(patients.id, PID))
+})
 
-async function makeDispense(patientId: string, medicationId: number, quantity: number) {
-  const [dispense] = await getDb().insert(medicationDispenses).values({
-    patientId, medicationId, medicationEpisodeId: null, quantity, dispensedByName: 'Test Pharmacist', notes: null,
+async function legacyDispense(medicationId: number, quantity = 15, chargeId: number | null = null) {
+  const [d] = await getDb().insert(medicationDispenses).values({
+    patientId: PID, medicationId, quantity, dispensedByName: 'Old Pharmacist', dispensedAt: new Date('2026-10-01T18:40:00Z'), chargeId,
   }).returning()
-  createdDispenseIds.push(dispense.id)
-  return dispense
+  return d
 }
-
 function req(body: unknown) {
   return new Request('http://localhost', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } })
 }
-function ctx(dispenseId: number) {
-  return { params: Promise.resolve({ dispenseId: String(dispenseId) }) }
-}
-const validBody = (diagnosisId: number) => ({
-  diagnosisId, procedureCode: 'J3490', procedureDescription: 'Unclassified drugs - Sertraline', unitChargeCents: 250,
-})
+const ctx = (id: number | string) => ({ params: Promise.resolve({ dispenseId: String(id) }) })
 
-describe('POST /api/pharmacy/dispenses/[dispenseId]/charge', () => {
-  it('creates a real draft charge and links it to the dispense', async () => {
-    const med = await makeMedWithStock(30)
-    const dispense = await makeDispense(patientAId, med.id, 6)
-
-    const res = await POST(req(validBody(dxA.id)) as never, ctx(dispense.id))
+describe('POST /api/pharmacy/dispenses/[dispenseId]/charge (bill a legacy dispense at current MRP)', () => {
+  it('bills an unbilled legacy dispense once at the current MRP; a second call is 409', async () => {
+    const d = await legacyDispense(med.priced)
+    const res = await POST(req({}) as never, ctx(d.id))
     expect(res.status).toBe(201)
-    const { chargeId } = await res.json()
-    createdChargeIds.push(chargeId)
+    const { lineId } = await res.json()
+    const lines = await getDb().select().from(chargeLines).where(eq(chargeLines.medicationDispenseId, d.id))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({
+      id: lineId, patientId: PID, source: 'pharmacy', priceSource: 'pharmacy', itemCode: `MED-${med.priced}`, itemName: `${TAG} Priced`,
+      quantity: 15, unitPricePaise: 312, taxablePaise: 4680, gstRateBp: 1200, hsnSac: '30049099', serviceDate: '2026-10-02', legacyChargeId: null,
+    })
+    expect(await getDb().select().from(charges).where(eq(charges.patientId, PID))).toHaveLength(0)
+    const [audit] = await getDb().select().from(auditLog).where(and(eq(auditLog.patientId, PID), eq(auditLog.action, 'billed a legacy dispense'))).orderBy(desc(auditLog.id)).limit(1)
+    expect(audit.details).toBe(`dispense=${d.id} line=${lineId}`)
 
-    const [charge] = await getDb().select().from(charges).where(eq(charges.id, chargeId))
-    expect(charge.status).toBe('draft')
-    expect(charge.patientId).toBe(dispense.patientId)
-    expect(charge.diagnosisCodes).toEqual([{ code: dxA.code, description: dxA.description }])
-    expect(charge.procedureCodes).toEqual([{ code: 'J3490', description: 'Unclassified drugs - Sertraline', units: dispense.quantity, chargeCents: 250 }])
-
-    const [updated] = await getDb().select().from(medicationDispenses).where(eq(medicationDispenses.id, dispense.id))
-    expect(updated.chargeId).toBe(chargeId)
+    const again = await POST(req({}) as never, ctx(d.id))
+    expect(again.status).toBe(409)
+    expect(await getDb().select().from(chargeLines).where(eq(chargeLines.medicationDispenseId, d.id))).toHaveLength(1)
   })
 
-  it('derives amountCents as quantity * unitChargeCents', async () => {
-    const med = await makeMedWithStock(30)
-    const dispense = await makeDispense(patientAId, med.id, 6)
-
-    const res = await POST(req(validBody(dxA.id)) as never, ctx(dispense.id))
-    expect(res.status).toBe(201)
-    const { chargeId } = await res.json()
-    createdChargeIds.push(chargeId)
-
-    const [charge] = await getDb().select().from(charges).where(eq(charges.id, chargeId))
-    expect(charge.amountCents).toBe(1500)
+  it('two concurrent calls bill once', async () => {
+    const d = await legacyDispense(med.priced, 4)
+    const statuses = (await Promise.all([POST(req({}) as never, ctx(d.id)), POST(req({}) as never, ctx(d.id))])).map((r) => r.status).sort()
+    expect(statuses).toEqual([201, 409])
+    expect(await getDb().select().from(chargeLines).where(eq(chargeLines.medicationDispenseId, d.id))).toHaveLength(1)
   })
 
-  it('rejects a client-supplied amountCents outright (mass-assignment guard)', async () => {
-    const med = await makeMedWithStock(30)
-    const dispense = await makeDispense(patientAId, med.id, 6)
-
-    const res = await POST(req({ ...validBody(dxA.id), amountCents: 1 }) as never, ctx(dispense.id))
-    expect(res.status).toBe(400)
-
-    const [unchanged] = await getDb().select().from(medicationDispenses).where(eq(medicationDispenses.id, dispense.id))
-    expect(unchanged.chargeId).toBeNull()
+  it('a dispense billed on the pre-SP4 charges table is already billed', async () => {
+    const [c] = await getDb().insert(charges).values({ patientId: PID, providerName: 'Dr Old', dateOfService: '2026-10-01', diagnosisCodes: [], procedureCodes: [], amountCents: 100, status: 'draft' }).returning()
+    chargeIds.push(c.id)
+    const d = await legacyDispense(med.priced, 2, c.id)
+    expect((await POST(req({}) as never, ctx(d.id))).status).toBe(409)
   })
 
-  // Review Focus #3
-  it('returns 409 on a second bill for the same dispense and creates no second charge', async () => {
-    const med = await makeMedWithStock(30)
-    const dispense = await makeDispense(patientAId, med.id, 6)
-
-    const before = await getDb().select().from(charges).where(eq(charges.patientId, patientAId))
-
-    const res1 = await POST(req(validBody(dxA.id)) as never, ctx(dispense.id))
-    expect(res1.status).toBe(201)
-    const { chargeId } = await res1.json()
-    createdChargeIds.push(chargeId)
-
-    const res2 = await POST(req(validBody(dxA.id)) as never, ctx(dispense.id))
-    expect(res2.status).toBe(409)
-    expect((await res2.json()).error).toBe('This dispense has already been billed')
-
-    const after = await getDb().select().from(charges).where(eq(charges.patientId, patientAId))
-    expect(after.length - before.length).toBe(1)
-
-    const [unchanged] = await getDb().select().from(medicationDispenses).where(eq(medicationDispenses.id, dispense.id))
-    expect(unchanged.chargeId).toBe(chargeId)
+  it('an unpriced medicine is 422; an unknown dispense 404; any body key 400', async () => {
+    const d = await legacyDispense(med.unpriced)
+    const unpriced = await POST(req({}) as never, ctx(d.id))
+    expect(unpriced.status).toBe(422)
+    expect((await unpriced.json()).code).toBe('medication_unpriced')
+    expect((await POST(req({}) as never, ctx(999999999))).status).toBe(404)
+    const p = await legacyDispense(med.priced)
+    expect((await POST(req({ unitChargeCents: 1 }) as never, ctx(p.id))).status).toBe(400)
   })
 
-  it('creates exactly one charge when two bill calls race', async () => {
-    const med = await makeMedWithStock(30)
-    const dispense = await makeDispense(patientAId, med.id, 6)
-
-    const before = await getDb().select().from(charges).where(eq(charges.patientId, patientAId))
-
-    const results = await Promise.allSettled([
-      POST(req(validBody(dxA.id)) as never, ctx(dispense.id)),
-      POST(req(validBody(dxA.id)) as never, ctx(dispense.id)),
-    ])
-
-    const responses = results.map((r) => (r.status === 'fulfilled' ? r.value : null))
-    const bodies = await Promise.all(responses.map((r) => (r ? r.json() : null)))
-
-    const successIndexes = responses.map((r, i) => (r && r.status === 201 ? i : -1)).filter((i) => i >= 0)
-    expect(successIndexes.length).toBe(1)
-    const failureIndexes = responses.map((r, i) => (r && r.status === 409 ? i : -1)).filter((i) => i >= 0)
-    expect(failureIndexes.length).toBe(1)
-
-    const chargeId = bodies[successIndexes[0]].chargeId
-    createdChargeIds.push(chargeId)
-
-    const [updated] = await getDb().select().from(medicationDispenses).where(eq(medicationDispenses.id, dispense.id))
-    expect(updated.chargeId).toBe(chargeId)
-
-    const after = await getDb().select().from(charges).where(eq(charges.patientId, patientAId))
-    expect(after.length - before.length).toBe(1)
-  })
-
-  // Review Focus #4
-  it('rejects a diagnosisId belonging to a different patient with 400 and creates nothing', async () => {
-    const med = await makeMedWithStock(30)
-    const dispense = await makeDispense(patientAId, med.id, 6)
-
-    const before = await getDb().select().from(charges).where(eq(charges.patientId, patientAId))
-
-    const res = await POST(req(validBody(dxB.id)) as never, ctx(dispense.id))
-    expect(res.status).toBe(400)
-    expect((await res.json()).error).toBe('diagnosisId does not belong to this patient')
-
-    const [unchanged] = await getDb().select().from(medicationDispenses).where(eq(medicationDispenses.id, dispense.id))
-    expect(unchanged.chargeId).toBeNull()
-
-    const after = await getDb().select().from(charges).where(eq(charges.patientId, patientAId))
-    expect(after.length).toBe(before.length)
-  })
-
-  it('returns 404 for an unknown dispenseId', async () => {
-    const res = await POST(req(validBody(dxA.id)) as never, ctx(999999999))
-    expect(res.status).toBe(404)
-  })
-
-  it('rejects crc, pi and frontdesk with 403, allows admin', async () => {
-    const med = await makeMedWithStock(30)
-    const dispense = await makeDispense(patientAId, med.id, 6)
-
-    for (const role of ['crc', 'pi', 'frontdesk'] as const) {
+  it('pi and billing are 403', async () => {
+    const d = await legacyDispense(med.priced)
+    for (const role of ['pi', 'billing'] as const) {
       sessionRole = role
-      const res = await POST(req(validBody(dxA.id)) as never, ctx(dispense.id))
-      expect(res.status).toBe(403)
+      expect((await POST(req({}) as never, ctx(d.id))).status).toBe(403)
     }
-
-    sessionRole = 'admin'
-    const res = await POST(req(validBody(dxA.id)) as never, ctx(dispense.id))
-    expect(res.status).toBe(201)
-    const { chargeId } = await res.json()
-    createdChargeIds.push(chargeId)
   })
 })

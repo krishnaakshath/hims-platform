@@ -195,7 +195,7 @@ describe('POST /api/lab-orders/[id]/collect', () => {
 describe('POST /api/lab-orders/[id]/cancel', () => {
   it('cancel never puts the reason in the audit log', async () => {
     role = 'pi'
-    vi.mocked(cancelLabOrder).mockResolvedValue({ ok: true, patientId: 'RD-1', cancelledVisitId: null })
+    vi.mocked(cancelLabOrder).mockResolvedValue({ ok: true, patientId: 'RD-1', cancelledVisitId: null, billing: 'none' })
     const res = await CANCEL(send({ reason: 'SECRETWORD patient left' }), ctx('4'))
     expect(res.status).toBe(200)
     expect(cancelLabOrder).toHaveBeenCalledWith(4, 'SECRETWORD patient left', expect.objectContaining({ role: 'pi' }))

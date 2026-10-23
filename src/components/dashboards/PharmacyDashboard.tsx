@@ -6,6 +6,7 @@ import { KpiTile } from '@/components/dashboards/KpiTile'
 import type { PharmacyKpi } from '@/lib/queries/hospital-kpis'
 import { Button } from '@/components/ui/button'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
+import { MedicationPriceEditor } from '@/components/MedicationPriceEditor' // WS2 T8
 import { AddMedicationModal } from '@/components/AddMedicationModal'
 import type { MedicationWithInventory, ActiveMedicationSummaryRow } from '@/lib/queries/medications'
 import type { Session } from '@/lib/auth'
@@ -71,6 +72,7 @@ export function PharmacyDashboard({
   kpis,
   stockFilter = null,
   canUseCounter = false,
+  canEditPrice = false,
 }: {
   session: Session
   medications: MedicationWithInventory[]
@@ -82,6 +84,7 @@ export function PharmacyDashboard({
   kpis: PharmacyKpi
   stockFilter?: 'out' | 'low' | null
   canUseCounter?: boolean
+  canEditPrice?: boolean // WS2 T8: MEDICATION_PRICE_ROLES
 }) {
   const [dispensing, setDispensing] = useState<MedicationWithInventory | null>(null)
   // `null` = closed; `{}` = open with no prefill (header button);
@@ -138,6 +141,7 @@ export function PharmacyDashboard({
                   <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Medication</th>
                   <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Class</th>
                   <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">On hand</th>
+                  <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">MRP</th>
                   <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
                   {canDispense && <th className="p-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>}
                 </tr>
@@ -154,6 +158,7 @@ export function PharmacyDashboard({
                       </td>
                       <td className="p-3 text-foreground">{m.medicationClass}</td>
                       <td className="p-3 text-foreground">{m.quantityOnHand} {m.unit}</td>
+                      <td className="p-3"><MedicationPriceEditor medication={m} canEdit={canEditPrice} /></td>
                       <td className="p-3"><StockPill status={status} /></td>
                       {canDispense && (
                         <td className="p-3">

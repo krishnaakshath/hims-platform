@@ -110,7 +110,8 @@ export const LAB_REPORT_RELEASE_ROLES: readonly Role[] = ['admin', 'pi', 'labs']
 export const LAB_REPORT_READ_ROLES: readonly Role[] = ['admin', 'pi', 'crc', 'labs']
 export const LAB_LABEL_ROLES: readonly Role[] = ['admin', 'pi', 'labs', 'frontdesk']
 export const LAB_SETUP_ROLES: readonly Role[] = ['admin']
-export const HOME_COLLECTION_BOOKING_ROLES: readonly Role[] = ['admin', 'frontdesk', 'labs']
+// WS2: + pi (a doctor books the home visit for the lab order they just placed).
+export const HOME_COLLECTION_BOOKING_ROLES: readonly Role[] = ['admin', 'frontdesk', 'labs', 'pi']
 export const HOME_COLLECTION_CANCEL_ROLES: readonly Role[] = ['admin', 'frontdesk', 'labs', 'collector']
 export const HOME_COLLECTION_DISPATCH_ROLES: readonly Role[] = ['admin', 'labs']
 export const COLLECTOR_ROUTE_ROLES: readonly Role[] = ['admin', 'collector']
@@ -262,3 +263,20 @@ export const COVERAGE_READ_ROLES: readonly Role[] = POLICY_READ_ROLES
 export const COVERAGE_VERIFY_ROLES: readonly Role[] = POLICY_WRITE_ROLES
 export const ADMISSION_COVERAGE_ROLES: readonly Role[] = ['admin', 'frontdesk', 'crc', 'rcm']
 // end WS12 T1
+// WS1/WS2 roles (doctor workspace + automatic billing, plan 2026-10-23-doctor-workspace-billing).
+// Workspace read: the doctor, the coordinator who preps the visit, admin. Clinical writes
+// (notes, diagnoses, orders) are the doctor's (pi) or admin's; pi writes are further limited to
+// the visit's own doctor by checkEncounterWriter (src/lib/encounters/ownership.ts). The
+// coordinator (crc) may record vitals and allergies. Medication search/dispense: the prescriber
+// and pharmacy; unit prices: pharmacy and admin. Marking a visit's charges invoice-ready is the
+// charge-capture desk's job, so it follows CHARGE_CAPTURE_ROLES.
+export const WORKSPACE_READ_ROLES: readonly Role[] = ['admin', 'pi', 'crc']
+export const CLINICAL_WRITE_ROLES: readonly Role[] = ['admin', 'pi']
+export const VITALS_ROLES: readonly Role[] = ['admin', 'pi', 'crc']
+export const ALLERGY_WRITE_ROLES: readonly Role[] = ['admin', 'pi', 'crc']
+export const PRESCRIBE_ROLES: readonly Role[] = ['admin', 'pi']
+export const MEDICATION_SEARCH_ROLES: readonly Role[] = ['admin', 'pi', 'pharmacy']
+export const DISPENSE_ROLES: readonly Role[] = ['admin', 'pi', 'pharmacy']
+export const MEDICATION_PRICE_ROLES: readonly Role[] = ['admin', 'pharmacy']
+export const INVOICE_READY_ROLES: readonly Role[] = CHARGE_CAPTURE_ROLES
+// end WS1/WS2 roles

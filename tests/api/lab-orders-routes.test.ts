@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
 import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { auditLog, patients, providers, labTests, labOrders, labResults, labRequisitions } from '@/db/schema'
+import { auditLog, chargeLines, patients, providers, labTests, labOrders, labResults, labRequisitions } from '@/db/schema'
 
 type Role = 'admin' | 'pi' | 'crc' | 'frontdesk' | 'labs'
 // SP5: unique probe names (session and mocked provider), so every audit row these routes write
@@ -45,7 +45,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await getDb().delete(auditLog).where(and(
     eq(auditLog.patientId, auditPatientId),
-    inArray(auditLog.action, ['created lab order', 'marked lab order collected', 'entered lab result', 'cancelled lab order']),
+    inArray(auditLog.action, ['created lab order', 'marked lab order collected', 'entered lab result', 'cancelled lab order', 'billing: auto-captured lab_order', 'billing: auto charge fell back to self-pay']), // WS2 T10
     inArray(auditLog.userName, [PROBE, PROBE_DR, PROBE_DR_SUBSTRING]),
   ))
 })
@@ -61,6 +61,9 @@ afterEach(async () => {
   // SP5: requisitions created through the route (their orders first).
   while (createdRequisitionIds.length > 0) {
     const id = createdRequisitionIds.pop()!
+    // WS2 T10: an order from a visit or a stay is billed at order time; its line goes first.
+    const orderIds = (await getDb().select({ id: labOrders.id }).from(labOrders).where(eq(labOrders.requisitionId, id))).map((o) => o.id)
+    if (orderIds.length > 0) await getDb().delete(chargeLines).where(inArray(chargeLines.labOrderId, orderIds))
     await getDb().delete(labOrders).where(eq(labOrders.requisitionId, id))
     await getDb().delete(labRequisitions).where(eq(labRequisitions.id, id))
   }

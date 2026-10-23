@@ -6,14 +6,14 @@ let signedIn = true
 vi.mock('@/lib/auth', () => ({
   requireSession: vi.fn(async () => (signedIn ? { role, name: 'Dr. Probe', userId: 7 } : NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))),
 }))
-vi.mock('@/lib/queries/lab-requisitions', () => ({ createLabRequisition: vi.fn() }))
+vi.mock('@/lib/queries/lab-requisitions', () => ({ createLabRequisition: vi.fn(), openOpdEncounterFor: vi.fn(async () => null) })) // WS2 T10
 vi.mock('@/lib/queries/notifications', () => ({ notifyPatientSafely: vi.fn() }))
 vi.mock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 4, name: 'Dr. Probe' }]) }))
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 4, name: 'Dr. Probe' })) }))
 vi.mock('@/lib/brand', () => ({ brand: { name: 'Probe Hospital' } }))
 
 import { POST } from '@/app/api/patients/[anonId]/lab-orders/route'
-import { createLabRequisition } from '@/lib/queries/lab-requisitions'
+import { createLabRequisition, openOpdEncounterFor } from '@/lib/queries/lab-requisitions'
 import { notifyPatientSafely } from '@/lib/queries/notifications'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 
@@ -25,17 +25,18 @@ const LINE = { orderId: 30, labTestId: 1, quotedPricePaise: 45000, quoteStatus: 
 beforeEach(() => {
   role = 'pi'
   signedIn = true
-  vi.mocked(createLabRequisition).mockReset().mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [LINE], patientIsLocal: false, includesLabTest: true })
+  vi.mocked(createLabRequisition).mockReset().mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [LINE], charges: [], patientIsLocal: false, includesLabTest: true })
+  vi.mocked(openOpdEncounterFor).mockReset().mockResolvedValue(null)
   vi.mocked(notifyPatientSafely).mockReset().mockResolvedValue('logged')
   vi.mocked(resolveDoctorQueueProvider).mockClear()
 })
 
 describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
   it('notifies only local patients, with a requisition dedupe key', async () => {
-    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], patientIsLocal: true, includesLabTest: true })
+    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], charges: [], patientIsLocal: true, includesLabTest: true })
     const res = await POST(send({ labTestIds: [1] }), ctx)
     expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({ requisitionId: 12, lines: [], patientIsLocal: true, notification: 'logged' })
+    expect(await res.json()).toEqual({ requisitionId: 12, lines: [], charges: [], patientIsLocal: true, homeCollectionEligible: true, notification: 'logged' })
     expect(notifyPatientSafely).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       patientId: 'RD-0001',
       templateKey: 'lab_tests_ordered',
@@ -50,13 +51,13 @@ describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
   it('a non-local patient gets no notice', async () => {
     const res = await POST(send({ labTestIds: [1] }), ctx)
     expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({ requisitionId: 12, lines: [LINE], patientIsLocal: false, notification: null })
+    expect(await res.json()).toEqual({ requisitionId: 12, lines: [LINE], charges: [], patientIsLocal: false, homeCollectionEligible: false, notification: null })
     expect(notifyPatientSafely).not.toHaveBeenCalled()
   })
 
   // SP5 Task 8 ruling: imaging stays orderable, but only a lab test triggers the home-collection notice.
   it('an imaging-only order for a local patient sends no notice', async () => {
-    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], patientIsLocal: true, includesLabTest: false })
+    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], charges: [], patientIsLocal: true, includesLabTest: false })
     const res = await POST(send({ labTestIds: [1] }), ctx)
     expect(res.status).toBe(201)
     expect((await res.json()).notification).toBeNull()
@@ -64,7 +65,7 @@ describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
   })
 
   it('a notifier failure still returns 201', async () => {
-    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], patientIsLocal: true, includesLabTest: true })
+    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], charges: [], patientIsLocal: true, includesLabTest: true })
     vi.mocked(notifyPatientSafely).mockResolvedValue('error')
     const res = await POST(send({ labTestIds: [1] }), ctx)
     expect(res.status).toBe(201)
@@ -74,7 +75,7 @@ describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
   it('keeps accepting the legacy { labTestId } body', async () => {
     expect((await POST(send({ labTestId: 5 }), ctx)).status).toBe(201)
     expect(createLabRequisition).toHaveBeenCalledWith(
-      { labTestIds: [5], followUp: null, originatingEncounterId: null, patientId: 'RD-0001', orderedByProviderId: 4 },
+      { labTestIds: [5], followUp: null, originatingEncounterId: null, priority: 'routine', clinicalNotes: null, fastingRequired: null, patientId: 'RD-0001', orderedByProviderId: 4 },
       expect.objectContaining({ role: 'pi' }),
     )
   })
@@ -82,9 +83,26 @@ describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
   it('passes the follow-up request and encounter through', async () => {
     await POST(send({ labTestIds: [1, 3], followUp: { interval: { value: 2, unit: 'weeks' }, reason: 'Review' }, originatingEncounterId: 9 }), ctx)
     expect(createLabRequisition).toHaveBeenCalledWith(
-      { labTestIds: [1, 3], followUp: { interval: { value: 2, unit: 'weeks' }, reason: 'Review' }, originatingEncounterId: 9, patientId: 'RD-0001', orderedByProviderId: 4 },
+      { labTestIds: [1, 3], followUp: { interval: { value: 2, unit: 'weeks' }, reason: 'Review' }, originatingEncounterId: 9, priority: 'routine', clinicalNotes: null, fastingRequired: null, patientId: 'RD-0001', orderedByProviderId: 4 },
       expect.anything(),
     )
+    expect(openOpdEncounterFor).not.toHaveBeenCalled()
+  })
+
+  // WS2 T10
+  it('passes priority, notes and fasting; with no visit given, the doctor\'s open OPD visit today is used', async () => {
+    vi.mocked(openOpdEncounterFor).mockResolvedValue(77)
+    await POST(send({ labTestIds: [1], priority: 'stat', clinicalNotes: ' Chest pain ', fastingRequired: true }), ctx)
+    expect(openOpdEncounterFor).toHaveBeenCalledWith('RD-0001', 4, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/))
+    expect(createLabRequisition).toHaveBeenCalledWith(
+      { labTestIds: [1], followUp: null, originatingEncounterId: 77, priority: 'stat', clinicalNotes: 'Chest pain', fastingRequired: true, patientId: 'RD-0001', orderedByProviderId: 4 },
+      expect.anything(),
+    )
+  })
+
+  it('homeCollectionEligible needs a local patient and a lab test (a booking role is given: pi)', async () => {
+    vi.mocked(createLabRequisition).mockResolvedValue({ ok: true, requisition: { id: 12 } as never, lines: [], charges: [], patientIsLocal: true, includesLabTest: false })
+    expect((await (await POST(send({ labTestIds: [1] }), ctx)).json()).homeCollectionEligible).toBe(false)
   })
 
   it.each(['labs', 'crc', 'frontdesk', 'billing', 'pharmacy', 'collector'] as const)('%s is denied before parse', async (r) => {

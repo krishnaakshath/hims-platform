@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS: BillingSettingsRow = {
   consultationWindowDays: 30, ipdDepositThresholdPaise: 0, roomRentServiceId: null, pharmacyGstRateBp: 500, pharmacyHsn: '3004',
   updatedAt: new Date(0), updatedByName: null,
   rohiniId: null, hfrId: null, // SP7
+  registrationServiceId: null, freeReviewDays: 0, // WS2 T9
 }
 
 export async function getBillingSettings(executor: WriteExecutor = getDb()): Promise<BillingSettingsRow> {
@@ -27,19 +28,26 @@ export async function getBillingSettings(executor: WriteExecutor = getDb()): Pro
 const SETTING_KEYS = [
   'legalName', 'gstin', 'stateCode', 'address', 'placeOfSupplyMode', 'consultationWindowDays', 'ipdDepositThresholdPaise',
   'roomRentServiceId', 'pharmacyGstRateBp', 'pharmacyHsn',
+  'registrationServiceId', 'freeReviewDays', // WS2 T9 (optional in the body: absent = unchanged)
 ] as const satisfies readonly (keyof BillingSettingsInput & keyof BillingSettingsRow)[]
 
 export async function updateBillingSettings(
   input: BillingSettingsInput, session: Session,
-): Promise<{ ok: true } | { ok: false; error: 'room_rent_service_invalid' }> {
+): Promise<{ ok: true } | { ok: false; error: 'room_rent_service_invalid' | 'registration_service_invalid' }> {
   return getDb().transaction(async (tx) => {
     if (input.roomRentServiceId !== null) {
       const [svc] = await tx.select({ category: serviceCatalog.category }).from(serviceCatalog).where(eq(serviceCatalog.id, input.roomRentServiceId)).limit(1)
       if (!svc || svc.category !== 'room_rent') return { ok: false as const, error: 'room_rent_service_invalid' as const }
     }
+    // WS2 T9: the registration fee is an active service outside the clinical categories.
+    if (input.registrationServiceId != null) {
+      const [svc] = await tx.select({ category: serviceCatalog.category, isActive: serviceCatalog.isActive }).from(serviceCatalog)
+        .where(eq(serviceCatalog.id, input.registrationServiceId)).limit(1)
+      if (!svc || !svc.isActive || svc.category !== 'other') return { ok: false as const, error: 'registration_service_invalid' as const }
+    }
     const [current] = await tx.select().from(billingSettings).where(eq(billingSettings.id, 1)).for('update')
     const before = current ?? DEFAULT_SETTINGS
-    const changed = SETTING_KEYS.filter((k) => before[k] !== input[k]).sort()
+    const changed = SETTING_KEYS.filter((k) => input[k] !== undefined && before[k] !== input[k]).sort()
     const values = { ...input, updatedAt: new Date(), updatedByName: session.name }
     await tx.insert(billingSettings).values({ id: 1, ...values }).onConflictDoUpdate({ target: billingSettings.id, set: values })
     await logAudit(session, 'billing: updated billing settings', null, `fields=${changed.join(',')}`, tx)

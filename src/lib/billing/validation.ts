@@ -124,6 +124,9 @@ export const billingSettingsSchema = z.object({
   roomRentServiceId: positiveInt.nullable(),
   pharmacyGstRateBp: z.number().refine((v) => (GST_RATES_BP as readonly number[]).includes(v), 'Choose a valid GST rate'),
   pharmacyHsn: z.string().regex(/^\d{4,8}$/, 'HSN must be 4 to 8 digits'),
+  // WS2 T9: optional so older clients keep working; absent = unchanged.
+  registrationServiceId: positiveInt.nullable().optional(),
+  freeReviewDays: z.number().int().min(0).max(30).optional(),
 }).strict().superRefine((v, ctx) => {
   if (v.gstin !== null && stateCodeOfGstin(v.gstin) !== v.stateCode) {
     ctx.addIssue({ code: 'custom', path: ['gstin'], message: GSTIN_STATE_MESSAGE })

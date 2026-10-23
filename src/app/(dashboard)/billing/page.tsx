@@ -14,7 +14,8 @@ import type { ChargeStatus } from '@/lib/charge-status'
 // Wave E P1-19: every tile drills into the list it counts.
 import { getBillingQueue, getCollectionsToday } from '@/lib/queries/hospital-kpis'
 import { KpiTile } from '@/components/dashboards/KpiTile'
-import { CASH_DESK_ROLES } from '@/lib/role-policy'
+import { CASH_DESK_ROLES, INVOICE_READY_ROLES } from '@/lib/role-policy'
+import { InvoiceReadyButton } from '@/components/billing/InvoiceReadyButton' // WS2 T12
 
 const SECTION = 'overflow-hidden rounded-md border border-border bg-card'
 const SECTION_HEADER = 'flex items-center justify-between border-b border-border px-5 py-3'
@@ -75,12 +76,23 @@ export default async function BillingHomePage() {
       {/* SP4 work queue and the day's takings. */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiTile label="Draft invoices" value={queue.draftInvoices} sub="Waiting to be finalised" href="/billing/invoices?status=draft" icon={FileText} tone={queue.draftInvoices > 0 ? 'warning' : 'primary'} />
-        <KpiTile label="Lines to invoice" value={queue.uninvoicedLines} sub={`${formatPaise(queue.uninvoicedPaise)} captured, not invoiced`} href="/billing/capture" icon={ClipboardPlus} />
+        {/* WS2 T12: of the captured lines on no invoice, how many "Invoice all ready lines" would draft now. */}
+        <KpiTile label="Lines to invoice" value={queue.uninvoicedLines} sub={`${queue.readyLines} ready, ${queue.waitingLines} waiting for the visit/stay to close`} href="/billing/capture" icon={ClipboardPlus} />
         <KpiTile label="Pharmacy drafts to review" value={queue.pharmacyDraftCharges} sub="Bills raised at the pharmacy" href="/billing/charges?status=draft&source=pharmacy" icon={Pill} tone={queue.pharmacyDraftCharges > 0 ? 'warning' : 'primary'} />
         {CASH_DESK_ROLES.includes(session.role) && (
           <KpiTile label="Collected today" value={formatPaise(today.netPaise)} sub={`${today.receiptCount} receipt${today.receiptCount === 1 ? '' : 's'}`} href="/cash-desk" icon={Banknote} tone="success" />
         )}
       </div>
+
+      {INVOICE_READY_ROLES.includes(session.role) && (
+        <div className="mb-6 flex flex-wrap items-start gap-3 rounded-md border border-border bg-card p-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground">Lines ready to invoice: {queue.readyLines} ({formatPaise(queue.readyPaise)} before tax)</p>
+            <p className="text-xs text-muted-foreground">Completed visits, discharged stays and pharmacy sales become draft invoices; finalise them from Invoices or the Cash Desk.</p>
+          </div>
+          <InvoiceReadyButton />
+        </div>
+      )}
 
       {/* Charge workflow by status: each opens /billing/charges on that status. */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">

@@ -2,15 +2,17 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { POST as dispenseRoute } from '@/app/api/pharmacy/dispense/route'
 import { getDb } from '@/db/client'
-import { patients, medications, medicationInventory, medicationDispenses } from '@/db/schema'
+import { patients, medications, medicationInventory, medicationDispenses, chargeLines } from '@/db/schema'
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' | 'pharmacy' = 'pi'
-vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Dr. R. Kunam' })) }))
+vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Dr. R. Kunam', userId: null })) }))
 
 const createdDispenseIds: number[] = []
 const createdMedIds: number[] = []
 afterEach(async () => {
   sessionRole = 'pi'
+  // WS2 T8: a dispense bills itself (one pharmacy charge line per dispense).
+  for (const id of createdDispenseIds) await getDb().delete(chargeLines).where(eq(chargeLines.medicationDispenseId, id))
   while (createdDispenseIds.length > 0) await getDb().delete(medicationDispenses).where(eq(medicationDispenses.id, createdDispenseIds.pop()!))
   while (createdMedIds.length > 0) {
     const id = createdMedIds.pop()!
@@ -21,7 +23,7 @@ afterEach(async () => {
 
 async function makeMedWithStock(qty: number) {
   const db = getDb()
-  const [med] = await db.insert(medications).values({ name: `Route Test Med ${Date.now()}`, medicationClass: 'Test', form: 'tablet' }).returning()
+  const [med] = await db.insert(medications).values({ name: `Route Test Med ${Date.now()}`, medicationClass: 'Test', form: 'tablet', mrpPerUnitPaise: 200 }).returning() // WS2 T8: priced
   createdMedIds.push(med.id)
   await db.insert(medicationInventory).values({ medicationId: med.id, quantityOnHand: qty, reorderThreshold: 5, unit: 'tablets' })
   return med
@@ -35,7 +37,7 @@ describe('POST /api/pharmacy/dispense', () => {
   it('dispenses successfully as pi', async () => {
     const med = await makeMedWithStock(30)
     const [patientRow] = await getDb().select({ id: patients.id }).from(patients).limit(1)
-    const res = await dispenseRoute(req({ patientId: patientRow.id, medicationId: med.id, quantity: 5, notes: 'Test dispense' }) as never)
+    const res = await dispenseRoute(req({ patientId: patientRow.id, medicationId: med.id, quantity: 5, notes: 'Test dispense', batchNo: 'B1', expiryMonth: '2099-12' }) as never)
     expect(res.status).toBe(201)
     const body = await res.json()
     createdDispenseIds.push(body.id)
@@ -45,7 +47,7 @@ describe('POST /api/pharmacy/dispense', () => {
     sessionRole = 'pharmacy'
     const med = await makeMedWithStock(30)
     const [patientRow] = await getDb().select({ id: patients.id }).from(patients).limit(1)
-    const res = await dispenseRoute(req({ patientId: patientRow.id, medicationId: med.id, quantity: 5, notes: 'Test dispense' }) as never)
+    const res = await dispenseRoute(req({ patientId: patientRow.id, medicationId: med.id, quantity: 5, notes: 'Test dispense', batchNo: 'B1', expiryMonth: '2099-12' }) as never)
     expect(res.status).toBe(201)
     const body = await res.json()
     createdDispenseIds.push(body.id)
@@ -70,7 +72,7 @@ describe('POST /api/pharmacy/dispense', () => {
   it('rejects dispensing more than on hand', async () => {
     const med = await makeMedWithStock(3)
     const [patientRow] = await getDb().select({ id: patients.id }).from(patients).limit(1)
-    const res = await dispenseRoute(req({ patientId: patientRow.id, medicationId: med.id, quantity: 10 }) as never)
+    const res = await dispenseRoute(req({ patientId: patientRow.id, medicationId: med.id, quantity: 10, batchNo: 'B1', expiryMonth: '2099-12' }) as never)
     expect(res.status).toBe(409)
   })
 

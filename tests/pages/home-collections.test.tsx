@@ -39,7 +39,7 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('/home-collections', () => {
-  it.each(['pi', 'crc', 'billing', 'pharmacy', 'collector'])('%s is redirected before any query', async (r) => {
+  it.each(['crc', 'billing', 'pharmacy', 'collector'])('%s is redirected before any query', async (r) => {
     role = r
     await expect(Page(props())).rejects.toThrow('NEXT_REDIRECT')
     expect(redirect).toHaveBeenCalledWith('/')
@@ -67,6 +67,15 @@ describe('/home-collections', () => {
     render(await Page(props('2099-07-02')))
     const select = screen.getByRole('combobox', { name: /collector for Asha Rao/i })
     expect(within(select).getByRole('option', { name: 'Ravi Collector' })).toBeInTheDocument()
+  })
+
+  // WS2 T1: a doctor books home visits too (HOME_COLLECTION_BOOKING_ROLES + pi) but does not dispatch.
+  it('pi sees the board without the collector select', async () => {
+    role = 'pi'
+    render(await Page(props('2099-07-02')))
+    expect(redirect).not.toHaveBeenCalled()
+    expect(listCollectors).not.toHaveBeenCalled()
+    expect(screen.queryByRole('combobox', { name: /collector for/i })).toBeNull()
   })
 
   it('uses the IST date by default and a valid ?date', async () => {

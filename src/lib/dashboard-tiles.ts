@@ -78,7 +78,7 @@ export function hospitalTiles(role: Role, s: HospitalSnapshot): HospitalTile[] {
   if (scope.billing && s.billing) {
     tiles.push({
       id: 'billing-queue', label: 'Draft invoices', value: s.billing.draftInvoices,
-      sub: `${plural(s.billing.uninvoicedLines, 'line')} not invoiced (${formatPaise(s.billing.uninvoicedPaise)})`,
+      sub: `${plural(s.billing.uninvoicedLines, 'line')} not invoiced (${formatPaise(s.billing.uninvoicedPaise)}): ${s.billing.readyLines} ready, ${s.billing.waitingLines} waiting`, // WS2 T12
       href: '/billing/invoices?status=draft', icon: FileText, tone: s.billing.draftInvoices > 0 ? 'warning' : 'primary',
     })
   }

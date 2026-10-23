@@ -28,6 +28,8 @@ import type {
 } from '@/lib/tariff/validation'
 import type { ImportLookups, ServiceImportRow } from '@/lib/tariff/import'
 
+import type { WriteExecutor } from './executor' // WS2 T9
+
 type Db = ReturnType<typeof getDb>
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 type Exec = Db | Tx
@@ -103,7 +105,7 @@ const serviceSelect = (e: Exec) =>
   e.select({ ...getTableColumns(serviceCatalog), departmentCode: departments.code, departmentName: departments.name })
     .from(serviceCatalog).innerJoin(departments, eq(serviceCatalog.departmentId, departments.id))
 
-const rateSelect = (e: Exec) =>
+const rateSelect = (e: Pick<WriteExecutor, 'select'>) =>
   e.select({ ...getTableColumns(tariffRates), payerName: payers.name, departmentName: departments.name, roomCategoryCode: roomCategories.code })
     .from(tariffRates)
     .leftJoin(payers, eq(tariffRates.payerId, payers.id))
@@ -379,8 +381,9 @@ export async function deactivateRate(id: number, audit?: TariffAudit): Promise<R
   })
 }
 
-export async function loadPricingContext(serviceId: number): Promise<{ service: ServiceForPricing | null; rates: TariffRateCandidate[] }> {
-  const db = getDb()
+// WS2 T9: `executor` lets automatic capture read inside its caller's transaction.
+export async function loadPricingContext(serviceId: number, executor: WriteExecutor = getDb()): Promise<{ service: ServiceForPricing | null; rates: TariffRateCandidate[] }> {
+  const db = executor
   const [service] = await db.select({
     id: serviceCatalog.id, code: serviceCatalog.code, name: serviceCatalog.name, departmentId: serviceCatalog.departmentId,
     isActive: serviceCatalog.isActive, hsnSac: serviceCatalog.hsnSac, gstRateBp: serviceCatalog.gstRateBp,

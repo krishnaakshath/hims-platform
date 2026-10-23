@@ -43,6 +43,7 @@ describe('patient master schema', () => {
     patients: [
       { file: '2026-10-08-sp5-lab-home-collection.sql', columns: ['notification_opt_out', 'notification_opt_out_at'] },
       { file: '2026-10-10-sp8-abdm-nhcx.sql', columns: ['abha_verified_at', 'abha_verification_source', 'abha_verified_via'] }, // SP8
+      { file: '2026-10-24-ws1-0-allergy-columns.sql', columns: ['allergy_status'] }, // WS1 T1
     ],
   }
 

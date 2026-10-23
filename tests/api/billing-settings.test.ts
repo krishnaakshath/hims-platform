@@ -80,6 +80,18 @@ describe('PUT /api/billing/settings', () => {
     expect(await res.json()).toEqual({ error: 'Choose a room-rent service from the Room rent category' })
   })
 
+  // WS2 T9
+  it('accepts the registration service and free review days; refuses an invalid registration service or range', async () => {
+    const ok = await putSettings(send('/api/billing/settings', { ...SETTINGS, registrationServiceId: 12, freeReviewDays: 7 }))
+    expect(ok.status).toBe(200)
+    expect(updateBillingSettings).toHaveBeenCalledWith(expect.objectContaining({ registrationServiceId: 12, freeReviewDays: 7 }), expect.anything())
+    expect((await putSettings(send('/api/billing/settings', { ...SETTINGS, freeReviewDays: 31 }))).status).toBe(400)
+    vi.mocked(updateBillingSettings).mockResolvedValue({ ok: false, error: 'registration_service_invalid' })
+    const bad = await putSettings(send('/api/billing/settings', { ...SETTINGS, registrationServiceId: 9 }))
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toEqual({ error: 'Choose an active registration service from the Other category' })
+  })
+
   it('a deadlock is a 409 with the retry message; anything else a generic 500', async () => {
     vi.mocked(updateBillingSettings).mockRejectedValueOnce(Object.assign(new Error('x'), { code: '40P01' }))
     const res = await putSettings(send('/api/billing/settings', SETTINGS))

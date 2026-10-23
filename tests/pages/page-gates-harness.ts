@@ -349,7 +349,7 @@ export const PAGE_GATES: PageGateCase[] = [
   // SP5: sample label sheet -- LAB_LABEL_ROLES; no nav entry (reached from links).
   { route: '/lab-labels', load: () => import('@/app/(dashboard)/lab-labels/page'), props: { searchParams: Promise.resolve({ orders: '1' }) }, allowed: ['admin', 'pi', 'labs', 'frontdesk'] },
   // LeftNav.tsx /home-collections -- HOME_COLLECTION_BOOKING_ROLES
-  { route: '/home-collections', load: () => import('@/app/(dashboard)/home-collections/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'frontdesk', 'labs'] },
+  { route: '/home-collections', load: () => import('@/app/(dashboard)/home-collections/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'frontdesk', 'labs', 'pi'] }, // WS2 T1: + pi
   // LeftNav.tsx /collections -- COLLECTOR_ROUTE_ROLES
   { route: '/collections', load: () => import('@/app/(dashboard)/collections/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'collector'] },
   // end SP5
@@ -396,4 +396,6 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/billing/insurance-collections', load: () => import('@/app/(dashboard)/billing/insurance-collections/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/rcm/claims'])) },
   { route: '/billing/statements', load: () => import('@/app/(dashboard)/billing/statements/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/cash-desk'])) },
   // end Foundations T11
+  // WS1 T3: the consultation workspace -- WORKSPACE_READ_ROLES; labs goes to its worklist.
+  { route: '/encounters/[id]', load: () => import('@/app/(dashboard)/encounters/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'pi', 'crc'], deniedRedirect: { labs: '/labs' } },
 ]

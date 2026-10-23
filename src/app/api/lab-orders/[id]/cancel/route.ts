@@ -1,5 +1,6 @@
 // SP5: cancel through the lifecycle query. The reason is stored on the order; the query's audit
 // row carries ids only, never the reason text (the route writes no audit of its own).
+// WS2 T10: the response says what happened to the order's charge line.
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
 import { LAB_ORDER_ROLES } from '@/lib/role-policy'
@@ -26,5 +27,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return labServerError('lab cancel', err, 'Could not cancel the test')
   }
   if (!result.ok) return labTransitionError(result.error)
-  return NextResponse.json({ ok: true })
+  // WS2 T10: 'voided' | 'none' | 'credit_note_needed' (the line is on a finalised invoice).
+  return NextResponse.json({ ok: true, billing: result.billing })
 }

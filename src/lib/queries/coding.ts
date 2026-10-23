@@ -32,7 +32,7 @@ import type {
 } from '@/lib/coding/validation'
 import { isUniqueViolation } from '@/lib/db-errors'
 import { DEFAULT_TIMEZONE, istDateOf, todayIsoIn } from '@/lib/india-time'
-import { getCodesByIds, type CodeDetail } from './code-systems'
+import { findCurrentCode, getCodesByIds, type CodeDetail } from './code-systems'
 import type { WriteExecutor } from './executor'
 
 type Failure = { ok: false; error: CodingWriteError; issues?: CodingIssue[] }
@@ -90,12 +90,14 @@ export function actorFor(role: Role): EntryActor {
 type Guarded = LockedEncounterCoding & { actor: EntryActor }
 
 /** The shared write guard for diagnosis/procedure writes, in the order the rules are checked. */
-async function guardEntryWrite(tx: WriteExecutor, encounterId: number, session: Session): Promise<CodingWriteResult<Guarded>> {
+// WS1 T4: `forcedActor` lets the doctor's consultation workspace write as 'doctor' for any role
+// allowed there (admin included); SP6's own coding routes never pass it.
+async function guardEntryWrite(tx: WriteExecutor, encounterId: number, session: Session, forcedActor?: EntryActor): Promise<CodingWriteResult<Guarded>> {
   const locked = await lockEncounterCoding(tx, encounterId)
   if (!locked) return fail('not_found')
   const { coding, encounter } = locked
   if (encounter.status === 'cancelled') return fail('encounter_cancelled')
-  const actor = actorFor(session.role)
+  const actor = forcedActor ?? actorFor(session.role)
   if (actor === 'doctor') {
     if (!doctorMayPropose(coding.status)) return fail('locked')
   } else {
@@ -132,12 +134,17 @@ export function refusesSampleCodes(env: NodeJS.ProcessEnv = process.env): boolea
   return env.NODE_ENV === 'production'
 }
 
-/** Looks up a code and runs the write-time checks; errors refuse, warnings are returned. */
+/**
+ * Looks up a code and runs the write-time checks; errors refuse, warnings are returned.
+ * `currentIcd10Only` (WS1 T4, spec ruling 5): the code must be in the current, non-sample WHO
+ * ICD-10 version, else `code_not_current`.
+ */
 async function checkCode(
-  tx: WriteExecutor, codeId: number, entryKind: 'diagnosis' | 'procedure', onDate: string, patientId: string,
+  tx: WriteExecutor, codeId: number, entryKind: 'diagnosis' | 'procedure', onDate: string, patientId: string, currentIcd10Only = false,
 ): Promise<CodingWriteResult<{ code: CodeDetail; warnings: CodingIssue[] }>> {
   const code = (await getCodesByIds([codeId], tx)).get(codeId)
   if (!code) return fail('code_not_found')
+  if (currentIcd10Only && (code.kind !== 'icd10' || code.isSample || (await findCurrentCode('icd10', code.code, tx))?.id !== codeId)) return fail('code_not_current')
   if (code.isSample && refusesSampleCodes()) return fail('sample_code')
   const issues = checkCodeForEntry(code, entryKind, { onDate, ...(await patientFacts(tx, patientId)) })
   if (hasBlockingIssues(issues)) return fail('code_invalid', issues.filter((i) => i.severity === 'error'))
@@ -158,18 +165,24 @@ async function hasOtherLivePrimary(tx: WriteExecutor, encounterId: number, excep
 // Diagnoses
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * WS1 T4: options the consultation workspace passes (SP6's coding routes pass none): write as the
+ * doctor whatever the role, accept only current non-sample WHO ICD-10 codes, set the problem-list flag.
+ */
+export interface WorkspaceDiagnosisOptions { asDoctor?: boolean; currentIcd10Only?: boolean; onProblemList?: boolean }
+
 export async function addEncounterDiagnosis(
-  encounterId: number, input: AddDiagnosisRequest, session: Session, now: Date = new Date(),
+  encounterId: number, input: AddDiagnosisRequest, session: Session, now: Date = new Date(), opts: WorkspaceDiagnosisOptions = {},
 ): Promise<CodingWriteResult<{ diagnosisId: number; patientId: string; warnings: CodingIssue[] }>> {
   return runCodingTransaction(async (tx) => {
-    const g = await guardEntryWrite(tx, encounterId, session)
+    const g = await guardEntryWrite(tx, encounterId, session, opts.asDoctor ? 'doctor' : undefined)
     if (!g.ok) return g
     const { encounter, actor } = g.value
     if (actor === 'coder' && input.codeId === undefined) return fail('code_required')
     let code: CodeDetail | null = null
     let warnings: CodingIssue[] = []
     if (input.codeId !== undefined) {
-      const c = await checkCode(tx, input.codeId, 'diagnosis', encounter.encounterDate, encounter.patientId)
+      const c = await checkCode(tx, input.codeId, 'diagnosis', encounter.encounterDate, encounter.patientId, opts.currentIcd10Only)
       if (!c.ok) return c
       ;({ code, warnings } = c.value)
     }
@@ -193,6 +206,7 @@ export async function addEncounterDiagnosis(
       codedAt: status === 'coded' ? now : null,
       createdByName: session.name,
       createdAt: now,
+      onProblemList: opts.onProblemList ?? false, // WS1 T4
     }).returning({ id: diagnoses.id })
     await finishEntryWrite(tx, g.value, session, now)
     await logAudit(session, 'coding: added diagnosis', encounter.patientId,
@@ -213,10 +227,10 @@ async function lockDiagnosis(tx: WriteExecutor, encounterId: number, diagnosisId
 }
 
 export async function updateEncounterDiagnosis(
-  encounterId: number, diagnosisId: number, input: UpdateDiagnosisRequest, session: Session, now: Date = new Date(),
+  encounterId: number, diagnosisId: number, input: Partial<UpdateDiagnosisRequest>, session: Session, now: Date = new Date(), opts: WorkspaceDiagnosisOptions = {},
 ): Promise<CodingWriteResult<{ diagnosisId: number; patientId: string; warnings: CodingIssue[] }>> {
   return runCodingTransaction(async (tx) => {
-    const g = await guardEntryWrite(tx, encounterId, session)
+    const g = await guardEntryWrite(tx, encounterId, session, opts.asDoctor ? 'doctor' : undefined)
     if (!g.ok) return g
     const { encounter, actor } = g.value
     const row = await lockDiagnosis(tx, encounterId, diagnosisId)
@@ -229,10 +243,11 @@ export async function updateEncounterDiagnosis(
     const patch: Partial<typeof diagnoses.$inferInsert> = {}
     if (input.type !== undefined) patch.diagnosisType = input.type
     if (input.sequence !== undefined) patch.sequence = input.sequence
+    if (opts.onProblemList !== undefined) patch.onProblemList = opts.onProblemList // WS1 T4
     let warnings: CodingIssue[] = []
     let to = codeLabel(row.codeSystemKind, row.code)
     if (input.codeId !== undefined) {
-      const c = await checkCode(tx, input.codeId, 'diagnosis', encounter.encounterDate, encounter.patientId)
+      const c = await checkCode(tx, input.codeId, 'diagnosis', encounter.encounterDate, encounter.patientId, opts.currentIcd10Only)
       if (!c.ok) return c
       const { code } = c.value
       warnings = c.value.warnings
@@ -244,16 +259,16 @@ export async function updateEncounterDiagnosis(
     await tx.update(diagnoses).set(patch).where(eq(diagnoses.id, diagnosisId))
     await finishEntryWrite(tx, g.value, session, now)
     await logAudit(session, 'coding: changed diagnosis', encounter.patientId,
-      `encounter=${encounterId} diagnosis=${diagnosisId} from=${codeLabel(row.codeSystemKind, row.code)} to=${to} type=${type ?? 'none'}`, tx)
+      `encounter=${encounterId} diagnosis=${diagnosisId} from=${codeLabel(row.codeSystemKind, row.code)} to=${to} type=${type ?? 'none'}${opts.onProblemList === undefined ? '' : ` problemList=${opts.onProblemList}`}`, tx)
     return { ok: true, value: { diagnosisId, patientId: encounter.patientId, warnings } }
   })
 }
 
 export async function voidEncounterDiagnosis(
-  encounterId: number, diagnosisId: number, session: Session, now: Date = new Date(),
+  encounterId: number, diagnosisId: number, session: Session, now: Date = new Date(), opts: Pick<WorkspaceDiagnosisOptions, 'asDoctor'> = {},
 ): Promise<CodingWriteResult<{ diagnosisId: number; patientId: string }>> {
   return runCodingTransaction(async (tx) => {
-    const g = await guardEntryWrite(tx, encounterId, session)
+    const g = await guardEntryWrite(tx, encounterId, session, opts.asDoctor ? 'doctor' : undefined)
     if (!g.ok) return g
     const row = await lockDiagnosis(tx, encounterId, diagnosisId)
     if (!row) return fail('entry_not_found')

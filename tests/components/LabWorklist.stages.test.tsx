@@ -164,3 +164,18 @@ describe('LabWorklist stages', () => {
     await waitFor(() => expect(screen.getByText(/Received L261008-0043-8/)).toBeInTheDocument())
   })
 })
+
+// WS1 T10: a stat or urgent order carries a chip; routine orders do not; fasting is shown.
+describe('LabWorklist priority chip', () => {
+  it('shows STAT and Urgent chips and the fasting note, nothing for routine', () => {
+    render(<LabWorklist orders={[
+      order({ testName: 'Stat test', priority: 'stat' }),
+      order({ testName: 'Urgent test', priority: 'urgent', fastingRequired: true }),
+      order({ testName: 'Routine test', priority: 'routine' }),
+    ]} labTests={[]} role="labs" />)
+    expect(screen.getByText('STAT')).toBeInTheDocument()
+    expect(screen.getByText('Urgent')).toBeInTheDocument()
+    expect(screen.queryByText('Routine')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Fasting')).toHaveLength(1)
+  })
+})

@@ -58,11 +58,13 @@ describe('SP4 migration A (charge lines)', () => {
 
   it('creates each enum type with every value', () => {
     const s = readMigration(MIGRATION)
-    expect(chargeLineSourceEnum.enumValues).toEqual(['manual', 'room_rent', 'pharmacy'])
+    // WS2 T1 appends registration, consultation, lab_order, procedure in its own enum-values file
+    // (tests/db/ws-enum-values.test.ts); this SP4 migration creates the first three.
+    expect(chargeLineSourceEnum.enumValues.slice(0, 3)).toEqual(['manual', 'room_rent', 'pharmacy'])
     expect(chargeLineStatusEnum.enumValues).toEqual(['captured', 'invoiced', 'void'])
     expect(PRICE_SOURCES).toEqual(['base', 'department', 'payer', 'manual', 'pharmacy'])
-    for (const e of [chargeLineSourceEnum, chargeLineStatusEnum]) {
-      expect(s, e.enumName).toContain(`CREATE TYPE ${e.enumName} AS ENUM (${e.enumValues.map((v) => `'${v}'`).join(', ')});`)
+    for (const [name, values] of [[chargeLineSourceEnum.enumName, chargeLineSourceEnum.enumValues.slice(0, 3)], [chargeLineStatusEnum.enumName, chargeLineStatusEnum.enumValues]] as const) {
+      expect(s, name).toContain(`CREATE TYPE ${name} AS ENUM (${values.map((v) => `'${v}'`).join(', ')});`)
     }
   })
 

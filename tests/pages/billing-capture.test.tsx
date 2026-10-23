@@ -18,6 +18,7 @@ vi.mock('@/lib/queries/charge-capture', () => ({
   listUnbilledPharmacyPatients: vi.fn(async () => []),
   getPharmacyCaptureView: vi.fn(),
 }))
+vi.mock('@/lib/queries/invoice-ready', () => ({ listUnbilledOrders: vi.fn(async () => []) })) // WS2 T12
 vi.mock('@/components/billing/ChargeCaptureForm', () => ({ ChargeCaptureForm: vi.fn(() => <div data-testid="capture-form" />) }))
 vi.mock('@/components/billing/ChargeLinesTable', () => ({ ChargeLinesTable: vi.fn(() => <div data-testid="lines-table" />) }))
 vi.mock('@/components/billing/RoomRentButton', () => ({ RoomRentButton: vi.fn(() => <button type="button">Post room rent to date</button>) }))
@@ -27,6 +28,7 @@ import { ChargeLinesTable } from '@/components/billing/ChargeLinesTable'
 import { ChargeCaptureForm } from '@/components/billing/ChargeCaptureForm'
 import { logAudit } from '@/lib/audit'
 import CapturePage from '@/app/(dashboard)/billing/capture/page'
+import { listUnbilledOrders } from '@/lib/queries/invoice-ready'
 
 const page = async (sp: Record<string, string>) => render(await CapturePage({ searchParams: Promise.resolve(sp) }))
 
@@ -43,6 +45,23 @@ beforeEach(() => {
 })
 
 describe('/billing/capture', () => {
+  // WS2 T12: orders whose automatic charge did not land, so billing can capture them by hand.
+  it('lists orders not billed (UHID, item, kind) on the landing view, and hides the section when there are none', async () => {
+    vi.mocked(listUnbilledOrders).mockResolvedValueOnce([
+      { kind: 'lab_order', id: 5, patientId: 'RD-0009', patientName: 'Meena Iyer', uhid: 'HMS-000900', itemName: 'Complete blood count', createdAt: new Date('2099-06-01T05:00:00Z') },
+      { kind: 'procedure', id: 6, patientId: 'RD-0010', patientName: 'Arun Das', uhid: null, itemName: 'Wound dressing', createdAt: new Date('2099-06-01T06:00:00Z') },
+    ])
+    const { unmount } = await page({})
+    expect(screen.getByRole('heading', { name: 'Orders not billed' })).toBeInTheDocument()
+    expect(screen.getByText('Meena Iyer')).toBeInTheDocument()
+    expect(screen.getByText(/HMS-000900 · Lab test · Complete blood count/)).toBeInTheDocument()
+    expect(screen.getByText(/UHID — · Procedure · Wound dressing/)).toBeInTheDocument()
+    expect(screen.queryByText(/RD-0010/)).toBeNull()
+    unmount()
+    await page({})
+    expect(screen.queryByRole('heading', { name: 'Orders not billed' })).toBeNull()
+  })
+
   it('lists today\'s visits and admitted patients with links, and empty states', async () => {
     vi.mocked(listCaptureContexts).mockResolvedValue({
       encounters: [{ id: 7, patientId: 'RD-0002', patientName: 'Ravi Kumar', uhid: 'HMS-000200', opdToken: 4, departmentName: 'General Medicine', providerName: 'Dr Iyer' }],

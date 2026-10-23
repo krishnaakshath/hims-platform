@@ -4,6 +4,7 @@ import { logAudit } from '@/lib/audit'
 import { listMedicationsWithInventory, listActiveMedicationEpisodeSummary } from '@/lib/queries/medications'
 import { PharmacyDashboard } from '@/components/dashboards/PharmacyDashboard'
 import { getPharmacyKpis } from '@/lib/queries/hospital-kpis' // Wave E
+import { MEDICATION_PRICE_ROLES } from '@/lib/role-policy' // WS2 T8
 
 export default async function PharmacyPage({ searchParams }: { searchParams?: Promise<{ stock?: string | string[] }> } = {}) {
   const session = await requireSessionOrRedirect()
@@ -26,6 +27,7 @@ export default async function PharmacyPage({ searchParams }: { searchParams?: Pr
       stockFilter={stockFilter}
       // The counter pages (/pharmacy/patient-lookup, /pharmacy/billing) admit pharmacy and admin only.
       canUseCounter={['admin', 'pharmacy'].includes(session.role)}
+      canEditPrice={MEDICATION_PRICE_ROLES.includes(session.role)} // WS2 T8: MRP column editor
     />
   )
 }

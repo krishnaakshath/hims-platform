@@ -1,9 +1,10 @@
 import { getDb } from '@/db/client'
-import { homeCollectionVisits, labOrders, labResults, labTests, patients, providers } from '@/db/schema'
+import { homeCollectionVisits, labOrders, labRequisitions, labResults, labTests, patients, providers } from '@/db/schema'
 import { asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { LabQuoteStatus } from '@/lib/labs/catalog' // SP5
 import { listImagingForOrders, type ImagingAttachment } from '@/lib/queries/documents'
 import { PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status' // SP5
+import type { LabOrderPriority } from '@/lib/labs/validation' // WS1 T10
 
 // SP5: orders are created only as part of a requisition (createLabRequisition in
 // src/lib/queries/lab-requisitions.ts); the single-order createLabOrder was removed.
@@ -117,6 +118,9 @@ export interface WorklistRow {
   patientUhid: string | null
   result: { value: string; unit: string | null; referenceRange: string | null; notes: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
   // end SP5
+  // WS1 T10: from the requisition ('routine' for a legacy order without one).
+  priority: LabOrderPriority
+  fastingRequired: boolean
 }
 
 function mapWorklistRow(r: {
@@ -127,6 +131,8 @@ function mapWorklistRow(r: {
   provider: typeof providers.$inferSelect
   visitDate: string | null
   result: typeof labResults.$inferSelect | null
+  priority: LabOrderPriority | null
+  fastingRequired: boolean | null
 }): Omit<WorklistRow, 'attachments'> {
   return {
     id: r.order.id,
@@ -153,10 +159,12 @@ function mapWorklistRow(r: {
       ? { value: r.result.value, unit: r.result.unit, referenceRange: r.result.referenceRange, notes: r.result.notes, flag: r.result.flag, resultedByName: r.result.resultedByName, amendedAt: r.result.amendedAt }
       : null,
     // end SP5
+    priority: r.priority ?? 'routine', // WS1 T10
+    fastingRequired: r.fastingRequired ?? false, // WS1 T10
   }
 }
 
-/** All orders across all patients, newest first, joined for display on the worklist screen. */
+/** All orders across all patients, stat then urgent first, then newest first, joined for display on the worklist screen. */
 export async function listWorklist(): Promise<WorklistRow[]> {
   const rows = await getDb()
     .select({
@@ -177,6 +185,8 @@ export async function listWorklist(): Promise<WorklistRow[]> {
       provider: providers,
       visitDate: homeCollectionVisits.visitDate, // SP5
       result: labResults, // SP5
+      priority: labRequisitions.priority, // WS1 T10
+      fastingRequired: labRequisitions.fastingRequired, // WS1 T10
     })
     .from(labOrders)
     .innerJoin(labTests, eq(labOrders.labTestId, labTests.id))
@@ -184,7 +194,8 @@ export async function listWorklist(): Promise<WorklistRow[]> {
     .innerJoin(providers, eq(labOrders.orderedByProviderId, providers.id))
     .leftJoin(homeCollectionVisits, eq(homeCollectionVisits.id, labOrders.homeCollectionVisitId)) // SP5
     .leftJoin(labResults, eq(labResults.labOrderId, labOrders.id)) // SP5
-    .orderBy(desc(labOrders.orderedAt))
+    .leftJoin(labRequisitions, eq(labRequisitions.id, labOrders.requisitionId)) // WS1 T10
+    .orderBy(sql`case ${labRequisitions.priority} when 'stat' then 0 when 'urgent' then 1 else 2 end`, desc(labOrders.orderedAt), desc(labOrders.id))
 
   const mapped = rows.map(mapWorklistRow)
   const byOrder = await listImagingForOrders(mapped.map((r) => r.id))
