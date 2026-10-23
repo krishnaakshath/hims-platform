@@ -2736,7 +2736,7 @@ export const paymentRequests = pgTable('payment_requests', {
   index('payment_requests_patient_idx').on(t.patientId),
 ])
 export type PaymentRequestRow = typeof paymentRequests.$inferSelect
-// Migration-only (scripts/migrations/2026-10-23-payment-requests-utr-guard.sql), like the SP4
+// Migration-only (scripts/migrations/2026-10-24-payment-requests-utr-guard.sql), like the SP4
 // document triggers: UNIQUE INDEX patient_payments_upi_reference_unique ON patient_payments
 // ((upper(regexp_replace(reference, '[[:space:]-]', '', 'g')))) WHERE mode = 'upi' AND reference IS NOT NULL
 // -- one receipt per normalised UTR across patients (UPI_REFERENCE_UNIQUE in patient-ledger.ts).

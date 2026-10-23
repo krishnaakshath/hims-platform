@@ -153,7 +153,7 @@ export type RecordPaymentError = 'patient_not_found' | 'admission_mismatch' | 'i
   | 'duplicate_utr' // Foundations T11
 
 // Foundations T11: the unique expression index over the normalised UPI reference
-// (scripts/migrations/2026-10-23-payment-requests-utr-guard.sql).
+// (scripts/migrations/2026-10-24-payment-requests-utr-guard.sql).
 export const UPI_REFERENCE_UNIQUE = 'patient_payments_upi_reference_unique'
 
 /**
