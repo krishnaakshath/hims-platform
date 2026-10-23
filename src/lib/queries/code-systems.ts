@@ -174,8 +174,17 @@ export async function searchCodes(i: { kind: CodeSystemKind; q: string; onDate: 
   hits: CodeSearchHit[]
 }> {
   const db = getDb()
-  const [cs] = await db.select({ id: codeSystems.id, version: codeSystems.version, isSample: codeSystems.isSample })
-    .from(codeSystems).where(and(eq(codeSystems.kind, i.kind), eq(codeSystems.isCurrent, true))).limit(1)
+  const pick = { id: codeSystems.id, version: codeSystems.version, isSample: codeSystems.isSample }
+  let [cs] = await db.select(pick).from(codeSystems)
+    .where(and(eq(codeSystems.kind, i.kind), eq(codeSystems.isCurrent, true))).limit(1)
+  if (cs?.isSample) {
+    // Picker rule: a SAMPLE set is never offered once a licensed version of the kind is loaded,
+    // even if a sample is somehow flagged current. Use the newest licensed version instead.
+    const [licensed] = await db.select(pick).from(codeSystems)
+      .where(and(eq(codeSystems.kind, i.kind), eq(codeSystems.isSample, false)))
+      .orderBy(desc(codeSystems.importedAt), desc(codeSystems.id)).limit(1)
+    if (licensed) cs = licensed
+  }
   if (!cs) return { codeSystem: null, hits: [] }
 
   const exact = normalizeCode(i.q)
