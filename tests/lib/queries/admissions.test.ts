@@ -218,6 +218,8 @@ describe('dischargeAdmission', () => {
 describe.skipIf(!process.env.DATABASE_URL)('dischargeAdmission: follow-up order + encounter (DB)', () => {
   const RUN = `${Date.now()}`
   const PATIENT = `TEST-SP3-${RUN}-DIS`
+  // WS3 T1/T2: one active stay per patient (admissions_one_active_per_patient), so two stays at once need two patients.
+  const PATIENT2 = `TEST-SP3-${RUN}-DIS2`
   const FIVE_DS = { dischargeDiagnosis: 'TEST_SP3 Dx', dischargeDrugs: 'TEST_SP3 Rx', dischargeDevices: 'None', dischargeDiet: 'Soft', dischargeSummaryNotes: 'TEST_SP3 notes' }
   const DAY = 24 * 60 * 60 * 1000
   let providerId = 0
@@ -232,7 +234,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dischargeAdmission: follow-up order 
     return { startsAt: start, endsAt: new Date(start.getTime() + 30 * 60000) }
   }
 
-  async function admit(opts: { withRoom?: boolean } = {}) {
+  async function admit(opts: { withRoom?: boolean; patientId?: string } = {}) {
     const db = getDb()
     let roomId: number | null = null
     if (opts.withRoom) {
@@ -240,7 +242,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dischargeAdmission: follow-up order 
       roomIds.push(room.id)
       roomId = room.id
     }
-    const adm = await createAdmission({ patientId: PATIENT, roomId, attendingProviderId: providerId, admissionType: 'elective', createdFromAssignmentId: null })
+    const adm = await createAdmission({ patientId: opts.patientId ?? PATIENT, roomId, attendingProviderId: providerId, admissionType: 'elective', createdFromAssignmentId: null })
     admissionIds.push(adm.id)
     return adm
   }
@@ -250,6 +252,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dischargeAdmission: follow-up order 
     const [p] = await db.insert(providers).values({ name: `TEST_SP3 Dr Discharge ${RUN}`, specialty: 'Test', colorTag: '#000000' }).returning()
     providerId = p.id
     await db.insert(patients).values({ id: PATIENT, name: 'TEST_SP3 Discharge Patient', dob: '1975-05-05' })
+    await db.insert(patients).values({ id: PATIENT2, name: 'TEST_SP3 Discharge Patient 2', dob: '1975-05-05' }) // WS3 T2
   })
 
   afterEach(async () => {
@@ -259,7 +262,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dischargeAdmission: follow-up order 
       const followUpAppts = await db.select({ id: admissions.followUpAppointmentId }).from(admissions).where(inArray(admissions.id, admissionIds))
       for (const r of followUpAppts) if (r.id !== null) appointmentIds.push(r.id)
     }
-    await db.delete(followUpOrders).where(eq(followUpOrders.patientId, PATIENT))
+    await db.delete(followUpOrders).where(inArray(followUpOrders.patientId, [PATIENT, PATIENT2]))
     if (encounterIds.length) await db.delete(encounters).where(inArray(encounters.id, encounterIds.splice(0)))
     if (admissionIds.length) await db.delete(admissions).where(inArray(admissions.id, admissionIds.splice(0)))
     if (appointmentIds.length) await db.delete(appointments).where(inArray(appointments.id, appointmentIds.splice(0)))
@@ -269,7 +272,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dischargeAdmission: follow-up order 
 
   afterAll(async () => {
     const db = getDb()
-    await db.delete(patients).where(eq(patients.id, PATIENT))
+    await db.delete(patients).where(inArray(patients.id, [PATIENT, PATIENT2]))
     await db.delete(providers).where(eq(providers.id, providerId))
   })
 
@@ -385,7 +388,7 @@ describe.skipIf(!process.env.DATABASE_URL)('dischargeAdmission: follow-up order 
 
   it('two discharges booking the same doctor slot at once: exactly one wins, one appointment row', async () => {
     const a1 = await admit()
-    const a2 = await admit()
+    const a2 = await admit({ patientId: PATIENT2 })
     const slot = slotAt(11)
     const results = await Promise.all([a1, a2].map((a) => dischargeAdmission(a.id, { ...FIVE_DS, followUp: slot, followUpPlan: null }, SESSION)))
     expect(results.filter((x) => x.ok)).toHaveLength(1)

@@ -47,10 +47,12 @@ const CASES: Case[] = [
   { name: 'EnterLabResultModal', ui: () => <EnterLabResultModal orderId={1} testName="CBC" defaultUnit="g/dL" defaultReferenceRange="12-16" category="lab" attachments={[]} onClose={vi.fn()} />, submit: /^Save result$/ },
   { name: 'DeletePatientDialog', ui: () => <DeletePatientDialog target={{ id: 'RD-1', name: 'P' }} onClose={vi.fn()} onDeleted={vi.fn()} />, submit: /delete/i },
   // WS6 T9: department then doctor; the success toast needs a ToastProvider.
-  { name: 'CheckInModal', ui: () => <ToastProvider><CheckInModal providers={[{ id: 1, name: 'Dr A', departmentId: 1 }]} departments={[{ id: 1, name: 'General Medicine' }]} rooms={[]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} /></ToastProvider>, submit: /^Check In$/ },
+  { name: 'CheckInModal', ui: () => <ToastProvider><CheckInModal providers={[{ id: 1, name: 'Dr A', departmentId: 1 }]} departments={[{ id: 1, name: 'General Medicine' }]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} /></ToastProvider>, submit: /^Check In$/ },
   { name: 'NoteForm', ui: () => <NoteForm patientId="RD-1" canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: /new note/i })) }, submit: /^(Save|Create)/ },
   { name: 'CarePlanSection', ui: () => <CarePlanSection patientId="RD-1" plans={[]} canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: 'New Care Plan' })) }, submit: /^Save$/ },
-  { name: 'BedBoard block', ui: () => <BedBoard rooms={[{ id: 5, ward: 'A', roomNumber: '1', bedNumber: 'B', status: 'available', blockedReason: null, occupantName: null, occupantPatientId: null, attendingProviderName: null, admittedAt: null }]} canManageFacilities canBlock canAdmit={false} />,
+  { name: 'BedBoard block', ui: () => <BedBoard rooms={[{ id: 5, ward: 'A', roomNumber: '1', bedNumber: 'B', status: 'available', blockedReason: null, occupantName: null, occupantPatientId: null, attendingProviderName: null, admittedAt: null,
+    admissionId: null, occupantUhid: null, occupantGender: null, genderRestriction: null, roomCategoryName: null, bedTariffPaise: null, daysStayed: null, wardGenderOverride: false }]}
+    availableRooms={[]} canManageFacilities canBlock canAdmit={false} canTransfer={false} canDischarge={false} canManageMedications={false} canCaptureCharges={false} />,
     before: () => { fireEvent.click(screen.getByRole('button', { name: /1/ })) }, submit: /^Block room$/ },
   { name: 'LabWorklist collect', ui: () => <LabWorklist role="labs" labTests={[]} orders={[{ id: 9, status: 'ordered', orderedAt: new Date(), collectedAt: null, patientId: 'RD-1', patientName: 'P', testId: 1, testName: 'CBC', testCode: 'CBC', category: 'lab', attachments: [], orderedByProviderId: 1, orderedByProviderName: 'Dr',
     sampleId: null, requisitionId: 1, homeCollectionVisitId: null, visitDate: null, receivedAt: null, verifiedAt: null, patientUhid: null, result: null }]} />, submit: /^Mark collected$/ },
@@ -90,6 +92,9 @@ describe('DischargeAdmissionModal', () => {
   it('shows a network failure from the signature step', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
     render(<DischargeAdmissionModal admissionId={1} onClose={vi.fn()} />)
+    // WS3 T6: the dues step first; its context load fails too, and the doctor may still go on (the server gates dues).
+    expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.network)
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     for (const label of ['Diagnosis', 'Drugs', 'Devices', 'Diet', 'Discharge summary notes']) fireEvent.change(screen.getByLabelText(label), { target: { value: 'x' } })
     fireEvent.click(screen.getByText('Next'))
     fireEvent.change(screen.getByLabelText('Typed signature'), { target: { value: 'Dr. Chen' } })

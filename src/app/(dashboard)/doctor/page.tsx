@@ -36,6 +36,11 @@ import type { ScheduleRow } from '@/components/DoctorScheduleTimeline'
 import { Share2 } from 'lucide-react'
 import { listOpenReferralsToProvider, providerDepartmentId } from '@/lib/queries/referrals'
 // end WS1 T4
+import { AcknowledgeResultButton } from '@/components/labs/AcknowledgeResultButton' // WS4 T11
+// WS4 T12: open/notified critical alerts on this doctor's orders or admitted patients.
+import { acknowledgeableCriticalOrderIds, listOpenCriticalAlerts } from '@/lib/queries/lab-critical'
+import { CriticalResultBanner } from '@/components/labs/CriticalResultBanner'
+// end WS4 T12
 
 // Wave E: a compact titled list card for the doctor's own work queues.
 function DoctorList({ title, icon: Icon, count, empty, href, linkLabel, children }: {
@@ -122,12 +127,18 @@ export default async function DoctorPortalPage() {
   // Wave E P1-02: lab work comes from the orders this doctor placed (orderedByProviderId),
   // never from the free-text panel match, and "pending" is no longer merely-ordered tests.
   const workload: DoctorWorkload | null = providerMatch ? await getDoctorWorkload(providerMatch.id, session.name) : null
-  const resultsToVerify = workload?.resultsToVerify ?? []
-  const criticalToVerify = resultsToVerify.filter((r) => r.flag === 'critical').length
+  // WS4 T11: verification is the reporting department's; the doctor reviews and acknowledges.
+  const resultsToReview = workload?.resultsToReview ?? []
+  const criticalToReview = resultsToReview.filter((r) => r.flag === 'critical').length
+  // WS4 T12: listed for the matched provider row; Acknowledge only where the staff link owns the order
+  // (the route checks the same under the order lock).
+  const [criticalAlerts, criticalAckIds] = providerMatch
+    ? await Promise.all([listOpenCriticalAlerts({ providerId: providerMatch.id }), acknowledgeableCriticalOrderIds(session)])
+    : [[], []]
 
   await logAudit(session, 'viewed My Patients (doctor portal)', null)
 
-  const highAcuityCount = criticalToVerify + pendingAssignments.filter(a => a.urgency === 'urgent' || a.urgency === 'emergency').length
+  const highAcuityCount = criticalToReview + pendingAssignments.filter(a => a.urgency === 'urgent' || a.urgency === 'emergency').length
   const initials = session.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
 
   return (
@@ -162,6 +173,8 @@ export default async function DoctorPortalPage() {
           </div>
         </div>
       </div>
+
+      <CriticalResultBanner alerts={criticalAlerts} canNotify={false} canAcknowledge={(a) => criticalAckIds.includes(a.orderId)} /> {/* WS4 T12 */}
 
       {/* Main EMR Grid - 3 Columns for high density */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
@@ -229,20 +242,20 @@ export default async function DoctorPortalPage() {
             </DoctorList>
           )}
 
-          {/* SP5 + Wave E P1-02: results on my own orders waiting for verification, critical first. */}
+          {/* WS4 T11: verified results on my own orders that I have not acknowledged, critical first. */}
           <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
             <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-3">
               <div className="flex items-center gap-2">
-                <Activity className={`h-4 w-4 ${criticalToVerify > 0 ? 'text-destructive' : 'text-warning'}`} />
-                <h3 className="text-sm font-semibold text-foreground">Results to verify</h3>
+                <Activity className={`h-4 w-4 ${criticalToReview > 0 ? 'text-destructive' : 'text-warning'}`} />
+                <h3 className="text-sm font-semibold text-foreground">Results to review</h3>
               </div>
-              <span className="rounded-full bg-warning/20 px-2 py-0.5 text-xs font-bold text-warning-foreground">{resultsToVerify.length}</span>
+              <span className="rounded-full bg-warning/20 px-2 py-0.5 text-xs font-bold text-warning-foreground">{resultsToReview.length}</span>
             </div>
-            {resultsToVerify.length === 0 ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">No results awaiting verification.</div>
+            {resultsToReview.length === 0 ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">No verified results awaiting your review.</div>
             ) : (
               <ul className="divide-y divide-border">
-                {resultsToVerify.slice(0, 8).map((l) => (
+                {resultsToReview.slice(0, 8).map((l) => (
                   <li key={l.orderId} className="flex items-center justify-between gap-2 p-4">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">
@@ -250,16 +263,16 @@ export default async function DoctorPortalPage() {
                         {l.flag === 'critical' && <span className="ml-2 rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-destructive">Critical</span>}
                         {l.flag === 'abnormal' && <span className="ml-2 rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-warning">Abnormal</span>}
                       </p>
-                      <p className="text-xs text-muted-foreground">{l.testName} · Resulted {formatIstDateTime(l.resultedAt)}</p>
+                      <p className="text-xs text-muted-foreground">{l.testName}{l.uhid ? ` · ${l.uhid}` : ''} · Resulted {formatIstDateTime(l.resultedAt)}</p>
                     </div>
-                    <Link href="/labs?stage=to-verify" className="rounded bg-primary/10 px-2 py-1 text-[10px] font-bold uppercase text-primary hover:bg-primary/20">Verify</Link>
+                    <AcknowledgeResultButton orderId={l.orderId} testName={l.testName} />
                   </li>
                 ))}
               </ul>
             )}
             <div className="border-t border-border px-4 py-2.5 text-center text-xs text-muted-foreground">
               {workload ? `${workload.labsAwaitingResult} orders awaiting results` : 'No provider record matched'}
-              {' · '}<Link href="/labs?stage=to-verify" className="font-medium text-primary hover:underline">Open lab worklist</Link>
+              {' · '}<Link href="/labs" className="font-medium text-primary hover:underline">Open lab worklist</Link>
             </div>
           </div>
 

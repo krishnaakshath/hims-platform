@@ -674,6 +674,46 @@ import { POST as postHandoverOtp } from '@/app/api/home-collections/[id]/otp/rou
 import { POST as postDoorPayment } from '@/app/api/home-collections/[id]/payment/route'
 import { POST as postDoorPaymentConfirm } from '@/app/api/home-collections/[id]/payment/confirm/route'
 // end WS6 T12
+// WS3 T2
+import { POST as postInpatientAdmission } from '@/app/api/inpatient/admissions/route'
+import { ADMISSION_ROLES } from '@/lib/role-policy'
+// end WS3 T2
+// WS3 T3
+import { GET as getAdmissionFormContext } from '@/app/api/inpatient/admissions/form-context/route'
+// end WS3 T3
+// WS3 T4
+import { PATCH as patchInpatientRoom } from '@/app/api/inpatient/rooms/[id]/route'
+import { MASTER_DATA_ADMIN_ROLES as WS3T4_MASTER_DATA_ADMIN_ROLES } from '@/lib/role-policy'
+// end WS3 T4
+// WS3 T5
+import { GET as getDuesClearance, POST as postDuesClearance } from '@/app/api/inpatient/admissions/[id]/dues-clearance/route'
+import { DUES_VIEW_ROLES, BILLING_AUTHORITY_ROLES as WS3T5_BILLING_AUTHORITY_ROLES } from '@/lib/role-policy'
+// end WS3 T5
+// WS3 T6
+import { GET as getDischargeContext } from '@/app/api/inpatient/admissions/[id]/discharge-context/route'
+// end WS3 T6
+// WS3 T7
+import { GET as getAdmissionVitals, POST as postAdmissionVitals } from '@/app/api/inpatient/admissions/[id]/vitals/route'
+import { GET as getMedicationRound } from '@/app/api/inpatient/medication-round/route'
+import { CLINICAL_ROLES as WS3T7_CLINICAL_ROLES } from '@/lib/role-policy'
+// end WS3 T7
+// WS4 T8
+import { GET as getLabTestAnalytes, PUT as putLabTestAnalytes } from '@/app/api/lab-tests/[id]/analytes/route'
+import { LAB_ANALYTE_READ_ROLES, LAB_ANALYTE_EDIT_ROLES } from '@/lib/role-policy'
+// end WS4 T8
+// WS4 T11
+import { POST as postLabAcknowledge } from '@/app/api/lab-orders/[id]/acknowledge/route'
+import { POST as postLabCosign } from '@/app/api/lab-orders/[id]/cosign/route'
+import { LAB_SIGNOFF_ROLES } from '@/lib/role-policy'
+// end WS4 T11
+// WS4 T12
+import { POST as postLabCriticalNotify } from '@/app/api/lab-orders/[id]/critical/notify/route'
+import { POST as postLabCriticalAck } from '@/app/api/lab-orders/[id]/critical/acknowledge/route'
+import { LAB_CRITICAL_ACK_ROLES, LAB_CRITICAL_NOTIFY_ROLES } from '@/lib/role-policy'
+// end WS4 T12
+// WS4 T13
+import { GET as getLabTestsFromTariff, POST as postLabTestsFromTariff } from '@/app/api/lab-tests/from-tariff/route'
+// end WS4 T13
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -908,7 +948,7 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/lab-orders/[id]/collect', call: () => settle(() => postLabCollect(send('POST', `/api/lab-orders/${BOGUS_ID}/collect`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_COLLECT_ROLES] },
   { name: 'POST /api/lab-orders/receive', call: () => settle(() => postLabReceive(send('POST', '/api/lab-orders/receive'))), allowed: [...LAB_RECEIVE_ROLES] },
   { name: 'POST /api/lab-orders/[id]/result', call: () => settle(() => postLabResult(send('POST', `/api/lab-orders/${BOGUS_ID}/result`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_RESULT_ENTRY_ROLES] },
-  { name: 'POST /api/lab-orders/[id]/verify', call: () => settle(() => postLabVerify(send('POST', `/api/lab-orders/${BOGUS_ID}/verify`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_VERIFY_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/verify', call: () => settle(() => postLabVerify(send('POST', `/api/lab-orders/${BOGUS_ID}/verify`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_VERIFY_ROLES] }, // WS4 T11: now admin, labs, pi (department rule in the query)
   { name: 'POST /api/lab-orders/[id]/cancel', call: () => settle(() => postLabCancel(send('POST', `/api/lab-orders/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_ORDER_ROLES] },
   { name: 'POST /api/lab-orders/[id]/imaging', call: () => settle(() => postLabImaging(send('POST', `/api/lab-orders/${BOGUS_ID}/imaging`), ctx({ id: BOGUS_ID }))), allowed: [...LAB_COLLECT_ROLES] },
   // SP5 home collection (Task 11): no ?patient / ?date and `{}` bodies fail validation before any query.
@@ -931,7 +971,7 @@ export const API_GATES: ApiGateCase[] = [
   // end SP6
   // SP6 code systems: code search (no PHI) for CODE_LOOKUP_ROLES, the version list for CODING_ROLES,
   // import / set current for CODE_SYSTEM_ADMIN_ROLES. Allowed roles' bodies fail validation before any write.
-  { name: 'GET /api/coding/codes', call: () => settle(() => getCodes(get('/api/coding/codes'))), allowed: [...CODE_LOOKUP_ROLES] },
+  { name: 'GET /api/coding/codes', call: () => settle(() => getCodes(get('/api/coding/codes'))), allowed: [...CODE_LOOKUP_ROLES] }, // WS3 T3: CODE_LOOKUP_ROLES now includes frontdesk
   { name: 'GET /api/coding/code-systems', call: () => settle(() => listCodeSystemsRoute()), allowed: [...CODING_ROLES] },
   { name: 'POST /api/coding/code-systems/import', call: () => settle(() => postCodeImport(send('POST', '/api/coding/code-systems/import'))), allowed: [...CODE_SYSTEM_ADMIN_ROLES] },
   { name: 'PATCH /api/coding/code-systems/[id]', call: () => settle(() => patchCodeSystem(send('PATCH', `/api/coding/code-systems/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...CODE_SYSTEM_ADMIN_ROLES] },
@@ -1212,6 +1252,49 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/home-collections/[id]/payment', call: () => settle(() => postDoorPayment(send('POST', `/api/home-collections/${BOGUS_ID}/payment`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
   { name: 'POST /api/home-collections/[id]/payment/confirm', call: () => settle(() => postDoorPaymentConfirm(send('POST', `/api/home-collections/${BOGUS_ID}/payment/confirm`), ctx({ id: BOGUS_ID }))), allowed: [...COLLECTOR_ROUTE_ROLES] },
   // end WS6 T12
+  // WS3 T2: the admission form -- ADMISSION_ROLES (a pi's ownership check runs after the body parse); an empty body is the 400 an allowed role gets.
+  { name: 'POST /api/inpatient/admissions', call: () => postInpatientAdmission(send('POST', '/api/inpatient/admissions', {})), allowed: [...ADMISSION_ROLES] },
+  // end WS3 T2
+  // WS3 T3: the admission dialog's form context -- ADMISSION_ROLES; no patientId is the 400 an allowed role gets.
+  { name: 'GET /api/inpatient/admissions/form-context', call: () => getAdmissionFormContext(get('/api/inpatient/admissions/form-context')), allowed: [...ADMISSION_ROLES] },
+  // end WS3 T3
+  // WS3 T4: a bed's ward-gender restriction -- MASTER_DATA_ADMIN_ROLES; an empty body is the 400 an allowed role gets.
+  { name: 'PATCH /api/inpatient/rooms/[id]', call: () => patchInpatientRoom(send('PATCH', `/api/inpatient/rooms/${BOGUS_ID}`, {}), ctx({ id: BOGUS_ID })), allowed: [...WS3T4_MASTER_DATA_ADMIN_ROLES] },
+  // end WS3 T4
+  // WS3 T5: discharge dues -- GET DUES_VIEW_ROLES (an unknown admission is the 404 an allowed role gets);
+  // POST BILLING_AUTHORITY_ROLES (a too-short reason is the 400 an allowed role gets).
+  { name: 'GET /api/inpatient/admissions/[id]/dues-clearance', call: () => getDuesClearance(get(`/api/inpatient/admissions/${BOGUS_ID}/dues-clearance`), ctx({ id: BOGUS_ID })), allowed: [...DUES_VIEW_ROLES] },
+  { name: 'POST /api/inpatient/admissions/[id]/dues-clearance', call: () => postDuesClearance(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/dues-clearance`, { overrideReason: 'x' }), ctx({ id: BOGUS_ID })), allowed: [...WS3T5_BILLING_AUTHORITY_ROLES] },
+  // end WS3 T5
+  // WS3 T6: the discharge dialog's context -- DISCHARGE_ROLES (an unknown admission is the 404 an allowed role gets).
+  { name: 'GET /api/inpatient/admissions/[id]/discharge-context', call: () => getDischargeContext(get(`/api/inpatient/admissions/${BOGUS_ID}/discharge-context`), ctx({ id: BOGUS_ID })), allowed: [...DISCHARGE_ROLES] },
+  // end WS3 T6
+  // WS3 T7: nursing vitals -- VITALS_ROLES (= CLINICAL_ROLES); an unknown admission is the 404 (GET) and an
+  // empty reading the 400 (POST) an allowed role gets. The medication round -- CLINICAL_ROLES; a bad date is the 400.
+  { name: 'GET /api/inpatient/admissions/[id]/vitals', call: () => getAdmissionVitals(get(`/api/inpatient/admissions/${BOGUS_ID}/vitals`), ctx({ id: BOGUS_ID })), allowed: [...VITALS_ROLES] },
+  { name: 'POST /api/inpatient/admissions/[id]/vitals', call: () => postAdmissionVitals(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/vitals`, {}), ctx({ id: BOGUS_ID })), allowed: [...VITALS_ROLES] },
+  { name: 'GET /api/inpatient/medication-round', call: () => getMedicationRound(get('/api/inpatient/medication-round?date=bad')), allowed: [...WS3T7_CLINICAL_ROLES] },
+  // end WS3 T7
+  // WS4 T8: a lab test's analytes -- GET LAB_SETUP_ROLES + LAB_RESULT_ENTRY_ROLES (an unknown test is the 404 an
+  // allowed role gets); PUT LAB_SETUP_ROLES (an empty body is the 400 an allowed role gets).
+  { name: 'GET /api/lab-tests/[id]/analytes', call: () => getLabTestAnalytes(get(`/api/lab-tests/${BOGUS_ID}/analytes`), ctx({ id: BOGUS_ID })), allowed: [...LAB_ANALYTE_READ_ROLES] },
+  { name: 'PUT /api/lab-tests/[id]/analytes', call: () => putLabTestAnalytes(send('PUT', `/api/lab-tests/${BOGUS_ID}/analytes`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_ANALYTE_EDIT_ROLES] },
+  // end WS4 T8
+  // WS4 T11: a doctor's acknowledgement / co-sign -- LAB_SIGNOFF_ROLES; an unknown order is the 404 (acknowledge, empty
+  // body allowed) and a missing typed name the 400 (co-sign) an allowed role gets. The verify row above now admits labs.
+  { name: 'POST /api/lab-orders/[id]/acknowledge', call: () => postLabAcknowledge(send('POST', `/api/lab-orders/${BOGUS_ID}/acknowledge`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_SIGNOFF_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/cosign', call: () => postLabCosign(send('POST', `/api/lab-orders/${BOGUS_ID}/cosign`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_SIGNOFF_ROLES] },
+  // end WS4 T11
+  // WS4 T12: critical-value call log (`{}` fails the strict body: 400) and acknowledgement (empty body allowed; the
+  // unknown order is the 404 an allowed role gets).
+  { name: 'POST /api/lab-orders/[id]/critical/notify', call: () => postLabCriticalNotify(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/notify`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_CRITICAL_NOTIFY_ROLES] },
+  { name: 'POST /api/lab-orders/[id]/critical/acknowledge', call: () => postLabCriticalAck(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/acknowledge`, {}), ctx({ id: BOGUS_ID })), allowed: [...LAB_CRITICAL_ACK_ROLES] },
+  // end WS4 T12
+  // WS4 T13: the catalogue from the tariff master -- LAB_SETUP_ROLES. GET lists the candidates (200); POST `{}`
+  // fails the strict body (400) for an allowed role.
+  { name: 'GET /api/lab-tests/from-tariff', call: () => getLabTestsFromTariff(), allowed: [...LAB_SETUP_ROLES] },
+  { name: 'POST /api/lab-tests/from-tariff', call: () => postLabTestsFromTariff(send('POST', '/api/lab-tests/from-tariff', {})), allowed: [...LAB_SETUP_ROLES] },
+  // end WS4 T13
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1394,6 +1477,32 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // Multipart route: a non-multipart body is the 400 an allowed role gets, after the gate (the limiter is mocked above).
   { name: 'POST /api/settings/branding/assets', call: () => postBrandingAsset(send('POST', '/api/settings/branding/assets', NOT_JSON)), allowed: BRAND_SETTINGS_ROLES },
   // end WL final review
+  // WS3 T2
+  { name: 'POST /api/inpatient/admissions', call: () => postInpatientAdmission(send('POST', '/api/inpatient/admissions', NOT_JSON)), allowed: ADMISSION_ROLES },
+  // end WS3 T2
+  // WS3 T4
+  { name: 'PATCH /api/inpatient/rooms/[id]', call: () => patchInpatientRoom(send('PATCH', `/api/inpatient/rooms/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: WS3T4_MASTER_DATA_ADMIN_ROLES },
+  // end WS3 T4
+  // WS3 T5
+  { name: 'POST /api/inpatient/admissions/[id]/dues-clearance', call: () => postDuesClearance(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/dues-clearance`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: WS3T5_BILLING_AUTHORITY_ROLES },
+  // end WS3 T5
+  // WS3 T7
+  { name: 'POST /api/inpatient/admissions/[id]/vitals', call: () => postAdmissionVitals(send('POST', `/api/inpatient/admissions/${BOGUS_ID}/vitals`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: VITALS_ROLES },
+  // end WS3 T7
+  // WS4 T8
+  { name: 'PUT /api/lab-tests/[id]/analytes', call: () => putLabTestAnalytes(send('PUT', `/api/lab-tests/${BOGUS_ID}/analytes`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_ANALYTE_EDIT_ROLES },
+  // end WS4 T8
+  // WS4 T11
+  { name: 'POST /api/lab-orders/[id]/acknowledge', call: () => postLabAcknowledge(send('POST', `/api/lab-orders/${BOGUS_ID}/acknowledge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SIGNOFF_ROLES },
+  { name: 'POST /api/lab-orders/[id]/cosign', call: () => postLabCosign(send('POST', `/api/lab-orders/${BOGUS_ID}/cosign`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_SIGNOFF_ROLES },
+  // end WS4 T11
+  // WS4 T12
+  { name: 'POST /api/lab-orders/[id]/critical/notify', call: () => postLabCriticalNotify(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/notify`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_CRITICAL_NOTIFY_ROLES },
+  { name: 'POST /api/lab-orders/[id]/critical/acknowledge', call: () => postLabCriticalAck(send('POST', `/api/lab-orders/${BOGUS_ID}/critical/acknowledge`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: LAB_CRITICAL_ACK_ROLES },
+  // end WS4 T12
+  // WS4 T13
+  { name: 'POST /api/lab-tests/from-tariff', call: () => postLabTestsFromTariff(send('POST', '/api/lab-tests/from-tariff', NOT_JSON)), allowed: LAB_SETUP_ROLES },
+  // end WS4 T13
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

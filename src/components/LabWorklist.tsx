@@ -17,6 +17,9 @@ import { formatDateTimeIn, formatIsoDate } from '@/lib/india-time'
 import { LAB_COLLECT_ROLES, LAB_LABEL_ROLES, LAB_ORDER_ROLES, LAB_RECEIVE_ROLES, LAB_REPORT_READ_ROLES, LAB_REPORT_RELEASE_ROLES, LAB_RESULT_ENTRY_ROLES, LAB_VERIFY_ROLES } from '@/lib/role-policy'
 import { ReleaseReportButton, type ReleasedReport } from '@/components/labs/ReleaseReportButton'
 // end SP5
+import type { AnalyteDef } from '@/lib/labs/analytes' // WS4 T9
+import type { AnalyteResultRow } from '@/lib/queries/lab-result-values' // WS4 T9
+import { VERIFY_DENIAL_MESSAGE, verificationDenial, type VerifyDenial } from '@/lib/labs/verification' // WS4 T11
 
 export interface WorklistOrder {
   id: number
@@ -44,11 +47,17 @@ export interface WorklistOrder {
   receivedAt: Date | null
   verifiedAt: Date | null
   patientUhid: string | null
-  result: { value: string; unit: string | null; referenceRange?: string | null; notes?: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
+  result: { value: string; unit: string | null; referenceRange?: string | null; notes?: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null; analytes?: AnalyteResultRow[] } | null
   // end SP5
   // WS1 T10: from the requisition (listWorklist sorts stat, then urgent, first).
   priority?: 'routine' | 'urgent' | 'stat'
   fastingRequired?: boolean
+  // WS4 T9: choose each analyte's reference range in the entry form.
+  patientSex?: 'male' | 'female' | null
+  ageDays?: number
+  // WS4 T11: the test's reporting department and who entered the result (who may verify).
+  testDepartmentId?: number | null
+  resultedByUserId?: number | null
 }
 
 export interface LabTestOption {
@@ -109,6 +118,8 @@ interface Caps {
   canPrintLabel: boolean
   canResult: boolean
   canVerify: boolean
+  /** WS4 T11: why this viewer may not verify a resulted order, or null when they may. */
+  verifyDenial: (o: WorklistOrder) => VerifyDenial | null
   canCancel: boolean
   canAttachImaging: boolean
 }
@@ -146,6 +157,9 @@ function LabRow({
 }) {
   const o = order
   const busy = busyId === o.id
+  // WS4 T11: Verify stays visible to the verify roles; when unavailable it is disabled with the reason.
+  const denial = o.status === 'resulted' && caps.canVerify ? caps.verifyDenial(o) : null
+  const denialId = `verify-denial-${o.id}`
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2.5 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -174,6 +188,14 @@ function LabRow({
               {' · '}by {o.result.resultedByName}{o.result.amendedAt ? ' (amended)' : ''}
             </p>
           )}
+          {/* WS4 T9: the flagged analytes of a per-analyte result, so the verifier sees them at a glance. */}
+          {o.result && (o.result.analytes ?? []).some((a) => a.flag !== 'normal') && (
+            <p className="text-xs text-foreground">
+              {(o.result.analytes ?? []).filter((a) => a.flag !== 'normal').map((a, i) => (
+                <span key={a.analyteId}>{i > 0 && ' · '}{a.name} {a.value}{a.unit ? ` ${a.unit}` : ''} <span className={FLAG_CLASS[a.flag]}>({FLAG_LABEL[a.flag]})</span></span>
+              ))}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <PriorityChip priority={o.priority} />
@@ -189,7 +211,7 @@ function LabRow({
             <Button size="xs" variant="outline" onClick={() => onOpenResult(o)} disabled={busy}>Amend</Button>
           )}
           {o.status === 'resulted' && caps.canVerify && (
-            <Button size="xs" onClick={() => onVerify(o.id)} disabled={busy}>Verify</Button>
+            <Button size="xs" onClick={() => onVerify(o.id)} disabled={busy || denial !== null} aria-describedby={denial ? denialId : undefined}>Verify</Button>
           )}
           {o.sampleId && caps.canPrintLabel && (o.status === 'collected' || o.status === 'scheduled') && (
             <Link href={`/lab-labels?orders=${o.id}`} className="text-xs font-medium text-primary hover:underline">Print label</Link>
@@ -202,6 +224,7 @@ function LabRow({
           )}
         </div>
       </div>
+      {denial && <p id={denialId} className="mt-1 text-right text-xs text-muted-foreground">{VERIFY_DENIAL_MESSAGE[denial]}</p>}
       <ImagingAttachmentStrip attachments={o.attachments} />
       {cancelFor?.id === o.id && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -242,7 +265,13 @@ function Section({ title, count, empty, children }: { title: string; count: numb
 }
 
 // `stage` (Wave E P1-15): show only that worklist section (a labs-home tile or the doctor's Verify link).
-export function LabWorklist({ orders, labTests, role, stage = null }: { orders: WorklistOrder[]; labTests: LabTestOption[]; role: Role; stage?: LabStage | null }) {
+// `analytesByTest` (WS4 T9): each test's active analytes; a test listed there is entered per analyte.
+// `verifierDepartmentId` / `userId` (WS4 T11): the viewer's staff-linked department (null = not
+// linked) and user id, so Verify explains itself when this viewer may not verify a row.
+export function LabWorklist({ orders, labTests, role, stage = null, analytesByTest = {}, verifierDepartmentId = null, userId = null }: {
+  orders: WorklistOrder[]; labTests: LabTestOption[]; role: Role; stage?: LabStage | null; analytesByTest?: Record<number, AnalyteDef[]>
+  verifierDepartmentId?: number | null; userId?: number | null
+}) {
   const router = useRouter()
   const [busyId, setBusyId] = useState<number | null>(null)
   const [rowError, setRowError] = useState<RowError | null>(null)
@@ -252,13 +281,16 @@ export function LabWorklist({ orders, labTests, role, stage = null }: { orders: 
   const [collectedNotice, setCollectedNotice] = useState<{ id: number; sampleId: string } | null>(null)
   const [releasedNotice, setReleasedNotice] = useState<ReleasedReport | null>(null)
 
-  // SP5 role split (src/lib/role-policy.ts): labs enters results, pi verifies, only the
+  // SP5 role split (src/lib/role-policy.ts): labs enters results, the reporting department verifies (WS4 T11), only the
   // ordering clinicians cancel; frontdesk and collector have no worklist actions.
   const caps: Caps = {
     canCollect: LAB_COLLECT_ROLES.includes(role),
     canPrintLabel: LAB_LABEL_ROLES.includes(role),
     canResult: LAB_RESULT_ENTRY_ROLES.includes(role),
     canVerify: LAB_VERIFY_ROLES.includes(role),
+    verifyDenial: (o) => verificationDenial({
+      status: o.status, verifierDepartmentId, testDepartmentId: o.testDepartmentId ?? null, verifierUserId: userId, resultedByUserId: o.resultedByUserId ?? null,
+    }),
     canCancel: LAB_ORDER_ROLES.includes(role),
     canAttachImaging: LAB_COLLECT_ROLES.includes(role),
   }
@@ -407,6 +439,9 @@ export function LabWorklist({ orders, labTests, role, stage = null }: { orders: 
           // Amend: prefill the current result so a correction never blanks a field.
           initial={resultFor.status === 'resulted' && resultFor.result ? resultFor.result : null}
           onClose={() => setResultFor(null)}
+          analytes={analytesByTest[resultFor.testId] ?? []}
+          patientSex={resultFor.patientSex ?? null}
+          ageDays={resultFor.ageDays ?? 0}
         />
       )}
 

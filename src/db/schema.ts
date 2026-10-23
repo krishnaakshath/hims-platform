@@ -1,6 +1,7 @@
 import { pgTable, text, timestamp, date, boolean, jsonb, integer, bigint, pgEnum, serial, uniqueIndex, index, pgSequence, check, foreignKey, primaryKey, unique, uuid, time, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 import { smallint } from 'drizzle-orm/pg-core' // WS1 T2
+import { numeric } from 'drizzle-orm/pg-core' // WS4 T8
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
@@ -844,7 +845,12 @@ export const rooms = pgTable('rooms', {
   occupiedByPatientId: text('occupied_by_patient_id').references(() => patients.id),
   // SP2: tariff room category (nullable; rooms predate categories).
   roomCategoryId: integer('room_category_id').references(() => roomCategories.id),
-})
+  // WS3 T1
+  genderRestriction: text('gender_restriction', { enum: ['male', 'female'] }), // null = mixed ward
+  // end WS3 T1
+}, (t) => [
+  check('rooms_gender_restriction_valid', sql`${t.genderRestriction} IS NULL OR ${t.genderRestriction} IN ('male', 'female')`), // WS3 T1
+])
 
 export const doctorAssignmentVisitTypeEnum = pgEnum('doctor_assignment_visit_type', ['inpatient', 'outpatient'])
 export const doctorAssignmentUrgencyEnum = pgEnum('doctor_assignment_urgency', ['routine', 'urgent', 'emergency'])
@@ -896,7 +902,19 @@ export const admissions = pgTable('admissions', {
   dischargeSummaryNotes: text('discharge_summary_notes'),
   followUpAppointmentId: integer('follow_up_appointment_id').references(() => appointments.id),
   createdFromAssignmentId: integer('created_from_assignment_id').references(() => doctorAssignments.id),
-})
+  // WS3 T1 (payer and deposit live in admission_coverage, not here)
+  expectedStayDays: integer('expected_stay_days'),
+  attendantName: text('attendant_name'),
+  attendantRelationship: text('attendant_relationship'),
+  attendantPhone: text('attendant_phone'),
+  wardGenderOverrideReason: text('ward_gender_override_reason'),
+  wardGenderOverrideByName: text('ward_gender_override_by_name'),
+  admittedByName: text('admitted_by_name'),
+  // end WS3 T1
+}, (t) => [
+  check('admissions_expected_stay_range', sql`${t.expectedStayDays} IS NULL OR (${t.expectedStayDays} BETWEEN 1 AND 365)`), // WS3 T1
+  uniqueIndex('admissions_one_active_per_patient').on(t.patientId).where(sql`status = 'admitted'`), // WS3 T1
+])
 
 export const admissionTransfers = pgTable('admission_transfers', {
   id: serial('id').primaryKey(),
@@ -906,6 +924,7 @@ export const admissionTransfers = pgTable('admission_transfers', {
   reason: text('reason').notNull(),
   transferredByName: text('transferred_by_name').notNull(),
   transferredAt: timestamp('transferred_at').defaultNow().notNull(),
+  wardGenderOverrideReason: text('ward_gender_override_reason'), // WS3 T1
 })
 
 // SP3 encounters & follow-up (scripts/migrations/2026-10-07-sp3-encounters-follow-up.sql)
@@ -3236,3 +3255,173 @@ export const providerLeave = pgTable('provider_leave', {
   unique('provider_leave_provider_date_unique').on(t.providerId, t.leaveDate),
 ])
 // end WS6 T6
+// WS3 T5: discharge dues clearances (spec 3.2 item 13, §4; scripts/migrations/2026-10-24-ws3-dues-clearance.sql).
+// Append-only: billing (BILLING_AUTHORITY_ROLES) records the dues at the moment of clearing; an
+// outstanding amount needs an override reason. Detail rows of the admission, so they cascade.
+export const admissionDuesClearances = pgTable('admission_dues_clearances', {
+  id: serial('id').primaryKey(),
+  admissionId: integer('admission_id').notNull().references(() => admissions.id, { onDelete: 'cascade' }),
+  chargesPaise: bigint('charges_paise', { mode: 'number' }).notNull(),
+  paidPaise: bigint('paid_paise', { mode: 'number' }).notNull(),
+  insurerSharePaise: bigint('insurer_share_paise', { mode: 'number' }).notNull(),
+  outstandingPaise: bigint('outstanding_paise', { mode: 'number' }).notNull(),
+  overrideReason: text('override_reason'),
+  clearedByName: text('cleared_by_name').notNull(),
+  clearedByUserId: integer('cleared_by_user_id').references(() => users.id),
+  clearedAt: timestamp('cleared_at').defaultNow().notNull(),
+}, (t) => [
+  index('admission_dues_clearances_admission_idx').on(t.admissionId, t.clearedAt),
+  check('admission_dues_clearances_reason', sql`${t.outstandingPaise} = 0 OR ${t.overrideReason} IS NOT NULL`),
+  check('admission_dues_clearances_amounts', sql`${t.chargesPaise} >= 0 AND ${t.paidPaise} >= 0 AND ${t.insurerSharePaise} >= 0 AND ${t.outstandingPaise} >= 0`),
+  check('admission_dues_clearances_reason_length', sql`${t.overrideReason} IS NULL OR char_length(${t.overrideReason}) BETWEEN 10 AND 500`),
+])
+export type AdmissionDuesClearanceRow = typeof admissionDuesClearances.$inferSelect
+// end WS3 T5
+// WS4 T8: lab analytes, age/sex reference ranges and per-analyte result values (spec 3.3 items
+// 17-22, §4; scripts/migrations/2026-10-24-ws4-lab-analytes.sql). Pure flagging rules live in
+// src/lib/labs/analytes.ts. Cascades (pinned in tests/db/migrate-runner.test.ts):
+//   lab_test_analytes -> lab_tests: catalogue detail of the test. The app never deletes a lab test
+//     (it is deactivated); a test with orders cannot be deleted (lab_orders is NO ACTION), and an
+//     analyte with results cannot be deleted (lab_result_values.analyte_id is NO ACTION), so the
+//     cascade only ever removes the definitions of an unused test.
+//   lab_analyte_ranges -> lab_test_analytes: the ranges are part of the definition.
+//   lab_result_values -> lab_results / lab_orders: the per-analyte detail of the one summary result.
+export const LAB_ANALYTE_VALUE_TYPES = ['numeric', 'option', 'text'] as const
+export const LAB_ANALYTE_RANGE_SEXES = ['any', 'male', 'female'] as const
+export const LAB_RESULT_INTERPRETATIONS = ['N', 'L', 'H', 'LL', 'HH', 'A', 'AA'] as const
+export const LAB_RESULT_FLAG_SOURCES = ['auto', 'manual'] as const
+const rangeBound = (name: string) => numeric(name, { precision: 14, scale: 4, mode: 'number' })
+
+export const labTestAnalytes = pgTable('lab_test_analytes', {
+  id: serial('id').primaryKey(),
+  labTestId: integer('lab_test_id').notNull().references(() => labTests.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  unit: text('unit'),
+  valueType: text('value_type', { enum: LAB_ANALYTE_VALUE_TYPES }).default('numeric').notNull(),
+  decimals: integer('decimals'),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  loincCode: text('loinc_code'),
+  options: jsonb('options').$type<string[]>(),
+  abnormalOptions: jsonb('abnormal_options').$type<string[]>(),
+  criticalOptions: jsonb('critical_options').$type<string[]>(),
+  isActive: boolean('is_active').default(true).notNull(),
+}, (t) => [
+  uniqueIndex('lab_test_analytes_test_code_unique').on(t.labTestId, t.code),
+  check('lab_test_analytes_value_type_valid', sql`${t.valueType} IN ('numeric', 'option', 'text')`),
+  check('lab_test_analytes_decimals_range', sql`${t.decimals} IS NULL OR ${t.decimals} BETWEEN 0 AND 4`),
+])
+export type LabTestAnalyteRow = typeof labTestAnalytes.$inferSelect
+
+export const labAnalyteRanges = pgTable('lab_analyte_ranges', {
+  id: serial('id').primaryKey(),
+  analyteId: integer('analyte_id').notNull().references(() => labTestAnalytes.id, { onDelete: 'cascade' }),
+  sex: text('sex', { enum: LAB_ANALYTE_RANGE_SEXES }).default('any').notNull(),
+  // Age band in days, [min, max); max null = no upper limit.
+  ageMinDays: integer('age_min_days').default(0).notNull(),
+  ageMaxDays: integer('age_max_days'),
+  normalLow: rangeBound('normal_low'),
+  normalHigh: rangeBound('normal_high'),
+  criticalLow: rangeBound('critical_low'),
+  criticalHigh: rangeBound('critical_high'),
+  displayText: text('display_text'),
+}, (t) => [
+  index('lab_analyte_ranges_analyte_idx').on(t.analyteId),
+  check('lab_analyte_ranges_sex_valid', sql`${t.sex} IN ('any', 'male', 'female')`),
+  check('lab_analyte_ranges_age_band', sql`${t.ageMinDays} >= 0 AND (${t.ageMaxDays} IS NULL OR ${t.ageMaxDays} > ${t.ageMinDays})`),
+  check('lab_analyte_ranges_bounds_ordered', sql`(${t.criticalLow} IS NULL OR ${t.normalLow} IS NULL OR ${t.criticalLow} <= ${t.normalLow})
+    AND (${t.normalLow} IS NULL OR ${t.normalHigh} IS NULL OR ${t.normalLow} <= ${t.normalHigh})
+    AND (${t.normalHigh} IS NULL OR ${t.criticalHigh} IS NULL OR ${t.normalHigh} <= ${t.criticalHigh})
+    AND (${t.criticalLow} IS NULL OR ${t.criticalHigh} IS NULL OR ${t.criticalLow} <= ${t.criticalHigh})`),
+])
+export type LabAnalyteRangeRow = typeof labAnalyteRanges.$inferSelect
+
+export const labResultValues = pgTable('lab_result_values', {
+  id: serial('id').primaryKey(),
+  labResultId: integer('lab_result_id').notNull().references(() => labResults.id, { onDelete: 'cascade' }),
+  labOrderId: integer('lab_order_id').notNull().references(() => labOrders.id, { onDelete: 'cascade' }),
+  analyteId: integer('analyte_id').notNull().references(() => labTestAnalytes.id),
+  valueText: text('value_text').notNull(),
+  valueNumeric: rangeBound('value_numeric'),
+  // Snapshots at entry: a later edit of the definition never rewrites a reported value.
+  unit: text('unit'),
+  referenceRangeText: text('reference_range_text'),
+  flag: labResultFlagEnum('flag').default('normal').notNull(),
+  interpretation: text('interpretation', { enum: LAB_RESULT_INTERPRETATIONS }),
+  flagSource: text('flag_source', { enum: LAB_RESULT_FLAG_SOURCES }).default('auto').notNull(),
+  flagReason: text('flag_reason'),
+}, (t) => [
+  uniqueIndex('lab_result_values_result_analyte_unique').on(t.labResultId, t.analyteId),
+  index('lab_result_values_order_idx').on(t.labOrderId),
+  index('lab_result_values_analyte_idx').on(t.analyteId),
+  check('lab_result_values_interpretation_valid', sql`${t.interpretation} IS NULL OR ${t.interpretation} IN ('N', 'L', 'H', 'LL', 'HH', 'A', 'AA')`),
+  check('lab_result_values_flag_source_valid', sql`${t.flagSource} IN ('auto', 'manual')`),
+  check('lab_result_values_flag_reason_length', sql`${t.flagReason} IS NULL OR char_length(${t.flagReason}) <= 500`),
+])
+export type LabResultValueRow = typeof labResultValues.$inferSelect
+// end WS4 T8
+// WS4 T11: doctor acknowledgement and co-sign of a lab result (spec 3.4, §4;
+// scripts/migrations/2026-10-24-ws4-lab-signoffs.sql). One row per (order, kind, provider).
+// lab_order_id CASCADE (pinned in tests/db/migrate-runner.test.ts): a sign-off is detail of its
+// order. provider_id / user_id stay NO ACTION (providers and users are never deleted while orders
+// reference them; the seed's clear step deletes lab_orders, and so these rows, first).
+export const LAB_SIGNOFF_KINDS = ['acknowledge', 'cosign'] as const
+export type LabSignoffKind = (typeof LAB_SIGNOFF_KINDS)[number]
+
+export const labResultSignoffs = pgTable('lab_result_signoffs', {
+  id: serial('id').primaryKey(),
+  labOrderId: integer('lab_order_id').notNull().references(() => labOrders.id, { onDelete: 'cascade' }),
+  kind: text('kind', { enum: LAB_SIGNOFF_KINDS }).notNull(),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  userId: integer('user_id').references(() => users.id),
+  signedByName: text('signed_by_name').notNull(),
+  note: text('note'),
+  signedAt: timestamp('signed_at').defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('lab_result_signoffs_order_kind_provider_unique').on(t.labOrderId, t.kind, t.providerId),
+  index('lab_result_signoffs_provider_idx').on(t.providerId),
+  check('lab_result_signoffs_kind_valid', sql`${t.kind} IN ('acknowledge', 'cosign')`),
+  check('lab_result_signoffs_note_length', sql`${t.note} IS NULL OR char_length(${t.note}) <= 300`),
+])
+export type LabResultSignoffRow = typeof labResultSignoffs.$inferSelect
+// end WS4 T11
+// WS4 T12: critical-value alerts (spec 3.5, §4; scripts/migrations/2026-10-24-ws4-critical-alerts.sql).
+// One alert per lab order (unique lab_order_id), raised inside the result transaction when the
+// summary flag becomes critical and withdrawn when an amendment removes it. Lifecycle
+// open -> notified -> acknowledged (or withdrawn). lab_order_id and patient_id CASCADE (pinned in
+// tests/db/migrate-runner.test.ts): an alert is detail of its order. The user ids stay NO ACTION
+// (the seed's clear step deletes these rows before users).
+export const LAB_CRITICAL_ALERT_STATUSES = ['open', 'notified', 'acknowledged', 'withdrawn'] as const
+export const LAB_CRITICAL_NOTIFY_CHANNELS = ['phone', 'in_person', 'in_app'] as const
+
+export const labCriticalAlerts = pgTable('lab_critical_alerts', {
+  id: serial('id').primaryKey(),
+  labOrderId: integer('lab_order_id').notNull().references(() => labOrders.id, { onDelete: 'cascade' }),
+  patientId: text('patient_id').notNull().references(() => patients.id, { onDelete: 'cascade' }),
+  summary: text('summary').notNull(),
+  status: text('status', { enum: LAB_CRITICAL_ALERT_STATUSES }).default('open').notNull(),
+  raisedAt: timestamp('raised_at').defaultNow().notNull(),
+  notifiedAt: timestamp('notified_at'),
+  notifiedByName: text('notified_by_name'),
+  notifiedByUserId: integer('notified_by_user_id').references(() => users.id),
+  notifiedToName: text('notified_to_name'),
+  notifyChannel: text('notify_channel', { enum: LAB_CRITICAL_NOTIFY_CHANNELS }),
+  readBack: boolean('read_back'),
+  acknowledgedAt: timestamp('acknowledged_at'),
+  acknowledgedByName: text('acknowledged_by_name'),
+  acknowledgedByUserId: integer('acknowledged_by_user_id').references(() => users.id),
+  ackNote: text('ack_note'),
+  withdrawnAt: timestamp('withdrawn_at'),
+}, (t) => [
+  uniqueIndex('lab_critical_alerts_lab_order_unique').on(t.labOrderId),
+  index('lab_critical_alerts_patient_idx').on(t.patientId),
+  index('lab_critical_alerts_status_idx').on(t.status),
+  check('lab_critical_alerts_status_valid', sql`${t.status} IN ('open', 'notified', 'acknowledged', 'withdrawn')`),
+  check('lab_critical_alerts_channel_valid', sql`${t.notifyChannel} IS NULL OR ${t.notifyChannel} IN ('phone', 'in_person', 'in_app')`),
+  check('lab_critical_alerts_summary_length', sql`char_length(${t.summary}) BETWEEN 1 AND 500`),
+  check('lab_critical_alerts_notified_to_length', sql`${t.notifiedToName} IS NULL OR char_length(${t.notifiedToName}) <= 120`),
+  check('lab_critical_alerts_ack_note_length', sql`${t.ackNote} IS NULL OR char_length(${t.ackNote}) <= 300`),
+  check('lab_critical_alerts_phone_read_back', sql`${t.notifyChannel} IS DISTINCT FROM 'phone' OR ${t.readBack} = true`),
+])
+export type LabCriticalAlertRow = typeof labCriticalAlerts.$inferSelect
+// end WS4 T12

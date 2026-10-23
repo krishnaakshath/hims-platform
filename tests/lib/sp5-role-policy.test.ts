@@ -18,7 +18,7 @@ describe('SP5 role policy', () => {
     expect(LAB_COLLECT_ROLES).toEqual(['admin', 'pi', 'labs'])
     expect(LAB_RECEIVE_ROLES).toEqual(['admin', 'labs'])
     expect(LAB_RESULT_ENTRY_ROLES).toEqual(['admin', 'labs'])
-    expect(LAB_VERIFY_ROLES).toEqual(['admin', 'pi'])
+    expect(LAB_VERIFY_ROLES).toEqual(['admin', 'labs', 'pi']) // WS4 T11: + labs (the pathologist)
     expect(LAB_REPORT_RELEASE_ROLES).toEqual(['admin', 'pi', 'labs'])
     expect(LAB_REPORT_READ_ROLES).toEqual(['admin', 'pi', 'crc', 'labs'])
     expect(LAB_LABEL_ROLES).toEqual(['admin', 'pi', 'labs', 'frontdesk'])

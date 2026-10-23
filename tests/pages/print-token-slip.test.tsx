@@ -60,7 +60,7 @@ describe('/print/token/[encounterId]', () => {
     expect(screen.getByText(/you are next/i)).toBeInTheDocument()
     expect(screen.queryByText(/^Room /)).not.toBeInTheDocument()
     cleanup()
-    state.getTokenSlip.mockResolvedValue({ ...SLIP, encounterType: 'ipd', estimatedWaitMinutes: null })
+    state.getTokenSlip.mockResolvedValue({ ...SLIP, estimatedWaitMinutes: null }) // WS3 T2: an IPD stay has no slip; an unknown wait is null
     render(await run('55'))
     expect(screen.queryByText(/about .* minutes|you are next/i)).not.toBeInTheDocument()
   })
@@ -72,10 +72,11 @@ describe('/print/token/[encounterId]', () => {
     expect(screen.getByText(/RD-0042/)).toBeInTheDocument()
   })
 
-  it('shows the bed for an inpatient check-in', async () => {
-    state.getTokenSlip.mockResolvedValue({ ...SLIP, encounterType: 'ipd', room: { ward: 'Ward A', roomNumber: '101', bedNumber: 'B' } })
-    render(await run('55'))
-    expect(screen.getByText(/Ward A.*101.*B/)).toBeInTheDocument()
+  // WS3 T2: an IPD stay has no OPD token (spec 3.1 item 6).
+  it('404s an IPD encounter without auditing', async () => {
+    state.getTokenSlip.mockResolvedValue({ ...SLIP, opdToken: null, encounterType: 'ipd', room: { ward: 'Ward A', roomNumber: '101', bedNumber: 'B' } })
+    await expect(run('55')).rejects.toBeInstanceOf(NotFound)
+    expect(state.logAudit).not.toHaveBeenCalled()
   })
 
   it.each(['abc', '0', '-1', '12345678901'])('404s a malformed id %s before any query', async (id) => {

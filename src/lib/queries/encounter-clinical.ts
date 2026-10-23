@@ -28,15 +28,30 @@ async function assertOpen(tx: Tx, encounterId: number): Promise<void> {
 export async function addVitals(encounter: EncounterRow, input: VitalsInput, session: Session): Promise<EncounterVitalsRow> {
   return getDb().transaction(async (tx) => {
     await assertOpen(tx, encounter.id)
-    const [row] = await tx.insert(encounterVitals).values({
-      encounterId: encounter.id,
-      patientId: encounter.patientId,
-      recordedByName: session.name,
-      recordedByUserId: session.userId ?? null,
-      ...toVitalsColumns(input),
-    }).returning()
-    return row
+    return insertVitalsInTx(tx, { encounterId: encounter.id, patientId: encounter.patientId }, input, session)
   })
+}
+
+/**
+ * WS3 T7: the one encounter_vitals insert, shared by the visit workspace (addVitals) and the
+ * nursing station (recordVitals). Callers have already locked and checked whatever makes the
+ * write legal (an open visit; an admitted patient). `recordedAt` absent = the column default (now).
+ */
+export async function insertVitalsInTx(
+  tx: Tx,
+  target: { encounterId: number; patientId: string; recordedAt?: Date },
+  input: VitalsInput,
+  session: Session,
+): Promise<EncounterVitalsRow> {
+  const [row] = await tx.insert(encounterVitals).values({
+    encounterId: target.encounterId,
+    patientId: target.patientId,
+    ...(target.recordedAt ? { recordedAt: target.recordedAt } : {}),
+    recordedByName: session.name,
+    recordedByUserId: session.userId ?? null,
+    ...toVitalsColumns(input),
+  }).returning()
+  return row
 }
 
 export async function listVitals(encounterId: number): Promise<EncounterVitalsRow[]> {

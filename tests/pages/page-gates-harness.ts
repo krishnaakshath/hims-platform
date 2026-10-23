@@ -402,4 +402,7 @@ export const PAGE_GATES: PageGateCase[] = [
   // A denied role is sent back to /settings (which itself redirects roles it does not admit).
   { route: '/settings/branding', load: () => import('@/app/(dashboard)/settings/branding/page'), allowed: ['admin'], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/settings'])) },
   // end WL T8
+  // WS3 T7: LeftNav /inpatient/nursing (Nursing station) -- CLINICAL_ROLES.
+  { route: '/inpatient/nursing', load: () => import('@/app/(dashboard)/inpatient/nursing/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'pi'] },
+  // end WS3 T7
 ]

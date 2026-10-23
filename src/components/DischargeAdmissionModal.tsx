@@ -1,12 +1,16 @@
 'use client'
-import { sendJson } from '@/lib/client-fetch'
-import { useState } from 'react'
+import { fetchJson, sendJson } from '@/lib/client-fetch'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { SignatureCapture } from '@/components/SignatureCapture'
 import { VISIT_REASON_MAX_LENGTH } from '@/lib/notification-templates'
 import { INTERVAL_UNITS, istSlotString, type IntervalUnit } from '@/lib/follow-ups/rules'
+import { CodePicker } from '@/components/coding/CodePicker' // WS3 T6
+import { clearanceIsCurrent, type DischargeDues } from '@/lib/inpatient/dues' // WS3 T6
+import { formatPaise } from '@/lib/money' // WS3 T6
+import { formatIstDateTime, istDateOf } from '@/lib/india-time' // WS3 T6
 
 const SLOT_MINUTES = 30
 
@@ -19,8 +23,33 @@ function addMinutesToHhmm(hhmm: string, minutes: number): string | null {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
-type Step = 'summary' | 'followup' | 'confirmation'
+type Step = 'dues' | 'summary' | 'followup' | 'confirmation'
 
+// WS3 T6: GET /api/inpatient/admissions/[id]/discharge-context (spec 3.2 items 13-14).
+interface DischargeContext {
+  diagnoses: { codeId: number | null; code: string; display: string; type: 'provisional' | 'primary' | 'secondary' }[]
+  medications: { name: string; dose: string; lastStatus: string }[]
+  dues: DischargeDues
+  latestClearance: { chargesPaise: number; outstandingPaise: number; overrideReason: string | null; clearedByName: string; clearedAt: string } | null
+  unpostedRoomRentDays: number
+}
+type PickedCode = { codeId: number; code: string; display: string }
+const MAX_DISCHARGE_CODES = 5
+export const DUES_BLOCK_MESSAGE = 'Billing must clear or override dues before discharge'
+
+/** The prefill: distinct coded diagnoses (primary first, as the context orders them) and the text. */
+function prefillFrom(ctx: DischargeContext): { codes: PickedCode[]; diagnosisText: string; drugs: string } {
+  const codes: PickedCode[] = []
+  for (const d of ctx.diagnoses) {
+    if (d.codeId !== null && !codes.some((c) => c.codeId === d.codeId) && codes.length < MAX_DISCHARGE_CODES) codes.push({ codeId: d.codeId, code: d.code, display: d.display })
+  }
+  const texts = [...new Set(ctx.diagnoses.map((d) => d.display).filter(Boolean))]
+  return { codes, diagnosisText: texts.join('; '), drugs: ctx.medications.map((m) => `${m.name} ${m.dose}`).join('\n') }
+}
+
+// WS3 T6: a dues step first (charges, paid, insurer share, outstanding, billing's latest
+// clearance, un-posted room rent); the server's dues gate is authoritative, so a failed load
+// still lets the doctor continue. Then the
 // 3-step flow following Headspace's appointment stepper
 // (https://mobbin.com/screens/c9b2bbdc-2976-46da-ba9a-e23f662f3d7e) for
 // steps 1-2, and Cal.com's confirmation card
@@ -29,7 +58,10 @@ type Step = 'summary' | 'followup' | 'confirmation'
 // API call when leaving step 2 -- never once per step.
 export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId: number; onClose: () => void }) {
   const router = useRouter()
-  const [step, setStep] = useState<Step>('summary')
+  const [step, setStep] = useState<Step>('dues')
+  const [context, setContext] = useState<DischargeContext | null>(null) // WS3 T6
+  const [contextError, setContextError] = useState<string | null>(null) // WS3 T6
+  const [codes, setCodes] = useState<PickedCode[]>([]) // WS3 T6
   const [dischargeDiagnosis, setDischargeDiagnosis] = useState('')
   const [dischargeDrugs, setDischargeDrugs] = useState('')
   const [dischargeDevices, setDischargeDevices] = useState('')
@@ -46,6 +78,30 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
   const [error, setError] = useState<string | null>(null)
   const [followUpCreated, setFollowUpCreated] = useState(false)
   const [followUpPlanned, setFollowUpPlanned] = useState(false)
+
+  // WS3 T6: load the context once; pre-fill only fields the doctor has not typed in yet.
+  useEffect(() => {
+    let cancelled = false
+    void fetchJson<DischargeContext>(`/api/inpatient/admissions/${admissionId}/discharge-context`).then((r) => {
+      if (cancelled) return
+      if (!r.ok) { setContextError(r.error); return }
+      setContext(r.data)
+      const pre = prefillFrom(r.data)
+      setCodes(pre.codes)
+      setDischargeDiagnosis((cur) => cur || pre.diagnosisText)
+      setDischargeDrugs((cur) => cur || pre.drugs)
+    })
+    return () => { cancelled = true }
+  }, [admissionId])
+
+  const duesBlocked = context !== null && context.dues.outstandingPaise > 0 && !clearanceIsCurrent(context.latestClearance, context.dues)
+  const duesReady = context !== null || contextError !== null
+
+  function pickCode(hit: { id: number; code: string; display: string }) {
+    if (codes.some((c) => c.codeId === hit.id) || codes.length >= MAX_DISCHARGE_CODES) return
+    setCodes([...codes, { codeId: hit.id, code: hit.code, display: hit.display }])
+    setDischargeDiagnosis((cur) => (cur.trim() ? `${cur}; ${hit.display}` : hit.display))
+  }
 
   const summaryComplete = Boolean(dischargeDiagnosis && dischargeDrugs && dischargeDevices && dischargeDiet && dischargeSummaryNotes)
 
@@ -75,7 +131,7 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
       }
     }
     setSubmitting(true)
-    const res = await sendJson<{ followUpAppointmentId?: number | null; followUpOrderId?: number | null }>(`/api/inpatient/admissions/${admissionId}/discharge`, 'POST', { dischargeDiagnosis, dischargeDrugs, dischargeDevices, dischargeDiet, dischargeSummaryNotes, typedName, ...(slot ?? {}), ...(followUp ? { followUp } : {}) })
+    const res = await sendJson<{ followUpAppointmentId?: number | null; followUpOrderId?: number | null }>(`/api/inpatient/admissions/${admissionId}/discharge`, 'POST', { dischargeDiagnosis, dischargeDrugs, dischargeDevices, dischargeDiet, dischargeSummaryNotes, typedName, ...(slot ?? {}), ...(followUp ? { followUp } : {}), ...(codes.length ? { diagnosisCodeIds: codes.map((c) => c.codeId) } : {}) })
     setSubmitting(false)
     if (!res.ok) {
       setError(res.error)
@@ -90,23 +146,67 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Discharge Patient</DialogTitle>
         </DialogHeader>
 
-        <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
-          <span className={step === 'summary' ? 'font-semibold text-foreground' : ''}>1. Discharge summary</span>
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span className={step === 'dues' ? 'font-semibold text-foreground' : ''}>1. Dues</span>
           <span>→</span>
-          <span className={step === 'followup' ? 'font-semibold text-foreground' : ''}>2. Follow-up</span>
+          <span className={step === 'summary' ? 'font-semibold text-foreground' : ''}>2. Discharge summary</span>
           <span>→</span>
-          <span className={step === 'confirmation' ? 'font-semibold text-foreground' : ''}>3. Confirmation</span>
+          <span className={step === 'followup' ? 'font-semibold text-foreground' : ''}>3. Follow-up</span>
+          <span>→</span>
+          <span className={step === 'confirmation' ? 'font-semibold text-foreground' : ''}>4. Confirmation</span>
         </div>
+
+        {step === 'dues' && (
+          <div className="space-y-3 text-sm">
+            {!duesReady && <p className="text-muted-foreground" aria-live="polite">Loading dues…</p>}
+            {contextError && <p role="alert" className="text-destructive">{contextError}</p>}
+            {context && (<>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
+                <dt className="text-muted-foreground">Charges</dt><dd className="text-right tabular-nums">{formatPaise(context.dues.chargesPaise)}</dd>
+                <dt className="text-muted-foreground">Paid</dt><dd className="text-right tabular-nums">{formatPaise(context.dues.paidPaise)}</dd>
+                <dt className="text-muted-foreground">Insurer share</dt><dd className="text-right tabular-nums">{formatPaise(context.dues.insurerSharePaise)}</dd>
+                <dt className="font-medium">Outstanding</dt><dd className="text-right font-medium tabular-nums">{formatPaise(context.dues.outstandingPaise)}</dd>
+              </dl>
+              {context.latestClearance ? (
+                <p className="text-muted-foreground">
+                  {`Cleared by ${context.latestClearance.clearedByName} on ${formatIstDateTime(context.latestClearance.clearedAt, { label: true })}`}
+                  {context.latestClearance.overrideReason !== null && ' (override)'}
+                </p>
+              ) : (
+                <p className="text-muted-foreground">No billing clearance recorded yet.</p>
+              )}
+              {context.unpostedRoomRentDays > 0 && (
+                <p className="rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+                  {`${context.unpostedRoomRentDays} ${context.unpostedRoomRentDays === 1 ? 'day' : 'days'} of room rent ${context.unpostedRoomRentDays === 1 ? 'is' : 'are'} not posted yet. Ask billing to post it before the final bill.`}
+                </p>
+              )}
+              {duesBlocked && <p role="status" className="font-medium text-destructive">{DUES_BLOCK_MESSAGE}</p>}
+            </>)}
+          </div>
+        )}
 
         {step === 'summary' && (
           <div className="space-y-2">
+            <CodePicker kinds={['icd10']} onDate={istDateOf(new Date())} onPick={pickCode} label="Discharge diagnosis (ICD-10)" />
+            {codes.length > 0 && (
+              <ul className="flex flex-wrap gap-1.5" aria-label="Discharge diagnosis codes">
+                {codes.map((c, i) => (
+                  <li key={c.codeId} className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs">
+                    <span className="font-mono font-semibold">{c.code}</span>
+                    <span className="max-w-48 truncate" title={c.display}>{c.display}</span>
+                    {i === 0 && <span className="text-muted-foreground">(primary)</span>}
+                    <button type="button" aria-label={`Remove ${c.code}`} onClick={() => setCodes(codes.filter((x) => x.codeId !== c.codeId))} className="ml-0.5 rounded px-1 text-muted-foreground hover:text-foreground">×</button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <input value={dischargeDiagnosis} onChange={(e) => setDischargeDiagnosis(e.target.value)} placeholder="Diagnosis" aria-label="Diagnosis" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
-            <input value={dischargeDrugs} onChange={(e) => setDischargeDrugs(e.target.value)} placeholder="Drugs (discharge medications)" aria-label="Drugs" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
+            <textarea value={dischargeDrugs} onChange={(e) => setDischargeDrugs(e.target.value)} placeholder="Drugs (discharge medications, one per line)" aria-label="Drugs" className="w-full rounded-md border border-border px-3 py-2 text-sm" rows={3} />
             <input value={dischargeDevices} onChange={(e) => setDischargeDevices(e.target.value)} placeholder="Devices (e.g. None, or Wound VAC)" aria-label="Devices" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
             <input value={dischargeDiet} onChange={(e) => setDischargeDiet(e.target.value)} placeholder="Diet" aria-label="Diet" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
             <textarea value={dischargeSummaryNotes} onChange={(e) => setDischargeSummaryNotes(e.target.value)} placeholder="Discharge summary notes" aria-label="Discharge summary notes" className="w-full rounded-md border border-border px-3 py-2 text-sm" rows={3} />
@@ -159,8 +259,12 @@ export function DischargeAdmissionModal({ admissionId, onClose }: { admissionId:
         )}
 
         <DialogFooter>
-          {step === 'summary' && (<>
+          {step === 'dues' && (<>
             <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button onClick={() => setStep('summary')} disabled={!duesReady || duesBlocked}>Next</Button>
+          </>)}
+          {step === 'summary' && (<>
+            <Button variant="outline" onClick={() => setStep('dues')}>Back</Button>
             <Button onClick={() => setStep('followup')} disabled={!summaryComplete}>Next</Button>
           </>)}
           {step === 'followup' && (

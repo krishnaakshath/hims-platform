@@ -67,7 +67,10 @@ export interface LockedEncounterCoding { coding: EncounterCodingRow; encounter: 
 /**
  * Creates the encounter's coding row if missing, then locks it FOR UPDATE (only that row: the
  * joined encounter is read, not locked). Null when the encounter does not exist. MUST run
- * inside a transaction and MUST be the first lock the transaction takes.
+ * inside a transaction and MUST be the first lock the transaction takes -- except in
+ * dischargeAdmission (WS3 T6), which takes it last (IPD encounter -> billing -> admission -> room ->
+ * coding row). That is safe because no coding writer takes any lock after the coding row other
+ * than its own dependent diagnosis/procedure/query rows.
  */
 export async function lockEncounterCoding(tx: WriteExecutor, encounterId: number): Promise<LockedEncounterCoding | null> {
   const [enc] = await tx.select({ patientId: encounters.patientId }).from(encounters).where(eq(encounters.id, encounterId))
@@ -143,10 +146,12 @@ export function refusesSampleCodes(env: NodeJS.ProcessEnv = process.env): boolea
  */
 async function checkCode(
   tx: WriteExecutor, codeId: number, entryKind: 'diagnosis' | 'procedure', onDate: string, patientId: string, currentIcd10Only = false,
+  currentIcd10Version = false, // WS3 T6
 ): Promise<CodingWriteResult<{ code: CodeDetail; warnings: CodingIssue[] }>> {
   const code = (await getCodesByIds([codeId], tx)).get(codeId)
   if (!code) return fail('code_not_found')
   if (currentIcd10Only && (code.kind !== 'icd10' || code.isSample || (await findCurrentCode('icd10', code.code, tx))?.id !== codeId)) return fail('code_not_current')
+  if (currentIcd10Version && (code.kind !== 'icd10' || (await findCurrentCode('icd10', code.code, tx))?.id !== codeId)) return fail('code_not_current') // WS3 T6
   if (code.isSample && refusesSampleCodes()) return fail('sample_code')
   const issues = checkCodeForEntry(code, entryKind, { onDate, ...(await patientFacts(tx, patientId)) })
   if (hasBlockingIssues(issues)) return fail('code_invalid', issues.filter((i) => i.severity === 'error'))
@@ -171,50 +176,68 @@ async function hasOtherLivePrimary(tx: WriteExecutor, encounterId: number, excep
  * WS1 T4: options the consultation workspace passes (SP6's coding routes pass none): write as the
  * doctor whatever the role, accept only current non-sample WHO ICD-10 codes, set the problem-list flag.
  */
-export interface WorkspaceDiagnosisOptions { asDoctor?: boolean; currentIcd10Only?: boolean; onProblemList?: boolean }
+export interface WorkspaceDiagnosisOptions {
+  asDoctor?: boolean
+  currentIcd10Only?: boolean
+  onProblemList?: boolean
+  /**
+   * WS3 T6 (discharge): the code must be ICD-10 in the current version (`code_not_current`), the
+   * admission picker's rule: a sample set is refused only in production (refusesSampleCodes).
+   */
+  currentIcd10Version?: boolean
+}
 
 export async function addEncounterDiagnosis(
   encounterId: number, input: AddDiagnosisRequest, session: Session, now: Date = new Date(), opts: WorkspaceDiagnosisOptions = {},
 ): Promise<CodingWriteResult<{ diagnosisId: number; patientId: string; warnings: CodingIssue[] }>> {
-  return runCodingTransaction(async (tx) => {
-    const g = await guardEntryWrite(tx, encounterId, session, opts.asDoctor ? 'doctor' : undefined)
-    if (!g.ok) return g
-    const { encounter, actor } = g.value
-    if (actor === 'coder' && input.codeId === undefined) return fail('code_required')
-    let code: CodeDetail | null = null
-    let warnings: CodingIssue[] = []
-    if (input.codeId !== undefined) {
-      const c = await checkCode(tx, input.codeId, 'diagnosis', encounter.encounterDate, encounter.patientId, opts.currentIcd10Only)
-      if (!c.ok) return c
-      ;({ code, warnings } = c.value)
-    }
-    if (input.type === 'primary' && await hasOtherLivePrimary(tx, encounterId, null)) return fail('primary_exists')
-    const status: CodeEntryStatus = code === null ? 'uncoded' : actor === 'doctor' ? 'proposed' : 'coded'
-    const [row] = await tx.insert(diagnoses).values({
-      patientId: encounter.patientId,
-      code: code?.code ?? '',
-      description: input.description ?? code?.display ?? '',
-      date: encounter.encounterDate,
-      encounterId,
-      codeId: code?.id ?? null,
-      codeSystemKind: code?.kind ?? null,
-      codeDisplay: code?.display ?? null,
-      diagnosisType: input.type,
-      codingStatus: status,
-      sequence: input.sequence ?? null,
-      proposedByName: status === 'proposed' ? session.name : null,
-      proposedAt: status === 'proposed' ? now : null,
-      codedByName: status === 'coded' ? session.name : null,
-      codedAt: status === 'coded' ? now : null,
-      createdByName: session.name,
-      createdAt: now,
-      onProblemList: opts.onProblemList ?? false, // WS1 T4
-    }).returning({ id: diagnoses.id })
-    await finishEntryWrite(tx, g.value, session, now)
-    await logAudit(session, 'coding: added diagnosis', encounter.patientId,
-      `encounter=${encounterId} diagnosis=${row.id} status=${status} type=${input.type} code=${codeLabel(code?.kind ?? null, code?.code ?? null)}`, tx)
-    return { ok: true, value: { diagnosisId: row.id, patientId: encounter.patientId, warnings } }
-  })
+  return runCodingTransaction((tx) => addEncounterDiagnosisInTx(tx, encounterId, input, session, now, opts))
+}
+
+/**
+ * WS3 T6: addEncounterDiagnosis on the caller's transaction (dischargeAdmission writes the coded
+ * discharge diagnoses inside the discharge). Same guard, code checks, primary rule, statuses and
+ * audit; a not-ok result is returned and the CALLER must roll back (nothing is undone here).
+ */
+export async function addEncounterDiagnosisInTx(
+  tx: WriteExecutor, encounterId: number, input: AddDiagnosisRequest, session: Session, now: Date = new Date(), opts: WorkspaceDiagnosisOptions = {},
+): Promise<CodingWriteResult<{ diagnosisId: number; patientId: string; warnings: CodingIssue[] }>> {
+  const g = await guardEntryWrite(tx, encounterId, session, opts.asDoctor ? 'doctor' : undefined)
+  if (!g.ok) return g
+  const { encounter, actor } = g.value
+  if (actor === 'coder' && input.codeId === undefined) return fail('code_required')
+  let code: CodeDetail | null = null
+  let warnings: CodingIssue[] = []
+  if (input.codeId !== undefined) {
+    const c = await checkCode(tx, input.codeId, 'diagnosis', encounter.encounterDate, encounter.patientId, opts.currentIcd10Only, opts.currentIcd10Version)
+    if (!c.ok) return c
+    ;({ code, warnings } = c.value)
+  }
+  if (input.type === 'primary' && await hasOtherLivePrimary(tx, encounterId, null)) return fail('primary_exists')
+  const status: CodeEntryStatus = code === null ? 'uncoded' : actor === 'doctor' ? 'proposed' : 'coded'
+  const [row] = await tx.insert(diagnoses).values({
+    patientId: encounter.patientId,
+    code: code?.code ?? '',
+    description: input.description ?? code?.display ?? '',
+    date: encounter.encounterDate,
+    encounterId,
+    codeId: code?.id ?? null,
+    codeSystemKind: code?.kind ?? null,
+    codeDisplay: code?.display ?? null,
+    diagnosisType: input.type,
+    codingStatus: status,
+    sequence: input.sequence ?? null,
+    proposedByName: status === 'proposed' ? session.name : null,
+    proposedAt: status === 'proposed' ? now : null,
+    codedByName: status === 'coded' ? session.name : null,
+    codedAt: status === 'coded' ? now : null,
+    createdByName: session.name,
+    createdAt: now,
+    onProblemList: opts.onProblemList ?? false, // WS1 T4
+  }).returning({ id: diagnoses.id })
+  await finishEntryWrite(tx, g.value, session, now)
+  await logAudit(session, 'coding: added diagnosis', encounter.patientId,
+    `encounter=${encounterId} diagnosis=${row.id} status=${status} type=${input.type} code=${codeLabel(code?.kind ?? null, code?.code ?? null)}`, tx)
+  return { ok: true, value: { diagnosisId: row.id, patientId: encounter.patientId, warnings } }
 }
 
 const diagnosisLockColumns = {

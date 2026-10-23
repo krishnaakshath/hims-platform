@@ -47,9 +47,13 @@ describe.skipIf(!process.env.DATABASE_URL)('coverageLimitsForCharge (DB)', () =>
     secondaryPolicyId = sec.id
     const [svc] = await db().select({ id: serviceCatalog.id }).from(serviceCatalog).limit(1)
     serviceId = svc.id
-    const admit = async () => (await db().insert(admissions).values({ patientId: b.patientId, attendingProviderId: b.providerId, admittedAt: new Date('2026-10-20T06:00:00Z') }).returning())[0].id
-    admissionId = await admit()
-    otherAdmissionId = await admit()
+    // WS3 T1: one active stay per patient, so the first two stays are discharged ones.
+    const admit = async (discharged = false) => (await db().insert(admissions).values({
+      patientId: b.patientId, attendingProviderId: b.providerId, admittedAt: new Date('2026-10-20T06:00:00Z'),
+      ...(discharged ? { status: 'discharged' as const, dischargedAt: new Date('2026-10-21T06:00:00Z') } : {}),
+    }).returning())[0].id
+    admissionId = await admit(true)
+    otherAdmissionId = await admit(true)
     cashlessAdmissionId = await admit()
     await line(admissionId, b.tpaId, 1_00_000_00)
     await line(admissionId, b.tpaId, 40_000_00)

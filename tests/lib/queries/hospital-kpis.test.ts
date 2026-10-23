@@ -11,11 +11,12 @@ import {
   admissions, encounterNotes, encounters, followUpOrders, labOrders, labResults, labTests, medicationDispenses,
   medicationInventory, medications, patientPayments, patients, providers, refunds, rooms, invoices, chargeLines, charges,
 } from '@/db/schema'
+import { labResultSignoffs } from '@/db/schema' // WS4 T11
 import { listPharmacyChargeIds } from '@/lib/queries/medication-dispenses'
 import { purgeBillingFixtures } from '../../db/billing-fixtures'
 import {
   loadOpdToday, loadIpdCensus, loadCollectionsToday, loadBillingQueue, loadLabKpis, loadPharmacyKpis,
-  loadFollowUpBuckets, loadDoctorWorkload, countResultsToVerifyForProvider,
+  loadFollowUpBuckets, loadDoctorWorkload, countResultsToReviewForProvider,
 } from '@/lib/queries/hospital-kpis'
 
 // Wave E: hospital KPIs. A far-future IST day nobody else writes to isolates
@@ -205,19 +206,33 @@ describe.skipIf(!process.env.DATABASE_URL)('hospital KPIs (DB)', () => {
     expect(await loadFollowUpBuckets(DAY, docB)).toMatchObject({ due: 0, overdue: 0 })
   })
 
-  it('doctor workload: own OPD today, inpatients, results to verify (critical first), follow-ups and unsigned notes -- no phone numbers', async () => {
+  it('doctor workload: own OPD today, inpatients, results to review, follow-ups and unsigned notes -- no phone numbers', async () => {
     const w = await loadDoctorWorkload({ providerId: docA, authorName: `TEST_WE Dr A ${RUN}`, today: DAY })
     expect(w.encountersToday.map((e) => [e.opdToken, e.status])).toEqual([[1, 'checked_in'], [2, 'in_consultation']])
     expect(w.inpatients).toHaveLength(1)
     expect(w.inpatients[0]).toMatchObject({ patientId: P1, ward: WARD, bed: '1-A' })
-    expect(w.resultsToVerify.map((r) => [r.patientId, r.flag])).toEqual([[P1, 'critical']])
-    expect(await countResultsToVerifyForProvider(docA)).toBe(w.resultsToVerify.length)
+    // WS4 T11: a resulted (unverified) order is the lab's to verify, not the doctor's to review.
+    expect(w.resultsToReview).toEqual([])
+    expect(await countResultsToReviewForProvider(docA)).toBe(0)
     expect(w.labsAwaitingResult).toBe(3)
     expect(w.followUps.map((f) => [f.patientId, f.bucket])).toEqual([[P2, 'overdue'], [P1, 'due']])
     expect(w.unsignedNotes).toBe(1)
     expect(w.draftNotes.map((d) => [d.patientId, d.patientName])).toEqual([[P1, 'TEST_WE Kpi One']])
     expect(JSON.stringify(w)).not.toMatch(/98765000/)
-    expect(await loadDoctorWorkload({ providerId: docB, authorName: 'nobody', today: DAY })).toMatchObject({ inpatients: [], resultsToVerify: [], unsignedNotes: 0, draftNotes: [] })
+    expect(await loadDoctorWorkload({ providerId: docB, authorName: 'nobody', today: DAY })).toMatchObject({ inpatients: [], unsignedNotes: 0, draftNotes: [] })
+  })
+
+  // WS4 T11: the verified result on Dr B's own order waits for Dr B's acknowledgement, then leaves the list.
+  it('doctor workload: a verified, unacknowledged result on my own order is under results to review until I acknowledge it', async () => {
+    const w = await loadDoctorWorkload({ providerId: docB, authorName: 'nobody', today: DAY })
+    expect(w.resultsToReview.map((r) => [r.orderId, r.patientId, r.flag])).toEqual([[ids.orders[4], P2, 'normal']])
+    expect(await countResultsToReviewForProvider(docB)).toBe(1)
+    // Someone else's acknowledgement does not clear mine.
+    await getDb().insert(labResultSignoffs).values({ labOrderId: ids.orders[4], kind: 'acknowledge', providerId: docA, signedByName: 'TEST_WE A' })
+    expect(await countResultsToReviewForProvider(docB)).toBe(1)
+    await getDb().insert(labResultSignoffs).values({ labOrderId: ids.orders[4], kind: 'acknowledge', providerId: docB, signedByName: 'TEST_WE B' })
+    expect(await countResultsToReviewForProvider(docB)).toBe(0)
+    expect((await loadDoctorWorkload({ providerId: docB, authorName: 'nobody', today: DAY })).resultsToReview).toEqual([])
   })
 
   it('every loader returns a JSON-safe value (a cache hit equals a miss)', async () => {

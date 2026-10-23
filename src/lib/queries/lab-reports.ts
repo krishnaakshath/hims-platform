@@ -25,6 +25,8 @@ import { renderLabReportPdf } from '@/lib/labs/report-pdf'
 import { PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status'
 import { putPrivateBlob } from '@/lib/blob-store'
 import { createFollowUpOrder } from './follow-ups'
+import { listAnalyteResults } from './lab-result-values' // WS4 T10
+import { listSignoffs } from './lab-signoffs' // WS4 T11
 import type { WriteExecutor } from './executor'
 
 export type LabReportRow = typeof labReports.$inferSelect
@@ -146,7 +148,9 @@ export async function releaseLabReport(requisitionId: number, session: Session, 
     .where(eq(labReports.requisitionId, requisitionId))
   const version = Number(maxVersion ?? 0) + 1
 
-  // 3. Render and store, before any lock.
+  // 3. Render and store, before any lock. WS4 T10: analyte values in definition order; an
+  // amendment between here and the lock changes amendedAt, so the fingerprint catches it.
+  const [analytes, signoffs] = await Promise.all([listAnalyteResults(snapshot.map((o) => o.id)), listSignoffs(snapshot.map((o) => o.id))])
   const source: LabReportSource = {
     hospital: await labReportHospital(),
     reportNumber,
@@ -162,7 +166,9 @@ export async function releaseLabReport(requisitionId: number, session: Session, 
       receivedAt: o.receivedAt,
       verifiedAt: o.verifiedAt,
       verifiedByName: o.verifiedByName,
-      result: { value: o.value, unit: o.unit, referenceRange: o.referenceRange, flag: o.flag },
+      result: { value: o.value, unit: o.unit, referenceRange: o.referenceRange, flag: o.flag, analytes: analytes.get(o.id) ?? [] },
+      // WS4 T11 (lane ruling R5): the co-signing providers, oldest first.
+      cosignedBy: (signoffs.get(o.id) ?? []).filter((x) => x.kind === 'cosign').map((x) => x.providerName),
     })),
   }
   const bytes = await deps.render(buildLabReportData(source, now))

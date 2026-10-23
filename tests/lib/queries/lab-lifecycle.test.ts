@@ -7,6 +7,7 @@ import { parseSampleId, formatSampleId } from '@/lib/labs/sample-id'
 import {
   allocateSampleId, cancelLabOrder, collectLabOrder, ensureSampleIds, getLabOrder, receiveLabSample, recordLabResult, verifyLabResult,
 } from '@/lib/queries/lab-lifecycle'
+import { createLabDepartmentFixture, type LabDepartmentFixture } from '../../db/lab-verifier-fixtures' // WS4 T11
 
 const RUN = `${Date.now()}`
 const PROBE = `TEST_SP5_LIFE-${RUN}`
@@ -27,6 +28,7 @@ let labTestId = 0
 let windowId = 0
 let u1 = 0
 let u2 = 0
+let dept: LabDepartmentFixture // WS4 T11
 const orderIds: number[] = []
 const visitIds: number[] = []
 
@@ -82,6 +84,10 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
     ]).returning()
     u1 = a.id
     u2 = b.id
+    // WS4 T11: both users are linked to a provider of the test's reporting department.
+    dept = await createLabDepartmentFixture(`L${RUN}`)
+    await dept.mapTests([labTestId])
+    await dept.linkUsers([u1, u2])
   })
 
   afterAll(async () => {
@@ -94,6 +100,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
     await db.delete(homeCollectionWindows).where(eq(homeCollectionWindows.id, windowId))
     await db.delete(auditLog).where(inArray(auditLog.userName, PROBE_NAMES))
     await db.delete(auditLog).where(and(eq(auditLog.userName, 'LIS integration'), inArray(auditLog.patientId, [P, P_OTHER])))
+    await dept?.cleanup() // WS4 T11
     await db.delete(users).where(inArray(users.id, [u1, u2]))
     await db.delete(labTests).where(eq(labTests.id, labTestId))
     await db.delete(providers).where(eq(providers.id, providerId))
@@ -193,11 +200,11 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
     const staff = { kind: 'staff' as const, session: S }
     expect(await recordLabResult(c.id, RESULT, staff, { now: NOW })).toEqual({ ok: false, error: 'invalid_status' })
     await receiveLabSample(c.sampleId, S, NOW)
-    expect(await recordLabResult(c.id, RESULT, staff, { now: NOW })).toEqual({ ok: true, patientId: P, amended: false })
+    expect(await recordLabResult(c.id, RESULT, staff, { now: NOW })).toEqual({ ok: true, patientId: P, amended: false, flag: 'normal' })
     const [r1] = await getDb().select().from(labResults).where(eq(labResults.labOrderId, c.id))
     expect(r1).toMatchObject({ value: '5.4', resultedByName: PROBE, resultedByUserId: null, amendedAt: null })
     expect((await getLabOrder(c.id))?.status).toBe('resulted')
-    expect(await recordLabResult(c.id, { ...RESULT, value: '5.6' }, staff, { now: NOW3 })).toEqual({ ok: true, patientId: P, amended: true })
+    expect(await recordLabResult(c.id, { ...RESULT, value: '5.6' }, staff, { now: NOW3 })).toEqual({ ok: true, patientId: P, amended: true, flag: 'normal' })
     const [r2] = await getDb().select().from(labResults).where(eq(labResults.labOrderId, c.id))
     expect(r2.value).toBe('5.6')
     expect(r2.amendedAt?.getTime()).toBe(NOW3.getTime())
@@ -208,7 +215,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
 
   it('LIS result on a collected order stamps receipt and results it', async () => {
     const c = await collected()
-    expect(await recordLabResult(c.id, RESULT, { kind: 'lis' }, { expectedPatientId: P, now: NOW })).toEqual({ ok: true, patientId: P, amended: false })
+    expect(await recordLabResult(c.id, RESULT, { kind: 'lis' }, { expectedPatientId: P, now: NOW })).toEqual({ ok: true, patientId: P, amended: false, flag: 'normal' })
     const o = await getLabOrder(c.id)
     expect(o).toMatchObject({ status: 'resulted', receivedByName: 'System (LIS API)' })
     expect(o?.receivedAt?.getTime()).toBe(NOW.getTime())
@@ -217,7 +224,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
     const lis = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, 'LIS integration'), eq(auditLog.action, `accepted LIS lab result for order ${c.id}`)))
     expect(lis).toHaveLength(1)
     // A later LIS message amends; an order not yet collected is refused.
-    expect(await recordLabResult(c.id, { ...RESULT, value: '5.5' }, { kind: 'lis' }, { now: NOW3 })).toEqual({ ok: true, patientId: P, amended: true })
+    expect(await recordLabResult(c.id, { ...RESULT, value: '5.5' }, { kind: 'lis' }, { now: NOW3 })).toEqual({ ok: true, patientId: P, amended: true, flag: 'normal' })
     const o2 = await makeOrder()
     expect(await recordLabResult(o2.id, RESULT, { kind: 'lis' }, { now: NOW })).toEqual({ ok: false, error: 'invalid_status' })
   })
@@ -243,10 +250,11 @@ describe.skipIf(!process.env.DATABASE_URL)('lab lifecycle (DB)', () => {
     expect(await verifyLabResult(a.id, { role: 'pi', name: PROBE_U2, userId: u2 }, NOW3)).toEqual({ ok: false, error: 'invalid_status' })
     // Results cannot be changed after verification.
     expect(await enter(a.id, u1, PROBE_U1)).toEqual({ ok: false, error: 'invalid_status' })
-    // The env admin (no user id) may verify another person's result.
+    // WS4 T11: the env admin (no user id, so no staff link) has no implicit right to verify.
     const b = await received()
     await enter(b.id, u1, PROBE_U1)
-    expect((await verifyLabResult(b.id, ADMIN, NOW)).ok).toBe(true)
+    expect(await verifyLabResult(b.id, ADMIN, NOW)).toEqual({ ok: false, error: 'not_linked' })
+    expect((await getLabOrder(b.id))?.status).toBe('resulted')
     // An amendment by U2 makes U2 the last enterer: now U2 is the one who cannot verify.
     const c = await received()
     await enter(c.id, u1, PROBE_U1)

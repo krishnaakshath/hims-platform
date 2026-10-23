@@ -49,7 +49,7 @@ describe('POST /api/lab-orders/[id]/result', () => {
   })
 
   it('labs records a staff result through recordLabResult', async () => {
-    vi.mocked(recordLabResult).mockResolvedValue({ ok: true, patientId: 'RD-1', amended: false })
+    vi.mocked(recordLabResult).mockResolvedValue({ ok: true, patientId: 'RD-1', amended: false, flag: 'normal' })
     const res = await RESULT(send(RESULT_BODY), ctx('4'))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
@@ -90,16 +90,25 @@ describe('POST /api/lab-orders/[id]/result', () => {
 })
 
 describe('POST /api/lab-orders/[id]/verify', () => {
-  it('pi verifies; labs cannot', async () => {
-    role = 'labs'
-    expect((await VERIFY(post(), ctx('4'))).status).toBe(403)
-    expect(verifyLabResult).not.toHaveBeenCalled()
-    role = 'pi'
+  // WS4 T11: the gate admits admin, labs and pi; the department rule is the query's (403 with a code).
+  it.each(['pi', 'labs', 'admin'] as const)('%s passes the gate and the query decides', async (r) => {
+    role = r
     vi.mocked(verifyLabResult).mockResolvedValue({ ok: true } as never)
     const res = await VERIFY(post(), ctx('4'))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
-    expect(verifyLabResult).toHaveBeenCalledWith(4, expect.objectContaining({ role: 'pi' }))
+    expect(verifyLabResult).toHaveBeenCalledWith(4, expect.objectContaining({ role: r }))
+  })
+
+  it.each([
+    ['not_linked', 'Verification needs a pathologist or reporting specialist account linked to a provider. Settings → Staff.'],
+    ['wrong_department', 'Only a specialist of the department that reports this test can verify it.'],
+  ] as const)('maps %s to 403 with its code', async (code, message) => {
+    role = 'pi'
+    vi.mocked(verifyLabResult).mockResolvedValue({ ok: false, error: code })
+    const res = await VERIFY(post(), ctx('4'))
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: message, code })
   })
 
   it.each(['crc', 'frontdesk', 'collector', 'billing', 'pharmacy'] as const)('%s is denied', async (r) => {

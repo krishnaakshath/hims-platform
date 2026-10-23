@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { ClipboardCheck, ArrowRight, MonitorPlay, Calculator, UserX } from 'lucide-react'
 import type { Session } from '@/lib/auth'
-import { listAvailableRooms } from '@/lib/queries/rooms'
 import { listTodaysAssignments, countAllPendingAssignments, countUnacknowledgedDeclines } from '@/lib/queries/doctor-assignments'
 import { listActiveProviders, listClinicalDoctors } from '@/lib/queries/providers'
 import { checkInDepartments } from '@/lib/queries/front-desk-queue'
@@ -36,8 +35,7 @@ export async function FrontDeskDashboard({ session }: { session: Session }) {
   // The table lists today's assignments only; the "Pending Assignments" tile
   // counts every still-pending one (what /front-desk/assignments lists), and
   // "Declines to acknowledge" is the same count as that nav entry's badge.
-  const [rooms, assignments, pendingCount, declineCount, providers, bookingRequests, hospital, checkInDoctors] = await Promise.all([
-    listAvailableRooms(),
+  const [assignments, pendingCount, declineCount, providers, bookingRequests, hospital, checkInDoctors] = await Promise.all([
     listTodaysAssignments(),
     countAllPendingAssignments(),
     countUnacknowledgedDeclines(),
@@ -60,7 +58,7 @@ export async function FrontDeskDashboard({ session }: { session: Session }) {
         </div>
         <div className="flex flex-wrap gap-2">
           {REGISTRATION_ROLES.includes(session.role) && <AddPatientButton />}
-          <CheckInButton providers={checkInDoctors} departments={checkInDepartments(checkInDoctors)} rooms={rooms} />
+          <CheckInButton providers={checkInDoctors} departments={checkInDepartments(checkInDoctors)} />
           <Link href="/display/queue" className={ACTION_LINK}><MonitorPlay className="h-4 w-4" aria-hidden="true" />Queue display</Link>
           {TARIFF_LOOKUP_ROLES.includes(session.role) && <Link href="/price-lookup" className={ACTION_LINK}><Calculator className="h-4 w-4" aria-hidden="true" />Price lookup</Link>}
         </div>

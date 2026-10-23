@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import type { ZodError } from 'zod'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 import { serviceErrorResponse } from '@/lib/service-config'
+import { VERIFY_DENIAL_MESSAGE } from '@/lib/labs/verification' // WS4 T11
 
 export { parseId, readJsonBody } from '@/lib/http'
 
@@ -38,6 +39,73 @@ export function labTransitionError(error: LabTransitionError) {
   if (error === 'not_found') return errorResponse(404, LAB_ORDER_NOT_FOUND)
   return errorResponse(409, LAB_TRANSITION_CONFLICT[error])
 }
+
+// WS4 T9: per-analyte result entry refusals (422 with a stable code; never echoes input).
+export const ANALYTE_ENTRY_MESSAGES = {
+  analytes_required: 'This test is entered one value per analyte.',
+  analyte_unknown: 'A value was sent for an analyte this test does not have.',
+  analyte_missing: 'Enter a value for every analyte of this test.',
+  flag_required: 'Choose a flag, with a reason, for each value the system cannot flag automatically.',
+  flag_below_computed: 'A flag can be raised but never lowered below the automatic flag. Correct the value by amendment instead.',
+  invalid_numeric: 'Enter a number for each numeric analyte.',
+} as const
+export type AnalyteEntryErrorCode = keyof typeof ANALYTE_ENTRY_MESSAGES
+
+export function analyteEntryError(code: AnalyteEntryErrorCode, analyteId?: number) {
+  return NextResponse.json({ error: ANALYTE_ENTRY_MESSAGES[code], code, ...(analyteId !== undefined ? { analyteId } : {}) }, { status: 422 })
+}
+// end WS4 T9
+
+// WS4 T11: verification by department (403 with a stable code; fixed messages from the pure rule).
+export function verifyDenialError(code: 'not_linked' | 'wrong_department') {
+  return errorResponse(403, VERIFY_DENIAL_MESSAGE[code], code)
+}
+
+// WS4 T11: a doctor's acknowledgement / co-sign. Fixed messages; never echo the typed name or note.
+const CRITICAL_NOT_NOTIFIED_MESSAGE = 'Log the call before acknowledging this critical result.' // WS4 T12
+export const SIGNOFF_MESSAGES = {
+  not_verified_acknowledge: 'There is no result to acknowledge yet.',
+  not_verified_cosign: 'A result can be co-signed only after it is verified.',
+  not_owner: 'Only the ordering doctor or the attending doctor of the current admission can sign off this result.',
+  not_notified: CRITICAL_NOT_NOTIFIED_MESSAGE, // WS4 T12
+  name_mismatch: 'The typed name must match the name you are signed in with.',
+  already_signed_acknowledge: 'You have already acknowledged this result.',
+  already_signed_cosign: 'You have already co-signed this result.',
+} as const
+
+export function signOffError(kind: 'acknowledge' | 'cosign', error: 'not_found' | 'not_verified' | 'not_owner' | 'name_mismatch' | 'already_signed' | 'not_notified') {
+  switch (error) {
+    case 'not_found': return errorResponse(404, LAB_ORDER_NOT_FOUND)
+    case 'not_notified': return errorResponse(409, SIGNOFF_MESSAGES.not_notified, 'not_notified')
+    case 'not_verified': return errorResponse(409, SIGNOFF_MESSAGES[`not_verified_${kind}`], 'not_verified')
+    case 'not_owner': return errorResponse(403, SIGNOFF_MESSAGES.not_owner, 'not_owner')
+    case 'name_mismatch': return errorResponse(403, SIGNOFF_MESSAGES.name_mismatch, 'name_mismatch')
+    case 'already_signed': return errorResponse(409, SIGNOFF_MESSAGES[`already_signed_${kind}`], 'already_signed')
+  }
+}
+// end WS4 T11
+
+// WS4 T12: critical-value call log and acknowledgement (fixed messages; never echo the called name or note).
+export const CRITICAL_MESSAGES = {
+  critical_not_notified: 'This is a critical result. Log the call to the doctor before verifying it.',
+  no_alert: 'There is no critical alert on this order.',
+  not_open: 'The call for this critical result has already been logged.',
+  read_back_required: 'A critical result given by phone must be read back by the person receiving it.',
+  not_owner: 'Only the ordering doctor or the attending doctor of the current admission can acknowledge this critical result.',
+  already_acknowledged: 'This critical result has already been acknowledged.',
+  withdrawn: 'This critical alert was withdrawn when the result was amended.',
+  not_notified: CRITICAL_NOT_NOTIFIED_MESSAGE,
+} as const
+
+export function criticalError(error: 'not_found' | 'not_open' | 'read_back_required' | 'not_owner' | 'already_acknowledged' | 'withdrawn' | 'critical_not_notified' | 'not_notified') {
+  switch (error) {
+    case 'not_found': return errorResponse(404, CRITICAL_MESSAGES.no_alert, 'not_found')
+    case 'read_back_required': return errorResponse(422, CRITICAL_MESSAGES.read_back_required, 'read_back_required')
+    case 'not_owner': return errorResponse(403, CRITICAL_MESSAGES.not_owner, 'not_owner')
+    default: return errorResponse(409, CRITICAL_MESSAGES[error], error)
+  }
+}
+// end WS4 T12
 
 /**
  * A thrown error: a missing blob store or unreachable database is a 503 (one [config] log

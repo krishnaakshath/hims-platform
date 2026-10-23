@@ -4,7 +4,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { eq, inArray, like } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
-  bookingRequests, doctorAssignments, labOrders, labResults, medicationInventory, medications,
+  bookingRequests, doctorAssignments, labCriticalAlerts, labOrders, labResults, medicationInventory, medications,
   notificationDeliveries, notificationLog, patients, staffNotificationReads,
 } from '@/db/schema'
 import type { Session } from '@/lib/auth'
@@ -31,7 +31,7 @@ const fakeRegistry = (): ChannelRegistry => {
 const s = (role: Session['role'], userId: number | null = null): Session => ({ role, name: `twg-${RUN}-${role}`, userId })
 
 describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () => {
-  const ids = { booking: 0, med: 0, delivery: 0, order: 0, result: 0, declined: 0, pending: 0 }
+  const ids = { booking: 0, med: 0, delivery: 0, order: 0, result: 0, declined: 0, pending: 0, alert: 0 }
 
   beforeAll(async () => {
     const db = getDb()
@@ -41,6 +41,8 @@ describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () =>
     const [d] = await db.insert(notificationDeliveries).values({ patientId: PATIENT, templateKey: 'lab_report_ready', channel: 'sms', status: 'failed', destinationMasked: '+91XXXXXX0000', dedupeKey: `twg-${RUN}`, createdByName: 'test', errorCode: 'test' }).returning()
     const [o] = await db.insert(labOrders).values({ patientId: PATIENT, labTestId: 1, orderedByProviderId: 1, status: 'resulted' }).returning()
     const [r] = await db.insert(labResults).values({ labOrderId: o.id, value: '9.9', flag: 'critical', resultedByName: 'test' }).returning()
+    // WS4 T12: the feed reads unacknowledged critical alerts (the result write raises one).
+    const [al] = await db.insert(labCriticalAlerts).values({ labOrderId: o.id, patientId: PATIENT, summary: 'Test 9.9', status: 'notified' }).returning()
     const [dec] = await db.insert(doctorAssignments).values({ patientId: PATIENT, providerId: 1, visitType: 'outpatient', reason: 'twg', status: 'declined', assignedByName: 'test', declineReason: 'away' }).returning()
     const [pen] = await db.insert(doctorAssignments).values({ patientId: PATIENT, providerId: 1, visitType: 'inpatient', urgency: 'emergency', reason: 'twg', status: 'pending', assignedByName: 'test' }).returning()
     // Foundations T9: failures come through sendNotification. sms fails (alerts); whatsapp is
@@ -49,7 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () =>
     await sendNotification({ patientId: PATIENT, templateKey: 'lab_report_ready', vars: { hospitalName: 'H' }, destination: { phone: '9845013210' }, dedupeKey: DK('fail') }, { registry })
     await sendNotification({ patientId: PATIENT, templateKey: 'lab_report_ready', vars: { hospitalName: 'H' }, destination: {}, dedupeKey: DK('skip') }, { registry })
     await sendNotification({ patientId: PATIENT, templateKey: 'booking_confirmed', vars: { hospitalName: 'H' }, destination: { phone: '9845013210' }, dedupeKey: DK('bad') }, { registry })
-    Object.assign(ids, { booking: b.id, med: m.id, delivery: d.id, order: o.id, result: r.id, declined: dec.id, pending: pen.id })
+    Object.assign(ids, { booking: b.id, med: m.id, delivery: d.id, order: o.id, result: r.id, declined: dec.id, pending: pen.id, alert: al.id })
   })
 
   afterAll(async () => {
@@ -74,7 +76,7 @@ describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () =>
     expect(k).toContain(`booking_request:${ids.booking}`)
     expect(k).toContain(`assignment_declined:${ids.declined}`)
     expect(k).toContain(`notice_failed:${ids.delivery}`)
-    expect(k).not.toContain(`lab_critical:${ids.result}`)
+    expect(k).not.toContain(`lab_critical:${ids.alert}`)
     expect(k.some((x) => x.startsWith('low_stock:'))).toBe(false)
     const notice = feed.find((n) => n.key === `notice_failed:${ids.delivery}`)!
     expect(notice.href).toBe(`/patients/${PATIENT}`)
@@ -97,7 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () =>
   })
 
   it('gives a coordinator the critical result with the patient, linked to the chart', async () => {
-    const item = (await loadStaffNotifications(s('crc'))).find((n) => n.key === `lab_critical:${ids.result}`)!
+    const item = (await loadStaffNotifications(s('crc'))).find((n) => n.key === `lab_critical:${ids.alert}`)!
     expect(item.severity).toBe('critical')
     expect(item.href).toBe(`/patients/${PATIENT}`)
     // The seeded patient's own name (the India demo renamed RD-0001), never a hardcoded one.
@@ -107,9 +109,19 @@ describe.skipIf(!process.env.DATABASE_URL)('staff notification feed (DB)', () =>
   })
 
   it('gives the lab the critical result without the patient name, linked to the lab worklist', async () => {
-    const item = (await loadStaffNotifications(s('labs'))).find((n) => n.key === `lab_critical:${ids.result}`)!
+    const item = (await loadStaffNotifications(s('labs'))).find((n) => n.key === `lab_critical:${ids.alert}`)!
     expect(item.href).toBe('/labs')
     expect(item.detail).not.toMatch(/Maria/)
+  })
+
+  // WS4 T12 (spec 3.5 item 25): only unacknowledged alerts; acknowledgement drops the item.
+  it('drops the critical item once the alert is acknowledged (or withdrawn)', async () => {
+    expect(await keys(s('crc'))).toContain(`lab_critical:${ids.alert}`)
+    await getDb().update(labCriticalAlerts).set({ status: 'acknowledged', acknowledgedAt: new Date(), acknowledgedByName: 'test' }).where(eq(labCriticalAlerts.id, ids.alert))
+    expect(await keys(s('crc'))).not.toContain(`lab_critical:${ids.alert}`)
+    expect(await keys(s('labs'))).not.toContain(`lab_critical:${ids.alert}`)
+    await getDb().update(labCriticalAlerts).set({ status: 'open', acknowledgedAt: null, acknowledgedByName: null }).where(eq(labCriticalAlerts.id, ids.alert))
+    expect(await keys(s('crc'))).toContain(`lab_critical:${ids.alert}`)
   })
 
   it('gives pharmacy only stock items', async () => {

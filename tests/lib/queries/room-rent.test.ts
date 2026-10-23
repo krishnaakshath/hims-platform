@@ -9,6 +9,8 @@ describe.skipIf(!process.env.DATABASE_URL)('room-rent posting (DB)', () => {
   const RUN = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`
   const PID = `TEST-SP4-${RUN}`
   const PID2 = `TEST-SP4-${RUN}-B`
+  // The roomless stay has its own patient: one active admission per patient (WS3 T1 index).
+  const PID3 = `TEST-SP4-${RUN}-C`
   const CODE = `TSP4${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`
   const session: Session = { role: 'crc', name: `TEST-SP4-${RUN}`, userId: null }
   const fx = { departmentId: 0, serviceId: 0, cats: [] as number[], rooms: [] as number[], rates: [] as number[], admissions: [] as number[], transfers: [] as number[],
@@ -38,14 +40,14 @@ describe.skipIf(!process.env.DATABASE_URL)('room-rent posting (DB)', () => {
     const rate = async (roomCategoryId: number, amountPaise: number) =>
       fx.rates.push((await db.insert(tariffRates).values({ serviceId: svc.id, scope: 'base', roomCategoryId, amountPaise, validFrom: '2099-01-01', createdByName: 'TEST-SP4' }).returning())[0].id)
     await rate(genCat, 200000); await rate(icuCat, 900000)
-    await db.insert(patients).values([{ id: PID, name: 'Test SP4 Room', dob: '1990-01-01' }, { id: PID2, name: 'Test SP4 Room B', dob: '1990-01-01' }])
+    await db.insert(patients).values([{ id: PID, name: 'Test SP4 Room', dob: '1990-01-01' }, { id: PID2, name: 'Test SP4 Room B', dob: '1990-01-01' }, { id: PID3, name: 'Test SP4 Room C', dob: '1990-01-01' }])
     const admit = async (patientId: string, currentRoomId: number | null) => {
       const [a] = await db.insert(admissions).values({ patientId, attendingProviderId: prov.id, currentRoomId, admittedAt: new Date('2099-05-01T06:00:00Z') }).returning()
       fx.admissions.push(a.id); return a.id
     }
     fx.admissionId = await admit(PID, fx.icu)
     fx.admission2Id = await admit(PID2, fx.gen)
-    fx.roomlessId = await admit(PID2, null)
+    fx.roomlessId = await admit(PID3, null)
     const move = async (admissionId: number, fromRoomId: number, toRoomId: number) =>
       fx.transfers.push((await db.insert(admissionTransfers).values({ admissionId, fromRoomId, toRoomId, reason: 'Test', transferredByName: 'TEST-SP4', transferredAt: new Date('2099-05-02T10:00:00Z') }).returning())[0].id)
     await move(fx.admissionId, fx.gen, fx.icu)
@@ -54,24 +56,24 @@ describe.skipIf(!process.env.DATABASE_URL)('room-rent posting (DB)', () => {
 
   afterEach(async () => {
     const { purgeBillingFixtures } = await import('../../db/billing-fixtures')
-    await purgeBillingFixtures([PID, PID2])
+    await purgeBillingFixtures([PID, PID2, PID3])
   })
 
   afterAll(async () => {
     const { getDb, departments, roomCategories, rooms, serviceCatalog, tariffRates, patients, admissions, admissionTransfers, billingSettings, auditLog, eq, inArray } = await m()
     const { purgeBillingFixtures } = await import('../../db/billing-fixtures')
     const db = getDb()
-    await purgeBillingFixtures([PID, PID2])
+    await purgeBillingFixtures([PID, PID2, PID3])
     if (savedSettings) await db.update(billingSettings).set(savedSettings).where(eq(billingSettings.id, 1))
     await db.delete(admissionTransfers).where(inArray(admissionTransfers.id, fx.transfers))
     await db.delete(admissions).where(inArray(admissions.id, fx.admissions))
-    await db.delete(patients).where(inArray(patients.id, [PID, PID2]))
+    await db.delete(patients).where(inArray(patients.id, [PID, PID2, PID3]))
     await db.delete(tariffRates).where(inArray(tariffRates.id, fx.rates))
     await db.delete(serviceCatalog).where(eq(serviceCatalog.id, fx.serviceId))
     await db.delete(rooms).where(inArray(rooms.id, fx.rooms))
     await db.delete(roomCategories).where(inArray(roomCategories.id, fx.cats))
     await db.delete(departments).where(eq(departments.id, fx.departmentId))
-    await db.delete(auditLog).where(inArray(auditLog.patientId, [PID, PID2]))
+    await db.delete(auditLog).where(inArray(auditLog.patientId, [PID, PID2, PID3]))
   })
 
   async function lines(admissionId: number) {

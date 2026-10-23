@@ -41,6 +41,7 @@ import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
 import { publicPatientColumns, patientPortalConfiguredSql, type PublicPatientRow } from '@/lib/queries/patient-columns'
 import { encounterVitals, encounterConsults } from '@/db/schema' // WS1 T2
 import { referrals } from '@/db/schema' // WS1 T4
+import { labCriticalAlerts } from '@/db/schema' // WS4 T12
 import { logAudit } from '@/lib/audit'
 import { lockPatientBilling } from './charge-capture' // SP4
 import type { Session } from '@/lib/auth'
@@ -814,6 +815,8 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   if (labOrderIds.length > 0) {
     await db.update(documents).set({ labOrderId: null }).where(inArray(documents.labOrderId, labOrderIds))
   }
+  // WS4 T12: lab_critical_alerts cascades from lab_orders and patients; deleted explicitly so the FK guard sees it.
+  await db.delete(labCriticalAlerts).where(eq(labCriticalAlerts.patientId, anonId))
   await db.delete(labOrders).where(eq(labOrders.patientId, anonId))
   // SP5: lab_orders.home_collection_visit_id is ON DELETE SET NULL and lab_orders.requisition_id
   // has no ON DELETE action, so visits and requisitions go after this patient's orders.

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 // SP5: the webhook records results through the lifecycle query (recordLabResult, LIS actor).
 // The mocked cases fake it; the DB cases at the bottom set `useReal` and run the real query
@@ -236,7 +236,9 @@ describe.skipIf(!process.env.DATABASE_URL)('POST /api/webhooks/fhir-labs — lif
 
   beforeAll(async () => {
     await getDb().insert(patients).values({ id: PATIENT, name: 'TEST_SP5 webhook', dob: '1980-01-01' })
-    ;[{ id: labTestId }] = await getDb().select({ id: labTests.id }).from(labTests).limit(1)
+    // WS4 T9: a single-value test (one Observation cannot fill a test with analytes).
+    ;[{ id: labTestId }] = await getDb().select({ id: labTests.id }).from(labTests)
+      .where(sql`not exists (select 1 from lab_test_analytes a where a.lab_test_id = ${labTests.id})`).limit(1)
     ;[{ id: providerId }] = await getDb().select({ id: providers.id }).from(providers).limit(1)
   })
   beforeEach(() => {

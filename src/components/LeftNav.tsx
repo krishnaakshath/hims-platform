@@ -23,6 +23,8 @@ import { ENCOUNTER_REGISTER_ROLES } from '@/lib/role-policy' // Wave F
 import { NotebookTabs } from 'lucide-react' // Wave F
 import { QrCode, Plug } from 'lucide-react' // SP8
 import { REPORTS_ROLES } from '@/lib/role-policy' // Wave I
+import { CLINICAL_ROLES } from '@/lib/role-policy' // WS3 T7
+import { HeartPulse } from 'lucide-react' // WS3 T7
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -75,6 +77,9 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   { href: '/front-desk/abdm-shares', label: 'ABHA Scan & Share', icon: QrCode, roles: ['admin', 'frontdesk'] as Role[] },
   // end SP8
   { href: '/inpatient/beds', label: 'Beds / Wards', icon: BedDouble, roles: ['frontdesk', 'admin', 'crc', 'pi'] as Role[] },
+  // WS3 T7: nursing station (medication round, vitals) -- CLINICAL_ROLES, same as the page gate.
+  { href: '/inpatient/nursing', label: 'Nursing station', icon: HeartPulse, roles: [...CLINICAL_ROLES] },
+  // end WS3 T7
   // Wave F P1-04: OPD register (SP3 encounters) -- ENCOUNTER_REGISTER_ROLES.
   { href: '/encounters', label: 'OPD Register', icon: NotebookTabs, roles: [...ENCOUNTER_REGISTER_ROLES] },
   // end Wave F

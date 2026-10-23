@@ -105,7 +105,9 @@ export const LAB_ORDER_ROLES: readonly Role[] = ['admin', 'pi']
 export const LAB_COLLECT_ROLES: readonly Role[] = ['admin', 'pi', 'labs']
 export const LAB_RECEIVE_ROLES: readonly Role[] = ['admin', 'labs']
 export const LAB_RESULT_ENTRY_ROLES: readonly Role[] = ['admin', 'labs']
-export const LAB_VERIFY_ROLES: readonly Role[] = ['admin', 'pi']
+// WS4 T11: + labs (the pathologist / reporting specialist). The gate only admits the role; the
+// query then requires a staff link to a provider of the test's department (src/lib/labs/verification.ts).
+export const LAB_VERIFY_ROLES: readonly Role[] = ['admin', 'labs', 'pi']
 export const LAB_REPORT_RELEASE_ROLES: readonly Role[] = ['admin', 'pi', 'labs']
 export const LAB_REPORT_READ_ROLES: readonly Role[] = ['admin', 'pi', 'crc', 'labs']
 export const LAB_LABEL_ROLES: readonly Role[] = ['admin', 'pi', 'labs', 'frontdesk']
@@ -133,7 +135,7 @@ export const CODING_ENTRY_ROLES: readonly Role[] = ['admin', 'coder', 'pi']
 // completed visits only), so admin codes from the coding workspace, not the chart.
 export const CODE_PROPOSE_ROLES: readonly Role[] = ['pi']
 export const CODING_QUERY_RESPOND_ROLES: readonly Role[] = ['admin', 'pi', 'coder']
-export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc', 'billing', 'rcm'] // SP7: + rcm (pre-auth diagnosis/procedure search)
+export const CODE_LOOKUP_ROLES: readonly Role[] = ['admin', 'coder', 'pi', 'crc', 'billing', 'rcm', 'frontdesk'] // SP7: + rcm (pre-auth diagnosis/procedure search); WS3 T3: + frontdesk (admission diagnosis picker, spec 3.1 item 3)
 export const CODE_SYSTEM_ADMIN_ROLES: readonly Role[] = ['admin']
 // end SP6
 
@@ -288,3 +290,24 @@ export const BRAND_SETTINGS_ROLES: readonly Role[] = MASTER_DATA_ADMIN_ROLES
 // /pharmacy page roles that may change stock.
 export const PHARMACY_STOCK_ROLES: readonly Role[] = ['admin', 'pharmacy']
 // end WS5 T3
+// WS3 T2: admission (spec 3.1 item 11). A pi may admit only as the attending (route-level check).
+export const ADMISSION_ROLES: readonly Role[] = ['frontdesk', 'admin', 'crc', 'pi']
+// end WS3 T2
+// WS3 T5: who may see an admission's discharge dues (spec 3.2 item 13). Clearing them is
+// BILLING_AUTHORITY_ROLES (admin, billing).
+export const DUES_VIEW_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'frontdesk', 'pi']
+// end WS3 T5
+// WS4 T8: a test's analytes and ranges -- read by setup and result entry; edited by setup only.
+export const LAB_ANALYTE_READ_ROLES: readonly Role[] = [...new Set([...LAB_SETUP_ROLES, ...LAB_RESULT_ENTRY_ROLES])]
+export const LAB_ANALYTE_EDIT_ROLES: readonly Role[] = LAB_SETUP_ROLES
+// end WS4 T8
+// WS4 T11: a doctor's acknowledgement / co-sign of a lab result (spec 3.4). The route then requires
+// the session's linked provider to be the ordering doctor or the attending of the active admission.
+export const LAB_SIGNOFF_ROLES: readonly Role[] = ['pi', 'admin']
+// end WS4 T11
+// WS4 T12: critical-value calls (spec 3.4 / 3.5). Logging the call: the lab, admin, and a pi only
+// when that pi may verify the order (same department rule as verification, checked in the route).
+// Acknowledging: the route then requires the ordering doctor or the attending of the admission.
+export const LAB_CRITICAL_NOTIFY_ROLES: readonly Role[] = ['admin', 'labs', 'pi']
+export const LAB_CRITICAL_ACK_ROLES: readonly Role[] = ['admin', 'pi']
+// end WS4 T12

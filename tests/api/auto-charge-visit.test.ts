@@ -51,7 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)('automatic visit charges (DB)', () =>
   const checkIn = async (patientId: string, over: Record<string, unknown> = {}, now = NOW) => {
     const { enc } = await m()
     const r = await enc.checkInVisit({
-      patientId, providerId: fx.provA, visitType: 'outpatient', urgency: 'routine', reason: 'Test', roomId: null, appointmentId: null, createAdmission: false, ...over,
+      patientId, providerId: fx.provA, visitType: 'outpatient', urgency: 'routine', reason: 'Test', appointmentId: null, ...over,
     } as never, desk, now)
     if (!r.ok) throw new Error(`check-in failed: ${r.error}`)
     return r
@@ -140,7 +140,7 @@ describe.skipIf(!process.env.DATABASE_URL)('automatic visit charges (DB)', () =>
   it('a failed check-in leaves no charge line (same transaction)', async () => {
     const pid = await newPatient()
     const { enc } = await m()
-    await expect(enc.checkInVisit({ patientId: pid, providerId: 2147483000, visitType: 'outpatient', urgency: 'routine', reason: 'x', roomId: null, appointmentId: null, createAdmission: false }, desk, NOW)).rejects.toThrow()
+    await expect(enc.checkInVisit({ patientId: pid, providerId: 2147483000, visitType: 'outpatient', urgency: 'routine', reason: 'x', appointmentId: null }, desk, NOW)).rejects.toThrow()
     expect(await linesOf(pid)).toEqual([])
   })
 
@@ -194,11 +194,13 @@ describe.skipIf(!process.env.DATABASE_URL)('automatic visit charges (DB)', () =>
     expect(r.charges.map((c) => c.source)).toEqual(['registration'])
   })
 
-  it('an inpatient check-in captures no visit charges', async () => {
+  // WS3 T2: inpatients are admitted by admitPatient, not check-in; the visit-charge plan still
+  // owes nothing for an IPD encounter.
+  it('an IPD encounter captures no visit charges', async () => {
     const pid = await newPatient()
-    const r = await checkIn(pid, { visitType: 'inpatient', createAdmission: true })
-    if (r.admissionId) fx.admissionIds.push(r.admissionId)
-    expect(r.charges).toEqual([])
+    const { getDb, encounters, ac } = await m()
+    const [e] = await getDb().insert(encounters).values({ patientId: pid, encounterType: 'ipd', encounterDate: DAY, providerId: fx.provA, checkedInByName: desk.name, checkedInAt: NOW }).returning()
+    expect(await getDb().transaction(async (tx) => ac.captureVisitChargesInTx(tx, e, desk, NOW))).toEqual([])
     expect(await linesOf(pid)).toEqual([])
   })
 

@@ -5,8 +5,6 @@ import { eq, or, sql } from 'drizzle-orm'
 import { requireSession } from '@/lib/auth'
 import { getDb } from '@/db/client'
 import { patients, providers } from '@/db/schema'
-import { assignRoomToPatient } from '@/lib/queries/rooms'
-import { getActiveAdmissionForPatient } from '@/lib/queries/admissions'
 import { checkInVisit, type CheckInVisitError } from '@/lib/queries/encounters'
 import { CHECK_IN_ROLES } from '@/lib/role-policy'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
@@ -19,8 +17,7 @@ const checkInSchema = z.object({
   urgency: z.enum(['routine', 'urgent', 'emergency']),
   // Shown to the patient in their visit confirmation -- see visitReasonSchema.
   reason: visitReasonSchema,
-  roomId: z.number().int().positive().optional(),
-  // SP3: check in against a booked appointment (e.g. a follow-up) -- outpatient only.
+  // SP3: check in against a booked appointment (e.g. a follow-up).
   appointmentId: z.number().int().positive().optional(),
 }).strict()
 
@@ -45,18 +42,13 @@ export async function POST(request: NextRequest) {
   const parsed = checkInSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid check-in payload', details: parsed.error.flatten() }, { status: 400 })
 
-  const { patientId: patientRef, providerId, visitType, urgency, reason, roomId, appointmentId } = parsed.data
+  const { patientId: patientRef, providerId, visitType, urgency, reason, appointmentId } = parsed.data
 
-  if (visitType === 'outpatient' && roomId) {
-    return NextResponse.json({ error: 'roomId is only valid for an inpatient check-in' }, { status: 400 })
-  }
-  if (visitType !== 'outpatient' && appointmentId !== undefined) {
-    return NextResponse.json({ error: 'appointmentId is only valid for an outpatient check-in' }, { status: 400 })
+  // WS3 T2 (spec 3.1 item 1): admission has its own form and route (POST /api/inpatient/admissions).
+  if (visitType === 'inpatient') {
+    return NextResponse.json({ error: 'Inpatients are admitted from the admission form.', code: 'use_admission_form' }, { status: 400 })
   }
 
-  // Verify the patient and provider actually exist BEFORE touching a room --
-  // a bad providerId must never be able to strand a room as occupied with no
-  // valid assignment behind it.
   // Wave C: the chart id (what the PatientPicker sends) or a UHID typed
   // directly (case-insensitive); an exact chart-id match wins.
   const patientRows = await getDb().select({ id: patients.id }).from(patients)
@@ -68,37 +60,8 @@ export async function POST(request: NextRequest) {
   const [providerRow] = await getDb().select({ id: providers.id }).from(providers).where(eq(providers.id, providerId))
   if (!providerRow) return NextResponse.json({ error: 'Provider not found' }, { status: 404 })
 
-  // Checking in an inpatient IS starting their admission -- there's no
-  // separate "start an admission" screen. Guard against double-admitting a
-  // patient who's already an active inpatient (e.g. reception accidentally
-  // re-checks someone in): the existing admission remains the current one.
-  //
-  // This lookup MUST happen before any room is claimed. If a room were
-  // claimed first and this guard then fired, the just-claimed room would be
-  // left permanently `occupied` with no admission ever pointing at it --
-  // nothing else in the app knows to free it. When the patient is already
-  // admitted AND a room was requested, reject the whole check-in instead:
-  // moving an already-admitted patient into a different room is what
-  // Transfer is for, not a second check-in.
-  const existingActive = visitType === 'inpatient' ? await getActiveAdmissionForPatient(patientId) : null
-  if (existingActive && roomId) {
-    return NextResponse.json(
-      { error: 'This patient is already admitted. Use Transfer to move them to a different room.' },
-      { status: 409 },
-    )
-  }
-
-  if (roomId) {
-    const assigned = await assignRoomToPatient(roomId, patientId)
-    if (!assigned) {
-      return NextResponse.json({ error: 'That room is no longer available. Please choose another.' }, { status: 409 })
-    }
-  }
-
-  // SP3: the assignment, its OPD token/lobby ticket, the admission, the
-  // encounter, a booked follow-up's completion and the audit rows are one
-  // transaction. (A room claimed above is not released if it throws -- a
-  // pre-existing hazard flagged in the SP3 plan.)
+  // SP3: the assignment, its OPD token/lobby ticket, the encounter, a booked follow-up's
+  // completion, the visit charges and the audit rows are one transaction.
   try {
     const result = await checkInVisit({
       patientId,
@@ -106,9 +69,7 @@ export async function POST(request: NextRequest) {
       visitType,
       urgency,
       reason,
-      roomId: roomId ?? null,
       appointmentId: appointmentId ?? null,
-      createAdmission: visitType === 'inpatient' && !existingActive,
     }, session)
     if (!result.ok) {
       const mapped = CHECK_IN_ERRORS[result.error]

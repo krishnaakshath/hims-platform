@@ -5,6 +5,12 @@ import type { LabQuoteStatus } from '@/lib/labs/catalog' // SP5
 import { listImagingForOrders, type ImagingAttachment } from '@/lib/queries/documents'
 import { PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status' // SP5
 import type { LabOrderPriority } from '@/lib/labs/validation' // WS1 T10
+// WS4 T9
+import { ageInDays } from '@/lib/labs/analytes'
+import { istDateOf } from '@/lib/india-time'
+import { listAnalyteResults, rangeSexOf, type AnalyteResultRow } from '@/lib/queries/lab-result-values'
+// end WS4 T9
+import { serviceCatalog } from '@/db/schema' // WS4 T11
 
 // SP5: orders are created only as part of a requisition (createLabRequisition in
 // src/lib/queries/lab-requisitions.ts); the single-order createLabOrder was removed.
@@ -32,6 +38,7 @@ export interface PatientLabOrderRow {
     resultedByName: string
     resultedAt: Date
     notes: string | null
+    analytes: AnalyteResultRow[] // WS4 T10: the per-analyte detail ([] for a single-value test)
   } | null
   // SP5
   sampleId: string | null
@@ -67,6 +74,7 @@ function mapPatientOrderRow(r: {
       resultedByName: r.result.resultedByName,
       resultedAt: r.result.resultedAt,
       notes: r.result.notes,
+      analytes: [], // WS4 T10: filled by listOrdersForPatient
     } : null,
     // SP5
     sampleId: r.order.sampleId,
@@ -90,8 +98,15 @@ export async function listOrdersForPatient(patientId: string): Promise<PatientLa
     .orderBy(desc(labOrders.orderedAt))
 
   const mapped = rows.map(mapPatientOrderRow)
-  const byOrder = await listImagingForOrders(mapped.map((r) => r.id))
-  return mapped.map((r) => ({ ...r, attachments: byOrder.get(r.id) ?? [] }))
+  const [byOrder, values] = await Promise.all([
+    listImagingForOrders(mapped.map((r) => r.id)),
+    listAnalyteResults(mapped.filter((r) => r.result !== null).map((r) => r.id)), // WS4 T10
+  ])
+  return mapped.map((r) => ({
+    ...r,
+    attachments: byOrder.get(r.id) ?? [],
+    result: r.result ? { ...r.result, analytes: values.get(r.id) ?? [] } : null,
+  }))
 }
 
 export interface WorklistRow {
@@ -116,11 +131,20 @@ export interface WorklistRow {
   receivedAt: Date | null
   verifiedAt: Date | null
   patientUhid: string | null
-  result: { value: string; unit: string | null; referenceRange: string | null; notes: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null } | null
+  // WS4 T9: `analytes` is the per-analyte detail ([] for a single-value test).
+  result: { value: string; unit: string | null; referenceRange: string | null; notes: string | null; flag: 'normal' | 'abnormal' | 'critical'; resultedByName: string; amendedAt: Date | null; analytes: AnalyteResultRow[] } | null
   // end SP5
   // WS1 T10: from the requisition ('routine' for a legacy order without one).
   priority: LabOrderPriority
   fastingRequired: boolean
+  // WS4 T9: what chooses each analyte's reference range in the entry form (spec 3.3 item 20):
+  // sex (male/female, else null) and age in days on the collection date, else today (IST).
+  patientSex: 'male' | 'female' | null
+  ageDays: number
+  // WS4 T11: what decides who may verify (src/lib/labs/verification.ts): the department of the
+  // test's tariff service (null = unmapped) and the user who entered the result (null = LIS / none).
+  testDepartmentId: number | null
+  resultedByUserId: number | null
 }
 
 function mapWorklistRow(r: {
@@ -133,7 +157,10 @@ function mapWorklistRow(r: {
   result: typeof labResults.$inferSelect | null
   priority: LabOrderPriority | null
   fastingRequired: boolean | null
-}): Omit<WorklistRow, 'attachments'> {
+  patientDob: string
+  patientGender: string | null
+  testDepartmentId: number | null
+}, today: string): Omit<WorklistRow, 'attachments'> {
   return {
     id: r.order.id,
     status: r.order.status,
@@ -156,11 +183,15 @@ function mapWorklistRow(r: {
     verifiedAt: r.order.verifiedAt,
     patientUhid: r.patientUhid,
     result: r.result
-      ? { value: r.result.value, unit: r.result.unit, referenceRange: r.result.referenceRange, notes: r.result.notes, flag: r.result.flag, resultedByName: r.result.resultedByName, amendedAt: r.result.amendedAt }
+      ? { value: r.result.value, unit: r.result.unit, referenceRange: r.result.referenceRange, notes: r.result.notes, flag: r.result.flag, resultedByName: r.result.resultedByName, amendedAt: r.result.amendedAt, analytes: [] }
       : null,
     // end SP5
     priority: r.priority ?? 'routine', // WS1 T10
     fastingRequired: r.fastingRequired ?? false, // WS1 T10
+    patientSex: rangeSexOf(r.patientGender), // WS4 T9
+    ageDays: ageInDays(r.patientDob, r.order.collectedAt ? istDateOf(r.order.collectedAt) : today), // WS4 T9
+    testDepartmentId: r.testDepartmentId, // WS4 T11
+    resultedByUserId: r.result?.resultedByUserId ?? null, // WS4 T11
   }
 }
 
@@ -187,6 +218,9 @@ export async function listWorklist(): Promise<WorklistRow[]> {
       result: labResults, // SP5
       priority: labRequisitions.priority, // WS1 T10
       fastingRequired: labRequisitions.fastingRequired, // WS1 T10
+      patientDob: sql<string>`to_char(patients.dob, 'YYYY-MM-DD')`, // WS4 T9
+      patientGender: sql<string | null>`patients.gender::text`, // WS4 T9
+      testDepartmentId: serviceCatalog.departmentId, // WS4 T11
     })
     .from(labOrders)
     .innerJoin(labTests, eq(labOrders.labTestId, labTests.id))
@@ -195,11 +229,20 @@ export async function listWorklist(): Promise<WorklistRow[]> {
     .leftJoin(homeCollectionVisits, eq(homeCollectionVisits.id, labOrders.homeCollectionVisitId)) // SP5
     .leftJoin(labResults, eq(labResults.labOrderId, labOrders.id)) // SP5
     .leftJoin(labRequisitions, eq(labRequisitions.id, labOrders.requisitionId)) // WS1 T10
+    .leftJoin(serviceCatalog, eq(serviceCatalog.id, labTests.serviceId)) // WS4 T11
     .orderBy(sql`case ${labRequisitions.priority} when 'stat' then 0 when 'urgent' then 1 else 2 end`, desc(labOrders.orderedAt), desc(labOrders.id))
 
-  const mapped = rows.map(mapWorklistRow)
-  const byOrder = await listImagingForOrders(mapped.map((r) => r.id))
-  return mapped.map((r) => ({ ...r, attachments: byOrder.get(r.id) ?? [] }))
+  const today = istDateOf(new Date())
+  const mapped = rows.map((r) => mapWorklistRow(r, today))
+  const [byOrder, values] = await Promise.all([
+    listImagingForOrders(mapped.map((r) => r.id)),
+    listAnalyteResults(mapped.filter((r) => r.result !== null).map((r) => r.id)), // WS4 T9
+  ])
+  return mapped.map((r) => ({
+    ...r,
+    attachments: byOrder.get(r.id) ?? [],
+    result: r.result ? { ...r.result, analytes: values.get(r.id) ?? [] } : null,
+  }))
 }
 
 export interface LabPatientRosterRow {

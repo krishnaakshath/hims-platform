@@ -42,6 +42,14 @@ import { refusesSampleCodes, addEncounterDiagnosis, addEncounterProcedure, apply
 import { raiseCodingQuery } from '../lib/queries/coding-queries'
 import { nextUhid } from '../lib/queries/uhid'
 import { checkInVisit } from '../lib/queries/encounters'
+import { admitPatient } from '../lib/queries/admit-patient' // WS3 T2
+// WS4 T8
+import { labAnalyteRanges, labTestAnalytes } from './schema'
+import { LAB_ANALYTE_SEED } from './seed-india-data'
+// end WS4 T8
+// WS4 T13: the catalogue from the tariff master (services and one test per service).
+import { WS4_LAB_TESTS, WS4_SERVICE_SEED } from './seed-india-data'
+// end WS4 T13
 import { captureChargeLine } from '../lib/queries/charge-capture'
 import { voidChargeLine } from '../lib/queries/charge-capture' // WS2 T9
 import type { AutoChargeOutcome } from '../lib/queries/auto-charge' // WS2 T9
@@ -49,6 +57,7 @@ import { createDraftInvoice, finaliseInvoice, cancelInvoice } from '../lib/queri
 import { recordPayment, issueRefund } from '../lib/queries/patient-ledger'
 import { postRoomRent } from '../lib/queries/room-rent'
 import { dischargeAdmission } from '../lib/queries/admissions'
+import { recordDuesClearance } from '../lib/queries/admission-dues' // WS3 T5
 import { createLabRequisition } from '../lib/queries/lab-requisitions'
 import { collectLabOrder, receiveLabSample, recordLabResult, verifyLabResult, cancelLabOrder } from '../lib/queries/lab-lifecycle'
 import { bookHomeCollection, assignCollector, collectHomeVisit, cancelHomeCollection } from '../lib/queries/home-collections'
@@ -144,12 +153,17 @@ async function ensureCategorisedRooms(db: Db, roomCategoryIds: Map<string, numbe
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(rooms).where(sql`${rooms.roomCategoryId} is not null`)
   if (n > 0) return
   await db.insert(rooms).values(ROOM_SEED.map((r) => ({
-    ward: r.ward, roomNumber: r.roomNumber, bedNumber: r.bedNumber, status: 'available' as const, roomCategoryId: roomCategoryIds.get(r.category)!,
+    ward: r.ward, roomNumber: r.roomNumber, bedNumber: r.bedNumber, status: 'available' as const, roomCategoryId: roomCategoryIds.get(r.category)!, genderRestriction: r.genderRestriction,
   })))
 }
 
+// WS4 T13: the base masters plus the catalogue-from-tariff additions.
+const ALL_SERVICE_SEED = [...SERVICE_SEED, ...WS4_SERVICE_SEED]
+const ALL_INDIA_LAB_TESTS = [...INDIA_LAB_TESTS, ...WS4_LAB_TESTS]
+// end WS4 T13
+
 async function upsertServices(db: Db, deptIds: Map<string, number>): Promise<Map<string, number>> {
-  await db.insert(serviceCatalog).values(SERVICE_SEED.map((s) => ({
+  await db.insert(serviceCatalog).values(ALL_SERVICE_SEED.map((s) => ({ // WS4 T13
     code: s.code, name: s.name, departmentId: deptIds.get(s.departmentCode)!, category: s.category, hsnSac: s.hsnSac,
     gstRateBp: s.gstRateBp, requiresPreauth: s.requiresPreauth ?? false, maxQuantity: s.maxQuantity ?? null,
   }))).onConflictDoNothing({ target: serviceCatalog.code })
@@ -163,7 +177,7 @@ const TARIFF_AUTHOR = 'Demo seed (rate card)'
 async function seedTariffs(db: Db, refs: Pick<IndiaRefs, 'deptIds' | 'payerIds' | 'roomCategoryIds' | 'serviceIds'>): Promise<void> {
   const withRates = new Set((await db.select({ id: tariffRates.serviceId }).from(tariffRates)).map((r) => r.id))
   const rows: (typeof tariffRates.$inferInsert)[] = []
-  for (const s of SERVICE_SEED) {
+  for (const s of ALL_SERVICE_SEED) { // WS4 T13
     const serviceId = refs.serviceIds.get(s.code)!
     if (withRates.has(serviceId)) continue
     if (s.basePaise !== undefined) {
@@ -201,16 +215,28 @@ const FASTING_LAB_TEST_CODES = ['FBS', 'LIPID']
 // end WS2 T10
 
 async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Promise<Map<string, number>> {
-  const existing = new Set((await db.select({ code: labTests.code }).from(labTests)).map((t) => t.code))
-  const toInsert = INDIA_LAB_TESTS.filter((t) => !existing.has(t.code)).map((t) => ({
-    name: t.name, code: t.code, category: t.category, defaultUnit: t.defaultUnit, referenceRange: t.referenceRange,
-    sampleType: t.sampleType, container: t.container, serviceId: t.serviceCode ? serviceIds.get(t.serviceCode) ?? null : null,
-  }))
+  const existingRows = await db.select({ code: labTests.code, serviceId: labTests.serviceId }).from(labTests)
+  const existing = new Set(existingRows.map((t) => t.code))
+  // WS4 T13: a service an admin already turned into a test (Lab setup -> Add from tariff) gets no second one.
+  const mappedServiceIds = new Set(existingRows.map((t) => t.serviceId).filter((id): id is number => id !== null))
+  const toInsert = ALL_INDIA_LAB_TESTS
+    .filter((t) => !existing.has(t.code) && !(t.serviceCode && mappedServiceIds.has(serviceIds.get(t.serviceCode) ?? -1)))
+    .map((t) => ({
+      name: t.name, code: t.code, category: t.category, defaultUnit: t.defaultUnit, referenceRange: t.referenceRange,
+      sampleType: t.sampleType, container: t.container, serviceId: t.serviceCode ? serviceIds.get(t.serviceCode) ?? null : null,
+    }))
   if (toInsert.length > 0) await db.insert(labTests).values(toInsert)
   for (const [code, m] of Object.entries(EXISTING_LAB_TEST_SERVICE_MAP)) {
     await db.update(labTests)
       .set({ serviceId: serviceIds.get(m.serviceCode) ?? null, sampleType: m.sampleType, container: m.container })
       .where(and(eq(labTests.code, code), isNull(labTests.serviceId)))
+  }
+  // WS3 T2: a reset releases every lab test's service (seed.ts clear) but keeps the rows, so an
+  // India test that already exists is re-linked here too (only while it has no service).
+  for (const t of ALL_INDIA_LAB_TESTS) { // WS4 T13
+    if (!t.serviceCode || !existing.has(t.code)) continue
+    await db.update(labTests).set({ serviceId: serviceIds.get(t.serviceCode) ?? null })
+      .where(and(eq(labTests.code, t.code), isNull(labTests.serviceId)))
   }
   // WS2 T10: fasting blood sugar and the lipid profile need a fasting sample (lane ruling R3).
   await db.update(labTests).set({ fastingRequired: true }).where(inArray(labTests.code, FASTING_LAB_TEST_CODES))
@@ -218,6 +244,25 @@ async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Prom
   const rows = await db.select({ id: labTests.id, code: labTests.code }).from(labTests)
   return new Map(rows.map((r) => [r.code, r.id]))
 }
+
+// WS4 T8: demo analytes and reference ranges (spec 3.3 item 21), matched by lab test code. A test
+// that already has analytes is left alone, so a re-run never overwrites the laboratory director's
+// edits from Settings -> Lab setup; analyte rows survive a reset (lab tests are not cleared).
+async function seedLabAnalytes(db: Db, labTestIds: Map<string, number>): Promise<void> {
+  for (const [testCode, defs] of Object.entries(LAB_ANALYTE_SEED)) {
+    const labTestId = labTestIds.get(testCode)
+    if (labTestId === undefined) continue
+    const [has] = await db.select({ id: labTestAnalytes.id }).from(labTestAnalytes).where(eq(labTestAnalytes.labTestId, labTestId)).limit(1)
+    if (has) continue
+    for (const [i, d] of defs.entries()) {
+      const { ranges, ...def } = d
+      const [row] = await db.insert(labTestAnalytes).values({ labTestId, ...def, sortOrder: i })
+        .onConflictDoNothing().returning({ id: labTestAnalytes.id })
+      if (row && ranges.length > 0) await db.insert(labAnalyteRanges).values(ranges.map((r) => ({ analyteId: row.id, ...r })))
+    }
+  }
+}
+// end WS4 T8
 
 /** Fills the hospital's legal details and the room-rent service only where they are still blank. */
 async function seedBillingSettings(db: Db, serviceIds: Map<string, number>): Promise<void> {
@@ -295,6 +340,7 @@ export async function seedIndiaReference(actor: Session): Promise<IndiaRefs> {
   const serviceIds = await upsertServices(db, deptIds)
   await seedTariffs(db, { deptIds, payerIds, roomCategoryIds, serviceIds })
   const labTestIds = await seedLabTestMapping(db, serviceIds)
+  await seedLabAnalytes(db, labTestIds) // WS4 T8
   await seedBillingSettings(db, serviceIds)
   const providerIds = await upsertDoctors(db, deptIds)
   await seedSampleCodeSets(db, actor)
@@ -343,7 +389,7 @@ export interface OperationsInput {
   patientIds: string[]
   heroIds: string[]
   /** Demo staff sessions, by DEMO_USERS local part. */
-  sessions: Record<'admin' | 'frontdesk' | 'billing' | 'labs' | 'pathologist' | 'collector' | 'coder' | 'pharmacy' | 'crc' | 'pi' | 'rcm', Session>
+  sessions: Record<'admin' | 'frontdesk' | 'billing' | 'labs' | 'pathologist' | 'radiologist' | 'collector' | 'coder' | 'pharmacy' | 'crc' | 'pi' | 'rcm', Session>
   now?: Date
 }
 
@@ -479,10 +525,9 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     return a.id
   }
 
-  async function checkIn(patientId: string, providerId: number, at: Date, reason: string, opts: { appointmentId?: number | null; inpatient?: boolean; roomId?: number | null; urgency?: 'routine' | 'urgent' | 'emergency' } = {}) {
+  async function checkIn(patientId: string, providerId: number, at: Date, reason: string, opts: { appointmentId?: number | null; urgency?: 'routine' | 'urgent' | 'emergency' } = {}) {
     const r = must(await checkInVisit({
-      patientId, providerId, visitType: opts.inpatient ? 'inpatient' : 'outpatient', urgency: opts.urgency ?? 'routine', reason,
-      roomId: opts.roomId ?? null, appointmentId: opts.appointmentId ?? null, createAdmission: Boolean(opts.inpatient),
+      patientId, providerId, visitType: 'outpatient', urgency: opts.urgency ?? 'routine', reason, appointmentId: opts.appointmentId ?? null,
     }, sessions.frontdesk, at), `check-in ${patientId}`)
     encounterCount++
     return r
@@ -658,13 +703,19 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   for (const s of stays) {
     const at = istAt(day(s.offset), '10:30')
     const roomId = room(...s.ward)
-    const ci = await checkIn(s.patientId, doctorId(s.doctor), at, s.reason, { inpatient: true, roomId, urgency: s.type === 'emergency' ? 'emergency' : 'routine' })
-    const admissionId = ci.admissionId!
+    // WS3 T2: through the admission path (bed claim, IPD encounter without a token, payer and deposit
+    // on admission_coverage). The demo ships only SAMPLE ICD-10 codes (no licensed version), so the
+    // provisional diagnosis is free text.
+    const adm = must(await admitPatient({
+      patientId: s.patientId, attendingProviderId: doctorId(s.doctor), roomId, admissionType: s.type, reason: s.reason,
+      provisionalDiagnosis: { text: s.reason }, expectedStayDays: s.type === 'emergency' ? 5 : 3, attendant: null,
+      policyId: s.payer ? (policyIds.get(s.patientId) ?? null) : null, preauthId: null,
+      depositRequiredPaise: s.payer ? 0 : 15_000_00, wardGenderOverrideReason: null, openOpdVisit: 'keep',
+    }, sessions.frontdesk, at), `admission ${s.patientId}`)
+    encounterCount++
+    const admissionId = adm.admissionId
     admissionIds.push(admissionId)
-    await db.update(admissions).set({ admittedAt: at, admissionType: s.type }).where(eq(admissions.id, admissionId))
-    await db.update(doctorAssignments).set({ status: 'scheduled' }).where(eq(doctorAssignments.id, ci.assignment.id))
-    await db.update(rooms).set({ status: 'occupied', occupiedByPatientId: s.patientId }).where(eq(rooms.id, roomId))
-    await setEncounterStatus(ci.encounter.id, 'in_consultation', plusMinutes(at, 20), s.doctor)
+    await setEncounterStatus(adm.encounterId, 'in_consultation', plusMinutes(at, 20), s.doctor)
 
     // Advance (deposit) on admission for self-pay stays.
     if (!s.payer) {
@@ -694,6 +745,10 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   const discharged = stays[0]
   // Room rent is posted while the stay still has its bed (discharge releases the bed).
   must(await postRoomRent(dischargedId, sessions.billing, { throughDate: day(-2), now: realNow }), 'room rent (discharged)')
+  // WS3 T5: billing clears the dues before the discharge (the gate refuses outstanding dues without a
+  // current clearance). Today the ₹15,000 advance covers the stay; the reason keeps the seed working
+  // if the demo charges ever exceed it, since the final bill is settled after discharge.
+  must(await recordDuesClearance(dischargedId, 'Final bill to be settled against the advance at the billing desk', sessions.billing, istAt(day(-2), '10:30')), 'dues clearance')
   must(await dischargeAdmission(dischargedId, {
     dischargeDiagnosis: 'Closed fracture of right distal radius, treated with closed reduction and cast',
     dischargeDrugs: 'Tab. Aceclofenac 100 mg twice daily after food for 5 days; Tab. Pantoprazole 40 mg once daily before breakfast for 5 days; Tab. Calcium + Vitamin D3 once daily for 6 weeks',
@@ -801,6 +856,20 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   async function result(orderId: number, value: string, flag: 'normal' | 'abnormal' | 'critical', at: Date, unit?: string, referenceRange?: string, notes?: string) {
     must(await recordLabResult(orderId, { value, flag, ...(unit ? { unit } : {}), ...(referenceRange ? { referenceRange } : {}), ...(notes ? { notes } : {}) }, { kind: 'staff', session: labs }, { now: at }), 'lab result')
   }
+  // WS4 T9: a test with analytes is entered one value per analyte; flags are computed from the
+  // patient's age/sex range exactly as at the bench (spec 3.3 items 18-20).
+  async function analyteResult(orderId: number, testCode: string, values: Record<string, string>, at: Date, notes?: string) {
+    const defs = await db.select({ id: labTestAnalytes.id, code: labTestAnalytes.code }).from(labTestAnalytes)
+      .where(and(eq(labTestAnalytes.labTestId, t(testCode)), eq(labTestAnalytes.isActive, true)))
+    const idOf = new Map(defs.map((d) => [d.code, d.id]))
+    const analytes = Object.entries(values).map(([code, value]) => {
+      const analyteId = idOf.get(code)
+      if (analyteId === undefined) throw new Error(`Seed step failed: lab result (${testCode} has no analyte ${code})`)
+      return { analyteId, value }
+    })
+    must(await recordLabResult(orderId, { analytes, ...(notes ? { notes } : {}) }, { kind: 'staff', session: labs }, { now: at }), 'lab result')
+  }
+  // end WS4 T9
   const fakeRelease = (at: Date) => ({
     render: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]),
     putBlob: async (path: string) => ({ url: `seed-demo://${path}` }),
@@ -814,19 +883,27 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     const r = await requisition(v.patientId, v.doctor.name, ['CBC-DIFF', 'LFT'], istAt(day(-5), '09:30'), v.encounterId)
     labOrderCount += r.orderIds.length
     for (const id of r.orderIds) await collectAndReceive(id, istAt(day(-5), '09:45'))
-    await result(r.orderIds[0], '7.8', 'normal', istAt(day(-5), '13:00'), 'x10^3/µL', '4.0-11.0')
-    await result(r.orderIds[1], 'ALT 86', 'abnormal', istAt(day(-5), '13:10'), 'U/L', '7-56', 'Mildly raised transaminases')
+    await analyteResult(r.orderIds[0], 'CBC-DIFF', {
+      HGB: '14.2', WBC: '7.8', NEUT: '62', LYMPH: '28', MONO: '6', EOS: '3', BASO: '1', PLT: '265', RBC: '4.9', HCT: '43.0', MCV: '88.0', MCH: '29.0', MCHC: '33.0',
+    }, istAt(day(-5), '13:00'))
+    await analyteResult(r.orderIds[1], 'LFT', {
+      TBIL: '0.9', DBIL: '0.2', AST: '64', ALT: '86', ALP: '112', TP: '7.1', ALB: '4.2',
+    }, istAt(day(-5), '13:10'), 'Mildly raised transaminases')
     for (const id of r.orderIds) must(await verifyLabResult(id, pathologist, istAt(day(-5), '15:00')), 'verify')
     must(await releaseLabReport(r.requisitionId, pathologist, fakeRelease(istAt(day(-5), '15:30'))), 'release report')
   }
-  // R2: critical result entered today, awaiting verification (dengue inpatient).
+  // R2: critical result entered today, awaiting verification (dengue inpatient). WS4 T12: the result
+  // write raises the order's critical alert, left `open` (call not yet logged) so the demo shows the
+  // banner, the Critical tile and the verify gate.
   {
     const r = await requisition(pid(12), 'Dr. Ananya Rao', ['DENGUE-NS1', 'CBC-DIFF'], istAt(day(-3), '11:00'))
     labOrderCount += r.orderIds.length
     for (const id of r.orderIds) await collectAndReceive(id, istAt(day(-3), '11:15'))
-    await result(r.orderIds[0], 'Positive', 'abnormal', istAt(day(-3), '16:00'), undefined, 'Negative')
+    await analyteResult(r.orderIds[0], 'DENGUE-NS1', { NS1: 'Positive' }, istAt(day(-3), '16:00'))
     must(await verifyLabResult(r.orderIds[0], pathologist, istAt(day(-3), '17:00')), 'verify')
-    await result(r.orderIds[1], 'Platelets 38', 'critical', earlier(60), 'x10^3/µL', '150-450', 'Critical value phoned to the ward')
+    await analyteResult(r.orderIds[1], 'CBC-DIFF', {
+      HGB: '13.6', WBC: '3.1', NEUT: '48', LYMPH: '42', MONO: '7', EOS: '2', BASO: '1', PLT: '38', RBC: '4.8', HCT: '44.0', MCV: '90.0', MCH: '29.5', MCHC: '33.0',
+    }, earlier(60), 'Platelet count confirmed on peripheral smear')
   }
   // R3: received at the bench, awaiting result.
   {
@@ -850,13 +927,13 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
     const r = await requisition(patientId, doctor.name, ['LIPID', 'URINE-RM'], earlier(50), encounterId)
     labOrderCount += r.orderIds.length
   }
-  // R6: imaging resulted and verified.
+  // R6: imaging resulted and verified -- WS4 T11: by the radiologist (Radiology reports imaging).
   {
     const r = await requisition(pid(49), 'Dr. Arjun Reddy', ['XR-CHEST-1V'], istAt(day(-6), '11:00'))
     labOrderCount += r.orderIds.length
     await collectAndReceive(r.orderIds[0], istAt(day(-6), '11:10'))
     await result(r.orderIds[0], 'No active lung lesion. Cardiac size normal.', 'normal', istAt(day(-6), '12:00'))
-    must(await verifyLabResult(r.orderIds[0], pathologist, istAt(day(-6), '12:30')), 'verify')
+    must(await verifyLabResult(r.orderIds[0], sessions.radiologist, istAt(day(-6), '12:30')), 'verify')
   }
   // Home collection (patients whose registered PIN is in the service area).
   const localPatients = await db.select({ id: patients.id, addressLine1: patients.addressLine1, city: patients.city, district: patients.district, stateCode: patients.stateCode, pinCode: patients.pinCode, phone: patients.phone })
@@ -885,7 +962,7 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
       const sampleIds = [...b.sampleIds.values()]
       must(await collectHomeVisit(b.visit.id, sampleIds, sessions.collector, istAt(day(-1), '07:40'), { waiverReason: 'sms_unavailable' }), 'collect at home')
       for (const sampleId of sampleIds) must(await receiveLabSample(sampleId, labs, istAt(day(-1), '10:00')), 'receive home sample')
-      await result(r.orderIds[0], 'LDL 168', 'abnormal', istAt(day(-1), '14:00'), 'mg/dL', '<100')
+      await analyteResult(r.orderIds[0], 'LIPID', { CHOL: '238', TG: '172', HDL: '38', LDL: '168', VLDL: '34' }, istAt(day(-1), '14:00'))
     }
     // H3: home visit cancelled at the patient's request, the test then cancelled.
     {

@@ -1,7 +1,7 @@
 // SP5 Task 13: the lab report data shape (pure builder) and the PDF-safe text helper.
 import { describe, it, expect } from 'vitest'
-import { NON_LATIN_PLACEHOLDER, buildLabReportData, flagLabel, hasNonLatinText, hospitalFromBrand, toPdfSafeText, type LabReportSource } from '@/lib/labs/report-data'
-import { SRC } from './report-fixtures'
+import { NON_LATIN_PLACEHOLDER, analyteFlagText, buildLabReportData, flagLabel, hasNonLatinText, hospitalFromBrand, toPdfSafeText, type LabReportSource } from '@/lib/labs/report-data'
+import { CBC_ANALYTES, CBC_SRC, SRC } from './report-fixtures'
 
 const NOW = new Date('2099-03-04T06:00:00Z')
 
@@ -24,6 +24,7 @@ describe('buildLabReportData', () => {
       testName: 'Haemoglobin', testCode: '718-7', sampleId: 'L99030200429', value: '11.2', unit: 'g/dL', referenceRange: '12-16 g/dL',
       flag: 'abnormal', collectedAt: '2099-03-02T04:00:00.000Z', receivedAt: '2099-03-02T06:00:00.000Z',
       verifiedByName: 'Dr Path One', verifiedAt: '2099-03-02T10:00:00.000Z',
+      analytes: [], cosignedBy: [], // WS4 T10: a single-value test has no analyte rows
     })
     expect(d.verifiers).toEqual(['Dr Path One', 'Dr Path Two'])
     expect(d).toMatchObject({
@@ -66,6 +67,44 @@ describe('buildLabReportData', () => {
     expect(hospitalFromBrand({ name: 'X', legalName: 'X Trust', print: { ...print, subline: null, footerText: null } }, png)).toEqual({
       name: 'X', legalName: 'X Trust', headerText: 'X Hospital, Pune', site: null, footerText: null, logoPng: png,
     })
+  })
+})
+
+// WS4 T10 (spec 3.7 item 30): per-analyte rows with the snapshot range and a directional flag.
+describe('analyte rows', () => {
+  it('a CBC is one test row with 13 analyte rows in definition order and CRITICAL LOW on Hb', () => {
+    const d = buildLabReportData(CBC_SRC, NOW)
+    expect(d.rows).toHaveLength(1)
+    const [row] = d.rows
+    expect(row.testName).toBe('Complete blood count with differential')
+    expect(row.analytes).toHaveLength(13)
+    expect(row.analytes.map((a) => a.name)).toEqual(CBC_ANALYTES.map((a) => a.name))
+    expect(row.analytes[0]).toEqual({ name: 'Haemoglobin', value: '6.5', unit: 'g/dL', referenceRange: '12.0-15.5 g/dL', flagText: 'CRITICAL LOW' })
+    expect(row.analytes.slice(1).every((a) => a.flagText === '')).toBe(true)
+    expect(row.cosignedBy).toEqual([])
+    expect(d.cosigners).toEqual([])
+    // Explicit projection: no ids, codes, flag sources or technician reasons reach the report.
+    expect(Object.keys(row.analytes[0]).sort()).toEqual(['flagText', 'name', 'referenceRange', 'unit', 'value'])
+  })
+
+  it('lists distinct co-signers in row order', () => {
+    const o = CBC_SRC.orders[0]
+    const d = buildLabReportData({ ...CBC_SRC, orders: [{ ...o, cosignedBy: ['Dr B', 'Dr A'] }, { ...o, cosignedBy: ['Dr A', 'Dr C'] }] }, NOW)
+    expect(d.rows.map((r) => r.cosignedBy)).toEqual([['Dr B', 'Dr A'], ['Dr A', 'Dr C']])
+    expect(d.cosigners).toEqual(['Dr B', 'Dr A', 'Dr C'])
+  })
+
+  it('analyteFlagText: direction from the interpretation, severity from the flag', () => {
+    expect(analyteFlagText('N', 'normal')).toBe('')
+    expect(analyteFlagText(null, 'normal')).toBe('')
+    expect(analyteFlagText('L', 'abnormal')).toBe('LOW')
+    expect(analyteFlagText('H', 'abnormal')).toBe('HIGH')
+    expect(analyteFlagText('A', 'abnormal')).toBe('ABNORMAL')
+    expect(analyteFlagText(null, 'abnormal')).toBe('ABNORMAL')
+    expect(analyteFlagText('LL', 'critical')).toBe('CRITICAL LOW')
+    expect(analyteFlagText('HH', 'critical')).toBe('CRITICAL HIGH')
+    expect(analyteFlagText('AA', 'critical')).toBe('CRITICAL')
+    expect(analyteFlagText(null, 'critical')).toBe('CRITICAL')
   })
 })
 

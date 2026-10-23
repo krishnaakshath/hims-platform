@@ -2,13 +2,16 @@ import { describe, it, expect, afterAll, beforeAll } from 'vitest'
 import { createHash } from 'node:crypto'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { auditLog, followUpOrders, labOrders, labReports, labRequisitions, labResults, labTests, patients, providers, users } from '@/db/schema'
+import { auditLog, followUpOrders, labOrders, labReports, labRequisitions, labResultValues, labResults, labTestAnalytes, labTests, patients, providers, users } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 import type { LabReportData } from '@/lib/labs/report-data'
 import { verifyLabResult } from '@/lib/queries/lab-lifecycle'
 import {
   getLabReportForDownload, listPortalLabReports, listReportsForPatient, releaseLabReport, type ReleaseDeps,
 } from '@/lib/queries/lab-reports'
+// WS4 T11: the verifier is linked to the reporting department of the tests; co-signers on the report.
+import { labResultSignoffs } from '@/db/schema'
+import { createLabDepartmentFixture, type LabDepartmentFixture } from '../../db/lab-verifier-fixtures'
 
 const RUN = `${Date.now()}`
 const PROBE = `TEST_SP5_REPORT-${RUN}`
@@ -23,6 +26,7 @@ let inactiveProviderId = 0
 let enterer = 0
 let verifierId = 0
 let VERIFIER: Session
+let dept: LabDepartmentFixture // WS4 T11
 const testIds: number[] = []
 const patientIds: string[] = []
 let seq = 0
@@ -101,7 +105,11 @@ describe.skipIf(!process.env.DATABASE_URL)('lab report release (DB)', () => {
     ]).returning()
     enterer = a.id
     verifierId = b.id
-    VERIFIER = { role: 'pi', name: PROBE_VERIFIER, userId: verifierId }
+    VERIFIER = { role: 'labs', name: PROBE_VERIFIER, userId: verifierId }
+    // WS4 T11: verification needs a staff link to a provider of the tests' department.
+    dept = await createLabDepartmentFixture(`R${RUN}`)
+    await dept.mapTests(testIds)
+    await dept.linkUsers([verifierId], `TEST_SP5 Dr Pathologist ${RUN}`)
   })
 
   afterAll(async () => {
@@ -117,6 +125,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab report release (DB)', () => {
       await db.delete(patients).where(inArray(patients.id, patientIds))
     }
     await db.delete(auditLog).where(inArray(auditLog.userName, PROBE_NAMES))
+    await dept?.cleanup() // WS4 T11
     await db.delete(users).where(inArray(users.id, [enterer, verifierId]))
     if (testIds.length > 0) await db.delete(labTests).where(inArray(labTests.id, testIds))
     await db.delete(providers).where(inArray(providers.id, [providerId, inactiveProviderId]))
@@ -163,6 +172,52 @@ describe.skipIf(!process.env.DATABASE_URL)('lab report release (DB)', () => {
       id: r.report.id, patientId: req.patientId, reportNumber: r.report.reportNumber, blobUrl: r.report.blobUrl, supersededAt: null,
     })
     expect(await getLabReportForDownload(2_000_000_000)).toBeNull()
+  })
+
+  // WS4 T10 (spec 3.7 item 30): the loader reads each order's analyte values in definition order.
+  it('passes an analyte test\'s values to the renderer in definition order, with no co-signers yet', async () => {
+    const db = getDb()
+    const [hgb, plt] = await db.insert(labTestAnalytes).values([
+      { labTestId: testIds[2], code: 'HGB', name: 'Haemoglobin', unit: 'g/dL', valueType: 'numeric', decimals: 1, sortOrder: 1, loincCode: '718-7' },
+      { labTestId: testIds[2], code: 'PLT', name: 'Platelet count', unit: '10^3/µL', valueType: 'numeric', decimals: 0, sortOrder: 2, loincCode: '777-3' },
+    ]).returning()
+    const req = await makeRequisition()
+    const o = await makeOrder(req, 2, 'verified')
+    const [res] = await db.select().from(labResults).where(eq(labResults.labOrderId, o.id))
+    // Inserted out of order: the report follows the analytes' sort order, not insertion order.
+    await db.insert(labResultValues).values([
+      { labResultId: res.id, labOrderId: o.id, analyteId: plt.id, valueText: '250', valueNumeric: 250, unit: '10^3/µL', referenceRangeText: '150-450 10^3/µL', flag: 'normal', interpretation: 'N', flagSource: 'auto' },
+      { labResultId: res.id, labOrderId: o.id, analyteId: hgb.id, valueText: '6.5', valueNumeric: 6.5, unit: 'g/dL', referenceRangeText: '12.0-15.5 g/dL', flag: 'critical', interpretation: 'LL', flagSource: 'auto' },
+    ])
+    rendered.length = 0
+    const r = await releaseLabReport(req.id, S, deps)
+    expect(r.ok).toBe(true)
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0].rows).toHaveLength(1)
+    expect(rendered[0].rows[0].analytes).toEqual([
+      { name: 'Haemoglobin', value: '6.5', unit: 'g/dL', referenceRange: '12.0-15.5 g/dL', flagText: 'CRITICAL LOW' },
+      { name: 'Platelet count', value: '250', unit: '10^3/µL', referenceRange: '150-450 10^3/µL', flagText: '' },
+    ])
+    expect(rendered[0].rows[0].cosignedBy).toEqual([])
+    expect(rendered[0].cosigners).toEqual([])
+  })
+
+  // WS4 T11 (lane ruling R5): each row lists its co-signing providers; the report lists them once.
+  it('lists the co-signers of each verified order under the verifier', async () => {
+    const req = await makeRequisition()
+    const o1 = await makeOrder(req, 0, 'verified')
+    const o2 = await makeOrder(req, 1, 'verified')
+    await getDb().insert(labResultSignoffs).values([
+      { labOrderId: o1.id, kind: 'cosign', providerId, signedByName: 'TEST_SP5 cosigner' },
+      { labOrderId: o2.id, kind: 'cosign', providerId, signedByName: 'TEST_SP5 cosigner' },
+      { labOrderId: o2.id, kind: 'acknowledge', providerId: inactiveProviderId, signedByName: 'TEST_SP5 acknowledger' },
+    ])
+    rendered.length = 0
+    expect((await releaseLabReport(req.id, S, deps)).ok).toBe(true)
+    const name = `TEST_SP5 Dr Report ${RUN}`
+    expect(rendered[0].rows.map((r) => r.cosignedBy)).toEqual([[name], [name]])
+    expect(rendered[0].cosigners).toEqual([name])
+    expect(rendered[0].verifiers).toEqual([PROBE_VERIFIER])
   })
 
   it('a second release (after another order is verified) supersedes v1 with a cumulative v2', async () => {

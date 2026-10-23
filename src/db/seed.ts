@@ -9,6 +9,8 @@ import { addDaysIso } from '../lib/follow-ups/rules'
 import { todayIsoIn } from '../lib/india-time'
 import { encounterVitals, encounterConsults } from './schema' // WS1 T2
 import { referrals } from './schema' // WS1 T4
+import { labResultSignoffs } from './schema' // WS4 T11
+import { labCriticalAlerts } from './schema' // WS4 T12
 import {
   // SP6
   codingQueryResponses, codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures, serviceProcedureCodes,
@@ -62,6 +64,7 @@ import {
   // SP8
   nhcxInboundCalls, nhcxExchanges, nhcxEligibilityChecks, abdmProfileShares, abdmConsents,
   admissionCoverage, coverageVerifications, // WS12 T1
+  admissionDuesClearances, // WS3 T5
   abhaLinkOverrides, // WS12 T5
   // SP3
   encounters,
@@ -653,6 +656,7 @@ const STAFF_SEED: {
   { name: 'Dr. Rajiv Kunam', linkUserLocal: 'pi', linkProviderName: 'Dr. Rajiv Kunam', department: 'Psychiatry', title: 'Consultant Psychiatrist', employmentStatus: 'active', hireDate: '2021-03-01', terminationDate: null },
   { name: 'Dr. Ananya Rao', linkUserLocal: null, linkProviderName: 'Dr. Ananya Rao', department: 'General Medicine', title: 'Consultant Physician', employmentStatus: 'active', hireDate: '2022-06-15', terminationDate: null },
   { name: 'Dr. Suresh Babu', linkUserLocal: 'pathologist', linkProviderName: 'Dr. Suresh Babu', department: 'Laboratory', title: 'Consultant Pathologist', employmentStatus: 'active', hireDate: '2019-01-10', terminationDate: null },
+  { name: 'Dr. Nandini Kulkarni', linkUserLocal: 'radiologist', linkProviderName: 'Dr. Nandini Kulkarni', department: 'Radiology', title: 'Consultant Radiologist', employmentStatus: 'active', hireDate: '2020-02-03', terminationDate: null }, // WS4 T11
   { name: 'Jaya Raman', linkUserLocal: 'crc', linkProviderName: null, department: 'Clinical Research', title: 'Clinical Research Coordinator', employmentStatus: 'active', hireDate: '2022-09-01', terminationDate: null },
   { name: 'Sanjay Patil', linkUserLocal: 'admin', linkProviderName: null, department: 'Administration', title: 'Hospital Administrator', employmentStatus: 'active', hireDate: '2020-11-01', terminationDate: null },
   { name: 'Pooja Nair', linkUserLocal: 'frontdesk', linkProviderName: null, department: 'Front Office', title: 'Front Office Executive', employmentStatus: 'active', hireDate: '2023-04-20', terminationDate: null },
@@ -862,6 +866,8 @@ async function clearExistingData() {
     // verifications (append-only, purge flag above) reference eligibility checks and policies.
     await tx.delete(admissionCoverage)
     await tx.delete(coverageVerifications)
+    // WS3 T5: dues clearances cascade from admissions but also reference users (cleared_by_user_id).
+    await tx.delete(admissionDuesClearances)
     // SP8: NHCX exchanges reference claims, claim versions, pre-auths, queries, policies and
     // eligibility checks; eligibility checks reference policies and payers; consents and shares
     // reference patients. Inbound calls and consents are append-only (purge flag above).
@@ -900,7 +906,7 @@ async function clearExistingData() {
     await tx.delete(documentCounters)
   })
   await db.delete(chargeRuleConfigs)
-  await db.update(billingSettings).set({ roomRentServiceId: null })
+  await db.update(billingSettings).set({ roomRentServiceId: null, registrationServiceId: null }) // WS3 T2: WS2 T9's registration link too
   // end SP4
   // Wave D: everything else that hangs off appointments, admissions, rooms and medication
   // episodes, children first.
@@ -960,6 +966,8 @@ async function clearExistingData() {
   await db.delete(notificationLog)
   await db.delete(patientNotificationPreferences)
   await db.delete(labReports)
+  await db.delete(labResultSignoffs) // WS4 T11: cascades from lab_orders but also references providers/users
+  await db.delete(labCriticalAlerts) // WS4 T12: cascades from lab_orders/patients but also references users
   await db.delete(labResults)
   await db.delete(labOrders)
   await db.delete(homeCollectionVisits)
@@ -1469,7 +1477,7 @@ export async function seed(opts: { reset?: boolean } = {}) {
     heroIds,
     sessions: {
       admin: sessionFor('admin'), frontdesk: sessionFor('frontdesk'), billing: sessionFor('billing'), labs: sessionFor('labs'),
-      pathologist: sessionFor('pathologist'), collector: sessionFor('collector'), coder: sessionFor('coder'), pharmacy: sessionFor('pharmacy'),
+      pathologist: sessionFor('pathologist'), radiologist: sessionFor('radiologist'), collector: sessionFor('collector'), coder: sessionFor('coder'), pharmacy: sessionFor('pharmacy'),
       crc: sessionFor('crc'), pi: sessionFor('pi'), rcm: sessionFor('rcm'),
     },
   })
