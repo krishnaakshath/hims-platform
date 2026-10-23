@@ -149,12 +149,14 @@ export const patients = pgTable('patients', {
   abhaVerifiedAt: timestamp('abha_verified_at'),
   abhaVerificationSource: text('abha_verification_source', { enum: ABHA_VERIFICATION_SOURCES }),
   abhaVerifiedVia: text('abha_verified_via', { enum: ABHA_VERIFIED_VIA }),
+  allergyStatus: text('allergy_status', { enum: ['unknown', 'none_known', 'recorded'] }).default('unknown').notNull(), // WS1 T1
 }, (t) => [
   // SP8
   check('patients_abha_verification_complete', sql`(${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerificationSource} IS NULL) AND (${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerifiedVia} IS NULL)`),
   check('patients_abha_verification_source_valid', sql`${t.abhaVerificationSource} IS NULL OR ${t.abhaVerificationSource} IN ('abdm', 'abdm_sandbox_mock')`),
   // abha_verified_via is checked in TypeScript only (ABHA_VERIFIED_VIA): the SP8 migration carries no
   // Aadhaar-named literal, which its static test pins.
+  check('patients_allergy_status_valid', sql`${t.allergyStatus} IN ('unknown', 'none_known', 'recorded')`), // WS1 T1
 ])
 
 // SP6 clinical coding enums (scripts/migrations/2026-10-07-sp6-b-clinical-coding.sql). Declared
@@ -541,6 +543,9 @@ export const allergies = pgTable('allergies', {
   allergen: text('allergen').notNull(),
   reaction: text('reaction'),
   severity: severityEnum('severity').notNull(),
+  recordedByName: text('recorded_by_name'), // WS1 T1
+  recordedAt: timestamp('recorded_at'), // WS1 T1
+  inactivatedAt: timestamp('inactivated_at'), // WS1 T1 (active = inactivated_at IS NULL)
 })
 
 export const identityVerifications = pgTable('identity_verifications', {
@@ -986,7 +991,8 @@ export type FollowUpContactAttemptRow = typeof followUpContactAttempts.$inferSel
 // Money: per-unit prices and configured amounts are int4 paise capped at MAX_AMOUNT_PAISE;
 // every computed amount is bigint paise (mode 'number', capped at MAX_DOCUMENT_PAISE < 2^53).
 // No SP4 FK has an ON DELETE action: deletePatient clears a patient's lines explicitly.
-export const chargeLineSourceEnum = pgEnum('charge_line_source', ['manual', 'room_rent', 'pharmacy'])
+// WS2 T1: + registration, consultation, lab_order, procedure (scripts/migrations/2026-10-24-ws2-0-enum-values.sql).
+export const chargeLineSourceEnum = pgEnum('charge_line_source', ['manual', 'room_rent', 'pharmacy', 'registration', 'consultation', 'lab_order', 'procedure'])
 export const chargeLineStatusEnum = pgEnum('charge_line_status', ['captured', 'invoiced', 'void'])
 export const PRICE_SOURCES = ['base', 'department', 'payer', 'manual', 'pharmacy'] as const
 
@@ -2107,7 +2113,8 @@ export const encounterNotes = pgTable('encounter_notes', {
   signedAt: timestamp('signed_at'),
 })
 
-export const signableTypeEnum = pgEnum('signable_type', ['form_submission', 'admission_discharge', 'policy_acceptance', 'form_submission_consent'])
+// WS1 T1: + encounter_note (scripts/migrations/2026-10-24-ws1-0-enum-values.sql).
+export const signableTypeEnum = pgEnum('signable_type', ['form_submission', 'admission_discharge', 'policy_acceptance', 'form_submission_consent', 'encounter_note'])
 
 export const policyDocumentTypeEnum = pgEnum('policy_document_type', ['npp', 'tos'])
 
