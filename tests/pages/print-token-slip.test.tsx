@@ -20,6 +20,7 @@ const SLIP = {
   encounterId: 55, opdToken: 17, encounterType: 'opd', encounterDate: '2026-10-08', checkedInAt: new Date('2026-10-08T04:00:00Z'),
   patient: { id: 'RD-0042', name: 'Asha Rao', uhid: 'UH00000042' },
   doctorName: 'Dr. Meera Iyer', departmentName: 'General Medicine', room: null,
+  roomLabel: null, waitingAhead: 0, estimatedWaitMinutes: 0,
 }
 
 afterEach(() => { cleanup(); state.role = 'frontdesk'; state.logAudit.mockClear(); state.getTokenSlip.mockReset() })
@@ -39,6 +40,27 @@ describe('/print/token/[encounterId]', () => {
     expect(screen.getByText(brand.legalName)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /print/i })).toBeInTheDocument()
     expect(state.logAudit).toHaveBeenCalledWith(expect.objectContaining({ role: 'frontdesk' }), 'printed OPD token slip', 'RD-0042', 'encounter=55')
+  })
+
+  // WS6 T9: the doctor's room and the wait, for the patient to read in the lobby.
+  it('shows the doctor, the OPD room and the estimated wait', async () => {
+    state.getTokenSlip.mockResolvedValue({ ...SLIP, roomLabel: '4', waitingAhead: 3, estimatedWaitMinutes: 30 })
+    render(await run('55'))
+    expect(screen.getByText(/Dr\. Meera Iyer/)).toBeInTheDocument()
+    expect(screen.getByText('Room 4')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
+    expect(screen.getByText('About 30 minutes')).toBeInTheDocument()
+  })
+
+  it('says the patient is next when nobody is ahead, and leaves out an unknown room and wait', async () => {
+    state.getTokenSlip.mockResolvedValue(SLIP)
+    render(await run('55'))
+    expect(screen.getByText(/you are next/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^Room /)).not.toBeInTheDocument()
+    cleanup()
+    state.getTokenSlip.mockResolvedValue({ ...SLIP, encounterType: 'ipd', estimatedWaitMinutes: null })
+    render(await run('55'))
+    expect(screen.queryByText(/about .* minutes|you are next/i)).not.toBeInTheDocument()
   })
 
   it('says when no UHID has been issued and still shows the chart id', async () => {

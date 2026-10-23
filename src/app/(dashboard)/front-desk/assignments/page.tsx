@@ -5,6 +5,7 @@ import { listAllAssignments } from '@/lib/queries/doctor-assignments'
 import { listAllProviders } from '@/lib/queries/providers'
 import { AssignmentStatusChip } from '@/components/AssignmentStatusChip'
 import { AcknowledgeDeclineButton } from '@/components/AcknowledgeDeclineButton'
+import { EmptyState } from '@/components/ui/empty-state'
 
 export default async function FrontDeskAssignmentsPage() {
   const session = await requireSessionOrRedirect()
@@ -24,7 +25,11 @@ export default async function FrontDeskAssignmentsPage() {
           decision, not something front desk fills in by hand. */}
       <p className="mb-6 text-sm text-muted-foreground">Doctor routing decisions from Check-In, pending until accepted or declined.</p>
       {assignments.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No assignments yet -- routing a patient to a doctor from Check-In creates one here.</p>
+        <EmptyState
+          title="No assignments yet"
+          description="Routing a patient to a doctor from Check-In creates one here."
+          action={{ label: 'Check in a patient', href: '/front-desk/check-in' }}
+        />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full border-collapse text-sm">
@@ -41,7 +46,8 @@ export default async function FrontDeskAssignmentsPage() {
             <tbody>
               {assignments.map((a, i) => (
                 <tr key={a.id} className={`border-b border-border last:border-b-0 ${i % 2 === 1 ? 'bg-muted/40' : ''}`}>
-                  <td className="p-3 text-foreground">{a.patientId}</td>
+                  {/* WS6 T9: name and UHID, never the chart id. */}
+                  <td className="p-3 text-foreground">{a.uhid ? `${a.patientName} · ${a.uhid}` : a.patientName}</td>
                   <td className="p-3 text-foreground">{providerName(a.providerId)}</td>
                   <td className="p-3 text-foreground capitalize">{a.visitType}</td>
                   <td className="p-3 text-foreground">{a.reason}</td>

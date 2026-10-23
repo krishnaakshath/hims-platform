@@ -624,6 +624,7 @@ import { GET as getProviderSlots } from '@/app/api/providers/[id]/slots/route'
 // end WS6 T6
 // WS6 T8
 import { GET as getClinicalDoctors } from '@/app/api/providers/route'
+import { GET as getQueueSummary } from '@/app/api/front-desk/queue-summary/route' // WS6 T9
 import { GET as getPatientPhoto, POST as postPatientPhoto } from '@/app/api/patients/[anonId]/photo/route'
 import { PATIENT_DIRECTORY_ROLES } from '@/lib/role-policy'
 // end WS6 T8
@@ -1113,6 +1114,9 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/patients/[anonId]/photo', call: () => settle(() => postPatientPhoto(send('POST', `/api/patients/${BOGUS_PATIENT}/photo`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...new Set([...REGISTRATION_ROLES, ...PATIENT_PROFILE_EDIT_ROLES])] },
   { name: 'GET /api/patients/[anonId]/photo', call: () => settle(() => getPatientPhoto(get(`/api/patients/${BOGUS_PATIENT}/photo`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...PATIENT_DIRECTORY_ROLES] },
   // end WS6 T8
+  // WS6 T9: the check-in dialog's queue length per clinical doctor.
+  { name: 'GET /api/front-desk/queue-summary', call: () => settle(() => getQueueSummary()), allowed: [...CHECK_IN_ROLES] },
+  // end WS6 T9
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

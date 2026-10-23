@@ -16,7 +16,7 @@ vi.mock('@/lib/queries/hospital-kpis', async () => {
     listPatientLabels: vi.fn(async () => [{ id: 'RD-0042', name: 'Asha Verma', uhid: 'UH-000042' }]),
   }
 })
-vi.mock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => []) }))
+vi.mock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => []), listClinicalDoctors: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/booking-requests', () => ({ listBookingRequests: vi.fn(async () => []) }))
 vi.mock('@/lib/queries/staff-credentials', () => ({ listExpiringOrExpiredCredentials: vi.fn(async () => { throw new Error('front desk must not load staff credentials') }) }))
 vi.mock('@/components/AddPatientButton', () => ({ AddPatientButton: () => <button type="button">Add New Patient</button> }))
