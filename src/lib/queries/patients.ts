@@ -12,6 +12,7 @@ import {
   // SP5
   labRequisitions, homeCollectionVisits, labReports, notificationDeliveries,
   notificationLog, patientNotificationPreferences, // Foundations T8
+  paymentRequests, // Foundations T11
   // SP6
   codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures,
   // SP7
@@ -477,7 +478,9 @@ async function hasFinancialRecords(db: DeleteTx, anonId: string): Promise<boolea
   const result = await db.execute<{ found: boolean }>(sql`
     select exists (select 1 from invoices where patient_id = ${anonId} and status in ('finalised', 'cancelled'))
         or exists (select 1 from patient_payments where patient_id = ${anonId})
-        or exists (select 1 from refunds where patient_id = ${anonId}) as found`)
+        or exists (select 1 from refunds where patient_id = ${anonId})
+        -- Foundations T11: a confirmed UPI request is money received (it also has a receipt row).
+        or exists (select 1 from payment_requests where patient_id = ${anonId} and status = 'confirmed') as found`)
   return Boolean(result.rows[0]?.found)
 }
 // end SP4
@@ -607,6 +610,10 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // the invoice_lines FK (23503) and the invoice guard trigger. Lines also reference
   // medication_dispenses, charges, encounters and admissions, so they go before those.
   await db.delete(refunds).where(eq(refunds.patientId, anonId))
+  // Foundations T11: payment_requests references patients, invoices, admissions and
+  // patient_payments with no ON DELETE action. The check above refuses a patient with a
+  // confirmed request, so only pending/cancelled QR requests (no money moved) remain here.
+  await db.delete(paymentRequests).where(eq(paymentRequests.patientId, anonId))
   await db.delete(patientPayments).where(eq(patientPayments.patientId, anonId))
   await db.delete(chargeLines).where(eq(chargeLines.patientId, anonId))
   await db.delete(invoices).where(eq(invoices.patientId, anonId))

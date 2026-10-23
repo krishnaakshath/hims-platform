@@ -43,6 +43,8 @@ function mockCommon(role: Role, row: Record<string, unknown> = LIST_ROW) {
   vi.doMock('@/lib/queries/departments', () => ({ listDepartments: async () => [] }))
   vi.doMock('@/lib/queries/rcm-policies', () => ({ listPatientPolicies: async () => [], legacyPolicyPrefill: async () => null }))
   vi.doMock('@/lib/queries/rcm-payers', () => ({ listRcmPayers: async () => [] }))
+  // Foundations T8, T9: the detail page now reads channel preferences and recent notices live.
+  vi.doMock('@/lib/queries/notification-log', () => ({ getPatientChannelPreferences: async () => ({ optOut: false, sms: true, whatsapp: true, email: true }), listPatientNotices: async () => [] }))
 }
 
 async function renderList(role: Role, row: Record<string, unknown> = LIST_ROW) {

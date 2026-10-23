@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { appointments, auditLog, bookingRequests, patients, providers } from '@/db/schema'
+import { appointments, auditLog, bookingRequests, notificationLog, patients, providers } from '@/db/schema'
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' = 'frontdesk'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Desk Staff', userId: null })) }))
@@ -41,6 +41,9 @@ afterAll(async () => {
   await db.delete(bookingRequests).where(inArray(bookingRequests.patientId, [A, B]))
   await db.delete(appointments).where(inArray(appointments.patientId, [A, B]))
   await db.delete(auditLog).where(inArray(auditLog.patientId, [A, B]))
+  // Foundations T9: confirming a request now sends the patient a notice, logged in notification_log
+  // (FK to patients, no ON DELETE action), so those rows go before the patients.
+  await db.delete(notificationLog).where(inArray(notificationLog.patientId, [A, B]))
   await db.delete(patients).where(inArray(patients.id, [A, B]))
 })
 

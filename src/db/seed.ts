@@ -71,6 +71,7 @@ import {
   labServiceAreaPins,
   labReports,
   notificationDeliveries,
+  notificationLog, patientNotificationPreferences, // Foundations T8
   // Wave D: every remaining child of patients/appointments/rooms/providers, so a reset can clear
   appointments,
   admissions,
@@ -935,6 +936,10 @@ async function clearExistingData() {
   // SP5: mirrors deletePatient's order -- deliveries and reports, then results -> orders, then
   // visits -> requisitions, then the reference windows/PINs -- all before patients/users.
   await db.delete(notificationDeliveries)
+  // Foundations T8: both reference patients (preferences cascade, but are cleared explicitly like
+  // every other patient child). notification_template_config has no FK and is configuration.
+  await db.delete(notificationLog)
+  await db.delete(patientNotificationPreferences)
   await db.delete(labReports)
   await db.delete(labResults)
   await db.delete(labOrders)

@@ -204,6 +204,12 @@ describe.skipIf(!process.env.DATABASE_URL)('invoices and ledger (DB)', () => {
     return p
   }
 
+  // Foundations T11 (scripts/migrations/2026-10-24-payment-requests-utr-guard.sql): one receipt per
+  // normalised UPI reference, an expression index like the SP4 triggers that live only in migrations.
+  const MIGRATION_ONLY_INDEXES: Record<string, string[]> = {
+    patient_payments: ['patient_payments_upi_reference_unique'],
+  }
+
   it('the live columns, constraints and indexes match schema.ts', async () => {
     const { sql } = await import('drizzle-orm')
     const d = await db()
@@ -228,8 +234,13 @@ describe.skipIf(!process.env.DATABASE_URL)('invoices and ledger (DB)', () => {
       const idx = await d.execute<{ indexname: string }>(sql`
         SELECT i.relname AS indexname FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid
         WHERE x.indrelid = ${cfg.name}::regclass AND NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = x.indexrelid)`)
-      expect(idx.rows.map((r) => r.indexname).sort(), cfg.name).toEqual(cfg.indexes.map((i) => i.config.name!).sort())
+      // Migration-only expression indexes (drizzle schema.ts cannot declare them; schema.ts carries a
+      // comment instead), listed per table so the parity check stays exact for everything else.
+      expect(idx.rows.map((r) => r.indexname).sort(), cfg.name).toEqual([...cfg.indexes.map((i) => i.config.name!), ...(MIGRATION_ONLY_INDEXES[cfg.name] ?? [])].sort())
     }
+    // ...and each one exists with the definition its migration gives it.
+    const upi = await d.execute<{ def: string }>(sql`SELECT pg_get_indexdef('patient_payments_upi_reference_unique'::regclass) AS def`)
+    expect(upi.rows[0].def).toMatch(/^CREATE UNIQUE INDEX patient_payments_upi_reference_unique ON public\.patient_payments USING btree \(upper\(regexp_replace\(reference, '\[\[:space:\]-\]'::text, ''::text, 'g'::text\)\)\) WHERE \(\(mode = 'upi'::.*\) AND \(reference IS NOT NULL\)\)$/)
     const pk = await d.execute<{ conname: string }>(sql`SELECT conname FROM pg_constraint WHERE conrelid = 'document_counters'::regclass AND contype = 'p'`)
     expect(pk.rows.map((r) => r.conname)).toEqual(['document_counters_pk'])
     const trg = await d.execute<{ tgname: string; tbl: string; fn: string; enabled: string }>(sql`
