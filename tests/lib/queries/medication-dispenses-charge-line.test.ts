@@ -116,4 +116,33 @@ describe.skipIf(!process.env.DATABASE_URL)('pharmacy legacy dispense charge line
     const rows = await getDb().select().from(auditLog).where(eq(auditLog.patientId, PID)).orderBy(asc(auditLog.id))
     expect(rows.map((a) => `${a.action}|${a.details}`)).toEqual([`billed a legacy dispense|dispense=${d.id} line=${r.ok ? r.lineId : 0}`])
   })
+  // Fix round 1: the patient billing lock is taken LAST. With the billing lock held elsewhere, a
+  // legacy bill must already hold the medication row (FOR SHARE) while it waits, so a price edit's
+  // FOR UPDATE cannot slip in between and close a deadlock cycle with a concurrent dispense.
+  it('takes the dispense and medication locks before the patient billing lock', async () => {
+    const { getDb, medications, eq, md } = await m()
+    const { lockPatientBilling } = await import('@/lib/queries/charge-capture')
+    const db = getDb()
+    const d = await dispense()
+    let release!: () => void
+    const held = new Promise<void>((r) => { release = r })
+    let locked!: () => void
+    const isLocked = new Promise<void>((r) => { locked = r })
+    const holder = db.transaction(async (tx) => { await lockPatientBilling(tx, PID); locked(); await held })
+    await isLocked
+    const bill = md.billLegacyDispense(d.id, session)
+    await new Promise((r) => setTimeout(r, 300))
+    let code: unknown = null
+    try {
+      await db.transaction(async (tx) => { await tx.select({ id: medications.id }).from(medications).where(eq(medications.id, fx.medId)).for('update', { noWait: true }) })
+    } catch (e) {
+      const err = e as { code?: unknown; cause?: { code?: unknown } }
+      code = err.cause?.code ?? err.code
+    }
+    release()
+    await holder
+    expect(await bill).toMatchObject({ ok: true })
+    expect(code).toBe('55P03') // lock_not_available: the bill already held the medication row
+  })
 })
+

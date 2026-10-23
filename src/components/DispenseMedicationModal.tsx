@@ -48,8 +48,13 @@ export function DispenseMedicationModal({
   const [expiryMonth, setExpiryMonth] = useState('')
   const [noCharge, setNoCharge] = useState(false)
   const [noChargeReason, setNoChargeReason] = useState('')
-  const [acknowledged, setAcknowledged] = useState(false)
-  const [serverConflicts, setServerConflicts] = useState<AllergyConflict[] | null>(null)
+  // A 409's conflicts and the acknowledgement belong to one patient and one medicine: both are
+  // keyed, so changing either drops them (a stale banner or tick must never carry over).
+  const subjectKey = `${patientId}|${medication.id}`
+  const [ack, setAck] = useState<string | null>(null)
+  const [server, setServer] = useState<{ key: string; conflicts: AllergyConflict[] } | null>(null)
+  const acknowledged = ack === subjectKey
+  const serverConflicts = server?.key === subjectKey ? server.conflicts : null
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<{ message: string; patientId: string; charged: boolean } | null>(null)
@@ -88,8 +93,8 @@ export function DispenseMedicationModal({
     }
     const body = res.body as { code?: string; conflicts?: AllergyConflict[] } | undefined
     if (body?.code === 'allergy_conflict' && Array.isArray(body.conflicts)) {
-      setServerConflicts(body.conflicts)
-      setAcknowledged(false)
+      setServer({ key: subjectKey, conflicts: body.conflicts })
+      setAck(null)
     }
     setError(res.error)
   }
@@ -128,7 +133,7 @@ export function DispenseMedicationModal({
           {initialPatientId ? (
             <input value={initialPatientId} readOnly aria-label="Patient" className="w-full rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground" />
           ) : (
-            <PatientPicker value={picked} onChange={setPicked} />
+            <PatientPicker value={picked} onChange={(p) => { setPicked(p); setError(null) }} />
           )}
 
           {conflicts.length > 0 && (
@@ -138,7 +143,7 @@ export function DispenseMedicationModal({
                 {conflicts.map((c) => <li key={c.allergen}>{c.allergen} ({c.severity})</li>)}
               </ul>
               <label className="mt-2 flex items-start gap-2 text-foreground">
-                <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className="mt-0.5" />
+                <input type="checkbox" checked={acknowledged} onChange={(e) => setAck(e.target.checked ? subjectKey : null)} className="mt-0.5" />
                 I have checked this allergy with the prescriber and will dispense
               </label>
             </div>

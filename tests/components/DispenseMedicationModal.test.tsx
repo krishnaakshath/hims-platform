@@ -112,4 +112,35 @@ describe('DispenseMedicationModal', () => {
     expect(screen.getByRole('link', { name: /bill now/i })).toHaveAttribute('href', '/cash-desk?patientId=RD-0001')
     expect(onDispensed).toHaveBeenCalled()
   })
+
+  // Fix round 1: a 409's conflicts and the acknowledgement belong to that patient and medicine only.
+  it('clears the server allergy banner and the acknowledgement when the patient changes', async () => {
+    const people = [
+      { id: 'RD-0001', name: 'Asha Rao', uhid: 'UH00000042', gender: 'female', ageYears: 36 },
+      { id: 'RD-0002', name: 'Ravi Kumar', uhid: 'UH00000043', gender: 'male', ageYears: 40 },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (
+      url.startsWith('/api/patients/lookup')
+        ? new Response(JSON.stringify({ results: people, page: 1, pageSize: 10, hasMore: false }), { status: 200 })
+        : new Response(JSON.stringify({ error: 'This medicine conflicts with an allergy on record.', code: 'allergy_conflict', conflicts: [{ allergen: 'Sulfa', severity: 'moderate', matchedOn: 'class' }] }), { status: 409 })
+    )))
+    render(<DispenseMedicationModal medication={MED} onClose={vi.fn()} />)
+    const pick = async (name: RegExp) => {
+      fireEvent.change(screen.getByRole('combobox', { name: /patient/i }), { target: { value: 'UH000' } })
+      fireEvent.click(await screen.findByRole('option', { name }))
+    }
+    await pick(/asha rao/i)
+    fireEvent.change(screen.getByLabelText(/quantity/i), { target: { value: '10' } })
+    fillBatch()
+    fireEvent.click(screen.getByRole('button', { name: 'Dispense' }))
+    fireEvent.click(await screen.findByLabelText(/i have checked this allergy/i))
+    expect(screen.getByRole('button', { name: 'Dispense' })).toBeEnabled()
+
+    // Another patient: no Sulfa banner, no carried-over acknowledgement.
+    fireEvent.click(screen.getByRole('button', { name: /change patient/i }))
+    await pick(/ravi kumar/i)
+    expect(screen.queryByLabelText(/i have checked this allergy/i)).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('alert').some((a) => /sulfa/i.test(a.textContent ?? ''))).toBe(false)
+  })
 })
+

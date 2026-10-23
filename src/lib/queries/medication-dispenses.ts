@@ -200,20 +200,24 @@ export type BillLegacyDispenseResult =
 /**
  * WS2 T8: bills a dispense made before dispensing billed itself, once, at the medicine's CURRENT
  * MRP. Already billed = it has a charge line (live or void: one line per dispense), a free-dispense
- * reason, or a bill on the pre-SP4 charges table. Everything is checked under the patient billing
- * lock; the unique medication_dispense_id is the backstop for a race.
+ * reason, or a bill on the pre-SP4 charges table. The dispense row lock serialises two bills of the
+ * same dispense; the line check runs again under the patient billing lock; the unique
+ * medication_dispense_id is the backstop.
  */
 export async function billLegacyDispense(dispenseId: number, session: Session): Promise<BillLegacyDispenseResult> {
   const db = getDb()
   const [pre] = await db.select({ patientId: medicationDispenses.patientId }).from(medicationDispenses).where(eq(medicationDispenses.id, dispenseId))
   if (!pre) return { ok: false, error: 'not_found' }
   try {
+    // Lock order (deadlock safety, spec section 6): dispense row FOR UPDATE → medication FOR SHARE →
+    // patient billing lock LAST (taken inside insertPharmacyLine, which re-checks for an existing
+    // line under it). dispenseMedication takes inventory → medication FOR SHARE → billing lock and
+    // the price PATCH takes only medication FOR UPDATE, so no path waits on the billing lock while
+    // another holds it and waits on the medication row.
     return await db.transaction(async (tx) => {
-      await lockPatientBilling(tx, pre.patientId)
       const [d] = await tx.select().from(medicationDispenses).where(eq(medicationDispenses.id, dispenseId)).for('update')
       if (!d) return { ok: false as const, error: 'not_found' as const }
-      const [line] = await tx.select({ id: chargeLines.id }).from(chargeLines).where(eq(chargeLines.medicationDispenseId, d.id)).limit(1)
-      if (line || d.chargeId !== null || d.noChargeReason !== null) return { ok: false as const, error: 'already_billed' as const }
+      if (d.chargeId !== null || d.noChargeReason !== null) return { ok: false as const, error: 'already_billed' as const }
       const [m] = await tx.select({ id: medications.id, name: medications.name, mrpPerUnitPaise: medications.mrpPerUnitPaise, gstRateBp: medications.gstRateBp, hsn: medications.hsn })
         .from(medications).where(eq(medications.id, d.medicationId)).for('share')
       if (m.mrpPerUnitPaise === null) return { ok: false as const, error: 'medication_unpriced' as const }
