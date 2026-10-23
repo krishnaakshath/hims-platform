@@ -47,6 +47,8 @@ let log: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
   vi.stubEnv('BLOB_STORE_ID', '')
+  vi.stubEnv('BLOB_DRIVER', '')
+  vi.stubEnv('NODE_ENV', 'production')
   log = vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })

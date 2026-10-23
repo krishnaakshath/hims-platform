@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getBlobDriver } from '@/lib/blob-store'
 
 // The backing services a request can depend on, and what a route answers when
 // one is missing or unreachable: a generic 503 for the client, and ONE log
@@ -54,7 +55,7 @@ export function isBlobConfigured(env: Record<string, string | undefined> = proce
 
 /** Throws ServiceNotConfiguredError('blob') before any stored-file read or write when there is no store. */
 export function requireBlobStore(): void {
-  if (!isBlobConfigured()) throw new ServiceNotConfiguredError('blob')
+  if (!getBlobDriver()) throw new ServiceNotConfiguredError('blob')
 }
 
 export function serviceUnavailableResponse(): NextResponse {

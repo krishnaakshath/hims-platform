@@ -67,6 +67,8 @@ describe('blob-store', () => {
   it('throws ServiceNotConfiguredError(blob) without a store, before calling the SDK', async () => {
     vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
     vi.stubEnv('BLOB_STORE_ID', '')
+    vi.stubEnv('BLOB_DRIVER', '')
+    vi.stubEnv('NODE_ENV', 'production')
     await expect(putPrivateBlob('x.pdf', new Uint8Array([1]), 'application/pdf')).rejects.toMatchObject({ name: 'ServiceNotConfiguredError', service: 'blob' })
     await expect(streamPrivateBlob(URL, { filename: 'a.pdf', disposition: 'inline' })).rejects.toBeInstanceOf(ServiceNotConfiguredError)
     expect(put).not.toHaveBeenCalled()
