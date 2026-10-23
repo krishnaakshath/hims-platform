@@ -24,7 +24,9 @@ export async function proxy(request: NextRequest) {
 // icon is excluded because it's the app's generated favicon (src/app/icon.tsx)
 // -- browsers request it directly, with no session cookie, on every page
 // including /login itself, so gating it here would leave the browser tab
-// with a broken icon for anyone not currently signed in.
+// with a broken icon for anyone not currently signed in. apple-icon and
+// manifest.webmanifest (src/app/apple-icon.tsx, src/app/manifest.ts) are
+// excluded for the same reason: home-screen installs fetch them cookieless.
 // branding is excluded because it's static logo assets (public/branding/*)
 // referenced directly by <img> tags on unauthenticated pages (both login
 // screens, the intake portal) -- without this exclusion those requests hit
@@ -56,4 +58,4 @@ export async function proxy(request: NextRequest) {
 // /login before the page ever rendered. Anchored to book(?:/|$) (not a bare
 // `book` prefix) so it can never over-match /booking-requests, the STAFF
 // confirm/decline queue, which must keep requiring a session.
-export const config = { matcher: ['/((?!api|_next/static|_next/image|favicon.ico|icon|branding|intake|patient-portal|telemedicine/join|display/queue|book(?:/|$)).*)'] }
+export const config = { matcher: ['/((?!api|_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest|branding|intake|patient-portal|telemedicine/join|display/queue|book(?:/|$)).*)'] }

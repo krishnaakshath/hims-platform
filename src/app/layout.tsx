@@ -1,8 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrandProvider } from "@/components/BrandProvider";
 import { brand, brandThemeCss, publicBrand } from "@/lib/brand";
+import { brandIconPalette } from "@/lib/brand-icon";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -20,6 +21,16 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: brand.name,
   description: brand.tagline,
+};
+
+// Browser chrome tint (mobile Safari/Chrome, installed PWA) follows the same
+// brand colour as the favicon tile; a deep shade of it under dark UI.
+const iconPalette = brandIconPalette({ primaryColor: brand.primaryColor });
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: iconPalette.themeColorLight },
+    { media: "(prefers-color-scheme: dark)", color: iconPalette.themeColorDark },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
