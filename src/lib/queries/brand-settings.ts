@@ -6,7 +6,7 @@ import { getDb } from '@/db/client'
 import { appSettings, billingSettings, brandAssets, brandSettings, type BrandSettingsRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
-import { envBrand } from '@/lib/brand'
+import { envBrand, type LoginQuote } from '@/lib/brand'
 import { deriveAccentPalette, parseHex, type AccentPalette } from '@/lib/brand-color'
 import { brandAssetPath } from '@/lib/brand-resolve'
 import {
@@ -133,7 +133,11 @@ export interface BrandingAdminPayload {
   revision: number
   assets: { kind: BrandAssetKind; path: string; width: number; height: number; source: 'upload' | 'derived' }[]
   /** The env layer (BRAND_* or built-in) each field falls back to when its stored value is null. */
-  defaults: { name: string; tagline: string; supportEmail: string | null; accentColor: string | null; portalName: string; legalName: string }
+  defaults: {
+    name: string; tagline: string; supportEmail: string | null; accentColor: string | null; portalName: string; legalName: string
+    /** The env/built-in quote the sign-in page shows while `loginQuote` is null (used wholesale, never mixed). */
+    loginQuote: LoginQuote
+  }
   /** Read-only identity from Billing settings, shown on prints. */
   linked: { legalName: string | null; address: string | null; gstin: string | null; rohiniId: string | null; hfrId: string | null }
   /** The WCAG-adjusted palette of the stored accent, or null when none is stored. */
@@ -156,7 +160,7 @@ export async function getBrandingAdminPayload(): Promise<BrandingAdminPayload> {
     })),
     defaults: {
       name: envBrand.name, tagline: envBrand.tagline, supportEmail: envBrand.supportEmail, accentColor: envBrand.primaryColor,
-      portalName: envBrand.portalName, legalName: envBrand.legalName,
+      portalName: envBrand.portalName, legalName: envBrand.legalName, loginQuote: envBrand.loginQuote,
     },
     linked: {
       legalName: snap.billing?.legalName ?? null, address: snap.billing?.address ?? null, gstin: snap.billing?.gstin ?? null,

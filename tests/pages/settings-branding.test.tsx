@@ -12,7 +12,8 @@ const PAYLOAD: BrandingAdminPayload = {
   },
   revision: 1,
   assets: [],
-  defaults: { name: 'HIMS', tagline: 'Hospital information management system', supportEmail: null, accentColor: null, portalName: 'Patient portal', legalName: 'HIMS' },
+  defaults: { name: 'HIMS', tagline: 'Hospital information management system', supportEmail: null, accentColor: null, portalName: 'Patient portal', legalName: 'HIMS',
+    loginQuote: { text: 'The very first requirement in a Hospital is that it should do the sick no harm.', attribution: 'Florence Nightingale' } },
   linked: { legalName: 'Sunrise Healthcare Pvt Ltd', address: '12 MG Road, Pune 411001', gstin: '27AABCS1234F1Z5', rohiniId: '8900080123456', hfrId: 'IN2710000123' },
   palette: null,
 }

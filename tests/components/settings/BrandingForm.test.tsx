@@ -12,7 +12,8 @@ const PAYLOAD: BrandingAdminPayload = {
   },
   revision: 5,
   assets: [],
-  defaults: { name: 'HIMS', tagline: 'Hospital information management system', supportEmail: null, accentColor: null, portalName: 'Patient portal', legalName: 'HIMS' },
+  defaults: { name: 'HIMS', tagline: 'Hospital information management system', supportEmail: null, accentColor: null, portalName: 'Patient portal', legalName: 'HIMS',
+    loginQuote: { text: 'The very first requirement in a Hospital is that it should do the sick no harm.', attribution: 'Florence Nightingale' } },
   linked: { legalName: null, address: null, gstin: null, rohiniId: null, hfrId: null },
   palette: null,
 }
@@ -118,6 +119,11 @@ describe('BrandingForm', () => {
     expect(url).toBe('/api/settings/branding/reset')
     expect(JSON.parse(String(init.body))).toEqual({ confirm: 'RESET', revision: 5 })
     await waitFor(() => expect(screen.getByLabelText('Hospital name')).toHaveValue(''))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reset branding' })).toBeNull())
+    // Reopening after a successful reset starts from an empty confirmation.
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }))
+    expect(await screen.findByRole('button', { name: 'Reset branding' })).toBeDisabled()
+    expect(screen.getByLabelText('Type RESET to confirm')).toHaveValue('')
   })
 
   it('uploads a logo as multipart with the variant and shows the thumbnail', async () => {

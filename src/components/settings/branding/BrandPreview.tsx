@@ -1,6 +1,6 @@
 'use client'
 import { useState, type CSSProperties } from 'react'
-import { DEFAULT_LOGIN_QUOTE, DEFAULT_PORTAL_NAME, DEFAULT_TAGLINE, parseLogoUrl } from '@/lib/brand'
+import { DEFAULT_LOGIN_QUOTE, DEFAULT_PORTAL_NAME, DEFAULT_TAGLINE, parseLogoUrl, type LoginQuote } from '@/lib/brand'
 import { deriveAccentPalette, parseHex, type AccentPalette } from '@/lib/brand-color'
 import { PLUS_BAR, PLUS_LENGTH, PLUS_RADIUS, PULSE_PATH, PULSE_STROKE } from '@/lib/brand-icon'
 import type { BrandEditableKey } from '@/lib/brand-snapshot'
@@ -23,7 +23,7 @@ export const EMPTY_DRAFT: BrandDraft = {
   printSignatureLine: '', emailSignature: '', smsName: '',
 }
 
-export interface BrandPreviewDefaults { name: string; tagline: string; portalName: string; accentColor: string | null }
+export interface BrandPreviewDefaults { name: string; tagline: string; portalName: string; accentColor: string | null; loginQuote?: LoginQuote }
 export interface BrandPreviewLinked { legalName: string | null; address: string | null; gstin: string | null; rohiniId: string | null; hfrId: string | null }
 
 const FALLBACK_DEFAULTS: BrandPreviewDefaults = { name: 'HIMS', tagline: DEFAULT_TAGLINE, portalName: DEFAULT_PORTAL_NAME, accentColor: null }
@@ -99,7 +99,7 @@ export function BrandPreview({ draft, assets, linked, defaults = FALLBACK_DEFAUL
   // Quote resolution mirrors resolveBrand: a stored quote brings its own attribution, never mixed with the default.
   const quote = draft.loginQuote.trim()
     ? { text: draft.loginQuote.trim(), attribution: draft.loginQuoteAttribution.trim() || null }
-    : DEFAULT_LOGIN_QUOTE
+    : defaults.loginQuote ?? DEFAULT_LOGIN_QUOTE
   const header = pick(draft.printHeaderText, linked.legalName?.trim() || name)
   const signature = draft.emailSignature.trim() ? draft.emailSignature.trim() : `${name}`
   const smsName = pick(draft.smsName, name)

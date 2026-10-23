@@ -18,7 +18,8 @@ const PAYLOAD: BrandingAdminPayload = {
   },
   revision: 2,
   assets: [],
-  defaults: { name: 'HIMS', tagline: 'Hospital information management system', supportEmail: null, accentColor: null, portalName: 'Patient portal', legalName: 'HIMS' },
+  defaults: { name: 'HIMS', tagline: 'Hospital information management system', supportEmail: null, accentColor: null, portalName: 'Patient portal', legalName: 'HIMS',
+    loginQuote: { text: 'The very first requirement in a Hospital is that it should do the sick no harm.', attribution: 'Florence Nightingale' } },
   linked: { legalName: null, address: null, gstin: null, rohiniId: null, hfrId: null },
   palette: null,
 }
@@ -48,6 +49,18 @@ describe('BrandPreview', () => {
     expect(within(pane('signin')).getByText(/Dr\. A\. Rao/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Quote'), { target: { value: 'Every patient, every time.' } })
     expect(within(pane('signin')).getByText(/Every patient, every time\./)).toBeInTheDocument()
+  })
+
+  it('a blank quote previews the env default quote from the payload, never mixed with a stored attribution', () => {
+    const initial: BrandingAdminPayload = {
+      ...PAYLOAD,
+      settings: { ...PAYLOAD.settings, loginQuote: null, loginQuoteAttribution: 'Dr. A. Rao' },
+      defaults: { ...PAYLOAD.defaults, loginQuote: { text: 'Seva is our first duty.', attribution: 'Founder, Sunrise Trust' } },
+    }
+    render(<BrandingForm initial={initial} />)
+    expect(within(pane('signin')).getByText(/Seva is our first duty\./)).toBeInTheDocument()
+    expect(within(pane('signin')).getByText('Founder, Sunrise Trust')).toBeInTheDocument()
+    expect(within(pane('signin')).queryByText(/Dr\. A\. Rao/)).toBeNull()
   })
 
   it('hides "Department sign-in" when the department list is off', () => {

@@ -355,7 +355,7 @@ export function BrandingForm({ initial }: { initial: BrandingAdminPayload }) {
             draft={draft}
             assets={assets}
             linked={linked}
-            defaults={{ name: d.name, tagline: d.tagline, portalName: d.portalName, accentColor: d.accentColor }}
+            defaults={{ name: d.name, tagline: d.tagline, portalName: d.portalName, accentColor: d.accentColor, loginQuote: d.loginQuote }}
           />
         </aside>
       </div>

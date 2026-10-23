@@ -14,10 +14,13 @@ export function ResetBrandingDialog({ open, busy, error, onOpenChange, onConfirm
   onConfirm: () => void
 }) {
   const [typed, setTyped] = useState('')
+  // Clear the confirmation whenever the dialog closes, however it closes (Cancel, Escape, or the
+  // parent closing it after a successful reset), so the next open never starts pre-confirmed.
+  if (!open && typed !== '') setTyped('')
   const ready = typed === 'RESET' && !busy
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) setTyped(''); onOpenChange(next) }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Reset branding to defaults?</DialogTitle>
@@ -34,7 +37,7 @@ export function ResetBrandingDialog({ open, busy, error, onOpenChange, onConfirm
           <Input id="brand-reset-confirm" value={typed} autoComplete="off" spellCheck={false} onChange={(e) => setTyped(e.target.value)} />
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => { setTyped(''); onOpenChange(false) }}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" variant="destructive" disabled={!ready}>Reset branding</Button>
           </DialogFooter>
         </form>

@@ -21,6 +21,7 @@ vi.mock('@/lib/auth', async () => {
 import { GET, PUT } from '@/app/api/settings/branding/route'
 import { POST as postReset } from '@/app/api/settings/branding/reset/route'
 import { POST as postOnboarding } from '@/app/api/settings/branding/onboarding/route'
+import { envBrand } from '@/lib/brand'
 
 const URL_BASE = 'http://localhost'
 const send = (method: 'PUT' | 'POST', path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -170,7 +171,8 @@ describe.skipIf(!process.env.DATABASE_URL)('branding routes (DB)', () => {
     expect(json.revision).toBe(1)
     expect(json.settings).toEqual({ ...BLANK, displayName: 'Sunrise', accentColor: '#0a7c86' })
     expect(json.assets).toEqual([{ kind: 'logo_light', path: `/branding/logo-light-${'d'.repeat(16)}.png`, width: 400, height: 100, source: 'upload' }])
-    expect(Object.keys(json.defaults).sort()).toEqual(['accentColor', 'legalName', 'name', 'portalName', 'supportEmail', 'tagline'])
+    expect(Object.keys(json.defaults).sort()).toEqual(['accentColor', 'legalName', 'loginQuote', 'name', 'portalName', 'supportEmail', 'tagline'])
+    expect(json.defaults.loginQuote).toEqual(envBrand.loginQuote)
     expect(Object.keys(json.linked).sort()).toEqual(['address', 'gstin', 'hfrId', 'legalName', 'rohiniId'])
     expect(json.palette.input).toBe('#0a7c86')
     expect(json.palette.light.primary).toMatch(/^#[0-9a-f]{6}$/)
