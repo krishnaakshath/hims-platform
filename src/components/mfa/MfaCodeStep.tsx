@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { AUTH_ALERT, AUTH_CODE_INPUT, AUTH_PRIMARY_BUTTON, AUTH_QUIET_BUTTON } from '@/components/auth/auth-styles'
 
 // Shared by staff login (verify mode), patient login (verify mode), and the
 // patient portal's Security page (confirming a fresh enrollment) -- one
@@ -28,13 +29,13 @@ export function MfaCodeStep({ title, description, onSubmit, onBack }: {
 
   return (
     <div>
-      <div className="mb-6 text-center">
-        <h1 className="text-xl font-bold text-foreground">{title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      <div className="mb-8">
+        <h1 className="text-2xl font-semibold leading-8 tracking-[-0.015em] text-foreground">{title}</h1>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
       </div>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label htmlFor="mfa-code" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">6-digit code</label>
+          <label htmlFor="mfa-code" className="mb-2 block text-[13px] font-medium leading-5 text-foreground">6-digit code</label>
           <input
             id="mfa-code"
             inputMode="numeric"
@@ -44,19 +45,20 @@ export function MfaCodeStep({ title, description, onSubmit, onBack }: {
             required
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            className="w-full rounded-lg border border-border bg-background px-3.5 py-2.5 text-center text-lg tracking-[0.5em] text-foreground focus:border-primary focus:outline-none"
+            placeholder="000000"
+            className={AUTH_CODE_INPUT}
           />
         </div>
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {error && <div role="alert" className={AUTH_ALERT}>{error}</div>}
         <button
           type="submit"
           disabled={submitting || code.length !== 6}
-          className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          className={AUTH_PRIMARY_BUTTON}
         >
           {submitting ? 'Verifying…' : 'Verify'}
         </button>
         {onBack && (
-          <button type="button" onClick={onBack} className="w-full text-center text-xs font-medium text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={onBack} className={AUTH_QUIET_BUTTON}>
             Back
           </button>
         )}

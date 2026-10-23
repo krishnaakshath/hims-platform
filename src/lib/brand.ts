@@ -35,12 +35,28 @@ export interface Brand {
   mfaIssuer: string
   /** Sender name on automated (system-generated) patient messages. */
   systemSenderName: string
+  /** Line shown on the sign-in brand panel (BRAND_LOGIN_QUOTE / _ATTRIBUTION). */
+  loginQuote: LoginQuote
+}
+
+export interface LoginQuote {
+  text: string
+  /** Who said it, or null for an unattributed line (e.g. the hospital's own). */
+  attribution: string | null
 }
 
 /** The subset of the brand that is safe and needed in client components. */
 export interface PublicBrand {
   name: string
   logoUrl: string | null
+  /** Optional so older callers/tests that build a PublicBrand by hand still type-check. */
+  loginQuote?: LoginQuote
+}
+
+// Florence Nightingale, Notes on Hospitals (3rd ed., 1863), preface. Public domain.
+export const DEFAULT_LOGIN_QUOTE: LoginQuote = {
+  text: 'The very first requirement in a Hospital is that it should do the sick no harm.',
+  attribution: 'Florence Nightingale, Notes on Hospitals',
 }
 
 export const DEFAULT_BRAND_NAME = 'HIMS'
@@ -54,6 +70,8 @@ export const BRAND_LIMITS = {
   supportEmail: 254,
   logoUrl: 2048,
   mfaIssuer: 60,
+  loginQuote: 200,
+  loginQuoteAttribution: 100,
 } as const
 
 export type CookieKind = 'session' | 'patient_session' | 'pending_staff_mfa' | 'pending_patient_mfa' | 'pending_google_oauth'
@@ -137,6 +155,13 @@ export function loadBrand(env: Env, onInvalid?: (varName: string) => void): Bran
   const logoUrl = parseLogoUrl(get('BRAND_LOGO_URL'))
   const primaryColor = parseColor(get('BRAND_PRIMARY_COLOR'))
   const cookiePrefix = parseCookiePrefix(get('BRAND_COOKIE_PREFIX'))
+  // A configured quote replaces the default wholesale: its attribution is
+  // only what is configured alongside it (never Nightingale's name on
+  // someone else's words).
+  const quoteText = cleanText(get('BRAND_LOGIN_QUOTE'), BRAND_LIMITS.loginQuote)
+  const loginQuote: LoginQuote = quoteText
+    ? { text: quoteText, attribution: cleanText(get('BRAND_LOGIN_QUOTE_ATTRIBUTION'), BRAND_LIMITS.loginQuoteAttribution) }
+    : DEFAULT_LOGIN_QUOTE
   reject('BRAND_SUPPORT_EMAIL', supportEmail)
   reject('BRAND_LOGO_URL', logoUrl)
   reject('BRAND_PRIMARY_COLOR', primaryColor)
@@ -157,6 +182,7 @@ export function loadBrand(env: Env, onInvalid?: (varName: string) => void): Bran
     cookiePrefix: cookiePrefix ?? DEFAULT_COOKIE_PREFIX,
     mfaIssuer,
     systemSenderName: `${finalName} (Automated)`,
+    loginQuote,
   }
 }
 
@@ -184,7 +210,7 @@ export function cookieName(kind: CookieKind, b: Pick<Brand, 'cookiePrefix'> = br
 }
 
 export function publicBrand(b: Brand = brand): PublicBrand {
-  return { name: b.name, logoUrl: b.logoUrl }
+  return { name: b.name, logoUrl: b.logoUrl, loginQuote: b.loginQuote }
 }
 
 // WCAG relative luminance of a validated #rgb/#rrggbb colour.
@@ -200,7 +226,7 @@ function relativeLuminance(hex: string): number {
 /**
  * CSS overriding the light theme's `--primary` (and a contrasting
  * `--primary-foreground`) with the brand colour, or null when no colour is
- * configured. Built ONLY from the regex-validated hex value, so it is safe to
+ * configured (plus `--brand`, the raw colour, for both themes). Built ONLY from the regex-validated hex value, so it is safe to
  * inline into a <style> tag. The dark theme keeps its own tuned primary.
  */
 export function brandThemeCss(b: Pick<Brand, 'primaryColor'> = brand): string | null {
@@ -211,5 +237,7 @@ export function brandThemeCss(b: Pick<Brand, 'primaryColor'> = brand): string | 
   const whiteContrast = 1.05 / (L + 0.05)
   const blackContrast = (L + 0.05) / 0.05
   const foreground = whiteContrast >= blackContrast ? 'oklch(0.99 0 0)' : 'oklch(0.18 0.01 60)'
-  return `:root:not(.dark){--primary:${color};--primary-foreground:${foreground};--ring:${color};}`
+  // `--brand` carries the raw colour into BOTH themes for surfaces that are
+  // derived from it rather than painted with it (the sign-in brand panel).
+  return `:root:not(.dark){--primary:${color};--primary-foreground:${foreground};--ring:${color};}:root{--brand:${color};}`
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { loadBrand, cookieName, brandThemeCss, publicBrand, BRAND_LIMITS, DEFAULT_BRAND_NAME, DEFAULT_COOKIE_PREFIX, DEFAULT_TAGLINE } from '@/lib/brand'
+import { loadBrand, cookieName, brandThemeCss, publicBrand, BRAND_LIMITS, DEFAULT_BRAND_NAME, DEFAULT_LOGIN_QUOTE, DEFAULT_COOKIE_PREFIX, DEFAULT_TAGLINE } from '@/lib/brand'
 
 describe('loadBrand defaults', () => {
   it('uses the neutral HIMS defaults when no BRAND_* var is set', () => {
@@ -16,6 +16,7 @@ describe('loadBrand defaults', () => {
       cookiePrefix: 'hims',
       mfaIssuer: 'HIMS',
       systemSenderName: 'HIMS (Automated)',
+      loginQuote: DEFAULT_LOGIN_QUOTE,
     })
   })
 
@@ -55,6 +56,7 @@ describe('loadBrand overrides', () => {
       cookiePrefix: 'acme',
       mfaIssuer: 'Acme Health',
       systemSenderName: 'Acme Health (Automated)',
+      loginQuote: DEFAULT_LOGIN_QUOTE,
     })
   })
 
@@ -159,8 +161,15 @@ describe('brandThemeCss / publicBrand', () => {
     expect(brandThemeCss({ primaryColor: 'red;}*{x:y' })).toBeNull()
   })
 
-  it('exposes only name and logoUrl publicly', () => {
-    expect(publicBrand(loadBrand({ BRAND_NAME: 'Acme', BRAND_SUPPORT_EMAIL: 'a@b.example' }))).toEqual({ name: 'Acme', logoUrl: null })
+  it('exposes only name, logoUrl and the sign-in quote publicly', () => {
+    expect(publicBrand(loadBrand({ BRAND_NAME: 'Acme', BRAND_SUPPORT_EMAIL: 'a@b.example' }))).toEqual({ name: 'Acme', logoUrl: null, loginQuote: DEFAULT_LOGIN_QUOTE })
+  })
+
+  it('takes a configured sign-in quote with only its own attribution', () => {
+    expect(loadBrand({ BRAND_LOGIN_QUOTE: '  Care,\n close to home. ' }).loginQuote).toEqual({ text: 'Care, close to home.', attribution: null })
+    expect(loadBrand({ BRAND_LOGIN_QUOTE: 'Healing together.', BRAND_LOGIN_QUOTE_ATTRIBUTION: 'Our founders' }).loginQuote).toEqual({ text: 'Healing together.', attribution: 'Our founders' })
+    expect(loadBrand({ BRAND_LOGIN_QUOTE: '   ', BRAND_LOGIN_QUOTE_ATTRIBUTION: 'Nobody' }).loginQuote).toEqual(DEFAULT_LOGIN_QUOTE)
+    expect(Array.from(loadBrand({ BRAND_LOGIN_QUOTE: 'x'.repeat(500) }).loginQuote.text)).toHaveLength(BRAND_LIMITS.loginQuote)
   })
 })
 
