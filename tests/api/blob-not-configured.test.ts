@@ -60,7 +60,7 @@ afterEach(() => {
 async function expect503(res: Response, feature: string) {
   expect(res.status).toBe(503)
   const body = await res.json()
-  expect(body).toEqual({ error: 'Service temporarily unavailable' })
+  expect(body).toEqual({ error: 'File storage is not set up. Ask your administrator.', code: 'storage_not_configured' })
   expect(JSON.stringify(body)).not.toMatch(ENV_NAMES)
   expect(log).toHaveBeenCalledTimes(1)
   expect(log.mock.calls[0][0]).toBe(`[config] BLOB_READ_WRITE_TOKEN not configured: ${feature} is unavailable`)

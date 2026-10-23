@@ -7,6 +7,8 @@
 // slot is already booked"); otherwise, and always for 401/403/429/5xx and
 // network failures, a fixed message from CLIENT_ERROR_MESSAGES is used.
 
+import { STORAGE_NOT_CONFIGURED_MESSAGE } from '@/lib/http/service-message'
+
 export const CLIENT_ERROR_MESSAGES = {
   badRequest: 'Some details are missing or invalid. Please check and try again.',
   unauthorized: 'Your session has expired. Please sign in again.',
@@ -53,6 +55,12 @@ function authoredMessage(status: number, data: unknown, options?: ErrorOptions):
   return trimmed && trimmed.length <= MAX_MESSAGE_LENGTH ? trimmed : null
 }
 
+/** Missing file storage is the one 5xx whose cause staff can act on: say so. */
+function storageMessage(status: number, data: unknown): string | null {
+  if (status !== 503 || !data || typeof data !== 'object') return null
+  return (data as { code?: unknown }).code === 'storage_not_configured' ? STORAGE_NOT_CONFIGURED_MESSAGE : null
+}
+
 async function parseBody(res: Response): Promise<unknown> {
   try {
     const text = await res.text()
@@ -64,7 +72,8 @@ async function parseBody(res: Response): Promise<unknown> {
 
 /** The human message for a failed (non-2xx) Response. Consumes the body. */
 export async function readError(res: Response, options?: ErrorOptions): Promise<string> {
-  return authoredMessage(res.status, await parseBody(res), options) ?? messageForStatus(res.status)
+  const data = await parseBody(res)
+  return storageMessage(res.status, data) ?? authoredMessage(res.status, data, options) ?? messageForStatus(res.status)
 }
 
 /**
@@ -81,7 +90,7 @@ export async function fetchJson<T = unknown>(url: string, init?: RequestInit, op
   }
   const data = await parseBody(res)
   if (res.ok) return { ok: true, status: res.status, data: data as T }
-  return { ok: false, status: res.status, error: authoredMessage(res.status, data, options) ?? messageForStatus(res.status), body: data }
+  return { ok: false, status: res.status, error: storageMessage(res.status, data) ?? authoredMessage(res.status, data, options) ?? messageForStatus(res.status), body: data }
 }
 
 /** A JSON mutation (body omitted when undefined). See fetchJson. */

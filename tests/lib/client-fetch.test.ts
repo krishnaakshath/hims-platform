@@ -89,3 +89,17 @@ describe('sendJson / fetchJson', () => {
     expect(fetchMock.mock.calls[0][1].body).toBe(fd)
   })
 })
+
+describe('storage not configured', () => {
+  const body = { error: 'File storage is not set up. Ask your administrator.', code: 'storage_not_configured' }
+  it('readError shows the storage message for a 503 with that code only', async () => {
+    expect(await readError(jsonResponse(503, body))).toBe('File storage is not set up. Ask your administrator.')
+    expect(await readError(jsonResponse(503, { error: 'Service temporarily unavailable' }))).toBe(CLIENT_ERROR_MESSAGES.server)
+    expect(await readError(jsonResponse(500, body))).toBe(CLIENT_ERROR_MESSAGES.server)
+  })
+  it('fetchJson shows it too', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(503, body)))
+    const r = await fetchJson('/x')
+    expect(r.ok === false && r.error).toBe('File storage is not set up. Ask your administrator.')
+  })
+})
