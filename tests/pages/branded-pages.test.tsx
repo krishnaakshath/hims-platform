@@ -57,6 +57,7 @@ async function renderAll(env: Record<string, string>) {
   const { default: PublicBookingPage } = await import('@/app/book/page')
   const { AddClientModal } = await import('@/components/AddClientModal')
   const { ArchivePatientDialog } = await import('@/components/ArchivePatientDialog')
+  const { ToastProvider } = await import('@/components/ui/toast') // WS7 T16: the dashboard layout provides toasts
   return {
     login: render(<LoginPage />),
     portalLogin: render(<PatientPortalLoginPage />),
@@ -64,7 +65,7 @@ async function renderAll(env: Record<string, string>) {
     book: render(await PublicBookingPage()),
     // Radix dialogs portal their content, which renderToStaticMarkup does
     // not emit -- so only assert these don't throw and carry no old name.
-    dialogs: render(<><AddClientModal onClose={() => {}} /><ArchivePatientDialog target={{ id: 'RD-0001', name: 'X' }} onClose={() => {}} onArchived={() => {}} /></>),
+    dialogs: render(<><AddClientModal onClose={() => {}} /><ToastProvider><ArchivePatientDialog target={{ id: 'RD-0001', name: 'X' }} onClose={() => {}} onArchived={() => {}} /></ToastProvider></>),
   }
 }
 

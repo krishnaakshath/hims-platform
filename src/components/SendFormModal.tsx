@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { sendJson } from '@/lib/client-fetch'
 import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
+import { useToast } from '@/components/ui/toast'
 
 export function SendFormModal({ templates, onClose, initialPatient = null }: {
   templates: { id: number; name: string }[]
@@ -12,6 +13,7 @@ export function SendFormModal({ templates, onClose, initialPatient = null }: {
   initialPatient?: PickedPatient | null
 }) {
   const router = useRouter()
+  const toast = useToast()
   const [templateId, setTemplateId] = useState<number | ''>('')
   const [patient, setPatient] = useState<PickedPatient | null>(initialPatient)
   const [submitting, setSubmitting] = useState(false)
@@ -27,11 +29,19 @@ export function SendFormModal({ templates, onClose, initialPatient = null }: {
     if (!result.ok) { setError(result.error); return }
     router.refresh()
     if (result.data?.accessToken) setIntakePath(`/intake/${result.data.accessToken}`)
-    else onClose()
+    else finish(null)
   }
 
+  // WS7 T16: "Form sent" toast once the dialog closes (a modal dialog makes the page behind it
+  // inert, so a toast shown under it could not be clicked). Its next step is the intake link.
+  function finish(path: string | null) {
+    toast.show({ title: 'Form sent', description: 'The patient has been notified where a channel is available.', ...(path ? { action: { label: 'Copy link', href: path } } : {}) })
+    onClose()
+  }
+  const close = () => { if (intakePath) finish(intakePath); else onClose() }
+
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog open onOpenChange={(open) => { if (!open) close() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Send Form to Client</DialogTitle>
@@ -53,7 +63,7 @@ export function SendFormModal({ templates, onClose, initialPatient = null }: {
         )}
         <DialogFooter>
           {intakePath ? (
-            <Button onClick={onClose}>Done</Button>
+            <Button onClick={close}>Done</Button>
           ) : (
             <>
               <Button variant="outline" onClick={onClose}>Cancel</Button>

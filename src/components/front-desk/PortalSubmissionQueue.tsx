@@ -8,10 +8,14 @@ import { Button } from '@/components/ui/button'
 import { sendJson } from '@/lib/client-fetch'
 import { formatIstDateTime } from '@/lib/india-time'
 import { INPUT_CLASS } from '@/components/registration/Field'
+import { EmptyState } from '@/components/ui/empty-state'
+import { useToast } from '@/components/ui/toast'
 
 export interface PortalSubmissionQueueRow {
   id: number; kind: 'policy' | 'abha'; patientName: string; uhid: string | null; submittedAt: string
   details: { label: string; value: string }[]; hasCard: boolean; cardHref: string | null
+  /** WS7 T16: where this reviewer opens the patient's policies after approving (null = no link). */
+  policyHref?: string | null
 }
 export interface PayerOption { payerId: number; name: string }
 
@@ -20,6 +24,7 @@ const REASON_MAX = 300
 
 function Row({ row, insurers, tpas }: { row: PortalSubmissionQueueRow; insurers: PayerOption[]; tpas: PayerOption[] }) {
   const router = useRouter()
+  const toast = useToast()
   const [insurerId, setInsurerId] = useState('')
   const [tpaId, setTpaId] = useState('')
   const [rejecting, setRejecting] = useState(false)
@@ -29,12 +34,18 @@ function Row({ row, insurers, tpas }: { row: PortalSubmissionQueueRow; insurers:
   const reasonOk = reason.trim().length >= REASON_MIN && reason.trim().length <= REASON_MAX
   const canApprove = row.kind === 'abha' || insurerId !== ''
 
-  async function send(body: unknown) {
+  async function send(body: { decision: 'approve' | 'reject' } & Record<string, unknown>) {
     setBusy(true); setError(null)
     const r = await sendJson(`/api/front-desk/portal-submissions/${row.id}/decision`, 'POST', body)
     setBusy(false)
     if (!r.ok) { setError(r.error); return }
     router.refresh()
+    // WS7 T16: an approved policy's next step is the patient's policies.
+    if (body.decision === 'approve' && row.kind === 'policy') {
+      toast.show({ title: 'Policy added', ...(row.policyHref ? { action: { label: 'Open policy', href: row.policyHref } } : {}) })
+    } else {
+      toast.show({ title: body.decision === 'approve' ? 'ABHA recorded' : 'Submission rejected' })
+    }
   }
 
   const approve = () => send(row.kind === 'policy'
@@ -104,6 +115,6 @@ function Row({ row, insurers, tpas }: { row: PortalSubmissionQueueRow; insurers:
 }
 
 export function PortalSubmissionQueue({ rows, insurers, tpas }: { rows: PortalSubmissionQueueRow[]; insurers: PayerOption[]; tpas: PayerOption[] }) {
-  if (rows.length === 0) return <p className="text-sm text-muted-foreground">No portal submissions are waiting for review.</p>
+  if (rows.length === 0) return <EmptyState title="No portal submissions are waiting for review." description="Policies and ABHA numbers patients add from the portal appear here." />
   return <ul className="space-y-3">{rows.map((r) => <Row key={r.id} row={r} insurers={insurers} tpas={tpas} />)}</ul>
 }

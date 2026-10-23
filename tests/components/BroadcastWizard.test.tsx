@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render as rtlRender, screen, fireEvent } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { BroadcastWizard } from '@/components/BroadcastWizard'
+import { ToastProvider } from '@/components/ui/toast'
+
+// The dashboard layout wraps every page in ToastProvider; so do these renders.
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ToastProvider })
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 
@@ -94,6 +99,8 @@ describe('BroadcastWizard', () => {
     fireEvent.click(sendButton)
     await screen.findByText('Broadcast sent to 180 patients.')
     expect(screen.getByText(/180 sent · 25 skipped · 7 not delivered/)).toBeInTheDocument()
+    expect(screen.getByText('Sent to 180 patients')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View log' })).toHaveAttribute('href', '/broadcasts/9')
     const [, init] = fetchMock.mock.calls.at(-1) as unknown as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toEqual({ message: 'Free eye camp this Sunday.', filters: {}, confirmCount: 187 })
   })

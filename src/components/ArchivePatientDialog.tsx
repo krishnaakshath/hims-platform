@@ -6,6 +6,7 @@ import { sendJson } from '@/lib/client-fetch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useToast } from '@/components/ui/toast'
 
 // WS8 T13 (spec D17): archive replaces delete. Shared by the patient page's "More" menu and the
 // Workbook. The admin types the patient's UHID and a reason of at least 10 characters; the chart
@@ -25,6 +26,7 @@ export function ArchivePatientDialog({ target, onClose, onArchived }: { target: 
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
   const uhidId = useId()
   const reasonId = useId()
 
@@ -53,6 +55,9 @@ export function ArchivePatientDialog({ target, onClose, onArchived }: { target: 
     }
     close()
     onArchived()
+    // WS7 T16: archiving is admin-only, so the admin always gets the way back. The toast's action is a
+    // link, so "Undo" opens the archived chart, whose banner restores it in one click (the restore route).
+    toast.show({ title: 'Archived', description: `${target.name} is hidden from lists and search.`, action: { label: 'Undo', href: `/patients/${encodeURIComponent(target.id)}` } })
   }
 
   return (

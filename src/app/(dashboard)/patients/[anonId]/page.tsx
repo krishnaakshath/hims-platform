@@ -85,7 +85,8 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   const sp = await searchParams
   const justRegistered = sp?.registered === '1' // Wave C
   // WS7 T6: ?tab=visits (the video-visit "Complete visit" link) opens Visits & follow-up.
-  const initialTab = sp?.tab === 'visits' ? 'follow-up' : undefined
+  // WS7 T16: ?tab=insurance (the "Open policy" toast after approving a portal policy) opens Insurance.
+  const initialTab = sp?.tab === 'visits' ? 'follow-up' : sp?.tab === 'insurance' ? 'insurance' : undefined
   const patient = await getPatientDetail(anonId)
   if (!patient) notFound()
   // WS8 T13: an archived chart is visible to admin only (with the banner below).

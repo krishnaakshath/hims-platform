@@ -4,6 +4,7 @@ import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { listAllDispensesWithBilling } from '@/lib/queries/medication-dispenses'
 import { PharmacyBillingTable } from '@/components/PharmacyBillingTable'
+import { EmptyState } from '@/components/ui/empty-state' // WS7 T16
 import { formatPaise } from '@/lib/format'
 
 function StatTile({ value, label, icon: Icon, tone }: { value: string; label: string; icon: React.ComponentType<{ className?: string }>; tone: string }) {
@@ -48,7 +49,7 @@ export default async function PharmacyBillingPage() {
       </div>
 
       {dispenses.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No dispenses on file.</p>
+        <EmptyState title="No dispenses on file." description="Medicines dispensed by the pharmacy appear here for billing." />
       ) : (
         <PharmacyBillingTable rows={dispenses.map((d) => ({
           dispenseId: d.dispenseId,

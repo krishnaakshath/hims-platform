@@ -9,6 +9,7 @@ import { trialsEnabled } from '@/lib/features'
 import { listAllTrials } from '@/lib/queries/trials'
 import { BroadcastWizard } from '@/components/BroadcastWizard'
 import { DemoBadge } from '@/components/DemoBadge'
+import { EmptyState } from '@/components/ui/empty-state' // WS7 T16
 
 export default async function BroadcastsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const session = await requireSessionOrRedirect()
@@ -37,9 +38,7 @@ export default async function BroadcastsPage({ searchParams }: { searchParams: P
       {activeTab === 'send' ? (
         <BroadcastWizard trials={trials.map((t) => ({ id: t.id, condition: t.condition }))} showTrialFilters={trialsOn} departments={options.departments} providers={options.providers} wards={options.wards} />
       ) : broadcasts.length === 0 ? (
-        <div className="rounded-md border border-border bg-card p-8 text-center shadow-none">
-          <p className="text-sm text-muted-foreground">No records found.</p>
-        </div>
+        <EmptyState title="No broadcasts sent yet" action={{ label: 'Send a broadcast', href: '/broadcasts?tab=send' }} />
       ) : (
         <div className="overflow-hidden rounded-md border border-border bg-card shadow-none">
           <table className="w-full border-collapse text-sm">

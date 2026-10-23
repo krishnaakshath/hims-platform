@@ -8,8 +8,9 @@ import type { PayerProfileValues } from './payer-profile-values'
 
 const opt = (s: string) => (s.trim() === '' ? undefined : s.trim())
 
-/** Create (with name and code) or update an insurer/TPA profile. */
-export function PayerProfileForm({ payerId, initial, onKindChange }: { payerId: number | null; initial: PayerProfileValues; onKindChange?: (k: PayerKind) => void }) {
+/** Create (with name and code) or update an insurer/TPA profile. `onCreated` (WS7 T16) takes over
+ *  from the default "open the new payer" navigation, e.g. the list page's drawer shows a toast. */
+export function PayerProfileForm({ payerId, initial, onKindChange, onCreated }: { payerId: number | null; initial: PayerProfileValues; onKindChange?: (k: PayerKind) => void; onCreated?: (payerId: number) => void }) {
   const router = useRouter()
   const [v, setV] = useState(initial)
   const [name, setName] = useState('')
@@ -33,8 +34,11 @@ export function PayerProfileForm({ payerId, initial, onKindChange }: { payerId: 
     if (!r.ok) { setError(r.error); return }
     setError(null)
     setSaved(true)
-    if (payerId === null) router.push(`/rcm/payers/${(r.data as { payerId: number }).payerId}`)
-    else router.refresh()
+    if (payerId === null) {
+      const newId = (r.data as { payerId: number }).payerId
+      if (onCreated) onCreated(newId)
+      else router.push(`/rcm/payers/${newId}`)
+    } else router.refresh()
   }
 
   const text = (k: keyof PayerProfileValues, label: string, type = 'text') => (

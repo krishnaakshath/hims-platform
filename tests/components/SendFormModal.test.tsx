@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render as rtlRender, screen, fireEvent } from '@testing-library/react'
+import { useState, type ReactElement } from 'react'
 import { SendFormModal } from '@/components/SendFormModal'
+import { ToastProvider } from '@/components/ui/toast'
+
+// The dashboard layout wraps every page in ToastProvider; so do these renders.
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ToastProvider })
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 afterEach(() => vi.unstubAllGlobals())
@@ -36,5 +41,26 @@ describe('SendFormModal', () => {
     render(<SendFormModal templates={[{ id: 1, name: 'Intake Form' }]} onClose={vi.fn()} initialPatient={{ id: 'RD-0007', name: 'Saroja Devi', uhid: 'UH00000007' }} />)
     expect(screen.getByText('Saroja Devi')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: /patient/i })).not.toBeInTheDocument()
+  })
+
+  it('on success shows a "Form sent" toast whose next step is the intake link', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 3, accessToken: 'tok-123' }), { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onClose = vi.fn()
+    // Like the real callers, onClose unmounts the modal.
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      return open ? <SendFormModal templates={[{ id: 1, name: 'Intake Form' }]} onClose={() => { onClose(); setOpen(false) }} initialPatient={{ id: 'RD-0007', name: 'Saroja Devi', uhid: 'UH00000007' }} /> : null
+    }
+    render(<Harness />)
+    fireEvent.change(screen.getByRole('dialog').querySelector('select')!, { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send Form' }))
+    // The intake link stays in the dialog until Done; the toast follows when it closes.
+    expect(await screen.findByRole('textbox', { name: 'Intake link' })).toHaveValue(`${window.location.origin}/intake/tok-123`)
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('Form sent')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Copy link' })).toHaveAttribute('href', '/intake/tok-123')
+    expect(fetchMock).toHaveBeenCalledWith('/api/form-submissions', expect.objectContaining({ method: 'POST' }))
   })
 })

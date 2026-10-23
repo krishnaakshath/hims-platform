@@ -9,6 +9,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => router }))
 afterEach(() => { vi.unstubAllGlobals(); router.refresh.mockClear(); router.push.mockClear() })
 
 import { SendFormModal } from '@/components/SendFormModal'
+import { ToastProvider } from '@/components/ui/toast' // WS7 T16: the dashboard layout provides toasts
 import { DiscrepancyList } from '@/components/DiscrepancyList'
 import { StaffLoginForm } from '@/components/StaffLoginForm'
 import { StaffManagementPanel } from '@/components/settings/StaffManagementPanel'
@@ -25,7 +26,7 @@ describe('SendFormModal', () => {
   it('shows a failed send in an alert, keeps the dialog open and Send enabled', async () => {
     mockFetch(500, { error: 'insert failed: duplicate key' })
     const onClose = vi.fn()
-    render(<SendFormModal {...props} onClose={onClose} />)
+    render(<ToastProvider><SendFormModal {...props} onClose={onClose} /></ToastProvider>)
     await fillSendForm()
     fireEvent.click(screen.getByRole('button', { name: 'Send Form' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
@@ -37,7 +38,7 @@ describe('SendFormModal', () => {
   it('shows the intake link after a successful send', async () => {
     mockFetch(201, { id: 9, accessToken: 'tok123' })
     const onClose = vi.fn()
-    render(<SendFormModal {...props} onClose={onClose} />)
+    render(<ToastProvider><SendFormModal {...props} onClose={onClose} /></ToastProvider>)
     await fillSendForm()
     fireEvent.click(screen.getByRole('button', { name: 'Send Form' }))
     const link = await screen.findByLabelText('Intake link')

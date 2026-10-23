@@ -1,7 +1,9 @@
 // WS7 T9 (spec D15): the reviewer's queue. A policy needs an insurer before Approve; a reject needs
 // a reason (5 to 300 characters) that the patient will see; refusals show the server's message.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { ToastProvider } from '@/components/ui/toast'
 
 const refresh = vi.fn()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
@@ -10,9 +12,12 @@ vi.mock('@/lib/client-fetch', () => ({ sendJson: vi.fn() }))
 import { sendJson } from '@/lib/client-fetch'
 import { PortalSubmissionQueue, type PortalSubmissionQueueRow } from '@/components/front-desk/PortalSubmissionQueue'
 
+// The dashboard layout wraps every page in ToastProvider; so do these renders.
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ToastProvider })
+
 const POLICY: PortalSubmissionQueueRow = {
   id: 5, kind: 'policy', patientName: 'Asha Rao', uhid: 'UHID-26-000123', submittedAt: '2026-10-20T05:00:00.000Z',
-  details: [{ label: 'Policy number', value: 'P-123' }], hasCard: true, cardHref: '/api/documents/9/download',
+  details: [{ label: 'Policy number', value: 'P-123' }], hasCard: true, cardHref: '/api/documents/9/download', policyHref: '/rcm/policies?patientId=RD-0001',
 }
 const ABHA: PortalSubmissionQueueRow = { ...POLICY, id: 6, kind: 'abha', details: [{ label: 'ABHA number', value: '91-1234-5678-9012' }], hasCard: false, cardHref: null }
 
@@ -36,6 +41,9 @@ describe('PortalSubmissionQueue', () => {
     fireEvent.click(approve)
     await waitFor(() => expect(refresh).toHaveBeenCalled())
     expect(sendJson).toHaveBeenCalledWith('/api/front-desk/portal-submissions/5/decision', 'POST', { decision: 'approve', insurerPayerId: 3, tpaPayerId: 4 })
+    // WS7 T16: the next step after approving a policy is the patient's policies.
+    expect(screen.getByText('Policy added')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open policy' })).toHaveAttribute('href', '/rcm/policies?patientId=RD-0001')
   })
 
   it('an ABHA is approved as is; a 409 shows the message', async () => {

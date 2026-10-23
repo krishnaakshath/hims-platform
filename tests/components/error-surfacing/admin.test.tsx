@@ -146,6 +146,7 @@ describe('more admin components (500 -> alert, no server text)', () => {
 import { ReceiveDocumentModal } from '@/components/ReceiveDocumentModal'
 import { SignConsentFormAction } from '@/components/SignConsentFormAction'
 import { BroadcastWizard } from '@/components/BroadcastWizard'
+import { ToastProvider } from '@/components/ui/toast' // WS7 T16: the dashboard layout provides toasts
 
 describe('billing, documents, consent and broadcast components', () => {
   it('ReceiveDocumentModal shows a 413/500 failure', async () => {
@@ -170,7 +171,7 @@ describe('billing, documents, consent and broadcast components', () => {
 
   it('BroadcastWizard shows a failed recipient preview', async () => {
     mockFetch(500, { error: LEAK })
-    render(<BroadcastWizard trials={[{ id: 't1', condition: 'C' }] as never} />)
+    render(<ToastProvider><BroadcastWizard trials={[{ id: 't1', condition: 'C' }] as never} /></ToastProvider>)
     await fillAll()
     const next = screen.queryByRole('button', { name: /next/i })
     if (next) fireEvent.click(next)

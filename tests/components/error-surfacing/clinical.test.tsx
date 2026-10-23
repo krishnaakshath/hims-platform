@@ -17,6 +17,7 @@ import { BedBoard } from '@/components/BedBoard'
 import { CarePlanSection } from '@/components/CarePlanSection'
 import { CheckInModal } from '@/components/CheckInModal'
 import { ArchivePatientDialog } from '@/components/ArchivePatientDialog'
+import { ToastProvider } from '@/components/ui/toast' // WS7 T16: the dashboard layout provides toasts
 import { DischargeAdmissionModal } from '@/components/DischargeAdmissionModal'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
 import { EnterLabResultModal } from '@/components/EnterLabResultModal'
@@ -42,7 +43,7 @@ const CASES: Case[] = [
   { name: 'TransferAdmissionModal', ui: () => <TransferAdmissionModal admissionId={1} availableRooms={[{ id: 2, ward: 'A', roomNumber: '1', bedNumber: 'B' }]} onClose={vi.fn()} />, submit: /^Transfer$/ },
   { name: 'DispenseMedicationModal', ui: () => <DispenseMedicationModal medication={med} onClose={vi.fn()} />, before: pickPatient, submit: /^Dispense$/ },
   { name: 'EnterLabResultModal', ui: () => <EnterLabResultModal orderId={1} testName="CBC" defaultUnit="g/dL" defaultReferenceRange="12-16" category="lab" attachments={[]} onClose={vi.fn()} />, submit: /^Save result$/ },
-  { name: 'ArchivePatientDialog', ui: () => <ArchivePatientDialog target={{ id: 'RD-1', name: 'P', uhid: 'UH-000001' }} onClose={vi.fn()} onArchived={vi.fn()} />,
+  { name: 'ArchivePatientDialog', ui: () => <ToastProvider><ArchivePatientDialog target={{ id: 'RD-1', name: 'P', uhid: 'UH-000001' }} onClose={vi.fn()} onArchived={vi.fn()} /></ToastProvider>,
     before: () => { fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Duplicate registration' } }) }, submit: /^Archive patient$/ },
   { name: 'CheckInModal', ui: () => <CheckInModal providers={[{ id: 1, name: 'Dr A' }]} rooms={[]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} />, submit: /^Check In$/ },
   { name: 'NoteForm', ui: () => <NoteForm patientId="RD-1" canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: /new note/i })) }, submit: /^(Save|Create)/ },

@@ -3,6 +3,7 @@ import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import type { BookingRequestRow } from '@/lib/queries/booking-requests'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state' // WS7 T16
 import { ConfirmBookingRequestModal } from '@/components/ConfirmBookingRequestModal'
 import { DeclineBookingRequestModal } from '@/components/DeclineBookingRequestModal'
 import { ConfirmCancelRequestButton } from '@/components/ConfirmCancelRequestButton' // Wave J
@@ -55,6 +56,9 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
 
   return (
     <>
+      {requests.length === 0 ? (
+        <EmptyState title="No booking requests yet" description="Appointment requests patients send from the online booking page appear here." />
+      ) : (
       <div className="overflow-hidden rounded-lg border border-border">
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -69,11 +73,6 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
             </tr>
           </thead>
           <tbody>
-            {requests.length === 0 && (
-              <tr>
-                <td colSpan={canResolve ? 7 : 6} className="p-6 text-center text-muted-foreground">No booking requests yet.</td>
-              </tr>
-            )}
             {requests.map((r, i) => (
               <tr key={r.id} className={`border-b border-border last:border-b-0 ${i % 2 === 1 ? 'bg-muted/40' : ''}`}>
                 <td className="p-3 text-foreground">
@@ -121,6 +120,7 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
           </tbody>
         </table>
       </div>
+      )}
 
       {confirmTarget && (
         <ConfirmBookingRequestModal request={confirmTarget} providers={providers} onClose={() => setConfirmTarget(null)} />

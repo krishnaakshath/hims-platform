@@ -34,7 +34,8 @@ async function renderAs(role: string, detail: typeof DETAIL) {
   vi.doMock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }), notFound: vi.fn(() => { throw new NotFound() }), redirect: vi.fn() }))
   const { default: Page } = await import('@/app/(dashboard)/patients/[anonId]/page')
   const { render, screen } = await import('@testing-library/react')
-  render(await Page({ params: Promise.resolve({ anonId: 'RD-0001' }), searchParams: Promise.resolve({}) }))
+  const { ToastProvider } = await import('@/components/ui/toast') // WS7 T16: the dashboard layout provides toasts
+  render(<ToastProvider>{await Page({ params: Promise.resolve({ anonId: 'RD-0001' }), searchParams: Promise.resolve({}) })}</ToastProvider>)
   return { screen }
 }
 

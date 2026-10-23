@@ -7,6 +7,7 @@ import { useId, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state' // WS7 T16
 import type { BoardVisit, WindowAvailability } from '@/lib/queries/home-collections'
 import { formatIsoDate } from '@/lib/india-time'
 import { addDaysIso } from '@/lib/follow-ups/rules'
@@ -106,7 +107,7 @@ export function HomeCollectionBoard({ date, windows, visits, totalVisits, collec
       <section aria-labelledby={`${id}-windows`}>
         <h2 id={`${id}-windows`} className="mb-2 text-sm font-semibold">Collection windows</h2>
         {windows.length === 0
-          ? <p className="text-sm text-muted-foreground">No collection windows are set up. An admin can add them in Settings → Lab setup.</p>
+          ? <EmptyState title="No collection windows are set up." description="An admin can add them in Settings → Lab setup." />
           : <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">{windows.map((w) => <CapacityCard key={w.windowId} w={w} />)}</ul>}
       </section>
 
@@ -143,7 +144,7 @@ export function HomeCollectionBoard({ date, windows, visits, totalVisits, collec
         </div>
 
         {shown.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{visits.length === 0 ? 'No home collections on this day.' : 'No visits match these filters.'}</p>
+          <EmptyState title={visits.length === 0 ? 'No home collections on this day.' : 'No visits match these filters.'} />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-sm">

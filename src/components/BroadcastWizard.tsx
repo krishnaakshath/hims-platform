@@ -4,6 +4,7 @@ import { audienceSummaryLine, BROADCAST_MESSAGE_MAX } from '@/lib/broadcasts/aud
 import { LANGUAGES } from '@/lib/india/reference'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useToast } from '@/components/ui/toast'
 import { Check, MessageSquareText, Users, Send } from 'lucide-react'
 
 interface Trial { id: string; condition: string }
@@ -11,7 +12,7 @@ interface Option { id: number; name: string }
 interface PreviewRecipient { id: string; uhid: string | null; name: string }
 interface AudienceCounts { match: number; optedOut: number; noPhone: number; sendable: number }
 interface Preview { counts: AudienceCounts; recipients: PreviewRecipient[] }
-interface SendResult { recipientCount: number; sentCount: number; skippedCount: number; failedCount: number }
+interface SendResult { id: number; recipientCount: number; sentCount: number; skippedCount: number; failedCount: number }
 
 const SECTION = 'rounded-xl border border-primary/10 bg-card/80 p-5 shadow-sm backdrop-blur-sm'
 const FIELD = 'w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring'
@@ -93,6 +94,7 @@ export function BroadcastWizard({
   wards = [],
 }: { trials: Trial[]; showTrialFilters?: boolean; departments?: Option[]; providers?: Option[]; wards?: string[] }) {
   const router = useRouter()
+  const toast = useToast()
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [message, setMessage] = useState('')
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS)
@@ -136,6 +138,9 @@ export function BroadcastWizard({
     if (res.ok) {
       setSent(res.data)
       router.refresh()
+      // WS7 T16: next step is the broadcast's per-patient delivery log.
+      const n = res.data.sentCount
+      toast.show({ title: `Sent to ${n} patient${n === 1 ? '' : 's'}`, action: { label: 'View log', href: `/broadcasts/${res.data.id}` } })
     } else if (res.status === 409) {
       // The audience changed since the preview: show the fresh count and ask for it again.
       await loadPreview()
