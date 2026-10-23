@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, readdir } from 'node:fs/promises'
+import { mkdtemp, rm, readdir, writeFile, mkdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { createLocalBlobDriver } from '@/lib/blob-local'
@@ -29,6 +29,58 @@ describe('local blob driver', () => {
   })
   it.each(['../x', 'a/../b', '/abs', 'a\\b', 'a\0b', '', 'a//b', './a'])('rejects %j', async (p) => {
     await expect(createLocalBlobDriver(dir).put(p, new Uint8Array([1]), 'text/plain')).rejects.toThrow()
+  })
+  it.each(['../x', 'a/../b', '/abs', 'a\\b', 'a\0b'])('creates nothing in the root or its parent after rejecting %j', async (p) => {
+    const root = path.join(dir, 'root')
+    await mkdir(root)
+    const before = [await readdir(root, { recursive: true }), await readdir(dir, { recursive: true })]
+    await expect(createLocalBlobDriver(root).put(p, new Uint8Array([1]), 'text/plain')).rejects.toThrow()
+    expect([await readdir(root, { recursive: true }), await readdir(dir, { recursive: true })]).toEqual(before)
+  })
+  it('write failures carry no path and no key', async () => {
+    const blocker = path.join(dir, 'file-not-dir')
+    await writeFile(blocker, 'x')
+    const key = 'very-secret-key/name.pdf'
+    const err = await createLocalBlobDriver(path.join(blocker, 'sub')).put(key, new Uint8Array([1]), 'text/plain').then(() => null, (e: Error) => e)
+    expect(err).not.toBeNull()
+    expect(err!.name).toBe('LocalBlobWriteError')
+    const text = `${err!.name} ${err!.message} ${err!.stack ?? ''} ${JSON.stringify(err)}`
+    expect(text).not.toContain(dir)
+    expect(text).not.toContain('very-secret-key')
+    expect(text).not.toContain('file-not-dir')
+  })
+  it('overwriting a key never pairs bytes with the wrong content type', async () => {
+    const d = createLocalBlobDriver(dir)
+    const A = new Uint8Array([1, 1, 1]); const B = new Uint8Array([2, 2, 2, 2])
+    await d.put('k/a', A, 'text/a')
+    const seen = new Set<string>()
+    let stop = false
+    const reader = (async () => {
+      while (!stop) {
+        const g = await d.get('local:k/a')
+        if (g) seen.add(`${g.bytes.length}:${g.contentType}`)
+        await new Promise((r) => setImmediate(r))
+      }
+    })()
+    for (let i = 0; i < 40; i++) await d.put('k/a', i % 2 ? A : B, i % 2 ? 'text/a' : 'text/b')
+    stop = true
+    await reader
+    for (const s of seen) expect(['3:text/a', '4:text/b']).toContain(s)
+  })
+  it('a missing or mismatched sidecar reads as null', async () => {
+    const d = createLocalBlobDriver(dir)
+    await d.put('k/b', new Uint8Array([1]), 'text/a')
+    const files = (await readdir(dir, { recursive: true })).filter((f) => f.endsWith('.meta'))
+    expect(files.length).toBe(1)
+    await writeFile(path.join(dir, files[0]), JSON.stringify({ contentType: 'text/z', digest: 'bogus' }))
+    expect(await d.get('local:k/b')).toBeNull()
+    await rm(path.join(dir, files[0]))
+    expect(await d.get('local:k/b')).toBeNull()
+  })
+  it('leaves no temp files after a successful put', async () => {
+    const d = createLocalBlobDriver(dir)
+    await d.put('k/c', new Uint8Array([1]), 'text/a')
+    expect((await readdir(dir, { recursive: true })).filter((f) => f.includes('.tmp'))).toEqual([])
   })
   it('get of unknown or hostile urls returns null', async () => {
     const d = createLocalBlobDriver(dir)
