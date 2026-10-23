@@ -270,7 +270,11 @@ export const auditLog = pgTable('audit_log', {
   patientId: text('patient_id'),
   timestamp: timestamp('timestamp').defaultNow().notNull(),
   details: text('details'),
-})
+}, (t) => [ // WS8 T12: keyset pagination and filters (scripts/migrations/2026-10-26-ws8-audit-log-indexes.sql)
+  index('audit_log_timestamp_id_idx').on(t.timestamp, t.id), // WS8 T12
+  index('audit_log_patient_timestamp_idx').on(t.patientId, t.timestamp), // WS8 T12
+  index('audit_log_role_timestamp_idx').on(t.role, t.timestamp), // WS8 T12
+]) // WS8 T12
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),

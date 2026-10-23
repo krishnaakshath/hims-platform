@@ -617,6 +617,9 @@ import { POST as postPortalSubmissionDecision } from '@/app/api/front-desk/porta
 import { PORTAL_SUBMISSION_REVIEW_ROLES } from '@/lib/role-policy'
 // end WS7 T9
 // end WS7 T4
+// WS8 T12
+import { GET as exportAuditLog } from '@/app/api/audit-log/export/route'
+// end WS8 T12
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1089,6 +1092,9 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/front-desk/portal-submissions', call: () => settle(() => getPortalSubmissions()), allowed: [...PORTAL_SUBMISSION_REVIEW_ROLES] },
   { name: 'POST /api/front-desk/portal-submissions/[id]/decision', call: () => settle(() => postPortalSubmissionDecision(send('POST', `/api/front-desk/portal-submissions/${BOGUS_ID}/decision`, NOT_JSON), ctx({ id: BOGUS_ID }))), allowed: [...PORTAL_SUBMISSION_REVIEW_ROLES] },
   // end WS7 T9
+  // WS8 T12: the audit-log CSV export -- admin only.
+  { name: 'GET /api/audit-log/export', call: () => settle(() => exportAuditLog(get('/api/audit-log/export?role=superuser'))), allowed: ['admin'] },
+  // end WS8 T12
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
