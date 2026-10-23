@@ -158,4 +158,17 @@ describe('POST /api/broadcasts', () => {
     const [audit] = await getDb().select().from(auditLog).where(eq(auditLog.action, 'sent broadcast')).orderBy(desc(auditLog.id)).limit(1)
     expect(audit.details).toBe(`broadcast=${body.id} matched=3 sent=0 skipped=2 failed=1`)
   })
+
+  it('refuses the same message and filters again from the same sender within 10 minutes (409 duplicate_broadcast)', async () => {
+    const message = 'Free health check camp this Sunday, 9 am to 1 pm.'
+    const [before] = await getDb().select().from(broadcasts).where(eq(broadcasts.message, message)).orderBy(desc(broadcasts.id)).limit(1)
+    expect(before).toBeDefined()
+    const logBefore = await getDb().select().from(notificationLog).where(inArray(notificationLog.patientId, cohortIds))
+    const res = await post({ message, filters, confirmCount: 1 })
+    expect(res.status).toBe(409)
+    expect((await res.json()).code).toBe('duplicate_broadcast')
+    const [after] = await getDb().select().from(broadcasts).where(eq(broadcasts.message, message)).orderBy(desc(broadcasts.id)).limit(1)
+    expect(after.id).toBe(before.id)
+    expect(await getDb().select().from(notificationLog).where(inArray(notificationLog.patientId, cohortIds))).toHaveLength(logBefore.length)
+  })
 })

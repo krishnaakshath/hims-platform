@@ -4,7 +4,7 @@ import { demoFeaturesEnabled, DEMO_NOT_CONFIGURED_BODY, DEMO_NOT_CONFIGURED_STAT
 import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
-import { listBroadcasts, listBroadcastRecipientCandidates, sendBroadcast, invalidateBroadcastsList } from '@/lib/queries/broadcasts'
+import { listBroadcasts, listBroadcastRecipientCandidates, sendBroadcast, invalidateBroadcastsList, DuplicateBroadcastError } from '@/lib/queries/broadcasts'
 import { trialsEnabled } from '@/lib/features'
 import { brand } from '@/lib/brand'
 import { BROADCAST_MESSAGE_MAX, summariseAudience, validateAudienceFilters } from '@/lib/broadcasts/audience'
@@ -57,7 +57,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'The number of recipients has changed. Check the new count and confirm again.', code: 'count_changed', count: counts.sendable }, { status: 409 })
   }
 
-  const result = await sendBroadcast({ message: parsed.data.message, filters: audience.filters, hospitalName: brand.name, sentBy: session.name, audience: members })
+  let result
+  try {
+    result = await sendBroadcast({ message: parsed.data.message, filters: audience.filters, hospitalName: brand.name, sentBy: session.name, audience: members })
+  } catch (err) {
+    if (err instanceof DuplicateBroadcastError) {
+      return NextResponse.json({ error: 'This broadcast was already sent a few minutes ago. Check the broadcast history before sending it again.', code: 'duplicate_broadcast' }, { status: 409 })
+    }
+    throw err
+  }
   await invalidateBroadcastsList()
   await logAudit(session, 'sent broadcast', null, `broadcast=${result.id} matched=${counts.match} sent=${result.sentCount} skipped=${result.skippedCount} failed=${result.failedCount}`)
   return NextResponse.json(result, { status: 201 })

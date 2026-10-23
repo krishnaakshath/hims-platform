@@ -149,31 +149,57 @@ export interface SendBroadcastInput {
 
 export interface SendBroadcastResult { id: number; recipientCount: number; sentCount: number; skippedCount: number; failedCount: number }
 
+/** The same sender may not send the same message to the same filters again within this window. */
+export const DUPLICATE_BROADCAST_WINDOW_MINUTES = 10
+
+/** sendBroadcast refused a repeat (a retry or a double submit from two tabs); nothing was sent. */
+export class DuplicateBroadcastError extends Error {
+  readonly code = 'duplicate_broadcast'
+  constructor(readonly existingId: number) {
+    super('duplicate_broadcast')
+    this.name = 'DuplicateBroadcastError'
+  }
+}
+
 /**
  * WS7 T10: records the broadcast, then sends `broadcast_notice` to every sendable recipient
  * through sendNotification (one notification_log row per channel attempt, deduped per broadcast),
  * then stores the sent/skipped/failed counts. Opted-out and no-phone patients are never sent to
  * and count as skipped. A recipient whose send throws counts as failed; the rest still go out.
+ * An identical message + filters from the same sender within DUPLICATE_BROADCAST_WINDOW_MINUTES
+ * throws DuplicateBroadcastError before anything is recorded or sent: the check and the insert run
+ * in one transaction under a per-sender advisory lock, so two concurrent submits cannot both pass.
  */
 export async function sendBroadcast(input: SendBroadcastInput, deps?: SendNotificationDeps): Promise<SendBroadcastResult> {
   const db = getDb()
   const { filters } = input
-  const [row] = await db
-    .insert(broadcasts)
-    .values({
-      subject: null,
-      message: input.message,
-      channel: 'sms',
-      filterTrialId: filters.trialId ?? null,
-      filterOverallStatus: filters.overallStatus ?? null,
-      filterFormStatus: filters.formStatus ?? null,
-      filters,
-      templateKey: 'broadcast_notice',
-      recipients: [],
-      recipientCount: input.audience.length,
-      sentBy: input.sentBy,
-    })
-    .returning({ id: broadcasts.id })
+  const row = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`broadcast:${input.sentBy}`}))`)
+    const [dup] = await tx.select({ id: broadcasts.id }).from(broadcasts).where(and(
+      eq(broadcasts.sentBy, input.sentBy),
+      eq(broadcasts.message, input.message),
+      sql`${broadcasts.filters} = ${JSON.stringify(filters)}::jsonb`,
+      sql`${broadcasts.sentAt} > now() - make_interval(mins => ${DUPLICATE_BROADCAST_WINDOW_MINUTES}::int)`,
+    )).orderBy(desc(broadcasts.id)).limit(1)
+    if (dup) throw new DuplicateBroadcastError(dup.id)
+    const [inserted] = await tx
+      .insert(broadcasts)
+      .values({
+        subject: null,
+        message: input.message,
+        channel: 'sms',
+        filterTrialId: filters.trialId ?? null,
+        filterOverallStatus: filters.overallStatus ?? null,
+        filterFormStatus: filters.formStatus ?? null,
+        filters,
+        templateKey: 'broadcast_notice',
+        recipients: [],
+        recipientCount: input.audience.length,
+        sentBy: input.sentBy,
+      })
+      .returning({ id: broadcasts.id })
+    return inserted
+  })
 
   let sentCount = 0
   let skippedCount = 0

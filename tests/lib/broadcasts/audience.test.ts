@@ -1,12 +1,15 @@
 // WS7 T10 (spec D16): hospital broadcast audience -- pure rules plus the DB-backed filter query.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { broadcasts, notificationLog, patientNotificationPreferences, patients } from '@/db/schema'
+import {
+  admissions, broadcasts, departments, encounters, followUpOrders, notificationLog, patientNotificationPreferences, patients, providers, rooms,
+} from '@/db/schema'
 import {
   audienceSummaryLine, broadcastOutcome, classifyRecipient, describeAudienceFilters, parseAudienceQuery, summariseAudience, validateAudienceFilters,
 } from '@/lib/broadcasts/audience'
-import { listBroadcastRecipientCandidates, sendBroadcast } from '@/lib/queries/broadcasts'
+import { DuplicateBroadcastError, listBroadcastRecipientCandidates, sendBroadcast } from '@/lib/queries/broadcasts'
+import { addDaysIso } from '@/lib/follow-ups/rules'
 import { todayIsoIn } from '@/lib/india-time'
 import type { ChannelAdapter, ChannelRegistry } from '@/lib/notify/registry'
 
@@ -144,5 +147,145 @@ describe('sendBroadcast', () => {
     } finally {
       await getDb().delete(broadcasts).where(eq(broadcasts.id, r.id))
     }
+  })
+})
+
+describe('sendBroadcast duplicate guard', () => {
+  const quiet: ChannelRegistry = (() => {
+    const a = (name: 'sms' | 'whatsapp' | 'email' | 'in_app'): ChannelAdapter => ({ name, configured: () => true, send: async () => ({ ok: true, providerMessageId: 'x' }) })
+    return { sms: a('sms'), whatsapp: a('whatsapp'), email: a('email'), in_app: a('in_app') }
+  })()
+  const created: number[] = []
+  afterAll(async () => {
+    if (created.length) await getDb().delete(broadcasts).where(inArray(broadcasts.id, created))
+  })
+
+  it('refuses an identical message + filters from the same sender within 10 minutes, sending nothing', async () => {
+    const audience = await listBroadcastRecipientCandidates({ pinCodePrefix: PIN, ageMin: 60 })
+    const sender = `Dup Sender ${P}`
+    const input = { message: 'OPD closed on Monday for maintenance.', filters: { pinCodePrefix: PIN, ageMin: 60 }, hospitalName: 'City Hospital', sentBy: sender, audience }
+    const first = await sendBroadcast(input, { registry: quiet })
+    created.push(first.id)
+    const logBefore = await getDb().select({ id: notificationLog.id }).from(notificationLog).where(inArray(notificationLog.patientId, allIds))
+
+    // Same filters in a different key order are the same audience.
+    await expect(sendBroadcast({ ...input, filters: { ageMin: 60, pinCodePrefix: PIN } }, { registry: quiet })).rejects.toBeInstanceOf(DuplicateBroadcastError)
+    const rows = await getDb().select({ id: broadcasts.id }).from(broadcasts).where(eq(broadcasts.sentBy, sender))
+    expect(rows.map((r) => r.id)).toEqual([first.id])
+    const logAfter = await getDb().select({ id: notificationLog.id }).from(notificationLog).where(inArray(notificationLog.patientId, allIds))
+    expect(logAfter.length).toBe(logBefore.length)
+
+    // Two concurrent submits: exactly one goes through.
+    const msg2 = 'Blood donation camp on Saturday.'
+    const results = await Promise.allSettled([sendBroadcast({ ...input, message: msg2 }, { registry: quiet }), sendBroadcast({ ...input, message: msg2 }, { registry: quiet })])
+    for (const r of results) if (r.status === 'fulfilled') created.push(r.value.id)
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((r) => r.status === 'rejected' && r.reason instanceof DuplicateBroadcastError)).toHaveLength(1)
+
+    // A different message, different filters, another sender, or an older broadcast are not duplicates.
+    const other = await sendBroadcast({ ...input, filters: { pinCodePrefix: PIN, ageMin: 61 } }, { registry: quiet })
+    created.push(other.id)
+    const another = await sendBroadcast({ ...input, sentBy: `${sender} 2` }, { registry: quiet })
+    created.push(another.id)
+    await getDb().execute(sql`UPDATE broadcasts SET sent_at = now() - interval '11 minutes' WHERE id = ${first.id}`)
+    const later = await sendBroadcast(input, { registry: quiet })
+    created.push(later.id)
+  })
+})
+
+// --- DB-backed: department, doctor, ward and follow-up filters ------------------------------
+describe('listBroadcastRecipientCandidates (encounter, ward and follow-up filters)', () => {
+  const Q = `WS7BF-${process.pid}`
+  const pid = {
+    deptRecent: `${Q}-A`, deptOld: `${Q}-B`, deptCancelled: `${Q}-C`, otherDept: `${Q}-D`,
+    wardAdmitted: `${Q}-E`, wardDischarged: `${Q}-F`, otherWard: `${Q}-G`,
+    fuOverdue: `${Q}-H`, fuLongOverdue: `${Q}-I`, fuDue7: `${Q}-J`, fuLater: `${Q}-K`, fuScheduled: `${Q}-L`,
+  }
+  const pids = Object.values(pid)
+  const WARD = `WS7B Ward ${process.pid}`
+  const OTHER_WARD = `WS7B Other Ward ${process.pid}`
+  let deptId = 0
+  let otherDeptId = 0
+  let docId = 0
+  let otherDocId = 0
+  const monthsAgo = (n: number) => {
+    const [y, m, d] = today.split('-').map(Number)
+    return new Date(Date.UTC(y, m - 1 - n, d)).toISOString().slice(0, 10)
+  }
+  const mine = async (f: Parameters<typeof listBroadcastRecipientCandidates>[0]) =>
+    (await listBroadcastRecipientCandidates(f)).map((m) => m.id).filter((id) => id.startsWith(Q)).sort()
+
+  beforeAll(async () => {
+    const db = getDb()
+    await db.insert(patients).values(pids.map((id) => ({ id, name: `Filter ${id.slice(-1)}`, dob: '1970-01-01', phone: '9876500000' })))
+    const tag = String(process.pid).slice(-6)
+    const [d1, d2] = await db.insert(departments).values([{ code: `WSA${tag}`, name: `WS7B Dept ${tag}` }, { code: `WSB${tag}`, name: `WS7B Dept2 ${tag}` }]).returning({ id: departments.id })
+    deptId = d1.id
+    otherDeptId = d2.id
+    const [p1, p2] = await db.insert(providers).values([
+      { name: `WS7B Doctor ${tag}`, specialty: 'General Medicine', colorTag: 'blue' },
+      { name: `WS7B Doctor2 ${tag}`, specialty: 'General Medicine', colorTag: 'green' },
+    ]).returning({ id: providers.id })
+    docId = p1.id
+    otherDocId = p2.id
+    const enc = (patientId: string, date: string, extra: Partial<typeof encounters.$inferInsert> = {}) =>
+      ({ patientId, encounterType: 'opd' as const, encounterDate: date, departmentId: deptId, providerId: docId, checkedInByName: 'Test', status: 'completed' as const, ...extra })
+    await db.insert(encounters).values([
+      enc(pid.deptRecent, monthsAgo(11)),
+      enc(pid.deptOld, monthsAgo(13)),
+      enc(pid.deptCancelled, addDaysIso(today, -10), { status: 'cancelled', cancelReason: 'Patient did not come' }),
+      enc(pid.otherDept, addDaysIso(today, -10), { departmentId: otherDeptId, providerId: otherDocId }),
+    ])
+    const [r1, r2] = await db.insert(rooms).values([
+      { ward: WARD, roomNumber: '1', bedNumber: 'A' },
+      { ward: OTHER_WARD, roomNumber: '1', bedNumber: 'A' },
+    ]).returning({ id: rooms.id })
+    await db.insert(admissions).values([
+      { patientId: pid.wardAdmitted, currentRoomId: r1.id, attendingProviderId: docId, status: 'admitted' },
+      { patientId: pid.wardDischarged, currentRoomId: r1.id, attendingProviderId: docId, status: 'discharged', dischargedAt: new Date() },
+      { patientId: pid.otherWard, currentRoomId: r2.id, attendingProviderId: docId, status: 'admitted' },
+    ])
+    const fu = (patientId: string, due: number, start: number, end: number, status: 'planned' | 'scheduled' = 'planned') => ({
+      patientId, source: 'manual' as const, status, prescribedByProviderId: docId, baseDate: addDaysIso(today, -30),
+      dueDate: addDaysIso(today, due), windowStart: addDaysIso(today, start), windowEnd: addDaysIso(today, end), reason: 'Review', createdByName: 'Test',
+    })
+    await db.insert(followUpOrders).values([
+      fu(pid.fuOverdue, -5, -7, -3),
+      fu(pid.fuLongOverdue, -25, -27, -20),
+      fu(pid.fuDue7, 3, 0, 10),
+      fu(pid.fuLater, 20, 15, 25),
+      fu(pid.fuScheduled, 3, 0, 10, 'scheduled'),
+    ])
+  })
+
+  afterAll(async () => {
+    const db = getDb()
+    await db.delete(followUpOrders).where(inArray(followUpOrders.patientId, pids))
+    await db.delete(admissions).where(inArray(admissions.patientId, pids))
+    await db.delete(rooms).where(inArray(rooms.ward, [WARD, OTHER_WARD]))
+    await db.delete(encounters).where(inArray(encounters.patientId, pids))
+    await db.delete(providers).where(inArray(providers.id, [docId, otherDocId]))
+    await db.delete(departments).where(inArray(departments.id, [deptId, otherDeptId]))
+    await db.delete(patients).where(inArray(patients.id, pids))
+  })
+
+  it('department: an encounter in the last 12 months counts; older, cancelled or another department do not', async () => {
+    expect(await mine({ departmentId: deptId })).toEqual([pid.deptRecent])
+    expect(await mine({ departmentId: otherDeptId })).toEqual([pid.otherDept])
+  })
+
+  it('doctor: the same 12-month, not-cancelled rule', async () => {
+    expect(await mine({ providerId: docId })).toEqual([pid.deptRecent])
+    expect(await mine({ providerId: otherDocId })).toEqual([pid.otherDept])
+  })
+
+  it('ward: only patients currently admitted to a bed in that ward', async () => {
+    expect(await mine({ ward: WARD })).toEqual([pid.wardAdmitted])
+    expect(await mine({ ward: OTHER_WARD })).toEqual([pid.otherWard])
+  })
+
+  it('follow-up: overdue inside the grace period, or due within 7 days; booked ones and later ones are out', async () => {
+    expect(await mine({ followUpDue: 'overdue' })).toEqual([pid.fuOverdue])
+    expect(await mine({ followUpDue: 'due_7_days' })).toEqual([pid.fuDue7])
   })
 })
