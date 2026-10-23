@@ -10,6 +10,9 @@ import { getLatestSignatureForSignable } from '@/lib/queries/signatures'
 import { hasSchedulingConflict, lockProviderSchedule } from '@/lib/queries/appointments'
 import { completeAdmissionEncounter } from '@/lib/queries/encounters'
 import { createFollowUpOrder } from '@/lib/queries/follow-ups'
+import { loadAdmissionDues } from '@/lib/queries/admission-dues' // WS3 T5
+import { lockPatientBilling } from '@/lib/queries/billing-lock' // WS3 T5
+import { clearanceIsCurrent, type DischargeDues } from '@/lib/inpatient/dues' // WS3 T5
 
 export type Admission = typeof admissions.$inferSelect
 
@@ -215,10 +218,12 @@ export interface DischargeResult {
    * display strings), or the SP3 codes 'conflict' (the slot is taken),
    * 'slot_in_past' (the slot is not later than now),
    * 'due_date_invalid' (fixed `message`) and 'provider_not_found' (the
-   * attending doctor is inactive, so no follow-up can be prescribed).
+   * attending doctor is inactive, so no follow-up can be prescribed),
+   * WS3 T5: 'dues_outstanding' (with `dues`).
    */
   error?: string
   message?: string
+  dues?: DischargeDues // WS3 T5
   followUpAppointmentId?: number
   followUpOrderId?: number
   followUpDueDate?: string
@@ -236,6 +241,10 @@ class DischargeRollback extends Error {
  * transactions; the old "sequential, not transactional" posture is gone):
  *
  * 1. Lock the admission row `for update` and check it is still admitted.
+ *    WS3 T5: the patient's billing lock is taken first (the billing writers' order: lock, then
+ *    rows), so no charge or payment lands between the dues check and the commit. Then the
+ *    dues gate: outstanding dues refuse the discharge (`dues_outstanding`) unless billing's
+ *    latest clearance is still current (clearanceIsCurrent). The only discharge dues gate.
  * 2. Store the five Ds and the discharge fields; free the room to `dirty`.
  * 3. With a slot: take the per-provider booking lock (the same key as
  *    bookFollowUp), run the conflict check on the tx, insert the appointment
@@ -253,9 +262,17 @@ export async function dischargeAdmission(admissionId: number, input: DischargeIn
   try {
     return await getDb().transaction(async (tx): Promise<DischargeResult> => {
       // 1.
+      const [pre] = await tx.select({ patientId: admissions.patientId }).from(admissions).where(eq(admissions.id, admissionId)).limit(1) // WS3 T5
+      if (!pre) return { ok: false, error: 'Admission not found' } // WS3 T5
+      await lockPatientBilling(tx, pre.patientId) // WS3 T5
       const [admission] = await tx.select().from(admissions).where(eq(admissions.id, admissionId)).for('update')
       if (!admission) return { ok: false, error: 'Admission not found' }
       if (admission.status !== 'admitted') return { ok: false, error: 'This admission has already been discharged' }
+      // WS3 T5: the dues gate (nothing has been written yet, so returning commits nothing).
+      const loaded = await loadAdmissionDues(admissionId, tx)
+      if (loaded && loaded.dues.outstandingPaise > 0 && !clearanceIsCurrent(loaded.latestClearance, loaded.dues)) {
+        return { ok: false, error: 'dues_outstanding', dues: loaded.dues }
+      }
 
       // 2.
       const dischargedAt = new Date()

@@ -62,6 +62,7 @@ import {
   // SP8
   nhcxInboundCalls, nhcxExchanges, nhcxEligibilityChecks, abdmProfileShares, abdmConsents,
   admissionCoverage, coverageVerifications, // WS12 T1
+  admissionDuesClearances, // WS3 T5
   abhaLinkOverrides, // WS12 T5
   // SP3
   encounters,
@@ -854,6 +855,8 @@ async function clearExistingData() {
     // verifications (append-only, purge flag above) reference eligibility checks and policies.
     await tx.delete(admissionCoverage)
     await tx.delete(coverageVerifications)
+    // WS3 T5: dues clearances cascade from admissions but also reference users (cleared_by_user_id).
+    await tx.delete(admissionDuesClearances)
     // SP8: NHCX exchanges reference claims, claim versions, pre-auths, queries, policies and
     // eligibility checks; eligibility checks reference policies and payers; consents and shares
     // reference patients. Inbound calls and consents are append-only (purge flag above).

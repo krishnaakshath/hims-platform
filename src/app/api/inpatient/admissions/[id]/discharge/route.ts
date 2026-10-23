@@ -101,6 +101,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       case 'slot_in_past': return errorResponse(400, 'Pick a time later than now.')
       case 'due_date_invalid': return errorResponse(400, result.message ?? 'The follow-up date is not valid.')
       case 'provider_not_found': return errorResponse(409, 'The attending doctor is inactive, so a follow-up cannot be recorded.')
+      // WS3 T5: the discharge dues gate (paise amounts only).
+      case 'dues_outstanding': return NextResponse.json({ error: 'Dues are outstanding. Ask billing to clear or override them.', code: 'dues_outstanding', dues: result.dues }, { status: 409 })
       default: return errorResponse(409, 'This admission has already been discharged')
     }
   }

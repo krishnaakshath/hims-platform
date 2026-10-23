@@ -93,6 +93,9 @@ describe.skipIf(!enabled)('db:migrate against a scratch database', () => {
         FROM pg_constraint co JOIN pg_class cl ON cl.oid = co.conrelid JOIN pg_class fcl ON fcl.oid = co.confrelid
         WHERE co.contype = 'f' AND co.confdeltype = 'c' ORDER BY 1`)
       expect(r.rows).toEqual([
+        // WS3 T5: billing's dues clearances are snapshots of one admission's dues at a moment
+        // (no clinical content, no ledger effect), meaningless once the admission is gone.
+        { child: 'admission_dues_clearances', parent: 'admissions' },
         { child: 'coding_query_responses', parent: 'coding_queries' },
         { child: 'follow_up_contact_attempts', parent: 'follow_up_orders' },
         // Foundations T8: one row of per-channel on/off switches per patient (no clinical or

@@ -50,6 +50,7 @@ import { createDraftInvoice, finaliseInvoice, cancelInvoice } from '../lib/queri
 import { recordPayment, issueRefund } from '../lib/queries/patient-ledger'
 import { postRoomRent } from '../lib/queries/room-rent'
 import { dischargeAdmission } from '../lib/queries/admissions'
+import { recordDuesClearance } from '../lib/queries/admission-dues' // WS3 T5
 import { createLabRequisition } from '../lib/queries/lab-requisitions'
 import { collectLabOrder, receiveLabSample, recordLabResult, verifyLabResult, cancelLabOrder } from '../lib/queries/lab-lifecycle'
 import { bookHomeCollection, assignCollector, collectHomeVisit, cancelHomeCollection } from '../lib/queries/home-collections'
@@ -707,6 +708,10 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   const discharged = stays[0]
   // Room rent is posted while the stay still has its bed (discharge releases the bed).
   must(await postRoomRent(dischargedId, sessions.billing, { throughDate: day(-2), now: realNow }), 'room rent (discharged)')
+  // WS3 T5: billing clears the dues before the discharge (the gate refuses outstanding dues without a
+  // current clearance). Today the ₹15,000 advance covers the stay; the reason keeps the seed working
+  // if the demo charges ever exceed it, since the final bill is settled after discharge.
+  must(await recordDuesClearance(dischargedId, 'Final bill to be settled against the advance at the billing desk', sessions.billing, istAt(day(-2), '10:30')), 'dues clearance')
   must(await dischargeAdmission(dischargedId, {
     dischargeDiagnosis: 'Closed fracture of right distal radius, treated with closed reduction and cast',
     dischargeDrugs: 'Tab. Aceclofenac 100 mg twice daily after food for 5 days; Tab. Pantoprazole 40 mg once daily before breakfast for 5 days; Tab. Calcium + Vitamin D3 once daily for 6 weeks',

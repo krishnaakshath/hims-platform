@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest'
 import { eq, ne, and, like, or } from 'drizzle-orm'
 import { POST } from '@/app/api/inpatient/admissions/[id]/discharge/route'
 import { getDb } from '@/db/client'
 import { admissions, patients, appointments, providers, signatures, auditLog, followUpOrders } from '@/db/schema'
+import { admissionDuesClearances, chargeLines, encounters, serviceCatalog } from '@/db/schema' // WS3 T5
 import { createAdmission } from '@/lib/queries/admissions'
+import { recordDuesClearance } from '@/lib/queries/admission-dues' // WS3 T5
 
 let sessionRole: 'admin' | 'pi' | 'frontdesk' = 'pi'
 let sessionName = 'Dr. Chen'
@@ -347,5 +349,75 @@ describe('POST /api/inpatient/admissions/[id]/discharge', () => {
       vi.doUnmock('@/lib/queries/admissions')
       vi.resetModules()
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WS3 T5: the discharge dues gate (spec 3.2 item 13). Own patient, so the
+// charge lines and clearances never touch the shared first patient.
+// ---------------------------------------------------------------------------
+describe.skipIf(!process.env.DATABASE_URL)('POST /api/inpatient/admissions/[id]/discharge -- dues gate (WS3 T5)', () => {
+  const RUN = `${Date.now() % 1e8}${Math.floor(Math.random() * 1e3)}`
+  const PID = `TEST-WS3T5-DIS-${RUN}`
+  const FIVE = { dischargeDiagnosis: 'A', dischargeDrugs: 'B', dischargeDevices: 'C', dischargeDiet: 'D', dischargeSummaryNotes: 'E', typedName: 'Dr. Chen' }
+  const billing = { role: 'billing' as const, name: 'TEST_WS3T5 Billing', userId: null }
+  const post = (admissionId: number) => POST(new Request('http://localhost', { method: 'POST', body: JSON.stringify(FIVE) }) as never, { params: Promise.resolve({ id: String(admissionId) }) })
+  let service: typeof serviceCatalog.$inferSelect
+
+  async function addLine(admissionId: number, taxablePaise: number) {
+    await getDb().insert(chargeLines).values({
+      patientId: PID, admissionId, source: 'manual', serviceId: service.id, itemCode: service.code, itemName: service.name, serviceDate: '2099-06-01',
+      quantity: 1, unitPricePaise: taxablePaise, priceSource: 'base', taxablePaise, gstRateBp: 0, hsnSac: service.hsnSac, createdByName: 'TEST_WS3T5',
+    })
+  }
+
+  beforeAll(async () => {
+    await getDb().insert(patients).values({ id: PID, name: 'TEST_WS3T5 Discharge Patient', dob: '1985-01-01', gender: 'male' })
+    ;[service] = await getDb().select().from(serviceCatalog).orderBy(serviceCatalog.id).limit(1)
+  })
+
+  afterAll(async () => {
+    const db = getDb()
+    const ids = (await db.select({ id: admissions.id }).from(admissions).where(eq(admissions.patientId, PID))).map((a) => a.id)
+    await db.delete(chargeLines).where(eq(chargeLines.patientId, PID))
+    for (const id of ids) {
+      await db.delete(signatures).where(and(eq(signatures.signableType, 'admission_discharge'), eq(signatures.signableId, id)))
+      await db.delete(encounters).where(eq(encounters.admissionId, id))
+    }
+    await db.delete(admissions).where(eq(admissions.patientId, PID)) // clearances cascade
+    await db.delete(auditLog).where(eq(auditLog.patientId, PID))
+    await db.delete(patients).where(eq(patients.id, PID))
+  })
+
+  it('409 dues_outstanding with the dues; a reasoned clearance lets it through unless a charge is added after it', async () => {
+    const adm = await createAdmission({ patientId: PID, roomId: null, attendingProviderId: 1, admissionType: 'elective', createdFromAssignmentId: null })
+    await addLine(adm.id, 2_000_00)
+
+    const refused = await post(adm.id)
+    expect(refused.status).toBe(409)
+    const body = await refused.json()
+    expect(body).toMatchObject({ error: 'Dues are outstanding. Ask billing to clear or override them.', code: 'dues_outstanding' })
+    expect(body.dues.outstandingPaise).toBe(2_000_00)
+    const [still] = await getDb().select().from(admissions).where(eq(admissions.id, adm.id))
+    expect(still.status).toBe('admitted')
+
+    expect((await recordDuesClearance(adm.id, 'TEST_WS3T5 employer pays on monthly statement', billing)).ok).toBe(true)
+    await addLine(adm.id, 500_00) // a charge after the clearance
+    const again = await post(adm.id)
+    expect(again.status).toBe(409)
+    expect((await again.json()).dues.outstandingPaise).toBe(2_500_00)
+
+    expect((await recordDuesClearance(adm.id, 'TEST_WS3T5 employer pays on monthly statement', billing)).ok).toBe(true)
+    const ok = await post(adm.id)
+    expect(ok.status).toBe(200)
+    const [done] = await getDb().select().from(admissions).where(eq(admissions.id, adm.id))
+    expect(done.status).toBe('discharged')
+  })
+
+  it('zero dues discharge without any clearance', async () => {
+    const adm = await createAdmission({ patientId: PID, roomId: null, attendingProviderId: 1, admissionType: 'elective', createdFromAssignmentId: null })
+    const rows = await getDb().select().from(admissionDuesClearances).where(eq(admissionDuesClearances.admissionId, adm.id))
+    expect(rows).toEqual([])
+    expect((await post(adm.id)).status).toBe(200)
   })
 })

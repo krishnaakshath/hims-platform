@@ -283,3 +283,7 @@ export const INVOICE_READY_ROLES: readonly Role[] = CHARGE_CAPTURE_ROLES
 // WS3 T2: admission (spec 3.1 item 11). A pi may admit only as the attending (route-level check).
 export const ADMISSION_ROLES: readonly Role[] = ['frontdesk', 'admin', 'crc', 'pi']
 // end WS3 T2
+// WS3 T5: who may see an admission's discharge dues (spec 3.2 item 13). Clearing them is
+// BILLING_AUTHORITY_ROLES (admin, billing).
+export const DUES_VIEW_ROLES: readonly Role[] = ['admin', 'billing', 'crc', 'frontdesk', 'pi']
+// end WS3 T5

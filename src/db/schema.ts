@@ -3089,3 +3089,25 @@ export const prescriptions = pgTable('prescriptions', {
 ])
 export type PrescriptionRow = typeof prescriptions.$inferSelect
 // end WS1 T6
+// WS3 T5: discharge dues clearances (spec 3.2 item 13, §4; scripts/migrations/2026-10-24-ws3-dues-clearance.sql).
+// Append-only: billing (BILLING_AUTHORITY_ROLES) records the dues at the moment of clearing; an
+// outstanding amount needs an override reason. Detail rows of the admission, so they cascade.
+export const admissionDuesClearances = pgTable('admission_dues_clearances', {
+  id: serial('id').primaryKey(),
+  admissionId: integer('admission_id').notNull().references(() => admissions.id, { onDelete: 'cascade' }),
+  chargesPaise: bigint('charges_paise', { mode: 'number' }).notNull(),
+  paidPaise: bigint('paid_paise', { mode: 'number' }).notNull(),
+  insurerSharePaise: bigint('insurer_share_paise', { mode: 'number' }).notNull(),
+  outstandingPaise: bigint('outstanding_paise', { mode: 'number' }).notNull(),
+  overrideReason: text('override_reason'),
+  clearedByName: text('cleared_by_name').notNull(),
+  clearedByUserId: integer('cleared_by_user_id').references(() => users.id),
+  clearedAt: timestamp('cleared_at').defaultNow().notNull(),
+}, (t) => [
+  index('admission_dues_clearances_admission_idx').on(t.admissionId, t.clearedAt),
+  check('admission_dues_clearances_reason', sql`${t.outstandingPaise} = 0 OR ${t.overrideReason} IS NOT NULL`),
+  check('admission_dues_clearances_amounts', sql`${t.chargesPaise} >= 0 AND ${t.paidPaise} >= 0 AND ${t.insurerSharePaise} >= 0 AND ${t.outstandingPaise} >= 0`),
+  check('admission_dues_clearances_reason_length', sql`${t.overrideReason} IS NULL OR char_length(${t.overrideReason}) BETWEEN 10 AND 500`),
+])
+export type AdmissionDuesClearanceRow = typeof admissionDuesClearances.$inferSelect
+// end WS3 T5
