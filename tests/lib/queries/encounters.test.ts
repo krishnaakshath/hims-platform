@@ -65,6 +65,12 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     await db.delete(departments).where(eq(departments.id, deptId))
   })
 
+  // WS2 T9 (spec ruling 6): a first OPD check-in also captures the registration fee when
+  // billing_settings.registration_service_id is set (the seed sets REG_FEE), auditing
+  // "billing: auto-captured registration". That seam is covered by tests/api/auto-charge-visit.test.ts;
+  // these encounter tests assert only the encounter audit rows, whatever the billing settings are.
+  const notBilling = <T extends { action: string }>(rows: T[]) => rows.filter((r) => !r.action.startsWith('billing: '))
+
   const input = (over: Partial<CheckInVisitInput> = {}): CheckInVisitInput => ({
     patientId: PATIENT, providerId, visitType: 'outpatient', urgency: 'routine', reason: 'TEST_SP3 visit',
     roomId: null, appointmentId: null, createAdmission: false, ...over,
@@ -172,7 +178,7 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     expect(o.status).toBe('completed')
     expect(o.completedEncounterId).toBe(r.encounter.id)
     expect(o.completedAt).toEqual(NOW)
-    const audit = await getDb().select({ action: auditLog.action, details: auditLog.details, patientId: auditLog.patientId }).from(auditLog).where(eq(auditLog.userName, PROBE_USER)).orderBy(auditLog.id)
+    const audit = notBilling(await getDb().select({ action: auditLog.action, details: auditLog.details, patientId: auditLog.patientId }).from(auditLog).where(eq(auditLog.userName, PROBE_USER)).orderBy(auditLog.id))
     expect(audit).toEqual([
       { action: 'checked in patient (outpatient)', details: `encounter=${r.encounter.id} token=${r.encounter.opdToken}`, patientId: PATIENT },
       { action: 'completed follow-up at check-in', details: `followUp=${order.id} encounter=${r.encounter.id}`, patientId: PATIENT },
@@ -298,7 +304,7 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     const r = await checkInVisit(input(), SESSION, NOW)
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    const rows = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, PROBE_USER), eq(auditLog.patientId, PATIENT)))
+    const rows = notBilling(await getDb().select().from(auditLog).where(and(eq(auditLog.userName, PROBE_USER), eq(auditLog.patientId, PATIENT))))
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ action: 'checked in patient (outpatient)', details: `encounter=${r.encounter.id} token=${r.encounter.opdToken}`, role: 'frontdesk' })
     // logAudit was handed the transaction, not the shared db.
@@ -319,7 +325,7 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     }
     expect(await transitionEncounter(r.encounter.id, 'cancelled', SESSION, { cancelReason: 'left' })).toEqual({ ok: false, error: 'invalid_transition' })
     expect(await transitionEncounter(2147483000, 'completed', SESSION)).toEqual({ ok: false, error: 'not_found' })
-    const audit = await getDb().select({ action: auditLog.action, details: auditLog.details }).from(auditLog).where(eq(auditLog.userName, PROBE_USER)).orderBy(auditLog.id)
+    const audit = notBilling(await getDb().select({ action: auditLog.action, details: auditLog.details }).from(auditLog).where(eq(auditLog.userName, PROBE_USER)).orderBy(auditLog.id))
     expect(audit.map((a) => a.action)).toEqual(['checked in patient (outpatient)', 'encounter status changed to completed'])
     expect(audit[1].details).toBe(`encounter=${r.encounter.id}`)
   })
