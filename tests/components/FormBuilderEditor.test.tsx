@@ -350,6 +350,81 @@ describe('FormBuilderEditor', () => {
       expect(body.questions[1].i18n).toEqual({ hi: { label: 'कोई एलर्जी?', options: ['हाँ', ''] } })
     })
 
+    describe('review round 1: conditions follow their trigger answers', () => {
+      const ALLERGY: FormQuestion[] = [
+        { id: 'q1', label: 'Any allergies?', type: 'select', options: ['Yes', 'No'], hipaaSensitive: false, required: true },
+        { id: 'q2', label: 'Which allergies?', type: 'textarea', hipaaSensitive: false, required: false, visibleIf: { questionId: 'q1', equals: 'Yes' } },
+      ]
+
+      it('renaming the answer carries the condition to the new text', async () => {
+        const fetchMock = okSave()
+        vi.stubGlobal('fetch', fetchMock)
+        render(<Editor initialQuestions={ALLERGY} />)
+        fireEvent.change(screen.getByLabelText('Option 1 for Any allergies?'), { target: { value: 'Yes, I do ' } })
+        expect(screen.getByLabelText('Show only if answer')).toHaveValue('Yes, I do')
+        fireEvent.click(screen.getByText('Save Form'))
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+        const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string)
+        expect(body.questions[1].visibleIf).toEqual({ questionId: 'q1', equals: 'Yes, I do' })
+      })
+
+      it('removing the answer removes the condition on it', async () => {
+        const fetchMock = okSave()
+        vi.stubGlobal('fetch', fetchMock)
+        render(<Editor initialQuestions={ALLERGY} />)
+        fireEvent.click(screen.getAllByLabelText('Remove option')[0]) // removes 'Yes'
+        expect(screen.queryByLabelText('Show only if answer')).not.toBeInTheDocument()
+        fireEvent.click(screen.getByText('Save Form'))
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+        const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string)
+        expect(body.questions[1].visibleIf ?? null).toBeNull()
+      })
+
+      it('refuses to save a condition on an answer the trigger no longer has', async () => {
+        const fetchMock = okSave()
+        vi.stubGlobal('fetch', fetchMock)
+        render(<Editor initialQuestions={[ALLERGY[0], { ...ALLERGY[1], visibleIf: { questionId: 'q1', equals: 'Maybe' } }]} />)
+        fireEvent.change(screen.getByLabelText('Question 2 text'), { target: { value: 'Which ones?' } })
+        fireEvent.click(screen.getByText('Save Form'))
+        expect(await screen.findByRole('alert')).toHaveTextContent('Q2 is shown only for an answer Q1 no longer has')
+        expect(fetchMock).not.toHaveBeenCalled()
+        // Choosing a real answer clears the way.
+        fireEvent.change(screen.getByLabelText('Show only if answer'), { target: { value: 'No' } })
+        fireEvent.click(screen.getByText('Save Form'))
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      })
+    })
+
+    it('keeps the editor read-only while the first create is in flight', async () => {
+      let finish!: (r: Response) => void
+      const fetchMock = vi.fn<FetchFn>(() => new Promise<Response>((resolve) => { finish = resolve }))
+      vi.stubGlobal('fetch', fetchMock)
+      render(<Editor templateId={null} initialQuestions={[]} />)
+      fireEvent.change(screen.getByLabelText('Form name'), { target: { value: 'PHQ-9' } })
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: 2000 })
+      // An edit now would be lost when /forms/<id> loads from the database, so none is possible.
+      expect(screen.getByRole('status')).toHaveTextContent('Saving…')
+      expect(screen.getByLabelText('Form name')).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Add New Question' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Add Section' })).toBeDisabled()
+      finish(new Response(JSON.stringify({ id: 42 }), { status: 201 }))
+      await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/forms/42'))
+      // Still read-only until the new page replaces this one; no second request.
+      expect(screen.getByLabelText('Form name')).toBeDisabled()
+      await new Promise((r) => setTimeout(r, 700))
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('re-enables the editor after a failed create', async () => {
+      vi.stubGlobal('fetch', vi.fn<FetchFn>(async () => new Response(JSON.stringify({ error: 'Invalid template payload' }), { status: 400 })))
+      render(<Editor templateId={null} initialQuestions={[]} />)
+      fireEvent.change(screen.getByLabelText('Form name'), { target: { value: 'PHQ-9' } })
+      await screen.findByRole('alert', {}, { timeout: 2000 })
+      expect(screen.getByLabelText('Form name')).toBeEnabled()
+      expect(router.replace).not.toHaveBeenCalled()
+    })
+
     it('keeps translated options in lockstep when an English option is removed', async () => {
       const fetchMock = okSave()
       vi.stubGlobal('fetch', fetchMock)

@@ -92,15 +92,38 @@ export const formQuestionSchema = questionObjectSchema
   })
   .transform((q): FormQuestion => ({ ...q, required: q.required ?? false }))
 
-/** A template's question list: each question valid, ids unique, visibleIf only on an earlier question. */
+/**
+ * The answers a select or checkbox trigger can actually give, which is what a
+ * visibleIf.equals on it must name: the English options, or 'true' / 'false'.
+ * Null for other trigger types (their answers are free-form).
+ */
+export function triggerAnswers(trigger: Pick<FormQuestion, 'type' | 'options'>): string[] | null {
+  if (trigger.type === 'checkbox') return ['true', 'false']
+  if (trigger.type === 'select') return trigger.options ?? []
+  return null
+}
+
+/**
+ * A template's question list: each question valid, ids unique, visibleIf only
+ * on an earlier question, and on a select / checkbox trigger only on an answer
+ * that trigger can give (else the dependant could never be shown).
+ */
 export const formQuestionsSchema = z.array(formQuestionSchema).superRefine((qs, ctx) => {
-  const seen = new Set<string>()
+  const seen = new Map<string, FormQuestion>()
   qs.forEach((q, i) => {
     if (seen.has(q.id)) ctx.addIssue({ code: 'custom', message: 'Duplicate question id', path: [i, 'id'] })
-    if (q.visibleIf && !seen.has(q.visibleIf.questionId)) {
-      ctx.addIssue({ code: 'custom', message: 'visibleIf must refer to an earlier question', path: [i, 'visibleIf', 'questionId'] })
+    if (q.visibleIf) {
+      const trigger = seen.get(q.visibleIf.questionId)
+      if (!trigger) {
+        ctx.addIssue({ code: 'custom', message: 'visibleIf must refer to an earlier question', path: [i, 'visibleIf', 'questionId'] })
+      } else {
+        const answers = triggerAnswers(trigger)
+        if (answers && !answers.includes(q.visibleIf.equals)) {
+          ctx.addIssue({ code: 'custom', message: 'visibleIf.equals must be one of the trigger question\'s answers', path: [i, 'visibleIf', 'equals'] })
+        }
+      }
     }
-    seen.add(q.id)
+    if (!seen.has(q.id)) seen.set(q.id, q)
   })
 })
 

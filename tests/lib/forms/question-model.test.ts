@@ -69,6 +69,20 @@ describe('formQuestionSchema / formQuestionsSchema', () => {
     expect(formQuestionsSchema.safeParse(earlier).success).toBe(true)
   })
 
+  it('visibleIf on a select / checkbox trigger must name an answer the trigger can give (review round 1)', () => {
+    const smoker = q({ id: 's', type: 'select', options: ['Yes', 'No'] })
+    const tick = q({ id: 'c', type: 'checkbox' })
+    const dep = (questionId: string, equals: string) => q({ id: 'd', type: 'text', visibleIf: { questionId, equals } })
+    expect(formQuestionsSchema.safeParse([smoker, dep('s', 'Yes')]).success).toBe(true)
+    expect(formQuestionsSchema.safeParse([smoker, dep('s', 'Maybe')]).success).toBe(false)
+    expect(formQuestionsSchema.safeParse([smoker, dep('s', 'yes')]).success).toBe(false)
+    expect(formQuestionsSchema.safeParse([tick, dep('c', 'true')]).success).toBe(true)
+    expect(formQuestionsSchema.safeParse([tick, dep('c', 'false')]).success).toBe(true)
+    expect(formQuestionsSchema.safeParse([tick, dep('c', 'Yes')]).success).toBe(false)
+    // Free-form triggers (e.g. phone) keep any equals.
+    expect(formQuestionsSchema.safeParse([q({ id: 'm', type: 'phone' }), dep('m', '+919845012345')]).success).toBe(true)
+  })
+
   it('rejects duplicate question ids', () => {
     expect(formQuestionsSchema.safeParse([q({ id: 'a', type: 'text' }), q({ id: 'a', type: 'date' })]).success).toBe(false)
   })

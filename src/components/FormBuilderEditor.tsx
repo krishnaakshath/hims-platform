@@ -9,7 +9,7 @@ import { SendFormModal } from '@/components/SendFormModal'
 import { FormTemplatePreviewModal } from '@/components/FormTemplatePreviewModal'
 import { TemplateConsentsPanel } from '@/components/TemplateConsentsPanel'
 import type { AttachedConsentRow } from '@/lib/queries/form-template-consents'
-import type { FormLang, FormQuestion, QuestionType } from '@/lib/forms/question-model'
+import { triggerAnswers, type FormLang, type FormQuestion, type QuestionType } from '@/lib/forms/question-model'
 import { QuestionConditionEditor, conditionTriggers, questionNumbers } from '@/components/forms/QuestionConditionEditor'
 import { TranslationsPanel, TRANSLATED_LANGS } from '@/components/forms/TranslationsPanel'
 
@@ -52,6 +52,25 @@ function pruneConditions(qs: Question[]): Question[] {
     if (conditionTriggers(qs, i).some((t) => t.id === q.visibleIf!.questionId)) return q
     return { ...q, visibleIf: null }
   })
+}
+
+/**
+ * Why the cleaned questions cannot be saved as they stand: a "Show only if"
+ * that names an answer its trigger no longer offers (the dependant could never
+ * be shown). The template routes refuse the same thing; this says it plainly.
+ */
+function staleConditionError(qs: Question[]): string | null {
+  const numbers = questionNumbers(qs)
+  const name = (q: Question) => (q.type === 'section' ? `Section "${q.label}"` : `Q${numbers.get(q.id)}`)
+  for (const q of qs) {
+    if (!q.visibleIf) continue
+    const trigger = qs.find((t) => t.id === q.visibleIf!.questionId)
+    const answers = trigger ? triggerAnswers(trigger) : null
+    if (trigger && answers && !answers.includes(q.visibleIf.equals)) {
+      return `${name(q)} is shown only for an answer ${name(trigger)} no longer has. Choose an answer for its "Show only if" or remove the condition.`
+    }
+  }
+  return null
 }
 
 /** Translated options kept one for one with the English options after an index-wise edit. */
@@ -227,16 +246,32 @@ export function FormBuilderEditor({
   }
 
   function removeOption(id: string, index: number) {
-    setQuestions(questions.map((q) => (q.id === id ? {
-      ...q,
-      options: (q.options ?? []).filter((_, i) => i !== index),
-      optionScores: q.optionScores ? q.optionScores.filter((_, i) => i !== index) : q.optionScores,
-      i18n: remapI18nOptions(q, (arr) => arr.filter((_, i) => i !== index)),
-    } : q)))
+    const options = questions.find((q) => q.id === id)?.options ?? []
+    const removed = (options[index] ?? '').trim()
+    // A "Show only if" on the removed answer could never be met any more.
+    const orphaned = !options.some((o, i) => i !== index && o.trim() === removed)
+    setQuestions(questions.map((q) => {
+      if (q.id === id) {
+        return {
+          ...q,
+          options: (q.options ?? []).filter((_, i) => i !== index),
+          optionScores: q.optionScores ? q.optionScores.filter((_, i) => i !== index) : q.optionScores,
+          i18n: remapI18nOptions(q, (arr) => arr.filter((_, i) => i !== index)),
+        }
+      }
+      if (orphaned && q.visibleIf?.questionId === id && q.visibleIf.equals === removed) return { ...q, visibleIf: null }
+      return q
+    }))
   }
 
   function updateOption(id: string, index: number, value: string) {
-    setQuestions(questions.map((q) => (q.id === id ? { ...q, options: (q.options ?? []).map((o, i) => (i === index ? value : o)) } : q)))
+    const before = (questions.find((q) => q.id === id)?.options?.[index] ?? '').trim()
+    setQuestions(questions.map((q) => {
+      if (q.id === id) return { ...q, options: (q.options ?? []).map((o, i) => (i === index ? value : o)) }
+      // Renaming an answer carries every "Show only if" on it to the new text.
+      if (q.visibleIf?.questionId === id && q.visibleIf.equals === before) return { ...q, visibleIf: { questionId: id, equals: value.trim() } }
+      return q
+    }))
   }
 
   function moveOption(id: string, index: number, direction: -1 | 1) {
@@ -261,26 +296,31 @@ export function FormBuilderEditor({
   // URL. Until then nothing exists, so an untouched new form leaves no row.
   const create = useCallback(async () => {
     if (creatingRef.current) return
+    // Blank option rows are dropped (with their scores and translations) so
+    // choice questions never ship empty entries -- see cleanQuestions.
+    const cleaned = cleanQuestions(questions)
+    const stale = staleConditionError(cleaned)
+    if (stale) { setSaveError(stale); return }
     creatingRef.current = true
     setCreating(true)
     setSaveError(null)
-    // Blank option rows are dropped (with their scores and translations) so
-    // choice questions never ship empty entries -- see cleanQuestions.
     const res = await sendJson<{ id: number }>('/api/form-templates', 'POST', {
       name: name.trim() || NEW_FORM_DEFAULTS.name,
       category: category.trim() || NEW_FORM_DEFAULTS.category,
       diagnosisTag: diagnosisTag.trim() || NEW_FORM_DEFAULTS.diagnosisTag,
       folderId,
       languages,
-      questions: cleanQuestions(questions),
+      questions: cleaned,
     })
-    setCreating(false)
     if (res.ok) {
+      // The editor stays read-only ("Saving…") until /forms/<id> replaces it:
+      // that page loads from the database, so an edit typed now would be lost.
       setSavedSnapshot(snapshot)
       router.replace(`/forms/${res.data.id}`)
     } else {
       // Allow a retry: the next edit, or Save Form, tries again.
       creatingRef.current = false
+      setCreating(false)
       setSaveError(res.error)
     }
   }, [name, category, diagnosisTag, folderId, languages, questions, snapshot, router])
@@ -293,9 +333,11 @@ export function FormBuilderEditor({
 
   async function save() {
     if (templateId === null) { await create(); return }
+    const cleaned = cleanQuestions(questions)
+    const stale = staleConditionError(cleaned)
+    if (stale) { setSaveError(stale); return }
     setSaving(true)
     setSaveError(null)
-    const cleaned = cleanQuestions(questions)
     const res = await sendJson(`/api/form-templates/${templateId}`, 'PUT', { name, category, diagnosisTag, folderId, languages, questions: cleaned })
     setSaving(false)
     if (res.ok) {
@@ -333,6 +375,8 @@ export function FormBuilderEditor({
     <div className="flex items-start gap-6">
     <div className="min-w-0 max-w-2xl flex-1">
       <Link href="/forms" className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-primary">← Form Templates</Link>
+      {/* Read-only while the first create is in flight (see create). */}
+      <fieldset disabled={creating} className="m-0 min-w-0 border-0 p-0">
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {/* Sending and attaching consents need a saved template. */}
         <button onClick={() => setShowSend(true)} disabled={isNew} className={btn}>Send to Client</button>
@@ -484,6 +528,7 @@ export function FormBuilderEditor({
       </div>
       )}
 
+      </fieldset>
       {saveError && <p role="alert" className="mt-3 text-sm text-destructive">{saveError}</p>}
     </div>
 

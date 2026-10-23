@@ -207,6 +207,16 @@ describe('question model v2 on /api/form-templates', () => {
     expect(res.status).toBe(400)
   })
 
+  it('POST with visibleIf on an answer the select trigger does not have returns 400 (review round 1)', async () => {
+    const res = await post([
+      { id: 'b', label: 'B', type: 'select', options: ['Yes', 'No'], hipaaSensitive: false, required: false },
+      { id: 'a', label: 'A', type: 'text', hipaaSensitive: false, required: false, visibleIf: { questionId: 'b', equals: 'Maybe' } },
+    ])
+    const leaked = await res.clone().json().catch(() => null)
+    if (typeof leaked?.id === 'number') createdTemplateId = leaked.id
+    expect(res.status).toBe(400)
+  })
+
   it('PUT with an unknown question type returns 400', async () => {
     const [existing] = await getDb().select().from(formTemplates).limit(1)
     const res = await putTemplate(new Request(`http://localhost/api/form-templates/${existing.id}`, {
