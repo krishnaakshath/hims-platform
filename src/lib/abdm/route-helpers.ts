@@ -14,6 +14,7 @@ import type { AbdmFailure, AbhaProfileView } from './gateway'
 
 const STATUS: Record<AbdmFailure, number> = {
   not_configured: 503,
+  payload_key_missing: 503,
   otp_invalid: 400,
   rate_limited: 429,
   abdm_unavailable: 502,
@@ -65,7 +66,8 @@ export async function withAbdmErrors(action: string, fn: () => Promise<NextRespo
     safeLog('abdm', { action, errorCode: name })
     // A deadlock or serialization failure wrote nothing: the staff member can simply try again.
     if (isRetryableConflict(e)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
-    if (e instanceof ServiceNotConfiguredError || (e instanceof Error && /INTEGRATION_PAYLOAD_KEY/.test(e.message))) return notConfiguredResponse()
+    if (e instanceof Error && /INTEGRATION_PAYLOAD_KEY/.test(e.message)) return abdmErrorResponse('payload_key_missing')
+    if (e instanceof ServiceNotConfiguredError) return notConfiguredResponse()
     return abdmErrorResponse('abdm_unavailable')
   }
 }

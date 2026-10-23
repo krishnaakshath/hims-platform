@@ -3,6 +3,7 @@ import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { formatIstDate, formatIstDateTime } from '@/lib/india-time'
 import { INTEGRATION_SETTINGS_ROLES } from '@/lib/role-policy'
+import { mocksEnabled } from '@/lib/integrations/runtime'
 import { integrationOverview, type CertView } from '@/lib/integrations/overview'
 import { recentExchanges } from '@/lib/queries/nhcx-review'
 import { IntegrationStatusCard } from '@/components/settings/IntegrationStatusCard'
@@ -26,10 +27,16 @@ export default async function IntegrationsPage() {
   const session = await requireSessionOrRedirect()
   if (!INTEGRATION_SETTINGS_ROLES.includes(session.role)) redirect('/')
   const o = integrationOverview()
+  const demoMocks = mocksEnabled()
   const recent = await recentExchanges(10)
   await logAudit(session, 'viewed ABDM / NHCX connection', null)
   return (
     <div className="space-y-5">
+      {demoMocks && (
+        <div role="status" className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+          Demo mode: mock integrations are active. Nothing here is real.
+        </div>
+      )}
       <div>
         <h1 className="text-2xl font-bold text-foreground">ABDM / NHCX connection</h1>
         <p className="text-sm text-muted-foreground">Credentials are set as environment variables (see docs/ABDM-NHCX.md); this page never shows them.{o.mode ? ` Mode: ${o.mode}.` : ''}</p>
