@@ -1,0 +1,25 @@
+# Keep the build context small and free of secrets and data.
+.git
+.github
+.worktrees
+.superpowers
+.claude
+.agents
+.vercel
+node_modules
+.next
+coverage
+data
+backups
+npm-debug.log*
+*.tsbuildinfo
+.DS_Store
+# env files hold secrets: the app gets them at run time via env_file, never baked in
+.env
+.env*
+# placeholders only; tests/scripts/check-env-docs.test.ts reads it
+!.env.docker.example
+# historic design docs; the runner image copies no docs at all (an ABHA
+# consent text, if used, is mounted), the test image reads a few
+docs/superpowers
+Clinsync-*
