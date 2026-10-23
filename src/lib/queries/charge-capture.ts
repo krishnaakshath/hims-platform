@@ -307,6 +307,11 @@ export interface CaptureInTxOptions {
   links?: { labOrderId?: number; encounterProcedureId?: number }
   /** False for automatic capture: rule overrides and manual prices are never applied. */
   overridesAllowed: boolean
+  /**
+   * WS2 T10: rules that do not apply to this capture at all (dropped before blocks are counted and
+   * never stored). Order-linked automatic lines skip `duplicate_charge`: each order is its own act.
+   */
+  skipRules?: readonly ChargeRuleCode[]
 }
 
 /**
@@ -325,7 +330,8 @@ export async function captureInTx(
   const pricing = await loadPricingContext(input.serviceId, tx)
   const r = await evaluate(tx, input, now, pricing)
   if (!r.ok) return r
-  const { ev } = r
+  const skip = opts.skipRules ?? []
+  const ev = skip.length === 0 ? r.ev : { ...r.ev, violations: r.ev.violations.filter((v) => !skip.includes(v.code)) } // WS2 T10
   const overrides = opts.overridesAllowed ? (input.overrides ?? []) : []
   const blocks = unresolvedBlocks(ev.violations, overrides, authority)
   if (blocks.length > 0 || ev.service === null || ev.unitPricePaise === null || ev.priceSource === null || ev.taxablePaise === null) {

@@ -249,39 +249,45 @@ export type CancelLabOrderResult =
  * committed change and cancels the visit. The free-text reason is stored, never audited.
  */
 export async function cancelLabOrder(orderId: number, reason: string, session: Session, now = new Date()): Promise<CancelLabOrderResult> {
-  return getDb().transaction(async (tx) => {
-    const order = await lockOrder(tx, orderId)
-    if (!order) return { ok: false, error: 'not_found' } as const
-    if (!canTransitionLabOrder(order.status, 'cancelled')) return { ok: false, error: 'not_cancellable' } as const
+  return getDb().transaction((tx) => cancelLabOrderInTx(tx, orderId, reason, session, now))
+}
 
-    await tx
-      .update(labOrders)
-      .set({ status: 'cancelled', cancelledAt: now, cancelledByName: session.name, cancelReason: reason.trim(), homeCollectionVisitId: null, statusChangedAt: now })
-      .where(eq(labOrders.id, orderId))
+/**
+ * The body of cancelLabOrder on the caller's transaction (WS2 T10: a visit cancel cancels its
+ * pending orders this way). Same lock order: the order row, its home visit, the billing lock.
+ */
+export async function cancelLabOrderInTx(tx: WriteExecutor, orderId: number, reason: string, session: Session, now: Date): Promise<CancelLabOrderResult> {
+  const order = await lockOrder(tx, orderId)
+  if (!order) return { ok: false, error: 'not_found' } as const
+  if (!canTransitionLabOrder(order.status, 'cancelled')) return { ok: false, error: 'not_cancellable' } as const
 
-    let cancelledVisitId: number | null = null
-    const visitId = order.homeCollectionVisitId
-    if (order.status === 'scheduled' && visitId !== null) {
-      const [visit] = await tx.select({ id: homeCollectionVisits.id, status: homeCollectionVisits.status }).from(homeCollectionVisits).where(eq(homeCollectionVisits.id, visitId)).for('update')
-      if (visit && visit.status === 'booked') {
-        const [left] = await tx
-          .select({ n: sql<number>`count(*)::int` })
-          .from(labOrders)
-          .where(and(eq(labOrders.homeCollectionVisitId, visitId), eq(labOrders.status, 'scheduled')))
-        if (Number(left.n) === 0) {
-          await tx
-            .update(homeCollectionVisits)
-            .set({ status: 'cancelled', cancelledAt: now, cancelledByName: session.name, cancelReason: 'tests_cancelled', updatedAt: now })
-            .where(eq(homeCollectionVisits.id, visitId))
-          cancelledVisitId = visitId
-        }
+  await tx
+    .update(labOrders)
+    .set({ status: 'cancelled', cancelledAt: now, cancelledByName: session.name, cancelReason: reason.trim(), homeCollectionVisitId: null, statusChangedAt: now })
+    .where(eq(labOrders.id, orderId))
+
+  let cancelledVisitId: number | null = null
+  const visitId = order.homeCollectionVisitId
+  if (order.status === 'scheduled' && visitId !== null) {
+    const [visit] = await tx.select({ id: homeCollectionVisits.id, status: homeCollectionVisits.status }).from(homeCollectionVisits).where(eq(homeCollectionVisits.id, visitId)).for('update')
+    if (visit && visit.status === 'booked') {
+      const [left] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(labOrders)
+        .where(and(eq(labOrders.homeCollectionVisitId, visitId), eq(labOrders.status, 'scheduled')))
+      if (Number(left.n) === 0) {
+        await tx
+          .update(homeCollectionVisits)
+          .set({ status: 'cancelled', cancelledAt: now, cancelledByName: session.name, cancelReason: 'tests_cancelled', updatedAt: now })
+          .where(eq(homeCollectionVisits.id, visitId))
+        cancelledVisitId = visitId
       }
     }
+  }
 
-    await logAudit(session, 'cancelled lab order', order.patientId, `order=${orderId}${cancelledVisitId !== null ? ` visit=${cancelledVisitId}` : ''}`, tx)
-    const billing = await voidOrderLineInTx(tx, orderId, order.patientId, session, now)
-    return { ok: true, patientId: order.patientId, cancelledVisitId, billing } as const
-  })
+  await logAudit(session, 'cancelled lab order', order.patientId, `order=${orderId}${cancelledVisitId !== null ? ` visit=${cancelledVisitId}` : ''}`, tx)
+  const billing = await voidOrderLineInTx(tx, orderId, order.patientId, session, now)
+  return { ok: true, patientId: order.patientId, cancelledVisitId, billing } as const
 }
 
 const ORDER_CANCELLED_REASON = 'Lab order cancelled'

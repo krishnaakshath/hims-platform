@@ -164,6 +164,24 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
     ])
   })
 
+  // Fix round 1 (I2): each order is a distinct billable act; duplicate_charge does not apply to order lines.
+  it('two same-day orders of the same test from one visit are two lines; a retry of one order is existing', async () => {
+    const pid = await newPatient()
+    const e = await opdEncounter(pid)
+    const first = await order({ patientId: pid, originatingEncounterId: e.id, labTestIds: [fx.tA] })
+    const second = await order({ patientId: pid, originatingEncounterId: e.id, labTestIds: [fx.tA] })
+    expect(second.charges).toEqual([expect.objectContaining({ ok: true, existing: false, taxablePaise: 45000 })])
+    const lines = await linesOf(pid)
+    expect(lines.map((l) => [l.labOrderId, l.status])).toEqual([[first.lines[0].orderId, 'captured'], [second.lines[0].orderId, 'captured']])
+    const { getDb } = await m()
+    const ac = await import('@/lib/queries/auto-charge')
+    const retry = await getDb().transaction((tx) => ac.captureAutoChargeInTx(tx, {
+      context: { encounterId: e.id }, serviceId: fx.svcA, quantity: 1, serviceDate: DAY, source: 'lab_order', links: { labOrderId: first.lines[0].orderId },
+    }, doctor, NOW))
+    expect(retry).toMatchObject({ ok: true, lineId: lines[0].id, existing: true })
+    expect(await linesOf(pid)).toHaveLength(2)
+  })
+
   it('an OPD patient with a primary payer is quoted and billed self-pay (the quote follows the bill-to)', async () => {
     const pid = await newPatient({ primaryPayerId: fx.payerId })
     const e = await opdEncounter(pid)
@@ -277,16 +295,35 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
   })
 
   describe('visit cancel and lab lines', () => {
-    it('cancelling the visit voids its captured lab_order lines', async () => {
+    it('cancelling the visit cancels its pending lab orders and voids their lines', async () => {
       const pid = await newPatient()
       const e = await opdEncounter(pid)
-      await order({ patientId: pid, originatingEncounterId: e.id })
+      const r = await order({ patientId: pid, originatingEncounterId: e.id })
       const { enc } = await m()
       const c = await enc.transitionEncounter(e.id, 'cancelled', doctor, { cancelReason: 'Left', now: LATER })
       expect(c.ok).toBe(true)
       expect((await linesOf(pid)).map((l) => [l.source, l.status, l.voidReason])).toEqual([
         ['lab_order', 'void', 'Visit cancelled'], ['lab_order', 'void', 'Visit cancelled'],
       ])
+      // Fix round 1 (I1): the orders go with the visit, so no test is left active and unbilled.
+      expect((await ordersOf(r.requisition.id)).map((o) => [o.status, o.cancelReason, o.cancelledByName])).toEqual([
+        ['cancelled', 'Visit cancelled', doctor.name], ['cancelled', 'Visit cancelled', doctor.name],
+      ])
+    })
+
+    it('a visit with a collected order cannot be cancelled (visit_has_performed_orders) and nothing changes', async () => {
+      const pid = await newPatient()
+      const e = await opdEncounter(pid)
+      const r = await order({ patientId: pid, originatingEncounterId: e.id })
+      const { enc, life, getDb, encounters, eq } = await m()
+      const collected = await life.collectLabOrder(r.lines[0].orderId, doctor, NOW)
+      expect(collected.ok).toBe(true)
+      const c = await enc.transitionEncounter(e.id, 'cancelled', doctor, { cancelReason: 'Left', now: LATER })
+      expect(c).toEqual({ ok: false, error: 'visit_has_performed_orders' })
+      const [after] = await getDb().select().from(encounters).where(eq(encounters.id, e.id))
+      expect([after.status, after.cancelReason]).toEqual(['checked_in', null])
+      expect((await ordersOf(r.requisition.id)).map((o) => o.status)).toEqual(['collected', 'ordered'])
+      expect((await linesOf(pid)).map((l) => l.status)).toEqual(['captured', 'captured'])
     })
 
     it('a lab line on a finalised invoice blocks the visit cancel (visit_billed) and changes nothing', async () => {

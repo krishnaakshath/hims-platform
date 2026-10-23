@@ -37,6 +37,7 @@ export type AutoChargeOutcome =
   | { ok: false; source: AutoChargeSource; reason: 'no_service' | 'no_context' | 'context_cancelled' | 'price_unresolved' | 'blocked'; rules?: ChargeRuleCode[] }
 
 const AUTO_CHARGE_SAVEPOINT = 'auto_charge_capture'
+const ORDER_LINKED_SOURCES: readonly AutoChargeSource[] = ['lab_order', 'procedure']
 
 /** Payer-only rules: when only these block a payer line, the line falls back to self-pay (ruling 6 bill-to). */
 const PAYER_ONLY_BLOCKS: readonly ChargeRuleCode[] = ['preauth_required', 'preauth_invalid']
@@ -83,7 +84,11 @@ export async function captureAutoChargeInTx(tx: WriteExecutor, input: AutoCharge
     context: input.context, serviceId: input.serviceId, quantity: input.quantity, serviceDate: input.serviceDate,
     billTo: billTo === 'payer' ? 'payer' : 'patient',
   }
-  const opts = { source, links: input.links, overridesAllowed: false }
+  // WS2 T10 fix round 1 (I2): an order-linked line is one billable act per order, so a deliberate
+  // same-day repeat is not a duplicate; the unique link plus the lookup above make retries idempotent.
+  // Registration and consultation keep every rule.
+  const skipRules: readonly ChargeRuleCode[] = ORDER_LINKED_SOURCES.includes(source) ? ['duplicate_charge'] : []
+  const opts = { source, links: input.links, overridesAllowed: false, skipRules }
   // WS2 T10: the insert runs under a savepoint. A unique violation (a line written by a path that
   // bypassed the billing lock) rolls back to it, leaving the caller's transaction usable, and the
   // line that won is returned as existing (spec section 6).
