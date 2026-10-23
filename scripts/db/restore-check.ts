@@ -1,8 +1,8 @@
 // npm run db:restore-check -- <backup.dump>
 //
 // The restore drill: restores a db:backup dump into an EMPTY scratch database
-// (RESTORE_DATABASE_URL: a fresh Neon branch or a local database, never the
-// live one), then proves it is usable: migration ledger complete for this
+// (RESTORE_DATABASE_URL: a scratch database, e.g. hims_restore_check in the
+// compose postgres service, never the live one), then proves it is usable: migration ledger complete for this
 // checkout, billing immutability triggers present, row counts of the core
 // tables printed for comparison with production. Delete the scratch
 // database afterwards: it holds real patient data. See docs/OPERATIONS.md.
@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import pg from 'pg'
-import { describeDatabaseUrl, isPooledNeonUrl, sslFor } from '../../src/db/url'
+import { describeDatabaseUrl, sslFor } from '../../src/db/url'
 import { readStatus } from './migrate-runner'
 import { INSTALL_HELP, findPgTool, pgEnvFromUrl, refuseRestoreTarget } from './pg-tools'
 
@@ -31,10 +31,6 @@ async function main(): Promise<number> {
   const refusal = refuseRestoreTarget(target, process.env.DATABASE_URL)
   if (refusal) {
     console.error(refusal)
-    return 1
-  }
-  if (isPooledNeonUrl(target)) {
-    console.error('RESTORE_DATABASE_URL is a Neon pooled endpoint; use the direct one.')
     return 1
   }
   const restore = findPgTool('pg_restore')

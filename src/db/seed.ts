@@ -163,10 +163,10 @@ const ADHD_TRIAL = {
 
 /** Throws when the seed must not run: production without explicit opt-in. */
 export function assertSeedAllowed(env: NodeJS.ProcessEnv = process.env): void {
-  const isProd = env.NODE_ENV === 'production' || env.VERCEL_ENV === 'production'
+  const isProd = env.NODE_ENV === 'production'
   if (isProd && env.ALLOW_PRODUCTION_SEED !== '1') {
     throw new Error(
-      'Refusing to seed: this looks like a production environment (NODE_ENV or VERCEL_ENV is "production"). ' +
+      'Refusing to seed: this looks like a production environment (NODE_ENV is "production"). ' +
         'The seed writes demo data and accounts. Set ALLOW_PRODUCTION_SEED=1 only if you really intend this.',
     )
   }

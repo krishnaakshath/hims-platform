@@ -81,7 +81,9 @@ describe('integration secret and national ID guards (static)', () => {
     for (const f of importers('mock-transport')) expect(['src/lib/abdm/registry.ts', 'src/lib/nhcx/claim-gateway.ts', 'src/lib/queries/nhcx-exchanges.ts']).toContain(f)
   })
 
-  it('7. no tracked file contains key or certificate material', () => {
+  // Needs a git checkout; the in-Docker test image has no .git (it is not in the build
+  // context), so there it is skipped and the host/CI run covers it.
+  it.skipIf(!existsSync(join(ROOT, '.git')))('7. no tracked file contains key or certificate material', () => {
     const tracked = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter((f) => f && !f.startsWith('node_modules'))
     const PEM = /-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE)-----\s*[A-Za-z0-9+/=]{40,}/
     const offenders = tracked.filter((f) => { try { return existsSync(join(ROOT, f)) && statSync(join(ROOT, f)).size < 5_000_000 && PEM.test(read(f)) } catch { return false } })

@@ -3,7 +3,7 @@
 //
 // Date/time rule (Wave A): patient messages state the visit in hospital time,
 // Asia/Kolkata, with an explicit "IST" label -- never in the server's own zone
-// (UTC on Vercel would tell a 09:00 IST patient "3:30 AM"). Day and time come
+// (UTC in the Docker container would tell a 09:00 IST patient "3:30 AM"). Day and time come
 // from the same pure IST formatters, so they always agree near midnight.
 import { formatIstLongDate, formatIstTime } from '@/lib/india-time'
 

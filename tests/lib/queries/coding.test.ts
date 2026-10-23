@@ -395,8 +395,8 @@ describe.skipIf(!process.env.DATABASE_URL)('encounter coding (DB)', () => {
   })
 
   // SP6 Task 9 ruling 1: fictional SAMPLE- codes never land on a live record in production.
-  it('refuses a SAMPLE code version when NODE_ENV or VERCEL_ENV is production', async () => {
-    for (const [key, value] of [['VERCEL_ENV', 'production'], ['NODE_ENV', 'production']] as const) {
+  it('refuses a SAMPLE code version when NODE_ENV is production', async () => {
+    for (const [key, value] of [['NODE_ENV', 'production']] as const) {
       vi.stubEnv(key, value)
       try {
         expect(await addEncounterDiagnosis(enc.id, { codeId: C['U6Z.0'], type: 'primary' }, PI), key).toEqual({ ok: false, error: 'sample_code' })

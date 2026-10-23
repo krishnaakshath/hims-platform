@@ -22,11 +22,9 @@ describe('seed configuration', () => {
   it('refuses production unless ALLOW_PRODUCTION_SEED=1', () => {
     const env = (o: Record<string, string>) => o as unknown as NodeJS.ProcessEnv
     expect(() => assertSeedAllowed(env({ NODE_ENV: 'production' }))).toThrow(/production/)
-    expect(() => assertSeedAllowed(env({ VERCEL_ENV: 'production' }))).toThrow(/production/)
     expect(() => assertSeedAllowed(env({ NODE_ENV: 'production', ALLOW_PRODUCTION_SEED: 'true' }))).toThrow(/production/)
     expect(() => assertSeedAllowed(env({ NODE_ENV: 'production', ALLOW_PRODUCTION_SEED: '1' }))).not.toThrow()
     expect(() => assertSeedAllowed(env({ NODE_ENV: 'development' }))).not.toThrow()
-    expect(() => assertSeedAllowed(env({ VERCEL_ENV: 'preview' }))).not.toThrow()
   })
 })
 
