@@ -95,3 +95,25 @@ export function toPublicBrand(b: Brand): PublicBrand {
     login: { showDepartmentList: b.login.showDepartmentList },
   }
 }
+
+// WL T11: first-run checklist state for admins (spec D18). Reads only booleans out of the snapshot,
+// so the result is safe to hand to a client component (no blob URLs, no field values).
+export type BrandOnboardingKey = 'name' | 'logo' | 'colour' | 'contact' | 'signin'
+export interface BrandOnboardingStatus {
+  items: { key: BrandOnboardingKey; done: boolean; href: string }[]
+  complete: boolean
+  dismissed: boolean
+}
+
+export function brandOnboardingStatus(snap: BrandSnapshot): BrandOnboardingStatus {
+  const s = snap.settings
+  const set = (v: string | null | undefined) => typeof v === 'string' && v.trim() !== ''
+  const items: BrandOnboardingStatus['items'] = [
+    { key: 'name', done: set(s.displayName), href: '/settings/branding#identity' },
+    { key: 'logo', done: snap.assets.some((a) => a.kind === 'logo_light') || set(s.logoUrl), href: '/settings/branding#logo' },
+    { key: 'colour', done: set(s.accentColor), href: '/settings/branding#colour' },
+    { key: 'contact', done: set(s.supportPhone) || set(s.supportEmail), href: '/settings/branding#contact' },
+    { key: 'signin', done: s.onboardingTestSigninAt != null, href: '/login' },
+  ]
+  return { items, complete: items.every((i) => i.done), dismissed: s.onboardingDismissedAt != null }
+}

@@ -11,7 +11,7 @@
 import { revalidateTag, unstable_cache } from 'next/cache'
 import { cache } from 'react'
 import { envBrand, type Brand, type PublicBrand } from '@/lib/brand'
-import { resolveBrand, toPublicBrand } from '@/lib/brand-resolve'
+import { brandOnboardingStatus, resolveBrand, toPublicBrand, type BrandOnboardingStatus } from '@/lib/brand-resolve'
 import type { BrandAssetKind } from '@/lib/brand-snapshot'
 import { getPrivateBlobBytes } from '@/lib/blob-store'
 import { loadBrandSnapshot } from '@/lib/queries/brand-settings'
@@ -81,6 +81,21 @@ export async function readStoredBrandPng(kind: BrandAssetKind): Promise<Uint8Arr
     return await getPrivateBlobBytes(row.blobUrl)
   } catch (err) {
     warnThrottled(`[brand] asset read failed (${errorClass(err)})`)
+    return null
+  }
+}
+
+/**
+ * The first-run checklist state for the admin dashboard card (WL T11), from the same cached snapshot.
+ * Returns only booleans and fixed hrefs (never blob URLs). Null (card hidden) when there is no stored
+ * snapshot or the read fails; a failure is logged by error class only.
+ */
+export async function getBrandOnboarding(): Promise<BrandOnboardingStatus | null> {
+  try {
+    const snap = await cachedSnapshot()
+    return snap ? brandOnboardingStatus(snap) : null
+  } catch (err) {
+    warnThrottled(`[brand] settings read failed (${errorClass(err)})`)
     return null
   }
 }
