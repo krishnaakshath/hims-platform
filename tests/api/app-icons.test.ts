@@ -6,14 +6,12 @@ import path from 'node:path'
 // The metadata routes read the brand per request (getBrand: stored settings over BRAND_* env), so
 // each test stubs BRAND_* env, mocks the stored snapshot / asset rows, and re-imports the routes.
 const loadBrandSnapshot = vi.fn()
-const getBrandAssetForServe = vi.fn()
 const getPrivateBlobBytes = vi.fn()
 
 beforeEach(() => {
   loadBrandSnapshot.mockReset().mockResolvedValue(null)
-  getBrandAssetForServe.mockReset().mockResolvedValue(null)
   getPrivateBlobBytes.mockReset().mockResolvedValue(null)
-  vi.doMock('@/lib/queries/brand-settings', () => ({ loadBrandSnapshot, getBrandAssetForServe }))
+  vi.doMock('@/lib/queries/brand-settings', () => ({ loadBrandSnapshot }))
   vi.doMock('@/lib/blob-store', () => ({ getPrivateBlobBytes }))
 })
 
@@ -48,6 +46,10 @@ const stored = (settings: Record<string, unknown>) => ({
 
 // A tiny distinguishable "PNG": the signature plus a marker; the route serves stored bytes as-is.
 const STORED_PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xde, 0xad, 0xbe, 0xef])
+const withAsset = (kind: string) => ({
+  ...stored({}),
+  assets: [{ kind, blobUrl: BLOB, sha256: 'a'.repeat(64), source: 'upload', width: 1, height: 1, byteSize: 1, createdAt: '2026-10-23T00:00:00.000Z' }],
+})
 const BLOB = 'local://brand/icon-secret.png'
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47]
@@ -128,7 +130,7 @@ describe('stored brand (WL T4, lane ruling R3)', () => {
   })
 
   it.each([['32', 'icon_32'], ['192', 'icon_192'], ['512', 'icon_512']])('/icon/%s serves the stored %s PNG bytes', async (id, kind) => {
-    getBrandAssetForServe.mockImplementation(async (k: string) => (k === kind ? { blobUrl: BLOB, sha256: 'a'.repeat(64) } : null))
+    loadBrandSnapshot.mockResolvedValue(withAsset(kind))
     getPrivateBlobBytes.mockResolvedValue(STORED_PNG)
     const { icon } = await load({})
     const res = await icon.default({ id: Promise.resolve(id) })
@@ -136,10 +138,12 @@ describe('stored brand (WL T4, lane ruling R3)', () => {
     expect(res.headers.get('content-type')).toBe('image/png')
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(STORED_PNG)
     expect(getPrivateBlobBytes).toHaveBeenCalledWith(BLOB)
+    expect(res.headers.get('cache-control')).toBe('public, max-age=300')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
   })
 
   it('/icon/svg wraps the stored 512 PNG as a base64 data URI (never a user SVG, never the blob URL)', async () => {
-    getBrandAssetForServe.mockImplementation(async (k: string) => (k === 'icon_512' ? { blobUrl: BLOB, sha256: 'a'.repeat(64) } : null))
+    loadBrandSnapshot.mockResolvedValue(withAsset('icon_512'))
     getPrivateBlobBytes.mockResolvedValue(STORED_PNG)
     const { icon } = await load({})
     const res = await icon.default({ id: Promise.resolve('svg') })
@@ -150,28 +154,31 @@ describe('stored brand (WL T4, lane ruling R3)', () => {
   })
 
   it('/apple-icon serves the stored icon_180', async () => {
-    getBrandAssetForServe.mockImplementation(async (k: string) => (k === 'icon_180' ? { blobUrl: BLOB, sha256: 'a'.repeat(64) } : null))
+    loadBrandSnapshot.mockResolvedValue(withAsset('icon_180'))
     getPrivateBlobBytes.mockResolvedValue(STORED_PNG)
     const { apple } = await load({})
     const res = await apple.default()
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(STORED_PNG)
+    expect(res.headers.get('cache-control')).toBe('public, max-age=300')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
   })
 
   it('falls back to the rendered icon when the asset read fails, logging the class name only', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    getBrandAssetForServe.mockRejectedValue(new RangeError(`no such blob ${BLOB}`))
+    loadBrandSnapshot.mockRejectedValue(new RangeError(`no such blob ${BLOB}`))
     const { icon, apple } = await load({})
     const res = await icon.default({ id: Promise.resolve('32') })
     const bytes = new Uint8Array(await res.arrayBuffer())
     expect(Array.from(bytes.slice(0, 4))).toEqual(PNG_MAGIC)
     expect(bytes).not.toEqual(STORED_PNG)
     expect((await apple.default()).status).toBe(200)
-    expect(warn).toHaveBeenCalledWith('[brand] icon read failed (RangeError)')
+    expect(warn).toHaveBeenCalledWith('[brand] settings read failed (RangeError)')
+    expect(warn).toHaveBeenCalledTimes(1)
     expect(warn.mock.calls.flat().join(' ')).not.toContain('local://')
   })
 
   it('falls back to the render when the blob bytes are missing', async () => {
-    getBrandAssetForServe.mockResolvedValue({ blobUrl: BLOB, sha256: 'a'.repeat(64) })
+    loadBrandSnapshot.mockResolvedValue(withAsset('icon_512'))
     getPrivateBlobBytes.mockResolvedValue(null)
     const { icon } = await load({})
     const svg = await (await icon.default({ id: Promise.resolve('svg') })).text()

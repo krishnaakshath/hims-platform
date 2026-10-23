@@ -38,6 +38,8 @@ function pngInSvg(png: Uint8Array): string {
   )
 }
 
+const STORED_HEADERS = { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' }
+
 export default async function Icon({ id }: { id: Promise<string | number> }) {
   await connection()
   const iconId = String(await id)
@@ -47,14 +49,14 @@ export default async function Icon({ id }: { id: Promise<string | number> }) {
   if (iconId === 'svg') {
     const stored = await readStoredBrandPng('icon_512')
     return new Response(stored ? pngInSvg(stored) : brandIconSvg(palette), {
-      headers: { 'Content-Type': 'image/svg+xml; charset=utf-8' },
+      headers: { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' },
     })
   }
 
   const px = ICON_PNG_SIZES.find((s) => String(s) === iconId) ?? 32
   const stored = await readStoredBrandPng(`icon_${px}`)
   if (stored) {
-    return new Response(Buffer.from(stored), { headers: { 'Content-Type': 'image/png' } })
+    return new Response(Buffer.from(stored), { headers: STORED_HEADERS })
   }
   return new ImageResponse(
     // eslint-disable-next-line jsx-a11y/alt-text

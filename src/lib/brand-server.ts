@@ -14,7 +14,7 @@ import { envBrand, type Brand, type PublicBrand } from '@/lib/brand'
 import { resolveBrand, toPublicBrand } from '@/lib/brand-resolve'
 import type { BrandAssetKind } from '@/lib/brand-snapshot'
 import { getPrivateBlobBytes } from '@/lib/blob-store'
-import { getBrandAssetForServe, loadBrandSnapshot } from '@/lib/queries/brand-settings'
+import { loadBrandSnapshot } from '@/lib/queries/brand-settings'
 
 export const BRAND_CACHE_TAG = 'brand-settings'
 
@@ -55,15 +55,32 @@ export function invalidateBrandCache(): void {
 }
 
 /**
+ * The current asset row (blob URL + sha256) of one kind, from the cached snapshot (so a favicon or
+ * /branding request costs no query; after invalidateBrandCache the snapshot is fresh). Null when
+ * there is none or the snapshot cannot be read (logged by error class only, throttled).
+ */
+export async function getBrandAssetRow(kind: BrandAssetKind): Promise<{ blobUrl: string; sha256: string } | null> {
+  try {
+    const snap = await cachedSnapshot()
+    const row = snap?.assets.find((a) => a.kind === kind)
+    return row ? { blobUrl: row.blobUrl, sha256: row.sha256 } : null
+  } catch (err) {
+    warnThrottled(`[brand] settings read failed (${errorClass(err)})`)
+    return null
+  }
+}
+
+/**
  * The stored PNG bytes of a brand asset for the icon metadata routes, or null when there is none or
  * it cannot be read (the caller then renders the built-in icon). Logs the error class only.
  */
 export async function readStoredBrandPng(kind: BrandAssetKind): Promise<Uint8Array | null> {
+  const row = await getBrandAssetRow(kind)
+  if (!row) return null
   try {
-    const row = await getBrandAssetForServe(kind)
-    return row ? await getPrivateBlobBytes(row.blobUrl) : null
+    return await getPrivateBlobBytes(row.blobUrl)
   } catch (err) {
-    console.warn(`[brand] icon read failed (${errorClass(err)})`)
+    warnThrottled(`[brand] icon read failed (${errorClass(err)})`)
     return null
   }
 }

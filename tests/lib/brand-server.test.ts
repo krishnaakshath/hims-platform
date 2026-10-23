@@ -20,7 +20,7 @@ beforeEach(() => {
     },
     revalidateTag,
   }))
-  vi.doMock('@/lib/queries/brand-settings', () => ({ loadBrandSnapshot, getBrandAssetForServe: vi.fn() }))
+  vi.doMock('@/lib/queries/brand-settings', () => ({ loadBrandSnapshot }))
   for (const k of ['BRAND_NAME', 'BRAND_PRIMARY_COLOR']) vi.stubEnv(k, '')
 })
 
@@ -83,6 +83,20 @@ describe('brand-server', () => {
     expect(warn).toHaveBeenLastCalledWith('[brand] settings read failed (TypeError)')
     loadBrandSnapshot.mockResolvedValue(pristine('Recovered Hospital'))
     expect((await getBrand()).name).toBe('Recovered Hospital')
+  })
+
+  it('getBrandAssetRow reads the cached snapshot and warns (throttled) when it fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const asset = { kind: 'icon_32', blobUrl: 'local://x', sha256: 'a'.repeat(64) }
+    loadBrandSnapshot.mockResolvedValueOnce({ ...pristine(null), assets: [asset] })
+    const { getBrandAssetRow } = await import('@/lib/brand-server')
+    expect(await getBrandAssetRow('icon_32')).toEqual({ blobUrl: 'local://x', sha256: 'a'.repeat(64) })
+    expect(await getBrandAssetRow('icon_512')).toBeNull()
+    loadBrandSnapshot.mockRejectedValue(new TypeError('x local://x'))
+    expect(await getBrandAssetRow('icon_32')).toBeNull()
+    expect(await getBrandAssetRow('icon_32')).toBeNull()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith('[brand] settings read failed (TypeError)')
   })
 
   it('invalidateBrandCache expires the tag immediately', async () => {

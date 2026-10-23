@@ -13,12 +13,14 @@ import { getBrand, readStoredBrandPng } from '@/lib/brand-server'
 export const size = { width: 180, height: 180 }
 export const contentType = 'image/png'
 
+const STORED_HEADERS = { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' }
+
 export default async function AppleIcon() {
   await connection()
   const b = await getBrand()
   const stored = await readStoredBrandPng('icon_180')
   if (stored) {
-    return new Response(Buffer.from(stored), { headers: { 'Content-Type': 'image/png' } })
+    return new Response(Buffer.from(stored), { headers: STORED_HEADERS })
   }
   const palette = brandIconPalette({ primaryColor: b.accent?.input ?? null })
   return new ImageResponse(
