@@ -68,6 +68,19 @@ describe('checkSvgSafe', () => {
     ['prefixed <s:style> with url(#)', svg('<s:style xmlns:s="http://www.w3.org/2000/svg">.a{fill:url(#g)}</s:style>')],
     ['unclosed <style> with url(#)', svg('<style>.a{fill:url(#g)}')],
     ['xml:base', svg('<g xml:base="https://x/"><use href="#a"/></g>')],
+    // libxml2 joins adjacent text nodes, so a split keyword reassembles.
+    ['url( split by CDATA', svg('<style>.a{fill:u<![CDATA[]]>rl(https://x/a.png)}</style>')],
+    ['url( split by a comment', svg('<style>.a{fill:u<!-- -->rl(https://x/a.png)}</style>')],
+    ['@import split by a comment', svg('<style>@im<!---->port "x.css";</style>')],
+    ['url( split by a child element', svg('<style>.a{fill:u<x/>rl(https://x/a.png)}</style>')],
+    ['CDATA outside style', svg('<text><![CDATA[x]]></text>')],
+    ['comment after the root start tag', svg('<!-- generator --><path d="M0 0"/>')],
+    ['processing instruction after the declaration', `<?xml version="1.0"?><?foo bar?>${svg('')}`],
+    ['processing instruction inside the root', svg('<?foo bar?>')],
+    ['non-ASCII namespace prefix', svg('<é:script xmlns:é="http://www.w3.org/2000/svg">alert(1)</é:script>')],
+    ['namespaced on* attribute', svg('<path d="M0 0" x:onclick="x"/>')],
+    ['on* attribute after a newline', svg('<path d="M0 0"\nonmouseover="x"/>')],
+    ['non-ASCII prefixed foreignObject',svg('<é:foreignObject xmlns:é="http://www.w3.org/2000/svg"/>')],
   ]
   it.each(rejects)('rejects %s', (_label, text) => {
     const r = checkSvgSafe(text)
@@ -104,6 +117,22 @@ describe('checkSvgSafe', () => {
   <text x="50" y="30" font-family="sans-serif" dominant-baseline="middle">Sanjeevani</text>
 </svg>`
     expect(checkSvgSafe(clean)).toEqual({ ok: true })
+  })
+
+  it('accepts generator comments before the root and a self-closing <style/>', () => {
+    const text = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Generator: Adobe Illustrator 28.0.0, SVG Export Plug-In -->
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+${svg('<style/><path d="M0 0h10v10z"/>')}`
+    expect(checkSvgSafe(text)).toEqual({ ok: true })
+    expect(sniffImageType(enc('<!-- c --><svg></svg>'))).toBe('image/svg+xml')
+  })
+
+  it('reports split-keyword structures with fixed codes', () => {
+    expect(checkSvgSafe(svg('<text><![CDATA[x]]></text>'))).toEqual({ ok: false, reason: 'cdata' })
+    expect(checkSvgSafe(svg('<!-- x -->'))).toEqual({ ok: false, reason: 'comment' })
+    expect(checkSvgSafe(svg('<?foo?>'))).toEqual({ ok: false, reason: 'processing_instruction' })
+    expect(checkSvgSafe(svg('<style>.a{fill:u<x/>rl(#g)}</style>'))).toEqual({ ok: false, reason: 'style_markup' })
   })
 
   it('reports numeric character references as entity', () => {

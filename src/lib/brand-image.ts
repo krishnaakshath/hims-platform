@@ -60,7 +60,7 @@ const ascii = (s: string) => [...s].map((c) => c.charCodeAt(0))
 
 /** True when the text's first element is `<svg`, optionally after a BOM, an XML declaration and comments. */
 function looksLikeSvg(text: string): boolean {
-  let s = text.replace(/^﻿/, '')
+  let s = text.replace(/^\uFEFF/, '')
   for (;;) {
     s = s.replace(/^\s+/, '')
     if (s.startsWith('<?xml')) {
@@ -90,6 +90,39 @@ export function sniffImageType(bytes: Uint8Array): SniffedImageType | null {
   return looksLikeSvg(head) ? 'image/svg+xml' : null
 }
 
+/** A namespace prefix: anything up to a colon that cannot end a tag name. */
+const NS_PREFIX = '[^\\s>/:]+:'
+
+/**
+ * Structural checks on lower-cased SVG text, against splitting a keyword across text nodes
+ * (libxml2 joins adjacent text, CDATA and the text either side of a comment or child element,
+ * so `u<!-- -->rl(` or `@im<![CDATA[]]>port` reassemble after the pattern checks):
+ * - no CDATA sections anywhere;
+ * - no processing instruction except one leading `<?xml …?>` declaration;
+ * - comments only before the root `<svg` start tag (generator comments);
+ * - <style> content holds no markup at all and no url(.
+ */
+function checkSvgStructure(s: string): string | null {
+  if (s.includes('<![cdata[')) return 'cdata'
+  const decl = /^\uFEFF?\s*<\?xml\s[\s\S]*?\?>/.exec(s)
+  const afterDecl = decl ? decl[0].length : 0
+  if (s.indexOf('<?', afterDecl) >= 0) return 'processing_instruction'
+  const root = /<svg[\s>/]/.exec(s)
+  if (root && s.indexOf('<!--', root.index) >= 0) return 'comment'
+  const styleOpen = new RegExp(`<(?:${NS_PREFIX})?style(?![a-z0-9_.-])([^>]*)>`, 'g')
+  for (const m of s.matchAll(styleOpen)) {
+    if (m[1].trimEnd().endsWith('/')) continue // <style/> has no content
+    const start = m.index + m[0].length
+    const close = new RegExp(`</(?:${NS_PREFIX})?style`, 'g')
+    close.lastIndex = start
+    const end = close.exec(s)?.index ?? s.length
+    const content = s.slice(start, end)
+    if (content.includes('<')) return 'style_markup'
+    if (content.includes('url(')) return 'style_url'
+  }
+  return null
+}
+
 /**
  * Rejects SVG features that can run script, pull external resources or expand entities.
  * Case-insensitive pattern checks over the whole text; deliberately strict (a false positive
@@ -97,8 +130,11 @@ export function sniffImageType(bytes: Uint8Array): SniffedImageType | null {
  */
 export function checkSvgSafe(text: string): { ok: true } | { ok: false; reason: string } {
   const s = text.toLowerCase()
-  // Element names may carry a namespace prefix (<s:script xmlns:s="http://www.w3.org/2000/svg">).
-  const el = (names: string) => new RegExp(`<(?:[a-z0-9_.-]+:)?(?:${names})`)
+  const structural = checkSvgStructure(s)
+  if (structural) return { ok: false, reason: structural }
+  // Element names may carry a namespace prefix of any characters
+  // (<s:script xmlns:s="http://www.w3.org/2000/svg">, <é:script …>).
+  const el = (names: string) => new RegExp(`<(?:${NS_PREFIX})?(?:${names})`)
   const checks: [RegExp, string][] = [
     [/<!doctype/, 'doctype'],
     [/<!entity/, 'entity'],
@@ -111,7 +147,9 @@ export function checkSvgSafe(text: string): { ok: true } | { ok: false; reason: 
     [/javascript:/, 'script'],
     [el('foreignobject'), 'foreign_object'],
     [el('iframe|embed|object'), 'embedded_content'],
-    [/on[a-z]+\s*=/, 'event_handler'],
+    // An on* attribute: at the start of an attribute name (after whitespace, a quote, `/` or a
+    // namespace colon), so `standalone="no"` in the XML declaration is not mistaken for one.
+    [/(?:^|[\s"'/:])on[a-z]+\s*=/, 'event_handler'],
     [/xml:base/, 'external_ref'],
     [/data:/, 'data_uri'],
     // Any href / xlink:href (including on <image>, <use>, <feImage> and <?xml-stylesheet?>)
@@ -120,8 +158,6 @@ export function checkSvgSafe(text: string): { ok: true } | { ok: false; reason: 
     [/href\s*=(?!\s*["']?\s*#)/, 'external_ref'],
     [/url\((?!\s*["']?\s*#)/, 'external_ref'],
     [/@import/, 'external_ref'],
-    // url( inside a <style> element (closed or not); url(#g) in an attribute stays allowed.
-    [/<(?:[a-z0-9_.-]+:)?style[^>]*>(?:(?!<\/(?:[a-z0-9_.-]+:)?style)[\s\S])*?url\(/, 'style_url'],
     // CSS escapes (u\72l(...)) could smuggle a url() past the checks above.
     [/\\/, 'css_escape'],
   ]
