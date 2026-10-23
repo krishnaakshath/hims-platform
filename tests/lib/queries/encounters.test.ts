@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { admissions, appointments, auditLog, departments, doctorAssignments, encounters, followUpOrders, patients, providers } from '@/db/schema'
+import { admissions, appointments, auditLog, chargeLines, departments, doctorAssignments, encounters, followUpOrders, patients, providers } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 import {
   allocateOpdToken, checkInVisit, completeAdmissionEncounter, getEncounterById, listEncountersForPatient, transitionEncounter,
@@ -48,6 +48,8 @@ describe.skipIf(!process.env.DATABASE_URL)('encounters (DB)', () => {
     const db = getDb()
     // Children first. Every row below belongs to this file's own patient.
     await db.delete(followUpOrders).where(eq(followUpOrders.patientId, PATIENT))
+    // WS2 T9: check-in captures visit charges (registration when billing_settings sets a service).
+    await db.delete(chargeLines).where(eq(chargeLines.patientId, PATIENT))
     await db.delete(encounters).where(eq(encounters.patientId, PATIENT))
     await db.delete(admissions).where(eq(admissions.patientId, PATIENT))
     await db.delete(doctorAssignments).where(eq(doctorAssignments.patientId, PATIENT))

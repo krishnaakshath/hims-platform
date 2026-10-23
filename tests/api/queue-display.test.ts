@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { appSettings, patients, doctorAssignments, appointments, admissions, rooms, encounters, auditLog } from '@/db/schema'
+import { appSettings, patients, doctorAssignments, appointments, admissions, rooms, encounters, auditLog, chargeLines } from '@/db/schema'
 import { GET } from '@/app/api/queue-display/route'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { getAppSettings } from '@/lib/queries/settings'
@@ -58,7 +58,12 @@ const createdEncounterIds: number[] = []
 const SP3_PROBE_USER = `TEST_SP3_QD-${Date.now()}`
 const SP3_SESSION: Session = { role: 'frontdesk', name: SP3_PROBE_USER, userId: null }
 afterEach(async () => {
-  while (createdEncounterIds.length > 0) await getDb().delete(encounters).where(eq(encounters.id, createdEncounterIds.pop()!))
+  // WS2 T9: check-in captures the visit charges; they go before their encounter.
+  while (createdEncounterIds.length > 0) {
+    const id = createdEncounterIds.pop()!
+    await getDb().delete(chargeLines).where(eq(chargeLines.encounterId, id))
+    await getDb().delete(encounters).where(eq(encounters.id, id))
+  }
   await getDb().delete(auditLog).where(eq(auditLog.userName, SP3_PROBE_USER))
   while (createdAdmissionIds.length > 0) await getDb().delete(admissions).where(eq(admissions.id, createdAdmissionIds.pop()!))
   while (createdAssignmentIds.length > 0) await getDb().delete(doctorAssignments).where(eq(doctorAssignments.id, createdAssignmentIds.pop()!))

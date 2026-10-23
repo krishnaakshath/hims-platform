@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll, beforeAll } from 'vitest'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
-  auditLog, departments, encounters, labOrders, labRequisitions, labServiceAreaPins, labTests, patients, payers, providers, serviceCatalog, tariffRates,
+  admissions, auditLog, chargeLines, departments, encounters, labOrders, labRequisitions, labServiceAreaPins, labTests, patients, payers, providers, serviceCatalog, tariffRates,
 } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 import { createLabRequisition, getRequisitionWithOrders, type CreateLabRequisitionInput } from '@/lib/queries/lab-requisitions'
@@ -31,7 +31,8 @@ const rateIds: number[] = []
 const requisitionIds: number[] = []
 
 const input = (over: Partial<CreateLabRequisitionInput> = {}): CreateLabRequisitionInput => ({
-  patientId: P, orderedByProviderId: providerId, labTestIds: [t1, t2], followUp: null, originatingEncounterId: null, ...over,
+  patientId: P, orderedByProviderId: providerId, labTestIds: [t1, t2], followUp: null, originatingEncounterId: null,
+  priority: 'routine', clinicalNotes: null, fastingRequired: null, ...over, // WS2 T10
 })
 
 async function create(over: Partial<CreateLabRequisitionInput> = {}, now = NOW) {
@@ -85,6 +86,9 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
 
   afterAll(async () => {
     const db = getDb()
+    // WS2 T10: orders from a visit or a stay are billed at order time.
+    await db.delete(chargeLines).where(inArray(chargeLines.patientId, [P, P_PAYER, P_OTHER]))
+    await db.delete(admissions).where(inArray(admissions.patientId, [P, P_PAYER, P_OTHER]))
     await db.delete(labOrders).where(inArray(labOrders.patientId, [P, P_PAYER, P_OTHER]))
     await db.delete(labRequisitions).where(inArray(labRequisitions.patientId, [P, P_PAYER, P_OTHER]))
     await db.delete(encounters).where(eq(encounters.id, encounterId))
@@ -132,10 +136,15 @@ describe.skipIf(!process.env.DATABASE_URL)('lab requisitions (DB)', () => {
     expect(r.ok && r.requisition).toMatchObject({ followUpRequested: true, followUpIntervalValue: 2, followUpIntervalUnit: 'weeks', followUpReason: 'Review the reports' })
   })
 
-  it('a payer-scoped rate wins for a patient with that primary payer', async () => {
+  // WS2 T10: the quote follows the line's bill-to: self-pay outside a stay, the primary payer in one.
+  it('a payer-scoped rate wins for an admitted patient with that primary payer; otherwise the self-pay rate is quoted', async () => {
+    const self = await create({ patientId: P_PAYER, labTestIds: [t1] })
+    expect(self.ok && self.lines.map((l) => [l.quotedPricePaise, l.quoteStatus])).toEqual([[45000, 'quoted']])
+    await getDb().insert(admissions).values({ patientId: P_PAYER, attendingProviderId: providerId, admittedAt: new Date('2099-04-30T05:00:00Z') })
     const r = await create({ patientId: P_PAYER, labTestIds: [t1] })
     expect(r.ok && r.lines.map((l) => [l.quotedPricePaise, l.quoteStatus])).toEqual([[38000, 'quoted']])
     expect(r.ok && (await getRequisitionWithOrders(r.requisition.id))?.orders[0].quotedTariffRateId).toBe(rateIds[1])
+    expect(r.ok && r.charges).toEqual([expect.objectContaining({ ok: true, source: 'lab_order', billTo: 'payer', taxablePaise: 38000 })])
   })
 
   it('an inactive tariff service refuses the order as unpriced', async () => {

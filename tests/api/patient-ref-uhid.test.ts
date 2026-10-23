@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { auditLog, doctorAssignments, encounters, patients, providers } from '@/db/schema'
+import { auditLog, chargeLines, doctorAssignments, encounters, patients, providers } from '@/db/schema'
 
 // Wave C: the check-in and pharmacy routes also accept a UHID typed directly
 // (case-insensitive), resolving it to the chart id. Fixture by id
@@ -17,6 +17,8 @@ import { GET as pharmacyView } from '@/app/api/pharmacy/patients/[patientId]/rou
 
 async function cleanup() {
   const db = getDb()
+  // WS2 T9: check-in captures the visit charges; they go before their encounter.
+  await db.delete(chargeLines).where(eq(chargeLines.patientId, PID))
   await db.delete(encounters).where(eq(encounters.patientId, PID))
   await db.delete(doctorAssignments).where(eq(doctorAssignments.patientId, PID))
   await db.delete(auditLog).where(eq(auditLog.userName, PROBE))

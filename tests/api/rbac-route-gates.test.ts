@@ -614,6 +614,15 @@ import { ACCOUNT_ROLES, PAYER_LIST_ROLES, PHARMACY_STOCK_READ_ROLES } from '@/li
 import { GET as getReportCsv } from '@/app/api/reports/[report]/csv/route'
 import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
 // end Wave I
+import { GET as getCheckInFeePreview } from '@/app/api/front-desk/check-in/fee-preview/route' // WS2 T9
+import { GET as getVisitLabOrders } from '@/app/api/patients/[anonId]/lab-orders/route' // WS2 T10
+import { WORKSPACE_READ_ROLES as WS2T10_WORKSPACE_READ_ROLES } from '@/lib/role-policy' // WS2 T10
+import { GET as getVisitProcedures, POST as postVisitProcedure } from '@/app/api/encounters/[id]/procedures/route' // WS2 T11
+import { DELETE as deleteVisitProcedure } from '@/app/api/encounters/[id]/procedures/[procedureId]/route' // WS2 T11
+import { GET as getProcedureOptions } from '@/app/api/encounters/[id]/procedure-options/route' // WS2 T11
+import { CLINICAL_WRITE_ROLES as WS2T11_CLINICAL_WRITE_ROLES, WORKSPACE_READ_ROLES as WS2T11_WORKSPACE_READ_ROLES } from '@/lib/role-policy' // WS2 T11
+import { GET as getInvoiceReady, POST as postInvoiceReady } from '@/app/api/billing/invoice-ready/route' // WS2 T12
+import { INVOICE_READY_ROLES as WS2T12_INVOICE_READY_ROLES } from '@/lib/role-policy' // WS2 T12
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1086,6 +1095,18 @@ export const API_GATES: ApiGateCase[] = [
   // end WS1 T6
   // WS2 T8: medicine MRP/GST/HSN (an empty body is the 400 an allowed role gets).
   { name: 'PATCH /api/pharmacy/medications/[id]/price', call: () => settle(() => patchMedicationPriceRoute(send('PATCH', `/api/pharmacy/medications/${BOGUS_ID}/price`), ctx({ id: BOGUS_ID }))), allowed: [...MEDICATION_PRICE_ROLES] },
+  // WS2 T9: the check-in fee preview -- CHECK_IN_ROLES; no query is the 400 an allowed role gets, after the gate.
+  { name: 'GET /api/front-desk/check-in/fee-preview', call: () => getCheckInFeePreview(get('/api/front-desk/check-in/fee-preview')), allowed: [...CHECK_IN_ROLES] }, // WS2 T9
+  // WS2 T10: a visit's lab orders (workspace Orders panel) -- WORKSPACE_READ_ROLES; no encounterId is the 400 an allowed role gets.
+  { name: 'GET /api/patients/[anonId]/lab-orders', call: () => getVisitLabOrders(get(`/api/patients/${BOGUS_PATIENT}/lab-orders`), ctx({ anonId: BOGUS_PATIENT })), allowed: [...WS2T10_WORKSPACE_READ_ROLES] }, // WS2 T10
+  // WS2 T11: procedure orders -- CLINICAL_WRITE_ROLES (ownership after the gate); an invalid body or id is the 400 an allowed role gets.
+  { name: 'POST /api/encounters/[id]/procedures', call: () => postVisitProcedure(send('POST', `/api/encounters/${BOGUS_ID}/procedures`, {}), ctx({ id: BOGUS_ID })), allowed: [...WS2T11_CLINICAL_WRITE_ROLES] }, // WS2 T11
+  { name: 'DELETE /api/encounters/[id]/procedures/[procedureId]', call: () => deleteVisitProcedure(del(`/api/encounters/${BOGUS_ID}/procedures/x`), ctx({ id: BOGUS_ID, procedureId: 'x' })), allowed: [...WS2T11_CLINICAL_WRITE_ROLES] }, // WS2 T11
+  { name: 'GET /api/encounters/[id]/procedure-options', call: () => getProcedureOptions(get('/api/encounters/x/procedure-options'), ctx({ id: 'x' })), allowed: [...WS2T11_CLINICAL_WRITE_ROLES] }, // WS2 T11
+  { name: 'GET /api/encounters/[id]/procedures', call: () => getVisitProcedures(get(`/api/encounters/${BOGUS_ID}/procedures`), ctx({ id: BOGUS_ID })), allowed: [...WS2T11_WORKSPACE_READ_ROLES] }, // WS2 T11
+  // WS2 T12: invoice all ready lines -- INVOICE_READY_ROLES; an invalid patient id is the 400 an allowed role gets (never a real batch).
+  { name: 'GET /api/billing/invoice-ready', call: () => getInvoiceReady(get('/api/billing/invoice-ready?patientId=bad%20id')), allowed: [...WS2T12_INVOICE_READY_ROLES] }, // WS2 T12
+  { name: 'POST /api/billing/invoice-ready', call: () => postInvoiceReady(send('POST', '/api/billing/invoice-ready', { patientId: 'bad id' })), allowed: [...WS2T12_INVOICE_READY_ROLES] }, // WS2 T12
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1256,6 +1277,8 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PUT /api/patients/[anonId]/notes/[id]/sign', call: () => signNoteRoute(send('PUT', `/api/patients/${BOGUS_PATIENT}/notes/${BOGUS_ID}/sign`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT, id: BOGUS_ID })), allowed: ['admin', 'pi'] }, // WS1 T5 (now takes a body)
   { name: 'POST /api/encounters/[id]/prescriptions', call: () => postEncounterPrescriptions(send('POST', `/api/encounters/${BOGUS_ID}/prescriptions`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: PRESCRIBE_ROLES }, // WS1 T6
   { name: 'PATCH /api/pharmacy/medications/[id]/price', call: () => patchMedicationPriceRoute(send('PATCH', `/api/pharmacy/medications/${BOGUS_ID}/price`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MEDICATION_PRICE_ROLES }, // WS2 T8
+  { name: 'POST /api/encounters/[id]/procedures', call: () => postVisitProcedure(send('POST', `/api/encounters/${BOGUS_ID}/procedures`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: [...WS2T11_CLINICAL_WRITE_ROLES] }, // WS2 T11
+  { name: 'POST /api/billing/invoice-ready', call: () => postInvoiceReady(send('POST', '/api/billing/invoice-ready', NOT_JSON)), allowed: [...WS2T12_INVOICE_READY_ROLES] }, // WS2 T12
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

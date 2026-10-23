@@ -297,74 +297,106 @@ export async function previewChargeLine(
   }
 }
 
-export async function captureChargeLine(
-  input: ChargeCaptureInput, session: Session, now: Date = new Date(),
-): Promise<{ ok: true; line: ChargeLineRow; violations: ChargeViolation[] } | { ok: false; error: CaptureError; violations?: ChargeViolation[] }> {
-  if (input.manualUnitPricePaise !== undefined && !canOverride(session)) return { ok: false, error: 'price_override_forbidden' }
+export type CaptureResult =
+  | { ok: true; line: ChargeLineRow; violations: ChargeViolation[] }
+  | { ok: false; error: CaptureError; violations?: ChargeViolation[] }
+
+/** WS2 T9: how a capture runs inside a caller's transaction. */
+export interface CaptureInTxOptions {
+  source: ChargeLineRow['source']
+  links?: { labOrderId?: number; encounterProcedureId?: number }
+  /** False for automatic capture: rule overrides and manual prices are never applied. */
+  overridesAllowed: boolean
+  /**
+   * WS2 T10: rules that do not apply to this capture at all (dropped before blocks are counted and
+   * never stored). Order-linked automatic lines skip `duplicate_charge`: each order is its own act.
+   */
+  skipRules?: readonly ChargeRuleCode[]
+}
+
+/**
+ * The body of a capture, on the caller's transaction: takes the patient billing lock, prices,
+ * runs the rules and inserts the line with its audit rows. Business failures are returned, never thrown.
+ */
+export async function captureInTx(
+  tx: WriteExecutor, input: ChargeCaptureInput, session: Session, now: Date, opts: CaptureInTxOptions,
+): Promise<CaptureResult> {
+  const authority = opts.overridesAllowed && canOverride(session)
+  if (input.manualUnitPricePaise !== undefined && !authority) return { ok: false, error: 'price_override_forbidden' }
   // The patient id is immutable on an encounter/admission, so it is safe to read before locking.
-  const pre = await loadChargeContext(getDb(), input.context)
+  const pre = await loadChargeContext(tx, input.context)
   if (!pre) return { ok: false, error: 'context_not_found' }
-  const pricing = await loadPricingContext(input.serviceId)
+  await lockPatientBilling(tx, pre.patientId)
+  const pricing = await loadPricingContext(input.serviceId, tx)
+  const r = await evaluate(tx, input, now, pricing)
+  if (!r.ok) return r
+  const skip = opts.skipRules ?? []
+  const ev = skip.length === 0 ? r.ev : { ...r.ev, violations: r.ev.violations.filter((v) => !skip.includes(v.code)) } // WS2 T10
+  const overrides = opts.overridesAllowed ? (input.overrides ?? []) : []
+  const blocks = unresolvedBlocks(ev.violations, overrides, authority)
+  if (blocks.length > 0 || ev.service === null || ev.unitPricePaise === null || ev.priceSource === null || ev.taxablePaise === null) {
+    return { ok: false, error: 'blocked', violations: ev.violations }
+  }
+  const applied = appliedOverrides(ev.violations, overrides, authority)
+  const appliedCodes = new Set(applied.map((o) => o.code))
+  const stored = ev.violations.filter((v) => v.severity !== 'block' || appliedCodes.has(v.code))
 
-  return getDb().transaction(async (tx) => {
-    await lockPatientBilling(tx, pre.patientId)
-    const r = await evaluate(tx, input, now, pricing)
-    if (!r.ok) return r
-    const { ev } = r
-    const authority = canOverride(session)
-    const overrides = input.overrides ?? []
-    const blocks = unresolvedBlocks(ev.violations, overrides, authority)
-    if (blocks.length > 0 || ev.service === null || ev.unitPricePaise === null || ev.priceSource === null || ev.taxablePaise === null) {
-      return { ok: false as const, error: 'blocked' as const, violations: ev.violations }
-    }
-    const applied = appliedOverrides(ev.violations, overrides, authority)
-    const appliedCodes = new Set(applied.map((o) => o.code))
-    const stored = ev.violations.filter((v) => v.severity !== 'block' || appliedCodes.has(v.code))
+  const [line] = await tx.insert(chargeLines).values({
+    patientId: ev.context.patientId,
+    encounterId: ev.context.encounterId,
+    admissionId: ev.context.admissionId,
+    source: opts.source,
+    serviceId: ev.service.id,
+    itemCode: ev.service.code,
+    itemName: ev.service.name,
+    serviceCategory: ev.service.category,
+    departmentId: ev.service.departmentId,
+    orderingProviderId: ev.context.orderingProviderId,
+    performingProviderId: input.performingProviderId ?? null,
+    serviceDate: input.serviceDate,
+    quantity: input.quantity,
+    unitPricePaise: ev.unitPricePaise,
+    priceSource: ev.priceSource,
+    tariffRateId: ev.tariffRateId,
+    resolvedPricePaise: ev.resolvedPricePaise,
+    priceOverrideReason: ev.priceSource === 'manual' ? (input.priceOverrideReason ?? '').trim() || null : null,
+    taxablePaise: ev.taxablePaise,
+    gstRateBp: ev.service.gstRateBp,
+    hsnSac: ev.service.hsnSac,
+    payerId: ev.payerId,
+    preAuthReference: input.preAuthReference ?? null,
+    preauthId: ev.preauthId, // SP7
+    procedureCodes: ev.procedureCodes,
+    violations: stored,
+    ruleOverrides: applied,
+    createdByName: session.name,
+    createdByUserId: session.userId,
+    labOrderId: opts.links?.labOrderId ?? null, // WS2 T9
+    encounterProcedureId: opts.links?.encounterProcedureId ?? null, // WS2 T9
+  }).returning()
 
-    const [line] = await tx.insert(chargeLines).values({
-      patientId: ev.context.patientId,
-      encounterId: ev.context.encounterId,
-      admissionId: ev.context.admissionId,
-      source: 'manual',
-      serviceId: ev.service.id,
-      itemCode: ev.service.code,
-      itemName: ev.service.name,
-      serviceCategory: ev.service.category,
-      departmentId: ev.service.departmentId,
-      orderingProviderId: ev.context.orderingProviderId,
-      performingProviderId: input.performingProviderId ?? null,
-      serviceDate: input.serviceDate,
-      quantity: input.quantity,
-      unitPricePaise: ev.unitPricePaise,
-      priceSource: ev.priceSource,
-      tariffRateId: ev.tariffRateId,
-      resolvedPricePaise: ev.resolvedPricePaise,
-      priceOverrideReason: ev.priceSource === 'manual' ? (input.priceOverrideReason ?? '').trim() || null : null,
-      taxablePaise: ev.taxablePaise,
-      gstRateBp: ev.service.gstRateBp,
-      hsnSac: ev.service.hsnSac,
-      payerId: ev.payerId,
-      preAuthReference: input.preAuthReference ?? null,
-      preauthId: ev.preauthId, // SP7
-      procedureCodes: ev.procedureCodes,
-      violations: stored,
-      ruleOverrides: applied,
-      createdByName: session.name,
-      createdByUserId: session.userId,
-    }).returning()
-
-    const patientId = ev.context.patientId
+  const patientId = ev.context.patientId
+  if (opts.source === 'manual') {
     await logAudit(session, 'billing: captured charge line', patientId,
       `line=${line.id} service=${ev.service.code} qty=${line.quantity} price=${line.priceSource}`, tx)
-    if (line.priceSource === 'manual') {
-      await logAudit(session, 'billing: overrode charge price', patientId,
-        `line=${line.id} resolved=${ev.resolvedPricePaise ?? 'none'} charged=${line.unitPricePaise}`, tx)
-    }
-    if (applied.length > 0) {
-      await logAudit(session, 'billing: overrode charge rule', patientId, `line=${line.id} rules=${applied.map((o) => o.code).join(',')}`, tx)
-    }
-    return { ok: true as const, line, violations: stored }
-  })
+  } else {
+    await logAudit(session, `billing: auto-captured ${opts.source}`, patientId, `line=${line.id} service=${ev.service.code}`, tx)
+  }
+  if (line.priceSource === 'manual') {
+    await logAudit(session, 'billing: overrode charge price', patientId,
+      `line=${line.id} resolved=${ev.resolvedPricePaise ?? 'none'} charged=${line.unitPricePaise}`, tx)
+  }
+  if (applied.length > 0) {
+    await logAudit(session, 'billing: overrode charge rule', patientId, `line=${line.id} rules=${applied.map((o) => o.code).join(',')}`, tx)
+  }
+  return { ok: true, line, violations: stored }
+}
+
+export async function captureChargeLine(
+  input: ChargeCaptureInput, session: Session, now: Date = new Date(),
+): Promise<CaptureResult> {
+  if (input.manualUnitPricePaise !== undefined && !canOverride(session)) return { ok: false, error: 'price_override_forbidden' }
+  return getDb().transaction((tx) => captureInTx(tx, input, session, now, { source: 'manual', overridesAllowed: true }))
 }
 
 /** Voids a captured line (also one on a draft invoice, which it leaves). Invoiced and void lines are refused. */

@@ -11,7 +11,7 @@ const FULL: HospitalSnapshot = {
   followUps: { due: 5, overdue: 4, upcoming: 9, scheduled: 3, missed: 1, capped: false },
   labs: { awaitingCollection: 6, inTransit: 2, atBench: 4, toVerify: 3, toReport: 1, criticalUnverified: 1, resultedToday: 11, criticalToday: 2, medianTatMinutes: 95 },
   collections: { date: '2026-10-08', receiptCount: 12, collectedPaise: 12345600, refundedPaise: 50000, netPaise: 12295600 },
-  billing: { draftInvoices: 4, uninvoicedLines: 17, uninvoicedPaise: 2500000, pharmacyDraftCharges: 2, pendingApprovalCharges: 3 },
+  billing: { draftInvoices: 4, uninvoicedLines: 17, uninvoicedPaise: 2500000, pharmacyDraftCharges: 2, pendingApprovalCharges: 3, readyLines: 5, readyPaise: 1200000, waitingLines: 12 },
   claims: { outstandingPaise: 98765400, aging: [{ label: '0-30', paise: 1 }, { label: '91-180', paise: 300000 }, { label: '181+', paise: 200000 }], preauthsOverdue: 2, queried: 3 },
   bookingRequestsPending: 6,
 }
@@ -70,7 +70,7 @@ describe('hospitalTiles', () => {
     expect(byId.opd).toMatchObject({ value: 42, sub: '7 waiting · 3 in consultation', href: '/encounters' })
     expect(byId.inpatients).toMatchObject({ value: 18, sub: '64% occupied · 8 beds free', href: '/inpatient/beds' })
     expect(byId.collections).toMatchObject({ value: '₹1,22,956.00', sub: '12 receipts · ₹500.00 refunded', href: '/cash-desk' })
-    expect(byId['billing-queue']).toMatchObject({ value: 4, sub: '17 lines not invoiced (₹25,000.00)', href: '/billing/invoices?status=draft' })
+    expect(byId['billing-queue']).toMatchObject({ value: 4, sub: '17 lines not invoiced (₹25,000.00): 5 ready, 12 waiting', href: '/billing/invoices?status=draft' })
     expect(byId['follow-ups']).toMatchObject({ value: 9, sub: '4 overdue · 5 due', href: '/front-desk/follow-ups?bucket=overdue' })
     expect(byId['labs-pending']).toMatchObject({ value: 12, sub: '1 critical to verify', href: '/labs', tone: 'danger' })
     expect(byId['lab-tat']).toMatchObject({ value: '1 h 35 min', sub: '11 results today' })

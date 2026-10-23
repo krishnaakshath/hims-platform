@@ -3,7 +3,8 @@ import { notFound, redirect } from 'next/navigation'
 import { Banknote } from 'lucide-react'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
-import { BILLING_AUTHORITY_ROLES, CASH_DESK_ROLES, CHARGE_CAPTURE_ROLES, CHARGES_ROLES } from '@/lib/role-policy'
+import { BILLING_AUTHORITY_ROLES, CASH_DESK_ROLES, CHARGE_CAPTURE_ROLES, CHARGES_ROLES, INVOICE_READY_ROLES } from '@/lib/role-policy'
+import { InvoiceReadyButton } from '@/components/billing/InvoiceReadyButton' // WS2 T12
 import { formatPaise } from '@/lib/format'
 import { formatIsoDate } from '@/lib/india-time'
 import { findPatientForCashDesk, getPatientLedger, listPayableInvoices } from '@/lib/queries/patient-ledger'
@@ -95,6 +96,10 @@ export default async function CashDeskPage({ searchParams }: { searchParams: Pro
               <h2 className="mb-2 text-lg font-semibold">Account</h2>
               <LedgerTable rows={ledger.ledger.rows} invoiceLinks={CHARGE_CAPTURE_ROLES.includes(session.role)} />
               <p className="mt-2 text-right text-sm text-muted-foreground">Balance: <Balance paise={ledger.ledger.summary.balancePaise} /></p>
+              {/* WS2 T12: draft this patient's ready charges (completed visits, discharged stays, pharmacy) before collecting. */}
+              {INVOICE_READY_ROLES.includes(session.role) && (
+                <div className="mt-3"><InvoiceReadyButton patientId={ledger.patient.id} label="Invoice ready charges" /></div>
+              )}
 
               {ledger.legacyCharges.length > 0 && (
                 <div className="mt-6">

@@ -1030,11 +1030,14 @@ export const billingSettings = pgTable('billing_settings', {
   rohiniId: text('rohini_id'),
   hfrId: text('hfr_id'),
   // end SP7
+  registrationServiceId: integer('registration_service_id').references(() => serviceCatalog.id), // WS2 T9
+  freeReviewDays: integer('free_review_days').default(0).notNull(), // WS2 T9
 }, (t) => [
   check('billing_settings_singleton', sql`${t.id} = 1`),
   check('billing_settings_consultation_window_range', sql`${t.consultationWindowDays} BETWEEN 1 AND 365`),
   check('billing_settings_deposit_threshold_range', sql`${t.ipdDepositThresholdPaise} BETWEEN 0 AND 1000000000`),
   check('billing_settings_pharmacy_gst_allowed', sql`${t.pharmacyGstRateBp} IN (0, 500, 1200, 1800, 2800, 4000)`),
+  check('billing_settings_free_review_days_range', sql`${t.freeReviewDays} BETWEEN 0 AND 30`), // WS2 T9
 ])
 
 // One row per configured rule (rule_code from CHARGE_RULE_CODES); a missing row = table defaults.
@@ -1088,6 +1091,8 @@ export const chargeLines = pgTable('charge_lines', {
   // SP7 (ruling 7): the approved pre-auth a payer line was validated against
   // (scripts/migrations/2026-10-09-sp7-c-preauth-claims.sql).
   preauthId: integer('preauth_id').references(() => preauths.id),
+  labOrderId: integer('lab_order_id').references(() => labOrders.id).unique(), // WS2 T9
+  encounterProcedureId: integer('encounter_procedure_id').references(() => encounterProcedures.id).unique(), // WS2 T9
 }, (t) => [
   index('charge_lines_patient_idx').on(t.patientId),
   index('charge_lines_encounter_idx').on(t.encounterId),
@@ -1103,6 +1108,9 @@ export const chargeLines = pgTable('charge_lines', {
   check('charge_lines_manual_reason', sql`${t.priceSource} <> 'manual' OR ${t.priceOverrideReason} IS NOT NULL`),
   check('charge_lines_void_reason', sql`${t.status} <> 'void' OR ${t.voidReason} IS NOT NULL`),
   index('charge_lines_invoice_idx').on(t.invoiceId),
+  // WS2 T9: automatic visit charges are idempotent (backstops; capture checks under the billing lock first).
+  uniqueIndex('charge_lines_one_consultation_per_encounter').on(t.encounterId).where(sql`source = 'consultation' AND status <> 'void'`), // WS2 T9
+  uniqueIndex('charge_lines_one_registration_per_patient').on(t.patientId).where(sql`source = 'registration' AND status <> 'void'`), // WS2 T9
 ])
 
 // Migration B: scripts/migrations/2026-10-08-sp4-b-invoices-ledger.sql (documents and ledger).
@@ -1333,11 +1341,13 @@ export const encounterProcedures = pgTable('encounter_procedures', {
   codedAt: timestamp('coded_at'),
   voidedAt: timestamp('voided_at'),
   voidedByName: text('voided_by_name'),
+  orderNotes: text('order_notes'), // WS2 T11: the doctor's note on a procedure ordered from the workspace
 }, (t) => [
   index('encounter_procedures_encounter_id_idx').on(t.encounterId),
   index('encounter_procedures_patient_id_idx').on(t.patientId),
   check('encounter_procedures_code_required', sql`${t.codingStatus} = 'uncoded' OR (${t.codeId} IS NOT NULL AND ${t.code} IS NOT NULL)`),
   check('encounter_procedures_code_kind_pair', sql`(${t.codeId} IS NULL) = (${t.codeSystemKind} IS NULL)`),
+  check('encounter_procedures_order_notes_length', sql`${t.orderNotes} IS NULL OR char_length(${t.orderNotes}) <= 300`), // WS2 T11
 ])
 
 // The coding status of one encounter; no row = uncoded.
@@ -2378,6 +2388,7 @@ export const labTests = pgTable('lab_tests', {
   // Foundations T10: a test can be switched off; activating an unmapped test is refused.
   isActive: boolean('is_active').default(true).notNull(),
   // end Foundations T10
+  fastingRequired: boolean('fasting_required').default(false).notNull(), // WS1 T10
 })
 
 export const labOrders = pgTable('lab_orders', {
@@ -2496,9 +2507,14 @@ export const labRequisitions = pgTable('lab_requisitions', {
   createdByName: text('created_by_name').notNull(),
   createdByUserId: integer('created_by_user_id').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  priority: text('priority', { enum: ['routine', 'urgent', 'stat'] }).default('routine').notNull(), // WS1 T10
+  clinicalNotes: text('clinical_notes'), // WS1 T10
+  fastingRequired: boolean('fasting_required').default(false).notNull(), // WS1 T10
 }, (t) => [
   check('lab_requisitions_follow_up_fields', sql`(NOT ${t.followUpRequested} AND ${t.followUpIntervalValue} IS NULL AND ${t.followUpIntervalUnit} IS NULL) OR (${t.followUpRequested} AND ${t.followUpIntervalValue} BETWEEN 1 AND 365 AND ${t.followUpIntervalUnit} IS NOT NULL)`),
   index('lab_requisitions_patient_idx').on(t.patientId),
+  check('lab_requisitions_priority_valid', sql`${t.priority} IN ('routine', 'urgent', 'stat')`), // WS1 T10
+  check('lab_requisitions_clinical_notes_length', sql`${t.clinicalNotes} IS NULL OR char_length(${t.clinicalNotes}) <= 500`), // WS1 T10
 ])
 
 // One home sample-collection trip: a slot (IST date + window snapshot), an address snapshot

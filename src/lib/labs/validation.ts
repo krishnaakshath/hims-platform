@@ -36,28 +36,49 @@ export const receiveSampleSchema = z.object({ sampleId: z.string().trim().min(1)
 
 // ── Doctor's order (requisition) ───────────────────────────────────────────
 
+// WS1 T10: order priority (the worklist shows stat, then urgent, first).
+export const LAB_ORDER_PRIORITIES = ['routine', 'urgent', 'stat'] as const
+export type LabOrderPriority = (typeof LAB_ORDER_PRIORITIES)[number]
+export const LAB_CLINICAL_NOTES_MAX = 500
+
 export interface CreateLabRequisitionRequest {
   labTestIds: number[]
   followUp: { interval: FollowUpInterval; reason: string } | null
   originatingEncounterId: number | null
+  // WS1 T10
+  priority: LabOrderPriority
+  clinicalNotes: string | null
+  /** null: fasting when any ordered test requires it (lane ruling R3). */
+  fastingRequired: boolean | null
+  // end WS1 T10
 }
 
 const legacyRequisitionSchema = z
   .object({ labTestId: positiveInt })
   .strict()
-  .transform((b): CreateLabRequisitionRequest => ({ labTestIds: [b.labTestId], followUp: null, originatingEncounterId: null }))
+  .transform((b): CreateLabRequisitionRequest => ({
+    labTestIds: [b.labTestId], followUp: null, originatingEncounterId: null, priority: 'routine', clinicalNotes: null, fastingRequired: null,
+  }))
 
 const multiRequisitionSchema = z
   .object({
     labTestIds: uniqueIds(20),
     followUp: z.object({ interval: followUpIntervalSchema, reason: followUpReasonSchema }).strict().nullable().optional(),
     originatingEncounterId: positiveInt.optional(),
+    // WS1 T10
+    priority: z.enum(LAB_ORDER_PRIORITIES).optional(),
+    clinicalNotes: z.string().trim().max(LAB_CLINICAL_NOTES_MAX).optional(),
+    fastingRequired: z.boolean().optional(),
+    // end WS1 T10
   })
   .strict()
   .transform((b): CreateLabRequisitionRequest => ({
     labTestIds: b.labTestIds,
     followUp: b.followUp ? { interval: b.followUp.interval as FollowUpInterval, reason: b.followUp.reason } : null,
     originatingEncounterId: b.originatingEncounterId ?? null,
+    priority: b.priority ?? 'routine',
+    clinicalNotes: b.clinicalNotes ? b.clinicalNotes : null,
+    fastingRequired: b.fastingRequired ?? null,
   }))
 
 export const createLabRequisitionSchema = z.union([legacyRequisitionSchema, multiRequisitionSchema])

@@ -16,7 +16,7 @@ vi.mock('@/lib/queries/insurance-eligibility', () => ({ countEligibilityFollowUp
 vi.mock('@/components/ArAgingChart', () => ({ ArAgingChart: () => null }))
 // Wave E P1-19: SP4 queue and the day's takings.
 vi.mock('@/lib/queries/hospital-kpis', () => ({
-  getBillingQueue: vi.fn(async () => ({ draftInvoices: 4, uninvoicedLines: 17, uninvoicedPaise: 2500000, pharmacyDraftCharges: 2, pendingApprovalCharges: 3 })),
+  getBillingQueue: vi.fn(async () => ({ draftInvoices: 4, uninvoicedLines: 17, uninvoicedPaise: 2500000, pharmacyDraftCharges: 2, pendingApprovalCharges: 3, readyLines: 5, readyPaise: 1200000, waitingLines: 12 })),
   getCollectionsToday: vi.fn(async () => ({ date: '2026-10-08', receiptCount: 12, collectedPaise: 12345600, refundedPaise: 0, netPaise: 12345600 })),
 }))
 
@@ -87,6 +87,9 @@ describe('/billing home tiles', () => {
     expect(tileHref(container, 'Draft invoices')).toBe('/billing/invoices?status=draft')
     expect(tileValue(container, 'Lines to invoice')).toBe('17')
     expect(tileHref(container, 'Lines to invoice')).toBe('/billing/capture')
+    // WS2 T12: ready vs waiting, and the batch action.
+    expect(screen.getByText('5 ready, 12 waiting for the visit/stay to close')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Invoice all ready lines' })).toBeInTheDocument()
     expect(tileValue(container, 'Collected today')).toBe('₹1,23,456.00')
     expect(tileHref(container, 'Collected today')).toBe('/cash-desk')
     expect(tileHref(container, 'Outstanding A/R')).toBe('/billing/ar-dashboard')

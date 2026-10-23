@@ -104,3 +104,17 @@ describe('BookHomeCollectionModal', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 })
+
+// WS2 T10: opened from a lab order, the patient is looked up at once and only the ordered tests are ticked.
+describe('BookHomeCollectionModal opened from an order', () => {
+  it('finds the initial patient and ticks only the initial orders', async () => {
+    const fetchMock = mockFetch(true)
+    vi.stubGlobal('fetch', fetchMock)
+    render(<BookHomeCollectionModal date="2099-07-02" initialPatient="RD-0001" initialOrderIds={[12]} onClose={vi.fn()} />)
+    await screen.findByText(/Asha Rao/)
+    expect(fetchMock.mock.calls.some(([u]) => String(u).startsWith('/api/home-collections/context') && String(u).includes('RD-0001'))).toBe(true)
+    expect(screen.getByLabelText(/patient id or uhid/i)).toHaveValue('RD-0001')
+    expect(screen.getByRole('checkbox', { name: /glucose, fasting/i })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /lipid panel/i })).toBeChecked()
+  })
+})
