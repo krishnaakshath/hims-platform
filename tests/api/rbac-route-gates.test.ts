@@ -116,7 +116,8 @@ vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
 // SP8: the ABHA routes rate-limit (Redis) right after the gate; this harness only probes the gate.
 vi.mock('@/lib/rate-limit', async () => {
   const actual = await vi.importActual<typeof import('@/lib/rate-limit')>('@/lib/rate-limit')
-  return { ...actual, checkAbhaRateLimit: vi.fn(async () => ({ allowed: true })), checkIntegrationTestRateLimit: vi.fn(async () => ({ allowed: true })) }
+  return { ...actual, checkAbhaRateLimit: vi.fn(async () => ({ allowed: true })), checkIntegrationTestRateLimit: vi.fn(async () => ({ allowed: true })),
+    checkBrandUploadRateLimit: vi.fn(async () => ({ allowed: true })) /* WL T7 */ }
 })
 
 export { ALL_ROLES }
@@ -614,6 +615,9 @@ import { GET as getBrandingSettings, PUT as putBrandingSettings } from '@/app/ap
 import { POST as postBrandingReset } from '@/app/api/settings/branding/reset/route'
 import { POST as postBrandingOnboarding } from '@/app/api/settings/branding/onboarding/route'
 // end WL T6
+// WL T7
+import { POST as postBrandingAsset, DELETE as deleteBrandingAsset } from '@/app/api/settings/branding/assets/route'
+// end WL T7
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1086,6 +1090,10 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/settings/branding/reset', call: () => settle(() => postBrandingReset(send('POST', '/api/settings/branding/reset'))), allowed: ['admin'] },
   { name: 'POST /api/settings/branding/onboarding', call: () => settle(() => postBrandingOnboarding(send('POST', '/api/settings/branding/onboarding'))), allowed: ['admin'] },
   // end WL T6
+  // WL T7: branding asset upload/removal ({} is a 400 after the gate for admin; no variant is a 400).
+  { name: 'POST /api/settings/branding/assets', call: () => settle(() => postBrandingAsset(send('POST', '/api/settings/branding/assets'))), allowed: ['admin'] },
+  { name: 'DELETE /api/settings/branding/assets', call: () => settle(() => deleteBrandingAsset(del('/api/settings/branding/assets'))), allowed: ['admin'] },
+  // end WL T7
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

@@ -227,3 +227,15 @@ export async function recordOnboarding(action: 'test_signin_done' | 'dismiss', s
     await logAudit(session, 'branding: onboarding', null, `action=${action}`, tx)
   })
 }
+
+// WL T7: the stored asset rows (kind, source, blob URL) for the upload and removal route. The blob
+// URL stays on the server: the route uses it to re-derive icons and to clean up replaced files.
+export async function listBrandAssetRows(): Promise<{ kind: BrandAssetKind; source: 'upload' | 'derived'; blobUrl: string }[]> {
+  return getDb().select({ kind: brandAssets.kind, source: brandAssets.source, blobUrl: brandAssets.blobUrl }).from(brandAssets)
+}
+
+/** Runs `fn` in one transaction (the route writes several asset rows plus one audit row). */
+export async function inBrandAssetTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return getDb().transaction(fn)
+}
+// end WL T7
