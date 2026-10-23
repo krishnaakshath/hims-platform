@@ -3,10 +3,11 @@
 // after the patient billing lock, which is taken LAST in visit transactions (spec section 6).
 // It never throws for a business reason and never aborts the clinical act: a block or a
 // missing price is returned as an outcome and no line is written.
-import { and, eq, inArray, max, ne, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, max, ne, or, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { chargeLines, encounters, invoices, patients, providers, type ChargeLineRow, type EncounterRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
+import { isUniqueViolation } from '@/lib/db-errors'
 import type { Session } from '@/lib/auth'
 import type { ChargeRuleCode } from '@/lib/billing/charge-rules'
 import type { ChargeCaptureInput } from '@/lib/billing/validation'
@@ -35,6 +36,8 @@ export type AutoChargeOutcome =
   | { ok: true; source: AutoChargeSource; lineId: number; itemName: string; taxablePaise: number; billTo: 'self' | 'payer'; existing: boolean }
   | { ok: false; source: AutoChargeSource; reason: 'no_service' | 'no_context' | 'context_cancelled' | 'price_unresolved' | 'blocked'; rules?: ChargeRuleCode[] }
 
+const AUTO_CHARGE_SAVEPOINT = 'auto_charge_capture'
+
 /** Payer-only rules: when only these block a payer line, the line falls back to self-pay (ruling 6 bill-to). */
 const PAYER_ONLY_BLOCKS: readonly ChargeRuleCode[] = ['preauth_required', 'preauth_invalid']
 
@@ -58,7 +61,8 @@ async function findAutoLine(tx: WriteExecutor, input: AutoChargeInput, ctx: Char
 /**
  * Captures one automatic charge on the caller's transaction. Idempotent: an existing line for the
  * same visit consultation, patient registration, lab order or procedure is returned with
- * `existing: true`. Runs with no overrides; bill-to follows `autoBillTo`.
+ * `existing: true`. Runs with no overrides; bill-to follows `autoBillTo`. `tx` must be a
+ * transaction (the insert runs under a savepoint).
  */
 export async function captureAutoChargeInTx(tx: WriteExecutor, input: AutoChargeInput, session: Session, now: Date = new Date()): Promise<AutoChargeOutcome> {
   const { source } = input
@@ -80,13 +84,38 @@ export async function captureAutoChargeInTx(tx: WriteExecutor, input: AutoCharge
     billTo: billTo === 'payer' ? 'payer' : 'patient',
   }
   const opts = { source, links: input.links, overridesAllowed: false }
-  let result = await captureInTx(tx, capture, session, now, opts)
+  // WS2 T10: the insert runs under a savepoint. A unique violation (a line written by a path that
+  // bypassed the billing lock) rolls back to it, leaving the caller's transaction usable, and the
+  // line that won is returned as existing (spec section 6).
+  const attempt = async (c: ChargeCaptureInput) => {
+    await tx.execute(sql.raw(`savepoint ${AUTO_CHARGE_SAVEPOINT}`))
+    try {
+      const r = await captureInTx(tx, c, session, now, opts)
+      await tx.execute(sql.raw(`release savepoint ${AUTO_CHARGE_SAVEPOINT}`))
+      return r
+    } catch (err) {
+      await tx.execute(sql.raw(`rollback to savepoint ${AUTO_CHARGE_SAVEPOINT}`))
+      await tx.execute(sql.raw(`release savepoint ${AUTO_CHARGE_SAVEPOINT}`))
+      if (!isUniqueViolation(err)) throw err
+      return null
+    }
+  }
+  const raced = async (): Promise<AutoChargeOutcome> => {
+    const line = await findAutoLine(tx, input, ctx)
+    // A violation the lookup cannot explain is not a business outcome: surface it.
+    if (!line) throw new Error('auto charge: unique violation without a matching line')
+    if (line.status === 'void') return { ok: false, source, reason: 'blocked', rules: [] }
+    return okOutcome(source, line, true)
+  }
+  let result = await attempt(capture)
+  if (result === null) return raced()
   let fellBack: ChargeRuleCode[] | null = null
   if (!result.ok && result.error === 'blocked' && billTo === 'payer') {
     const blocks = (result.violations ?? []).filter((v) => v.severity === 'block').map((v) => v.code)
     if (blocks.length > 0 && blocks.every((c) => PAYER_ONLY_BLOCKS.includes(c))) {
       fellBack = blocks
-      result = await captureInTx(tx, { ...capture, billTo: 'patient' }, session, now, opts)
+      result = await attempt({ ...capture, billTo: 'patient' })
+      if (result === null) return raced()
     }
   }
   if (!result.ok) {
@@ -180,9 +209,13 @@ const VISIT_SOURCES = ['registration', 'consultation'] as const
 const VISIT_CANCELLED_REASON = 'Visit cancelled'
 
 /**
- * Cancel: voids the visit's live registration and consultation lines (a draft invoice loses
- * them, the SP4 void rule). A line on a finalised invoice is never touched: the whole cancel is
- * refused with that invoice's number, and nothing is changed.
+ * Cancel: voids the visit's live consultation and lab-order lines (WS2 T10: lab lines billed to the
+ * visit, not to a stay) and its registration line (a draft invoice loses them, the SP4 void rule).
+ * WS2 T10: the registration fee is owed once per patient, so while the patient has another
+ * non-cancelled encounter the registration line moves to the earliest of them instead of being
+ * voided. A line on a finalised invoice is never touched: the whole cancel is refused with that
+ * invoice's number, and nothing is changed. Runs under the patient billing lock; encounters are
+ * read, never locked.
  */
 export async function voidAutoLinesForEncounterInTx(
   tx: WriteExecutor, encounterId: number, session: Session,
@@ -190,20 +223,39 @@ export async function voidAutoLinesForEncounterInTx(
   const [enc] = await tx.select({ patientId: encounters.patientId }).from(encounters).where(eq(encounters.id, encounterId)).limit(1)
   if (!enc) return { ok: true, voided: 0 }
   await lockPatientBilling(tx, enc.patientId)
-  const lines = await tx.select({ id: chargeLines.id, status: chargeLines.status, invoiceNumber: invoices.invoiceNumber })
+  const lines = await tx.select({ id: chargeLines.id, source: chargeLines.source, status: chargeLines.status, invoiceNumber: invoices.invoiceNumber })
     .from(chargeLines).leftJoin(invoices, eq(invoices.id, chargeLines.invoiceId))
-    .where(and(eq(chargeLines.encounterId, encounterId), inArray(chargeLines.source, [...VISIT_SOURCES]), ne(chargeLines.status, 'void')))
+    .where(and(
+      eq(chargeLines.encounterId, encounterId), ne(chargeLines.status, 'void'),
+      or(
+        inArray(chargeLines.source, [...VISIT_SOURCES]),
+        and(eq(chargeLines.source, 'lab_order'), isNull(chargeLines.admissionId)),
+      ),
+    ))
     .orderBy(chargeLines.id)
     .for('update', { of: chargeLines })
   const billed = lines.find((l) => l.status === 'invoiced')
   if (billed) return { ok: false, error: 'visit_billed', invoiceNumber: billed.invoiceNumber ?? '' }
   const at = new Date()
+  let voided = 0
   for (const l of lines) {
+    if (l.source === 'registration') {
+      const [next] = await tx.select({ id: encounters.id, admissionId: encounters.admissionId, encounterDate: encounters.encounterDate }).from(encounters)
+        .where(and(eq(encounters.patientId, enc.patientId), ne(encounters.id, encounterId), ne(encounters.status, 'cancelled')))
+        .orderBy(asc(encounters.encounterDate), asc(encounters.id)).limit(1)
+      if (next) {
+        await tx.update(chargeLines).set({ encounterId: next.id, admissionId: next.admissionId, serviceDate: next.encounterDate, invoiceId: null })
+          .where(eq(chargeLines.id, l.id))
+        await logAudit(session, 'billing: moved registration line', enc.patientId, `line=${l.id} from=${encounterId} to=${next.id}`, tx)
+        continue
+      }
+    }
     await tx.update(chargeLines).set({ status: 'void', voidReason: VISIT_CANCELLED_REASON, voidedAt: at, voidedByName: session.name, invoiceId: null })
       .where(eq(chargeLines.id, l.id))
     await logAudit(session, 'billing: voided charge line', enc.patientId, `line=${l.id} encounter=${encounterId} cause=visit_cancelled`, tx)
+    voided++
   }
-  return { ok: true, voided: lines.length }
+  return { ok: true, voided }
 }
 
 // ---------- fee preview (check-in dialog) ----------

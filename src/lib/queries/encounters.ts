@@ -166,8 +166,9 @@ export type TransitionEncounterResult =
 
 /**
  * WS2 T9: completing an OPD visit captures its consultation if still missing (`charges`);
- * cancelling voids its registration/consultation lines, and is refused (`visit_billed`, nothing
- * changed) while one of them is on a finalised invoice. Lock order: follow-up orders ->
+ * cancelling voids its consultation and lab-order lines and its registration line (WS2 T10: moved
+ * to another live visit of the patient instead, when there is one), and is refused (`visit_billed`,
+ * nothing changed) while one of them is on a finalised invoice. Lock order: follow-up orders ->
  * encounter -> patient billing lock (last).
  */
 export async function transitionEncounter(

@@ -598,6 +598,8 @@ import { GET as getReportCsv } from '@/app/api/reports/[report]/csv/route'
 import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
 // end Wave I
 import { GET as getCheckInFeePreview } from '@/app/api/front-desk/check-in/fee-preview/route' // WS2 T9
+import { GET as getVisitLabOrders } from '@/app/api/patients/[anonId]/lab-orders/route' // WS2 T10
+import { WORKSPACE_READ_ROLES as WS2T10_WORKSPACE_READ_ROLES } from '@/lib/role-policy' // WS2 T10
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1055,6 +1057,8 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/patients/[anonId]/notices', call: () => getPatientNotices(get(`/api/patients/${BOGUS_PATIENT}/notices`), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'crc', 'pi', 'frontdesk'] }, // Foundations T9
   // WS2 T9: the check-in fee preview -- CHECK_IN_ROLES; no query is the 400 an allowed role gets, after the gate.
   { name: 'GET /api/front-desk/check-in/fee-preview', call: () => getCheckInFeePreview(get('/api/front-desk/check-in/fee-preview')), allowed: [...CHECK_IN_ROLES] }, // WS2 T9
+  // WS2 T10: a visit's lab orders (workspace Orders panel) -- WORKSPACE_READ_ROLES; no encounterId is the 400 an allowed role gets.
+  { name: 'GET /api/patients/[anonId]/lab-orders', call: () => getVisitLabOrders(get(`/api/patients/${BOGUS_PATIENT}/lab-orders`), ctx({ anonId: BOGUS_PATIENT })), allowed: [...WS2T10_WORKSPACE_READ_ROLES] }, // WS2 T10
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body

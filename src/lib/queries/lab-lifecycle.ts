@@ -12,10 +12,11 @@
 //   2. lab_orders rows, `for update`, by ascending id
 //   3. the per-IST-date sample-sequence advisory lock (allocateSampleId)
 //   4. home_collection_visits row, `for update` (cancelLabOrder only)
-//   5. encounters (not taken here)
+//   5. the patient billing lock, then the order's charge line `for update` (cancelLabOrder only, WS2 T10)
+//   6. encounters (not taken here)
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { homeCollectionVisits, labOrders, labResults, type LabOrderRow } from '@/db/schema'
+import { chargeLines, homeCollectionVisits, labOrders, labResults, type LabOrderRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { istDateOf } from '@/lib/india-time'
@@ -24,6 +25,7 @@ import { canTransitionLabOrder, type LabOrderStatus } from '@/lib/labs/status'
 import type { LabResultRequest } from '@/lib/labs/validation'
 import { logIntegrationEvent } from '@/lib/patient-portal-audit'
 import type { WriteExecutor } from '@/lib/queries/executor'
+import { lockPatientBilling } from '@/lib/queries/charge-capture' // WS2 T10
 
 export type LabActor = { kind: 'staff'; session: Session } | { kind: 'lis' }
 
@@ -232,8 +234,11 @@ export async function verifyLabResult(orderId: number, session: Session, now = n
 
 // ── Cancel ──────────────────────────────────────────────────────────────────
 
+/** WS2 T10: what cancelling did to the order's charge line. */
+export type LabOrderCancelBilling = 'voided' | 'none' | 'credit_note_needed'
+
 export type CancelLabOrderResult =
-  | { ok: true; patientId: string; cancelledVisitId: number | null }
+  | { ok: true; patientId: string; cancelledVisitId: number | null; billing: LabOrderCancelBilling }
   | { ok: false; error: 'not_found' | 'not_cancellable' }
 
 /**
@@ -274,6 +279,26 @@ export async function cancelLabOrder(orderId: number, reason: string, session: S
     }
 
     await logAudit(session, 'cancelled lab order', order.patientId, `order=${orderId}${cancelledVisitId !== null ? ` visit=${cancelledVisitId}` : ''}`, tx)
-    return { ok: true, patientId: order.patientId, cancelledVisitId } as const
+    const billing = await voidOrderLineInTx(tx, orderId, order.patientId, session, now)
+    return { ok: true, patientId: order.patientId, cancelledVisitId, billing } as const
   })
+}
+
+const ORDER_CANCELLED_REASON = 'Lab order cancelled'
+
+/**
+ * WS2 T10 (spec ruling 6): a cancelled order's line is voided (a draft invoice loses it, the SP4
+ * void rule). A line on a finalised invoice is never touched: the cancel still succeeds and the
+ * caller is told a credit note is needed. No line, or an already void one: 'none'.
+ */
+async function voidOrderLineInTx(tx: WriteExecutor, orderId: number, patientId: string, session: Session, now: Date): Promise<LabOrderCancelBilling> {
+  await lockPatientBilling(tx, patientId)
+  const [line] = await tx.select({ id: chargeLines.id, status: chargeLines.status }).from(chargeLines)
+    .where(eq(chargeLines.labOrderId, orderId)).for('update')
+  if (!line || line.status === 'void') return 'none'
+  if (line.status === 'invoiced') return 'credit_note_needed'
+  await tx.update(chargeLines).set({ status: 'void', voidReason: ORDER_CANCELLED_REASON, voidedAt: now, voidedByName: session.name, invoiceId: null })
+    .where(eq(chargeLines.id, line.id))
+  await logAudit(session, 'billing: voided charge line', patientId, `line=${line.id} order=${orderId} cause=order_cancelled`, tx)
+  return 'voided'
 }

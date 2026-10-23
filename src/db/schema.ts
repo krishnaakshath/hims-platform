@@ -2356,6 +2356,7 @@ export const labTests = pgTable('lab_tests', {
   // Foundations T10: a test can be switched off; activating an unmapped test is refused.
   isActive: boolean('is_active').default(true).notNull(),
   // end Foundations T10
+  fastingRequired: boolean('fasting_required').default(false).notNull(), // WS1 T10
 })
 
 export const labOrders = pgTable('lab_orders', {
@@ -2474,9 +2475,14 @@ export const labRequisitions = pgTable('lab_requisitions', {
   createdByName: text('created_by_name').notNull(),
   createdByUserId: integer('created_by_user_id').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  priority: text('priority', { enum: ['routine', 'urgent', 'stat'] }).default('routine').notNull(), // WS1 T10
+  clinicalNotes: text('clinical_notes'), // WS1 T10
+  fastingRequired: boolean('fasting_required').default(false).notNull(), // WS1 T10
 }, (t) => [
   check('lab_requisitions_follow_up_fields', sql`(NOT ${t.followUpRequested} AND ${t.followUpIntervalValue} IS NULL AND ${t.followUpIntervalUnit} IS NULL) OR (${t.followUpRequested} AND ${t.followUpIntervalValue} BETWEEN 1 AND 365 AND ${t.followUpIntervalUnit} IS NOT NULL)`),
   index('lab_requisitions_patient_idx').on(t.patientId),
+  check('lab_requisitions_priority_valid', sql`${t.priority} IN ('routine', 'urgent', 'stat')`), // WS1 T10
+  check('lab_requisitions_clinical_notes_length', sql`${t.clinicalNotes} IS NULL OR char_length(${t.clinicalNotes}) <= 500`), // WS1 T10
 ])
 
 // One home sample-collection trip: a slot (IST date + window snapshot), an address snapshot

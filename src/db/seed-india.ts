@@ -196,6 +196,10 @@ async function seedTariffs(db: Db, refs: Pick<IndiaRefs, 'deptIds' | 'payerIds' 
   await db.insert(servicePackageItems).values(pkgRows).onConflictDoNothing()
 }
 
+// WS2 T10: the catalog tests that need a fasting sample (FBS here, LIPID from the base catalog).
+const FASTING_LAB_TEST_CODES = ['FBS', 'LIPID']
+// end WS2 T10
+
 async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Promise<Map<string, number>> {
   const existing = new Set((await db.select({ code: labTests.code }).from(labTests)).map((t) => t.code))
   const toInsert = INDIA_LAB_TESTS.filter((t) => !existing.has(t.code)).map((t) => ({
@@ -208,6 +212,9 @@ async function seedLabTestMapping(db: Db, serviceIds: Map<string, number>): Prom
       .set({ serviceId: serviceIds.get(m.serviceCode) ?? null, sampleType: m.sampleType, container: m.container })
       .where(and(eq(labTests.code, code), isNull(labTests.serviceId)))
   }
+  // WS2 T10: fasting blood sugar and the lipid profile need a fasting sample (lane ruling R3).
+  await db.update(labTests).set({ fastingRequired: true }).where(inArray(labTests.code, FASTING_LAB_TEST_CODES))
+  // end WS2 T10
   const rows = await db.select({ id: labTests.id, code: labTests.code }).from(labTests)
   return new Map(rows.map((r) => [r.code, r.id]))
 }
@@ -781,7 +788,10 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
   const labs = sessions.labs
   const pathologist = sessions.pathologist
   async function requisition(patientId: string, doctorName: string, codes: string[], at: Date, encounterId: number | null = null) {
-    const r = must(await createLabRequisition({ patientId, orderedByProviderId: doctorId(doctorName), labTestIds: codes.map(t), followUp: null, originatingEncounterId: encounterId }, doctorSession(doctorName), at), 'lab requisition')
+    const r = must(await createLabRequisition({
+      patientId, orderedByProviderId: doctorId(doctorName), labTestIds: codes.map(t), followUp: null, originatingEncounterId: encounterId,
+      priority: 'routine', clinicalNotes: null, fastingRequired: null, // WS2 T10 (fasting follows the tests)
+    }, doctorSession(doctorName), at), 'lab requisition')
     return { requisitionId: r.requisition.id, orderIds: r.lines.map((l) => l.orderId) }
   }
   async function collectAndReceive(orderId: number, at: Date) {

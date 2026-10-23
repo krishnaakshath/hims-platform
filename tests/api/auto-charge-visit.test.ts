@@ -306,6 +306,72 @@ describe.skipIf(!process.env.DATABASE_URL)('automatic visit charges (DB)', () =>
     expect(unknown).toEqual({ ok: false, source: 'procedure', reason: 'blocked', rules: ['service_not_found'] })
   })
 
+  // WS2 T10 (T9 review a): a unique violation on the insert must not abort the caller's transaction.
+  it('a line inserted concurrently without the billing lock comes back existing:true and the caller still commits', async () => {
+    const pid = await newPatient()
+    const r = await checkIn(pid)
+    const { getDb, chargeLines, auditLog, eq, and, sql, ac } = await m()
+    const db = getDb()
+    const [consult] = (await linesOf(pid)).filter((l) => l.source === 'consultation')
+    // Void it so the capture's own lookup finds nothing live, then race a raw live copy in.
+    await db.update(chargeLines).set({ status: 'void', voidReason: 'test', voidedAt: NOW, voidedByName: 'test' }).where(eq(chargeLines.id, consult.id))
+    const { id: _id, ...copy } = consult
+    void _id
+    let release!: () => void
+    const gate = new Promise<void>((res) => { release = res })
+    let inserted!: (id: number) => void
+    const racedId = new Promise<number>((res) => { inserted = res })
+    const other = db.transaction(async (tx) => {
+      const [row] = await tx.insert(chargeLines).values({ ...copy, status: 'captured', voidReason: null, voidedAt: null, voidedByName: null }).returning({ id: chargeLines.id })
+      inserted(row.id)
+      await gate
+    })
+    const raced = await racedId
+    const mine = db.transaction(async (tx) => {
+      const out = await ac.captureAutoChargeInTx(tx, { context: { encounterId: r.encounter.id }, serviceId: fx.consultA, quantity: 1, serviceDate: DAY, source: 'consultation' }, doctor, NOW)
+      await tx.insert(auditLog).values({ userName: doctor.name, role: 'admin', action: 'test: after capture', patientId: pid, details: 'race' } as never)
+      return out
+    })
+    // Wait until the capture's insert is blocked on the uncommitted unique row, then commit it.
+    for (let i = 0; i < 200; i++) {
+      const res = await db.execute(sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query ilike 'insert into "charge_lines"%'`)
+      if (Number((res as unknown as { rows: { n: number }[] }).rows[0].n) > 0) break
+      await new Promise((res) => setTimeout(res, 25))
+    }
+    release()
+    await other
+    const out = await mine
+    expect(out).toMatchObject({ ok: true, source: 'consultation', lineId: raced, existing: true })
+    expect((await linesOf(pid)).filter((l) => l.source === 'consultation' && l.status !== 'void').map((l) => l.id)).toEqual([raced])
+    const after = await db.select().from(auditLog).where(and(eq(auditLog.patientId, pid), eq(auditLog.action, 'test: after capture')))
+    expect(after).toHaveLength(1)
+  })
+
+  // WS2 T10 (T9 review b): the registration fee is billed once per patient, not once per surviving visit.
+  it('cancelling the visit holding the registration line moves it to the patient\'s earliest other live visit', async () => {
+    const pid = await newPatient()
+    const first = await checkIn(pid)
+    const second = await checkIn(pid, {}, LATER)
+    const { enc, getDb, auditLog, eq } = await m()
+    const reg = (await linesOf(pid)).find((l) => l.source === 'registration')!
+    expect(reg.encounterId).toBe(first.encounter.id)
+    const c = await enc.transitionEncounter(first.encounter.id, 'cancelled', desk, { cancelReason: 'Duplicate', now: LATER })
+    expect(c.ok).toBe(true)
+    const lines = await linesOf(pid)
+    const regAfter = lines.find((l) => l.id === reg.id)!
+    expect([regAfter.status, regAfter.encounterId, regAfter.serviceDate, regAfter.invoiceId]).toEqual(['captured', second.encounter.id, DAY, null])
+    expect(lines.filter((l) => l.source === 'consultation').map((l) => [l.encounterId, l.status])).toEqual([
+      [first.encounter.id, 'void'], [second.encounter.id, 'captured'],
+    ])
+    const audits = (await getDb().select().from(auditLog).where(eq(auditLog.patientId, pid))).map((a) => `${a.action}|${a.details}`)
+    expect(audits).toContain(`billing: moved registration line|line=${reg.id} from=${first.encounter.id} to=${second.encounter.id}`)
+    // Cancelling the last live visit voids it; the next visit pays registration again.
+    expect((await enc.transitionEncounter(second.encounter.id, 'cancelled', desk, { cancelReason: 'Left', now: LATER })).ok).toBe(true)
+    expect((await linesOf(pid)).find((l) => l.id === reg.id)!.status).toBe('void')
+    const third = await checkIn(pid, {}, LATER)
+    expect(third.charges.map((x) => x.ok && x.source)).toEqual(['consultation', 'registration'])
+  })
+
   describe('routes', () => {
     it('POST /api/front-desk/check-in: 201 with charges; an unpriced department still checks in', async () => {
       role = 'frontdesk'
