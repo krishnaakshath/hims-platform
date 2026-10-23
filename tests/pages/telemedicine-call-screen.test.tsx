@@ -222,6 +222,37 @@ describe('Provider call screen page passes the call clock anchor and next steps 
   })
 })
 
+describe('Bill link only for cash-desk roles (WS7 T6 review)', () => {
+  async function propsFor(role: 'admin' | 'pi') {
+    vi.resetModules()
+    const captured: Record<string, unknown>[] = []
+    vi.doMock('next/navigation', () => ({ redirect: mockRedirect, notFound: mockNotFound }))
+    vi.doMock('@/components/TelemedicineCallScreen', () => ({ TelemedicineCallScreen: (props: Record<string, unknown>) => { captured.push(props); return 'call-screen-stub' } }))
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Dr. R. Kunam' })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/queries/telemedicine-sessions', () => ({ getSessionById: vi.fn(async () => SESSION_ROW) }))
+    vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 7, name: 'Dr. R. Kunam', credentials: null, specialty: 'Psychiatry', colorTag: 'chart-1', isActive: true }]) }))
+    const { default: TelemedicineCallPage } = await import('@/app/(dashboard)/telemedicine/[sessionId]/page')
+    mockRedirect.mockClear()
+    const jsx = await TelemedicineCallPage({ params: Promise.resolve({ sessionId: '42' }) })
+    const { render, cleanup } = await import('@testing-library/react')
+    render(jsx)
+    cleanup()
+    return captured[0].nextSteps as Record<string, string | undefined>
+  }
+
+  it('pi (cannot open the cash desk) gets no Bill link', async () => {
+    const steps = await propsFor('pi')
+    expect(steps.billHref).toBeUndefined()
+    expect(steps.completeVisitHref).toBe('/patients/RD-0001?tab=visits')
+    expect(steps.writeNoteHref).toBe('/patients/RD-0001/medical-record#notes')
+  })
+
+  it('admin gets the Bill link', async () => {
+    expect((await propsFor('admin')).billHref).toBe('/cash-desk?patientId=RD-0001')
+  })
+})
+
 describe('TelemedicineCallScreen clock and end-of-call summary (WS7 T6)', () => {
   const NOW = new Date('2026-10-23T05:00:00Z')
 
@@ -282,6 +313,29 @@ describe('TelemedicineCallScreen clock and end-of-call summary (WS7 T6)', () => 
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: /end call/i })) })
       expect(screen.getByText('Call lasted under a minute')).toBeInTheDocument()
       expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+describe('TelemedicineCallScreen without a Bill link (WS7 T6 review)', () => {
+  it('shows Complete visit and Write note but no Bill when billHref is absent', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('RTCPeerConnection', class { connectionState = 'new'; close() {} addTrack() {} })
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: () => new Promise(() => {}) } })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })))
+    const actual = await vi.importActual<typeof import('@/components/TelemedicineCallScreen')>('@/components/TelemedicineCallScreen')
+    const { render, screen, act, fireEvent, cleanup } = await import('@testing-library/react')
+    try {
+      render(<actual.TelemedicineCallScreen role="provider" pollUrl="/api/telemedicine/42/signal" initialStatus="in_progress" startedAt={null}
+        nextSteps={{ completeVisitHref: '/patients/RD-0001?tab=visits', writeNoteHref: '/patients/RD-0001/medical-record#notes' }} />)
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /end call/i })) })
+      expect(screen.getByRole('link', { name: 'Complete visit' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Write note' })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Bill' })).not.toBeInTheDocument()
     } finally {
       cleanup()
       vi.useRealTimers()

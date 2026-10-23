@@ -3,7 +3,8 @@
 export interface VisitNextStepLinks {
   completeVisitHref: string
   writeNoteHref: string
-  billHref: string
+  // Only for roles that may open the cash desk (CASH_DESK_ROLES); absent -> no Bill link.
+  billHref?: string
 }
 
 /**
@@ -15,11 +16,11 @@ export interface VisitNextStepLinks {
  * call page and, when one exists, return `/encounters/<encounterId>` for
  * `completeVisitHref` and `writeNoteHref` here. Until then these are the fallback links.
  */
-export function visitNextStepLinks(patientId: string): VisitNextStepLinks {
+export function visitNextStepLinks(patientId: string, { canBill }: { canBill: boolean }): VisitNextStepLinks {
   const id = encodeURIComponent(patientId)
   return {
     completeVisitHref: `/patients/${id}?tab=visits`,
     writeNoteHref: `/patients/${id}/medical-record#notes`,
-    billHref: `/cash-desk?patientId=${id}`,
+    ...(canBill ? { billHref: `/cash-desk?patientId=${id}` } : {}),
   }
 }

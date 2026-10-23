@@ -294,7 +294,7 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd, st
           <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
             <Link href={nextSteps.completeVisitHref} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">Complete visit</Link>
             <Link href={nextSteps.writeNoteHref} className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary">Write note</Link>
-            <Link href={nextSteps.billHref} className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary">Bill</Link>
+            {nextSteps.billHref && <Link href={nextSteps.billHref} className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary">Bill</Link>}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">You can safely close this window.</p>

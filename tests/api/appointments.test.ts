@@ -4,6 +4,7 @@ import { GET, POST } from '@/app/api/appointments/route'
 import { PUT } from '@/app/api/appointments/[id]/route'
 import { POST as startTelemedicine } from '@/app/api/appointments/[id]/telemedicine/route'
 import { listActiveProviders } from '@/lib/queries/providers'
+import { createTelemedicineSession, endSession } from '@/lib/queries/telemedicine-sessions'
 import { getDb } from '@/db/client'
 import { appointments, auditLog, telemedicineSessions } from '@/db/schema'
 
@@ -375,6 +376,29 @@ describe('appointments visit mode (WS7 T6)', () => {
     const row = list.find((a: { id: number }) => a.id === created.id)
     expect(row.visitMode).toBe('video')
     expect(row.telemedicine).toBeNull()
+  })
+
+  it('PUT refuses switching to in person while a session is open (409 session_active), allows it once ended', async () => {
+    sessionRef.current = { role: 'crc', name: 'Jamie Ruiz' }
+    const { created } = await create({ startsAt: '2032-01-09T09:00:00+05:30', endsAt: '2032-01-09T09:30:00+05:30', visitMode: 'video' })
+    const { session } = await createTelemedicineSession(created.id)
+    try {
+      const put = () => PUT(new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ visitMode: 'in_person' }) }) as never, { params: Promise.resolve({ id: String(created.id) }) })
+      for (const status of ['scheduled', 'waiting', 'in_progress'] as const) {
+        await getDb().update(telemedicineSessions).set({ status }).where(eq(telemedicineSessions.id, session!.id))
+        const res = await put()
+        expect(res.status).toBe(409)
+        expect(await res.json()).toMatchObject({ code: 'session_active' })
+        const [row] = await getDb().select().from(appointments).where(eq(appointments.id, created.id))
+        expect(row.visitMode).toBe('video')
+      }
+      await endSession(session!.id)
+      expect((await put()).status).toBe(200)
+      const [after] = await getDb().select().from(appointments).where(eq(appointments.id, created.id))
+      expect(after.visitMode).toBe('in_person')
+    } finally {
+      await getDb().delete(telemedicineSessions).where(eq(telemedicineSessions.id, session!.id))
+    }
   })
 
   it('starting telemedicine on an in-person appointment is refused with 409 not_video and creates no session', async () => {
