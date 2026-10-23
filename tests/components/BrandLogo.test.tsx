@@ -29,4 +29,20 @@ describe('BrandLogo', () => {
     expect(screen.getByText('<b>Acme</b>')).toBeInTheDocument()
     expect(container.querySelector('b')).toBeNull()
   })
+
+  it('renders the dark logo only under the dark theme, the light one otherwise (WL T4)', () => {
+    render(<BrandProvider brand={{ name: 'Acme Health', logoUrl: '/branding/logo-light-aaaaaaaaaaaaaaaa.png', logoDarkUrl: '/branding/logo-dark-bbbbbbbbbbbbbbbb.png' }}><BrandLogo /></BrandProvider>)
+    const imgs = screen.getAllByRole('img', { name: 'Acme Health' })
+    expect(imgs).toHaveLength(2)
+    expect(imgs[0]).toHaveAttribute('src', '/branding/logo-light-aaaaaaaaaaaaaaaa.png')
+    expect(imgs[0]).toHaveClass('dark:hidden')
+    expect(imgs[1]).toHaveAttribute('src', '/branding/logo-dark-bbbbbbbbbbbbbbbb.png')
+    expect(imgs[1]).toHaveClass('hidden', 'dark:inline')
+  })
+
+  it('uses the light logo in both themes when no dark logo is stored', () => {
+    render(<BrandProvider brand={{ name: 'Acme Health', logoUrl: '/branding/logo-light-aaaaaaaaaaaaaaaa.png', logoDarkUrl: null }}><BrandLogo /></BrandProvider>)
+    const img = screen.getByRole('img', { name: 'Acme Health' })
+    expect(img).not.toHaveClass('dark:hidden')
+  })
 })

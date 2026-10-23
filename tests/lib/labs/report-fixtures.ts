@@ -2,7 +2,7 @@
 import type { LabReportSource } from '@/lib/labs/report-data'
 
 export const SRC: LabReportSource = {
-  hospital: { name: 'Test Hospital', legalName: 'Test Hospital Trust', site: 'Main campus' },
+  hospital: { name: 'Test Hospital', legalName: 'Test Hospital Trust', headerText: 'Test Hospital Trust', site: 'Main campus', footerText: null, logoPng: null },
   reportNumber: 'LR-2099-000001',
   version: 1,
   patient: { id: 'RD-0001', name: 'Asha Rao', dob: '2059-03-03', uhid: 'UH-000042', gender: 'female' },

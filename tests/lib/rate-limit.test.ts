@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect, afterAll } from 'vitest'
-import { checkLoginRateLimit, checkPatientLoginRateLimit, checkStaffMfaRateLimit, checkPatientMfaRateLimit, checkAccountMfaResetRateLimit, checkBookingRequestRateLimit, __resetBookingRequestGlobalBucketForTests } from '@/lib/rate-limit'
+import { Ratelimit } from '@upstash/ratelimit'
+import { getRedis } from '@/lib/cache'
+import { checkLoginRateLimit, checkPatientLoginRateLimit, checkStaffMfaRateLimit, checkPatientMfaRateLimit, checkAccountMfaResetRateLimit, checkBookingRequestRateLimit, __resetBookingRequestGlobalBucketForTests, checkBrandUploadRateLimit, __resetBrandUploadGlobalBucketForTests } from '@/lib/rate-limit'
 
 describe('checkLoginRateLimit', () => {
   it('allows the first few attempts for a fresh ip+email key', async () => {
@@ -244,4 +246,25 @@ describe('checkBookingRequestRateLimit', () => {
     const results = await Promise.all(calls)
     expect(results.some(({ allowed }) => allowed === false)).toBe(true)
   }, 30000)
+})
+
+describe('checkBrandUploadRateLimit', () => {
+  // Same prefix and window as the shared bucket in src/lib/rate-limit.ts, used only to read its count.
+  const globalProbe = () => new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(60, '3600 s'), prefix: 'ratelimit:brand-upload-global' })
+
+  it('an upload the per-staff bucket refuses never spends the shared hospital bucket', async () => {
+    await __resetBrandUploadGlobalBucketForTests()
+    try {
+      const admin = `rl-brand-${Date.now()}-${Math.random()}`
+      for (let i = 0; i < 10; i++) expect(await checkBrandUploadRateLimit(admin)).toEqual({ allowed: true })
+      expect((await globalProbe().getRemaining('all')).remaining).toBe(50)
+      for (let i = 0; i < 5; i++) expect(await checkBrandUploadRateLimit(admin)).toEqual({ allowed: false })
+      expect((await globalProbe().getRemaining('all')).remaining).toBe(50)
+      // A second admin still gets through on the shared bucket the refused uploads left alone.
+      expect(await checkBrandUploadRateLimit(`${admin}-b`)).toEqual({ allowed: true })
+      expect((await globalProbe().getRemaining('all')).remaining).toBe(49)
+    } finally {
+      await __resetBrandUploadGlobalBucketForTests()
+    }
+  })
 })

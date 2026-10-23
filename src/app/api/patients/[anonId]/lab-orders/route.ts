@@ -4,7 +4,7 @@ import { patientExists } from '@/lib/queries/patient-exists'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 // SP5: the doctor's order is a requisition of one or more tests, priced from the tariff master.
-import { brand } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 import { HOME_COLLECTION_BOOKING_ROLES, LAB_ORDER_ROLES, WORKSPACE_READ_ROLES } from '@/lib/role-policy'
 import { createLabRequisitionSchema } from '@/lib/labs/validation'
 import { createLabRequisition, labOrderBillTo, listEncounterLabOrders, openOpdEncounterFor } from '@/lib/queries/lab-requisitions'
@@ -97,10 +97,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   let notification: NotifyOutcome | 'error' | null = null
   // Imaging-only orders stay orderable but get no home-collection notice (Task 8 ruling).
   if (result.patientIsLocal && result.includesLabTest) {
+    const { smsName } = await getBrand()
     notification = await notifyPatientSafely(session, {
       patientId: anonId,
       templateKey: 'lab_tests_ordered',
-      vars: { hospitalName: brand.name },
+      vars: { hospitalName: smsName },
       related: { type: 'lab_requisition', id: requisitionId },
       dedupeKey: `lab_tests_ordered:requisition=${requisitionId}`,
     })

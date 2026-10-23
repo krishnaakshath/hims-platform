@@ -85,6 +85,7 @@ import { NHCX_ELIGIBILITY_ROLES } from '@/lib/role-policy'
 import { POST as postNhcxEligibility } from '@/app/api/nhcx/eligibility/route'
 import { GET as getNhcxEligibility } from '@/app/api/nhcx/eligibility/[id]/route'
 import { INTEGRATION_SETTINGS_ROLES } from '@/lib/role-policy'
+import { BRAND_SETTINGS_ROLES } from '@/lib/role-policy' // WL final review
 import { GET as getNhcxPayload } from '@/app/api/rcm/nhcx/exchanges/[id]/payload/route'
 import { POST as postNhcxReview } from '@/app/api/rcm/nhcx/exchanges/[id]/review/route'
 import { POST as postIntegrationTest } from '@/app/api/settings/integrations/test/route'
@@ -133,7 +134,8 @@ vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
 // SP8: the ABHA routes rate-limit (Redis) right after the gate; this harness only probes the gate.
 vi.mock('@/lib/rate-limit', async () => {
   const actual = await vi.importActual<typeof import('@/lib/rate-limit')>('@/lib/rate-limit')
-  return { ...actual, checkAbhaRateLimit: vi.fn(async () => ({ allowed: true })), checkIntegrationTestRateLimit: vi.fn(async () => ({ allowed: true })) }
+  return { ...actual, checkAbhaRateLimit: vi.fn(async () => ({ allowed: true })), checkIntegrationTestRateLimit: vi.fn(async () => ({ allowed: true })),
+    checkBrandUploadRateLimit: vi.fn(async () => ({ allowed: true })) /* WL T7 */ }
 })
 
 export { ALL_ROLES }
@@ -635,6 +637,14 @@ import { GET as getProcedureOptions } from '@/app/api/encounters/[id]/procedure-
 import { CLINICAL_WRITE_ROLES as WS2T11_CLINICAL_WRITE_ROLES, WORKSPACE_READ_ROLES as WS2T11_WORKSPACE_READ_ROLES } from '@/lib/role-policy' // WS2 T11
 import { GET as getInvoiceReady, POST as postInvoiceReady } from '@/app/api/billing/invoice-ready/route' // WS2 T12
 import { INVOICE_READY_ROLES as WS2T12_INVOICE_READY_ROLES } from '@/lib/role-policy' // WS2 T12
+// WL T6
+import { GET as getBrandingSettings, PUT as putBrandingSettings } from '@/app/api/settings/branding/route'
+import { POST as postBrandingReset } from '@/app/api/settings/branding/reset/route'
+import { POST as postBrandingOnboarding } from '@/app/api/settings/branding/onboarding/route'
+// end WL T6
+// WL T7
+import { POST as postBrandingAsset, DELETE as deleteBrandingAsset } from '@/app/api/settings/branding/assets/route'
+// end WL T7
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1130,6 +1140,16 @@ export const API_GATES: ApiGateCase[] = [
   // WS2 T12: invoice all ready lines -- INVOICE_READY_ROLES; an invalid patient id is the 400 an allowed role gets (never a real batch).
   { name: 'GET /api/billing/invoice-ready', call: () => getInvoiceReady(get('/api/billing/invoice-ready?patientId=bad%20id')), allowed: [...WS2T12_INVOICE_READY_ROLES] }, // WS2 T12
   { name: 'POST /api/billing/invoice-ready', call: () => postInvoiceReady(send('POST', '/api/billing/invoice-ready', { patientId: 'bad id' })), allowed: [...WS2T12_INVOICE_READY_ROLES] }, // WS2 T12
+  // WL T6: admin branding settings ({} is a 400 after the gate for admin; GET reads the singleton).
+  { name: 'GET /api/settings/branding', call: () => settle(() => getBrandingSettings()), allowed: ['admin'] },
+  { name: 'PUT /api/settings/branding', call: () => settle(() => putBrandingSettings(send('PUT', '/api/settings/branding'))), allowed: ['admin'] },
+  { name: 'POST /api/settings/branding/reset', call: () => settle(() => postBrandingReset(send('POST', '/api/settings/branding/reset'))), allowed: ['admin'] },
+  { name: 'POST /api/settings/branding/onboarding', call: () => settle(() => postBrandingOnboarding(send('POST', '/api/settings/branding/onboarding'))), allowed: ['admin'] },
+  // end WL T6
+  // WL T7: branding asset upload/removal ({} is a 400 after the gate for admin; no variant is a 400).
+  { name: 'POST /api/settings/branding/assets', call: () => settle(() => postBrandingAsset(send('POST', '/api/settings/branding/assets'))), allowed: ['admin'] },
+  { name: 'DELETE /api/settings/branding/assets', call: () => settle(() => deleteBrandingAsset(del('/api/settings/branding/assets'))), allowed: ['admin'] },
+  // end WL T7
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1305,6 +1325,13 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'PATCH /api/pharmacy/medications/[id]/price', call: () => patchMedicationPriceRoute(send('PATCH', `/api/pharmacy/medications/${BOGUS_ID}/price`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: MEDICATION_PRICE_ROLES }, // WS2 T8
   { name: 'POST /api/encounters/[id]/procedures', call: () => postVisitProcedure(send('POST', `/api/encounters/${BOGUS_ID}/procedures`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: [...WS2T11_CLINICAL_WRITE_ROLES] }, // WS2 T11
   { name: 'POST /api/billing/invoice-ready', call: () => postInvoiceReady(send('POST', '/api/billing/invoice-ready', NOT_JSON)), allowed: [...WS2T12_INVOICE_READY_ROLES] }, // WS2 T12
+  // WL final review: branding writes (BRAND_SETTINGS_ROLES).
+  { name: 'PUT /api/settings/branding', call: () => putBrandingSettings(send('PUT', '/api/settings/branding', NOT_JSON)), allowed: BRAND_SETTINGS_ROLES },
+  { name: 'POST /api/settings/branding/reset', call: () => postBrandingReset(send('POST', '/api/settings/branding/reset', NOT_JSON)), allowed: BRAND_SETTINGS_ROLES },
+  { name: 'POST /api/settings/branding/onboarding', call: () => postBrandingOnboarding(send('POST', '/api/settings/branding/onboarding', NOT_JSON)), allowed: BRAND_SETTINGS_ROLES },
+  // Multipart route: a non-multipart body is the 400 an allowed role gets, after the gate (the limiter is mocked above).
+  { name: 'POST /api/settings/branding/assets', call: () => postBrandingAsset(send('POST', '/api/settings/branding/assets', NOT_JSON)), allowed: BRAND_SETTINGS_ROLES },
+  // end WL final review
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

@@ -27,10 +27,10 @@ export async function proxy(request: NextRequest) {
 // with a broken icon for anyone not currently signed in. apple-icon and
 // manifest.webmanifest (src/app/apple-icon.tsx, src/app/manifest.ts) are
 // excluded for the same reason: home-screen installs fetch them cookieless.
-// branding is excluded because it's static logo assets (public/branding/*)
-// referenced directly by <img> tags on unauthenticated pages (both login
-// screens, the intake portal) -- without this exclusion those requests hit
-// this same staff-session gate and redirect to /login, breaking the image.
+// branding is excluded because it's the public, hash-addressed brand image
+// route (src/app/branding/[file]/route.ts) referenced directly by <img> tags
+// on unauthenticated pages (both login screens, the intake portal) -- without
+// this exclusion those requests hit this same staff-session gate and redirect to /login, breaking the image.
 // telemedicine/join is excluded the same way intake and patient-portal are:
 // it's the patient-facing video-visit join page, gated by its own
 // single-use join token (see src/app/telemedicine/join/[token]/page.tsx),

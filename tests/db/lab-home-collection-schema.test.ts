@@ -14,6 +14,8 @@ import { readMigration, idempotencyProblems, missingColumns } from './migration-
 
 const ENUMS = '2026-10-08-sp5-lab-enum-values.sql'
 const TABLES = '2026-10-08-sp5-lab-home-collection.sql'
+// WS1 T10 adds lab_requisitions.priority/clinical_notes/fasting_required in its own migration.
+const WS1_LAB_FIELDS = '2026-10-24-ws1-lab-order-fields.sql'
 
 const NEW_TABLES = [
   ['lab_service_area_pins', labServiceAreaPins], ['home_collection_windows', homeCollectionWindows], ['lab_requisitions', labRequisitions],
@@ -72,7 +74,7 @@ describe('SP5 lab LIS & home-collection schema', () => {
   })
 
   it.each(NEW_TABLES)('tables migration declares every %s column', (_n, t) => {
-    expect(missingColumns(t, readMigration(TABLES))).toEqual([])
+    expect(missingColumns(t, readMigration(TABLES) + readMigration(WS1_LAB_FIELDS))).toEqual([])
   })
 
   it('declares every SP5 column on existing tables', () => {
@@ -86,7 +88,7 @@ describe('SP5 lab LIS & home-collection schema', () => {
   })
 
   it('every SP5 FK, unique, check and index name is in the SQL and fits 63 chars', () => {
-    const s = readMigration(TABLES)
+    const s = readMigration(TABLES) + readMigration(WS1_LAB_FIELDS)
     for (const t of SP5_TABLES) {
       const names = constraintNames(t)
       expect(names.length, getTableConfig(t).name).toBeGreaterThan(0)

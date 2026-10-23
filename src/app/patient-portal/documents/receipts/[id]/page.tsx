@@ -7,6 +7,7 @@ import { getPortalReceipt } from '@/lib/queries/patient-portal-records'
 import { getBillingSettings } from '@/lib/queries/billing-settings'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { ReceiptDocument } from '@/components/billing/ReceiptDocument'
+import { getBrand } from '@/lib/brand-server'
 import { BackLink } from '@/components/BackLink'
 import { PrintButton } from '@/components/PrintButton'
 
@@ -17,6 +18,7 @@ export default async function PortalReceiptPage({ params }: { params: Promise<{ 
   const receipt = await getPortalReceipt(session.patientId, id)
   if (!receipt) notFound()
   const { legalName, address, gstin } = await getBillingSettings()
+  const { print } = await getBrand()
   await logPatientPortalAction('viewed receipt via patient portal', session.patientId, `receipt=${receipt.id}`)
 
   return (
@@ -25,7 +27,7 @@ export default async function PortalReceiptPage({ params }: { params: Promise<{ 
         <BackLink href="/patient-portal/bills" label="Back to bills" />
         <PrintButton />
       </div>
-      <ReceiptDocument receipt={receipt} settings={{ legalName, address, gstin }} />
+      <ReceiptDocument receipt={receipt} settings={{ legalName, address, gstin }} marks={print} />
     </main>
   )
 }

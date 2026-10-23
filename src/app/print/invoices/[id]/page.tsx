@@ -4,6 +4,7 @@ import { logAudit } from '@/lib/audit'
 import { CHARGE_CAPTURE_ROLES } from '@/lib/role-policy'
 import { getInvoice } from '@/lib/queries/invoices'
 import { InvoiceDocument } from '@/components/billing/InvoiceDocument'
+import { getBrand } from '@/lib/brand-server'
 import { BackLink } from '@/components/BackLink'
 import { PrintButton } from '@/components/PrintButton'
 
@@ -16,6 +17,7 @@ export default async function PrintInvoicePage({ params }: { params: Promise<{ i
   if (!/^[1-9]\d{0,9}$/.test(raw) || Number(raw) > 2_147_483_647) notFound()
   const invoice = await getInvoice(Number(raw))
   if (!invoice) notFound()
+  const { print } = await getBrand()
   await logAudit(session, 'billing: printed invoice', invoice.patientId)
 
   return (
@@ -24,7 +26,7 @@ export default async function PrintInvoicePage({ params }: { params: Promise<{ i
         <BackLink href={`/billing/invoices/${invoice.id}`} label="Back to invoice" />
         <PrintButton />
       </div>
-      <InvoiceDocument invoice={invoice} />
+      <InvoiceDocument invoice={invoice} marks={print} />
     </main>
   )
 }

@@ -2,6 +2,7 @@ import { formatPaise } from '@/lib/format'
 import { formatDateTimeIn, formatIsoDate } from '@/lib/india-time'
 import { rupeesInWords } from '@/lib/billing/amount-words'
 import { PAYMENT_MODE_LABELS } from '@/components/billing/labels'
+import type { BillingDocumentMarks } from '@/lib/brand'
 
 export interface ReceiptDocumentData {
   kind: 'advance' | 'receipt'
@@ -20,8 +21,10 @@ export interface ReceiptDocumentData {
 /**
  * SP4: an advance or payment receipt as a document. Shared by the staff print view and
  * (Wave J) the patient portal's own-receipt view. Server-renderable (no hooks).
+ * WL T10 (spec D3): `marks` adds the brand logo, print footer and signature line; the legal name
+ * stays the billing one. Without `marks` the document is unchanged.
  */
-export function ReceiptDocument({ receipt, settings }: { receipt: ReceiptDocumentData; settings: { legalName: string | null; address: string | null; gstin: string | null } }) {
+export function ReceiptDocument({ receipt, settings, marks }: { receipt: ReceiptDocumentData; settings: { legalName: string | null; address: string | null; gstin: string | null }; marks?: BillingDocumentMarks }) {
   const title = receipt.kind === 'advance' ? 'Advance Receipt' : 'Payment Receipt'
   const row = (label: string, value: React.ReactNode) => (
     <div className="grid grid-cols-[10rem_1fr] border-b border-neutral-200 py-2">
@@ -34,6 +37,11 @@ export function ReceiptDocument({ receipt, settings }: { receipt: ReceiptDocumen
     <article className="mx-auto max-w-[160mm] bg-white p-8 text-[13px] text-neutral-900 shadow-sm ring-1 ring-neutral-200 print:max-w-none print:p-0 print:text-black print:shadow-none print:ring-0">
       <header className="flex items-start justify-between gap-6 border-b-2 border-neutral-800 pb-4">
         <div>
+          {marks?.logoUrl && (
+            // A validated https:// or /branding/ path; a plain img prints reliably.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={marks.logoUrl} alt="" className="mb-2 h-12 w-auto" />
+          )}
           <p className="text-xl font-bold">{settings.legalName ?? 'Hospital legal name not set'}</p>
           {settings.address && <p className="whitespace-pre-line text-neutral-600 print:text-black">{settings.address}</p>}
           {settings.gstin && <p className="text-neutral-600 print:text-black">GSTIN {settings.gstin}</p>}
@@ -57,9 +65,10 @@ export function ReceiptDocument({ receipt, settings }: { receipt: ReceiptDocumen
         <p>Computer-generated receipt.{receipt.kind === 'advance' ? ' Advances are adjusted against the final bill.' : ''}</p>
         <div className="text-right">
           <p>For {settings.legalName ?? 'the hospital'}</p>
-          <p className="mt-8 border-t border-neutral-400 pt-1">Cashier</p>
+          <p className="mt-8 border-t border-neutral-400 pt-1">{marks?.signatureLine ?? 'Cashier'}</p>
         </div>
       </footer>
+      {marks?.footerText && <p className="mt-4 whitespace-pre-line text-center text-[11px] text-neutral-500 print:text-black">{marks.footerText}</p>}
     </article>
   )
 }

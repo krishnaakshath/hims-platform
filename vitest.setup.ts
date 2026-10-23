@@ -21,3 +21,22 @@ vi.mock('next/headers', () => ({
     delete: () => {},
   }),
 }))
+
+// WL T4: `next/cache` needs Next's request/incremental-cache context, which tests (calling route
+// handlers, layouts and getBrand directly) do not have. `unstable_cache` passes straight through
+// (every call reads the DB, so a stored brand is visible at once) and the invalidation APIs are
+// no-op spies. Tests that assert on the cache wiring (tests/lib/brand-server.test.ts) doMock it.
+vi.mock('next/cache', () => ({
+  unstable_cache: <T extends (...args: never[]) => Promise<unknown>>(fn: T) => fn,
+  revalidateTag: vi.fn(),
+  revalidatePath: vi.fn(),
+  updateTag: vi.fn(),
+}))
+
+// WL T4: the root layout and the icon/manifest metadata routes `await connection()` (next/server)
+// to render per request; outside a Next request scope it throws, so tests get a resolved no-op.
+// Everything else in next/server is the real module.
+vi.mock('next/server', async () => {
+  const actual = await vi.importActual<typeof import('next/server')>('next/server')
+  return { ...actual, connection: async () => undefined }
+})

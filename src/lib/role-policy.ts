@@ -280,3 +280,6 @@ export const DISPENSE_ROLES: readonly Role[] = ['admin', 'pi', 'pharmacy']
 export const MEDICATION_PRICE_ROLES: readonly Role[] = ['admin', 'pharmacy']
 export const INVOICE_READY_ROLES: readonly Role[] = CHARGE_CAPTURE_ROLES
 // end WS1/WS2 roles
+// WL T6: Settings > Branding (read, save, reset, logo upload, onboarding). Admin only (spec D17).
+export const BRAND_SETTINGS_ROLES: readonly Role[] = MASTER_DATA_ADMIN_ROLES
+// end WL T6

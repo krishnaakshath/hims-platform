@@ -5,7 +5,7 @@ import { liveDiagnosis } from './diagnoses' // SP6
 import { evaluateEligibility } from '@/lib/eligibility'
 import { evaluateCriteria, type Verdict } from '@/lib/rule-engine'
 import { sendMessage } from '@/lib/queries/messages'
-import { brand } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 import { publicPatientColumns } from '@/lib/queries/patient-columns'
 
 /**
@@ -67,9 +67,11 @@ export type ConfirmSelectionResult =
   | { ok: true; screeningId: number; confirmedAt: Date; notifiedAt: Date; messageId: number }
   | { ok: false; reason: 'not_found' | 'not_green' | 'already_confirmed' | 'trial_missing' }
 
-// Configured per deployment (brand.ts). Already-stored messages keep the sender
-// name they were written with; nothing matches on this string.
-export const SYSTEM_SENDER_NAME = brand.systemSenderName
+// The resolved brand's automated sender ("<name> (Automated)"), read per request (WL T10).
+// Already-stored messages keep the sender name they were written with; nothing matches on this string.
+export async function systemSenderName(): Promise<string> {
+  return (await getBrand()).systemSenderName
+}
 
 export function selectionNotificationBody(trialName: string, trialSite: string): string {
   return `Great news — based on your recent screening, you've been selected to move forward with ${trialName} at ${trialSite}. A member of our care team will reach out soon to schedule your next steps.`
@@ -121,6 +123,6 @@ export async function confirmScreeningSelection(patientId: string, confirmedByNa
     .returning({ id: patientTrialScreenings.id })
   if (claimedNotify.length === 0) return { ok: false, reason: 'already_confirmed' }
 
-  const created = await sendMessage(patientId, 'system', SYSTEM_SENDER_NAME, selectionNotificationBody(trial.name, trial.site))
+  const created = await sendMessage(patientId, 'system', await systemSenderName(), selectionNotificationBody(trial.name, trial.site))
   return { ok: true, screeningId: screening.id, confirmedAt, notifiedAt, messageId: created.id }
 }

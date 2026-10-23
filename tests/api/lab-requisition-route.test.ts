@@ -10,8 +10,9 @@ vi.mock('@/lib/queries/lab-requisitions', () => ({ createLabRequisition: vi.fn()
 vi.mock('@/lib/queries/notifications', () => ({ notifyPatientSafely: vi.fn() }))
 vi.mock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => [{ id: 4, name: 'Dr. Probe' }]) }))
 vi.mock('@/lib/doctor-queue-provider', () => ({ resolveDoctorQueueProvider: vi.fn(async () => ({ id: 4, name: 'Dr. Probe' })) }))
-vi.mock('@/lib/brand', () => ({ brand: { name: 'Probe Hospital' } }))
 vi.mock('@/lib/encounters/ownership', () => ({ checkEncounterWriter: vi.fn() })) // final fix wave (item 2)
+// WL T10 / spec D14: the SMS hospitalName is the resolved brand's smsName, read per request.
+vi.mock('@/lib/brand-server', async () => ({ getBrand: vi.fn(async () => ({ ...(await import('@/lib/brand')).envBrand, name: 'Probe Hospital', smsName: 'PROBE HSP' })) }))
 
 import { POST } from '@/app/api/patients/[anonId]/lab-orders/route'
 import { createLabRequisition, openOpdEncounterFor } from '@/lib/queries/lab-requisitions'
@@ -43,7 +44,7 @@ describe('POST /api/patients/[anonId]/lab-orders (requisition)', () => {
     expect(notifyPatientSafely).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       patientId: 'RD-0001',
       templateKey: 'lab_tests_ordered',
-      vars: { hospitalName: 'Probe Hospital' },
+      vars: { hospitalName: 'PROBE HSP' },
       related: { type: 'lab_requisition', id: 12 },
       dedupeKey: 'lab_tests_ordered:requisition=12',
     }))

@@ -2,7 +2,7 @@ import { createHash, randomInt, timingSafeEqual } from 'crypto'
 import { getRedis } from '@/lib/cache'
 import { sendSms } from '@/lib/sms'
 import { sendEmail } from '@/lib/email'
-import { brand } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 
 const OTP_TTL_SECONDS = 300 // 5 minutes, matches the copy shown to the user
 
@@ -21,7 +21,7 @@ export async function generateAndSendOtp(identity: string, channel: 'sms' | 'ema
   if (channel === 'sms') {
     await sendSms(destination, code)
   } else {
-    await sendEmail(destination, `Your ${brand.name} verification code`, `Your verification code is ${code}. It expires in 5 minutes.`)
+    await sendEmail(destination, `Your ${(await getBrand()).name} verification code`, `Your verification code is ${code}. It expires in 5 minutes.`)
   }
 }
 

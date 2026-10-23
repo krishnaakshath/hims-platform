@@ -7,7 +7,7 @@ import { createDoctorAssignment } from '../../fixtures/doctor-assignment'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { buildVisitConfirmationBody } from '@/lib/notification-templates'
 import * as messagesModule from '@/lib/queries/messages'
-import { SYSTEM_SENDER_NAME } from '@/lib/queries/eligibility'
+import { systemSenderName } from '@/lib/queries/eligibility'
 
 // Pass-through spy on sendMessage so one test can force a failure inside the
 // notify transaction; every other test runs the real implementation.
@@ -278,7 +278,7 @@ describe('notifyPatientOfScheduledAssignment', () => {
     await notifyPatientOfScheduledAssignment(scheduled, appointment, providerName)
     const rows = await confirmationsSince(testStart)
     expect(rows).toHaveLength(1)
-    expect(rows[0].senderName).toBe(SYSTEM_SENDER_NAME)
+    expect(rows[0].senderName).toBe(await systemSenderName())
     expect(rows[0].internal).toBe(false)
     expect(rows[0].body).toBe(buildVisitConfirmationBody({ providerName, startsAt: appointment.startsAt, visitReason, visitType: 'outpatient' }))
     expect(rows[0].body).not.toContain('• An overnight bag')
@@ -293,7 +293,7 @@ describe('notifyPatientOfScheduledAssignment', () => {
     await notifyPatientOfScheduledAssignment(scheduled, appointment, providerName)
     const rows = await confirmationsSince(testStart)
     expect(rows).toHaveLength(1)
-    expect(rows[0].senderName).toBe(SYSTEM_SENDER_NAME)
+    expect(rows[0].senderName).toBe(await systemSenderName())
     // Second call is a no-op: the timestamp is not overwritten.
     expect((await notifiedAt(scheduled.id))?.getTime()).toBe(first?.getTime())
   })

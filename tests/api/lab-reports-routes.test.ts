@@ -13,6 +13,8 @@ vi.mock('@/lib/queries/lab-reports', () => ({ releaseLabReport: vi.fn(), getLabR
 vi.mock('@/lib/blob-store', () => ({ streamPrivateBlob: vi.fn() }))
 vi.mock('@/lib/queries/notifications', () => ({ notifyPatientSafely: vi.fn(async () => 'logged') }))
 vi.mock('@/lib/follow-ups/notifier', () => ({ notifyFollowUpSafely: vi.fn(async () => undefined) }))
+// WL T10 / spec D14: the SMS hospitalName is the resolved brand's smsName, read per request.
+vi.mock('@/lib/brand-server', async () => ({ getBrand: vi.fn(async () => ({ ...(await import('@/lib/brand')).envBrand, name: 'Probe Hospital', smsName: 'PROBE HSP' })) }))
 
 import { POST as release } from '@/app/api/lab-requisitions/[id]/report/route'
 import { GET as download } from '@/app/api/lab-reports/[id]/download/route'
@@ -21,7 +23,6 @@ import { streamPrivateBlob } from '@/lib/blob-store'
 import { notifyPatientSafely } from '@/lib/queries/notifications'
 import { notifyFollowUpSafely } from '@/lib/follow-ups/notifier'
 import { logAudit } from '@/lib/audit'
-import { brand } from '@/lib/brand'
 
 const BLOB_URL = 'local:lab-reports/5/LR-2099-000007-x.pdf'
 const REPORT = {
@@ -95,7 +96,7 @@ describe('POST /api/lab-requisitions/[id]/report', () => {
     expect(JSON.stringify(body)).not.toContain('blob')
     expect(releaseLabReport).toHaveBeenCalledWith(5, expect.objectContaining({ role: 'labs', userId: 3 }))
     expect(notifyPatientSafely).toHaveBeenCalledWith(expect.objectContaining({ role: 'labs' }), {
-      patientId: 'RD-0001', templateKey: 'lab_report_ready', vars: { hospitalName: brand.name },
+      patientId: 'RD-0001', templateKey: 'lab_report_ready', vars: { hospitalName: 'PROBE HSP' },
       related: { type: 'lab_report', id: 41 }, dedupeKey: 'lab_report_ready:report=41',
     })
     expect(notifyFollowUpSafely).toHaveBeenCalledWith(expect.objectContaining({ role: 'labs' }), {

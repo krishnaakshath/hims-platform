@@ -5,7 +5,7 @@ secrets. Everything runs on that host: Postgres, Redis, the file store and the
 app. There is no cloud database, cache or file store, and nothing in the stack
 calls the internet at run time unless the operator configures an optional
 integration (SMTP, SMS/WhatsApp, Google SSO, ABDM/NHCX) or runs the WHO
-ICD-10 loader. Branding is configuration (`BRAND_*`), so the same repository
+ICD-10 loader. Branding is configuration (`BRAND_*` defaults plus Settings > Branding), so the same repository
 serves every client.
 
 ## What runs
@@ -199,11 +199,12 @@ backing services, secrets, admin, branding, features, demo switches, seed,
 optional integrations). `npm run check:env-docs` (and its test) fails if the
 code reads a variable that file does not document.
 
-> **Brand changes need a rebuild.** `BRAND_*` is read when the app starts, but
-> pages prerendered at build time keep the values the image was built with:
-> after editing them run `docker compose build app && docker compose up -d`.
-> **Changing `BRAND_COOKIE_PREFIX` signs everyone out**, so set it once before
-> go-live.
+> **Branding.** `BRAND_*` are first-run defaults; the hospital admin overrides
+> them in Settings > Branding, and changes apply on the next request with no
+> rebuild. With several self-hosted replicas they appear within 5 minutes.
+> **Changing `BRAND_COOKIE_PREFIX` signs everyone out** (it is env-only), so set
+> it once before go-live. Logo uploads need the file store: keep
+> `BLOB_DRIVER=local` and the `hims_blobs` volume writable.
 
 Never set `DISABLE_STAFF_MFA`, `DEMO_FEATURES`, `ABDM_USE_MOCKS`,
 `ALLOW_DEMO_MOCKS`, `SEED_ON_START` or `ALLOW_PRODUCTION_SEED` on a deployment
@@ -228,6 +229,24 @@ holding real data.
 - Status: `docker compose run --rm migrate migrate --status`; dry run:
   `docker compose run --rm migrate migrate --dry-run`.
 
+## Onboarding a new hospital
+
+1. Provision one database, Redis and file store per hospital (the compose
+   stack does this).
+2. In `.env.docker` set `BRAND_COOKIE_PREFIX` (fixed for the life of the
+   deployment) and optionally `BRAND_NAME` and `BRAND_PRIMARY_COLOR`, so the
+   very first sign-in already looks right.
+3. `docker compose up -d --build`. The migrate step applies
+   `scripts/migrations/2026-10-27-wl-brand-settings.sql` with the rest. Create
+   the first admin.
+4. The admin signs in and follows the onboarding card on the dashboard: name,
+   logo, colour, support contact, then a test sign-in from a private window.
+5. Verify: `/login` and `/patient-portal/login` show the brand, a print slip
+   shows the header, and an OTP email shows the signature.
+6. Caveats to tell the hospital: the cookie prefix cannot be changed; the
+   authenticator-app label follows the name for new enrolments only.
+7. Multiple replicas: brand changes show within 5 minutes.
+
 ## Smoke test
 
 After each deploy or upgrade:
@@ -242,6 +261,9 @@ After each deploy or upgrade:
 - [ ] A role is redirected away from a page it may not see.
 - [ ] An upload (document or insurance card) succeeds and downloads again
       (proves the `hims_blobs` volume).
+- [ ] Settings > Branding (admin) loads; saving a name shows on `/login` on
+      the next request; uploading a small PNG logo works and is served from
+      `/branding/<kind>-<hash>.png`; the browser tab icon follows it.
 - [ ] If configured: an email or SMS one-time code arrives with the client's name.
 - [ ] None of the demo switches above is set.
 

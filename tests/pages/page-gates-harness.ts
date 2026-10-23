@@ -398,4 +398,8 @@ export const PAGE_GATES: PageGateCase[] = [
   // end Foundations T11
   // WS1 T3: the consultation workspace -- WORKSPACE_READ_ROLES; labs goes to its worklist.
   { route: '/encounters/[id]', load: () => import('@/app/(dashboard)/encounters/[id]/page'), props: { params: Promise.resolve({ id: '1' }) }, allowed: ['admin', 'pi', 'crc'], deniedRedirect: { labs: '/labs' } },
+  // WL T8: Settings > Branding -- BRAND_SETTINGS_ROLES (admin); linked from the Practice tab, no nav entry.
+  // A denied role is sent back to /settings (which itself redirects roles it does not admit).
+  { route: '/settings/branding', load: () => import('@/app/(dashboard)/settings/branding/page'), allowed: ['admin'], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/settings'])) },
+  // end WL T8
 ]

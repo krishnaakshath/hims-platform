@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import type { Role } from '@/lib/auth'
-import { brand } from '@/lib/brand'
+import { envBrand } from '@/lib/brand'
 
 class NotFound extends Error {}
 class Redirect extends Error {}
@@ -13,6 +13,8 @@ const state = vi.hoisted(() => ({ role: 'frontdesk' as string, logAudit: vi.fn(a
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: state.role, name: 'Test WC', userId: null })) }))
 vi.mock('@/lib/audit', () => ({ logAudit: state.logAudit }))
 vi.mock('@/lib/queries/print-slips', () => ({ getTokenSlip: state.getTokenSlip }))
+// WL T10: the slip reads the brand at request time; with no stored brand getBrand() is the env brand.
+vi.mock('@/lib/brand-server', async () => ({ getBrand: vi.fn(async () => (await import('@/lib/brand')).envBrand) }))
 
 import TokenSlipPage from '@/app/print/token/[encounterId]/page'
 
@@ -36,7 +38,7 @@ describe('/print/token/[encounterId]', () => {
     expect(screen.getByText(/Dr\. Meera Iyer/)).toBeInTheDocument()
     expect(screen.getByText(/General Medicine/)).toBeInTheDocument()
     expect(screen.getByText('8 Oct 2026, 9:30 am')).toBeInTheDocument()
-    expect(screen.getByText(brand.legalName)).toBeInTheDocument()
+    expect(screen.getByText(envBrand.legalName)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /print/i })).toBeInTheDocument()
     expect(state.logAudit).toHaveBeenCalledWith(expect.objectContaining({ role: 'frontdesk' }), 'printed OPD token slip', 'RD-0042', 'encounter=55')
   })

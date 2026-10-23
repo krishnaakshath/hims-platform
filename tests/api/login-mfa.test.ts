@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { NextRequest, NextResponse } from 'next/server'
 import { eq, and } from 'drizzle-orm'
 import * as OTPAuth from 'otpauth'
-import { brand, cookieName } from '@/lib/brand'
+import { envBrand, cookieName } from '@/lib/brand'
 import { hashPassword } from '@/lib/password'
 import { encryptSensitive } from '@/lib/crypto'
 import { POST as loginRoute } from '@/app/api/login/route'
@@ -158,7 +158,7 @@ describe('two-step staff login', () => {
     expect(state?.mfaSecretEncrypted).toBeTruthy()
 
     const pendingCookie = enrollRes.cookies.get(cookieName('pending_staff_mfa'))?.value
-    const totp = new OTPAuth.TOTP({ issuer: brand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret: enrollBody.manualKey })
+    const totp = new OTPAuth.TOTP({ issuer: envBrand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret: enrollBody.manualKey })
     enrollCode = totp.generate()
     const verifyRes = await loginMfa(mfaReq({ code: enrollCode }, `${cookieName('pending_staff_mfa')}=${pendingCookie}`))
     expect(verifyRes.status).toBe(200)

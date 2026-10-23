@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LayoutDashboard, FileText, Pill, CalendarCheck, MessageSquare, Megaphone, ShieldCheck, FileCheck, ClipboardList, BedDouble, Receipt, ShieldPlus } from 'lucide-react'
 import { BrandLogo } from '@/components/BrandLogo'
+import { useBrand } from '@/components/BrandProvider'
 
 type Icon = React.ComponentType<{ className?: string }>
 
@@ -35,13 +36,14 @@ function isActive(pathname: string | null, href: string): boolean {
 // convention, just recolored for a light background.
 export function PatientPortalSideNav() {
   const pathname = usePathname()
+  const { portalName } = useBrand()
 
   return (
     <nav className="w-60 shrink-0 overflow-y-auto border-r border-border/60 bg-secondary/30 p-3">
       <div className="mb-4 px-2.5 py-2">
         <BrandLogo className="text-lg font-semibold tracking-tight text-foreground" />
       </div>
-      <p className="mb-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">Patient Portal</p>
+      <p className="mb-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">{portalName}</p>
       <ul className="space-y-0.5">
         {ITEMS.map((item) => {
           const active = isActive(pathname, item.href)

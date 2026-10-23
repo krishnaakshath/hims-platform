@@ -4,7 +4,8 @@ import { CLINICAL_ROLES, DISCHARGE_SUMMARY_PRINT_ROLES } from '@/lib/role-policy
 import { logAudit } from '@/lib/audit'
 import { parseId } from '@/lib/http'
 import { getDischargeSummaryData } from '@/lib/queries/discharge-summary'
-import { getPracticeIdentity } from '@/lib/queries/settings'
+import { getBrand } from '@/lib/brand-server'
+import { printIdentity } from '@/lib/brand'
 import { DischargeSummaryDocument } from '@/components/print/DischargeSummaryDocument'
 
 // Wave F P1-13: the printable A4 discharge summary (SP3 promised it; the data
@@ -26,7 +27,7 @@ export default async function DischargeSummaryPrintPage({ params }: { params: Pr
   const now = new Date()
   const data = await getDischargeSummaryData(admissionId, { now, viewerRole: session.role })
   if (!data) notFound()
-  const practice = await getPracticeIdentity()
+  const identity = printIdentity(await getBrand())
   await logAudit(session, 'printed discharge summary', data.patient.id, `admission=${data.admission.id}`)
 
   return (
@@ -35,8 +36,7 @@ export default async function DischargeSummaryPrintPage({ params }: { params: Pr
       now={now}
       backHref={`/patients/${data.patient.id}`}
       backLabel="Back to patient"
-      hospitalName={practice.practiceName}
-      hospitalSubline={practice.practiceSite}
+      identity={identity}
       clinicalCopy={CLINICAL_ROLES.includes(session.role)}
     />
   )

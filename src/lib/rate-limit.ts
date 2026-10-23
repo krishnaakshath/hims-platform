@@ -442,3 +442,39 @@ export async function checkIntegrationTestRateLimit(staffName: string): Promise<
   return { allowed: success }
 }
 // end SP8
+
+// WL T7: Settings > Branding uploads decode images with sharp, so each admin gets 10 uploads per
+// 10 minutes and the whole hospital 60 per hour (both buckets must allow; the shared bucket is only
+// charged for an upload the staff bucket allowed). Fails closed like every
+// limiter here: no Redis means getRedis() throws ServiceNotConfiguredError.
+let _brandUploadStaffLimiter: Ratelimit | null = null
+let _brandUploadGlobalLimiter: Ratelimit | null = null
+function getBrandUploadLimiters(): [Ratelimit, Ratelimit] {
+  if (!_brandUploadStaffLimiter) {
+    _brandUploadStaffLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(10, '600 s'), prefix: 'ratelimit:brand-upload' })
+  }
+  if (!_brandUploadGlobalLimiter) {
+    _brandUploadGlobalLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(60, '3600 s'), prefix: 'ratelimit:brand-upload-global' })
+  }
+  return [_brandUploadStaffLimiter, _brandUploadGlobalLimiter]
+}
+
+export async function checkBrandUploadRateLimit(staffName: string): Promise<{ allowed: boolean }> {
+  const [staff, global] = getBrandUploadLimiters()
+  // Staff bucket first, and the shared bucket only when it allows: one admin hammering the button
+  // must not spend the whole hospital's hourly quota with uploads that were refused anyway.
+  const a = await staff.limit(staffName.toLowerCase())
+  if (!a.success) return { allowed: false }
+  const b = await global.limit('all')
+  return { allowed: b.success }
+}
+
+// The global bucket's key is shared by every caller, so the test that saturates the per-staff
+// bucket clears it before and after (same reasoning as __resetBookingRequestGlobalBucketForTests).
+export async function __resetBrandUploadGlobalBucketForTests(): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('__resetBrandUploadGlobalBucketForTests must never be called in production')
+  }
+  await getBrandUploadLimiters()[1].resetUsedTokens('all')
+}
+// end WL T7

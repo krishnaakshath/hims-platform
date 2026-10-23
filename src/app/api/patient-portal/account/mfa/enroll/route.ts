@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requirePatientSession } from '@/lib/patient-session'
 import { encryptSensitive } from '@/lib/crypto'
 import { generateMfaEnrollment } from '@/lib/mfa'
+import { getBrand } from '@/lib/brand-server'
 import { getPatientMfaState, setPatientMfaSecret } from '@/lib/queries/patient-portal'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 
@@ -12,7 +13,7 @@ export async function POST() {
   const mfaState = await getPatientMfaState(session.patientId)
   if (mfaState?.mfaEnabled) return NextResponse.json({ error: 'MFA is already enabled' }, { status: 400 })
 
-  const enrollment = await generateMfaEnrollment(session.patientId)
+  const enrollment = await generateMfaEnrollment(session.patientId, (await getBrand()).mfaIssuer)
   await setPatientMfaSecret(session.patientId, encryptSensitive(enrollment.secretBase32))
   await logPatientPortalAction('enrolled in patient portal MFA', session.patientId)
 

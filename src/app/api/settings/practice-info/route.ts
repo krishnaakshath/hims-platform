@@ -5,6 +5,7 @@ import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { updatePracticeInfo } from '@/lib/queries/settings'
 import { isPracticeTimezone } from '@/lib/practice-timezones'
+import { invalidateBrandCache } from '@/lib/brand-server'
 
 const practiceInfoSchema = z.object({
   practiceName: z.string().trim().min(1),
@@ -28,5 +29,7 @@ export async function PUT(request: NextRequest) {
 
   await updatePracticeInfo(parsed.data)
   await logAudit(session, 'updated practice information', null)
+  // The brand snapshot carries the practice name and site.
+  invalidateBrandCache()
   return NextResponse.json({ ok: true })
 }

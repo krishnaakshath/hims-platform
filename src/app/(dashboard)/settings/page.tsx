@@ -65,6 +65,8 @@ export default async function SettingsPage() {
         <UhidPrefixForm initialPrefix={settings.uhidPrefix} isAdmin={isAdmin} />
         {/* SP8 */}
         {isAdmin && <p className="mt-4 text-sm"><a href="/settings/integrations" className="text-primary hover:underline">ABDM / NHCX connection</a> <span className="text-muted-foreground">— connection state, certificates and test connection</span></p>}
+        {/* WL T8 */}
+        {isAdmin && <p className="mt-2 text-sm"><a href="/settings/branding" className="text-primary hover:underline">Branding</a> <span className="text-muted-foreground">— name, logo, colours, sign-in page and printouts</span></p>}
       </div>
     </section>
   )

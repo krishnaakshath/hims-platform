@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { NextRequest, NextResponse } from 'next/server'
 import { eq, and } from 'drizzle-orm'
 import * as OTPAuth from 'otpauth'
-import { brand } from '@/lib/brand'
+import { envBrand } from '@/lib/brand'
 import { setPatientSessionCookie, PATIENT_SESSION_COOKIE_NAME } from '@/lib/patient-session'
 import { POST as enroll } from '@/app/api/patient-portal/account/mfa/enroll/route'
 import { POST as confirm } from '@/app/api/patient-portal/account/mfa/confirm/route'
@@ -141,7 +141,7 @@ describe('patient opt-in MFA', () => {
   })
 
   it('confirm with the correct code enables MFA', async () => {
-    const totp = new OTPAuth.TOTP({ issuer: brand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret: manualKey })
+    const totp = new OTPAuth.TOTP({ issuer: envBrand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret: manualKey })
     const sessionCookieValue = await mintSessionCookieValue(TEST_PATIENT_ID)
     const res = await withCookieBridge((request) => confirm(request), reqWithSession('/api/patient-portal/account/mfa/confirm', { code: totp.generate() }, sessionCookieValue))
     expect(res.status).toBe(200)

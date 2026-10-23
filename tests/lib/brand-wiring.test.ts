@@ -96,10 +96,16 @@ describe.each(CASES)('brand wiring ($label)', ({ env, name, prefix }) => {
     }
   })
 
-  it('uses the brand for the MFA issuer', async () => {
+  it('uses the brand for the MFA issuer at enrolment (env brand when the settings cannot be read)', async () => {
     await withBrand(env)
-    const { generateMfaEnrollment } = await import('@/lib/mfa')
-    const { qrDataUrl } = await generateMfaEnrollment('someone@example.test')
+    vi.doMock('@/lib/patient-session', () => ({ requirePatientSession: vi.fn(async () => ({ patientId: 'RD-0001' })) }))
+    vi.doMock('@/lib/queries/patient-portal', () => ({ getPatientMfaState: vi.fn(async () => null), setPatientMfaSecret: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/patient-portal-audit', () => ({ logPatientPortalAction: vi.fn(async () => undefined) }))
+    const { POST } = await import('@/app/api/patient-portal/account/mfa/enroll/route')
+    const { qrDataUrl } = await (await POST()).json()
+    vi.doUnmock('@/lib/patient-session')
+    vi.doUnmock('@/lib/queries/patient-portal')
+    vi.doUnmock('@/lib/patient-portal-audit')
     const uri = new URL(qrDataUrl.replace(/^qr:/, ''))
     expect(uri.searchParams.get('issuer')).toBe(name)
   })
@@ -127,7 +133,7 @@ describe.each(CASES)('brand wiring ($label)', ({ env, name, prefix }) => {
 
   it('uses the brand for the automated system sender name', async () => {
     await withBrand(env)
-    const { SYSTEM_SENDER_NAME } = await import('@/lib/queries/eligibility')
-    expect(SYSTEM_SENDER_NAME).toBe(`${name} (Automated)`)
+    const { systemSenderName } = await import('@/lib/queries/eligibility')
+    expect(await systemSenderName()).toBe(`${name} (Automated)`)
   })
 })
