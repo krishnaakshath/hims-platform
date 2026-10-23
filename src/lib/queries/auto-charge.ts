@@ -5,7 +5,7 @@
 // missing price is returned as an outcome and no line is written.
 import { and, asc, eq, inArray, isNull, max, ne, or, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { chargeLines, encounters, invoices, patients, providers, type ChargeLineRow, type EncounterRow } from '@/db/schema'
+import { chargeLines, encounterProcedures, encounters, invoices, patients, providers, type ChargeLineRow, type EncounterRow } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import { isUniqueViolation } from '@/lib/db-errors'
 import type { Session } from '@/lib/auth'
@@ -215,7 +215,7 @@ const VISIT_CANCELLED_REASON = 'Visit cancelled'
 
 /**
  * Cancel: voids the visit's live consultation and lab-order lines (WS2 T10: lab lines billed to the
- * visit, not to a stay) and its registration line (a draft invoice loses them, the SP4 void rule).
+ * visit, not to a stay), its procedure lines (WS2 T11) and its registration line (a draft invoice loses them, the SP4 void rule).
  * WS2 T10: the registration fee is owed once per patient, so while the patient has another
  * non-cancelled encounter the registration line moves to the earliest of them instead of being
  * voided. A line on a finalised invoice is never touched: the whole cancel is refused with that
@@ -235,6 +235,9 @@ export async function voidAutoLinesForEncounterInTx(
       or(
         inArray(chargeLines.source, [...VISIT_SOURCES]),
         and(eq(chargeLines.source, 'lab_order'), isNull(chargeLines.admissionId)),
+        // WS2 T11: the lines of the visit's procedures (linked by procedure, whatever the context).
+        and(eq(chargeLines.source, 'procedure'), inArray(chargeLines.encounterProcedureId,
+          tx.select({ id: encounterProcedures.id }).from(encounterProcedures).where(eq(encounterProcedures.encounterId, encounterId)))),
       ),
     ))
     .orderBy(chargeLines.id)

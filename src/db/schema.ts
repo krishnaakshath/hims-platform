@@ -1326,11 +1326,13 @@ export const encounterProcedures = pgTable('encounter_procedures', {
   codedAt: timestamp('coded_at'),
   voidedAt: timestamp('voided_at'),
   voidedByName: text('voided_by_name'),
+  orderNotes: text('order_notes'), // WS2 T11: the doctor's note on a procedure ordered from the workspace
 }, (t) => [
   index('encounter_procedures_encounter_id_idx').on(t.encounterId),
   index('encounter_procedures_patient_id_idx').on(t.patientId),
   check('encounter_procedures_code_required', sql`${t.codingStatus} = 'uncoded' OR (${t.codeId} IS NOT NULL AND ${t.code} IS NOT NULL)`),
   check('encounter_procedures_code_kind_pair', sql`(${t.codeId} IS NULL) = (${t.codeSystemKind} IS NULL)`),
+  check('encounter_procedures_order_notes_length', sql`${t.orderNotes} IS NULL OR char_length(${t.orderNotes}) <= 300`), // WS2 T11
 ])
 
 // The coding status of one encounter; no row = uncoded.

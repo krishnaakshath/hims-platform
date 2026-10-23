@@ -10,6 +10,7 @@ import { captureVisitChargesInTx, ensureConsultationChargeInTx, voidAutoLinesFor
 import type { WriteExecutor } from './executor'
 import { cancelLabOrderInTx } from './lab-lifecycle' // WS2 T10
 import type { LabOrderStatus } from '@/lib/labs/status' // WS2 T10
+import { lockVisitProceduresInTx, voidVisitProceduresInTx } from './procedure-orders' // WS2 T11
 
 // WS2 T10 (fix round 1): lab orders still waiting for their sample; anything later was performed.
 const LAB_PENDING_STATUSES: readonly LabOrderStatus[] = ['ordered', 'scheduled']
@@ -177,8 +178,10 @@ export type TransitionEncounterResult =
  * to another live visit of the patient instead, when there is one), and is refused (`visit_billed`,
  * nothing changed) while one of them is on a finalised invoice. WS2 T10: cancelling also cancels the
  * visit's pending lab orders, and is refused (`visit_has_performed_orders`, nothing changed) when one
- * is collected or later. Lock order: follow-up orders -> encounter -> lab orders (ascending id) ->
- * their home collection visits (ascending id) -> patient billing lock (last).
+ * is collected or later. WS2 T11: cancelling also voids the visit's procedure lines and soft-voids
+ * its procedures that are not coded. Lock order: follow-up orders -> encounter -> lab orders
+ * (ascending id) -> their home collection visits (ascending id) -> procedures (ascending id) ->
+ * patient billing lock (last).
  */
 export async function transitionEncounter(
   id: number,
@@ -223,6 +226,15 @@ export async function transitionEncounter(
           .where(inArray(homeCollectionVisits.id, homeVisitIds)).orderBy(asc(homeCollectionVisits.id)).for('update')
       }
     }
+    // WS2 T11: the visit's live procedures, ascending id, after the home visits and before the
+    // billing lock (cancelProcedure: encounter, procedure row, billing). Uncoded/proposed ones are
+    // soft-voided with the visit; a coded one stays (the coder owns it). Their lines are voided by
+    // voidAutoLinesForEncounterInTx below.
+    const proceduresToVoid: number[] = []
+    if (to === 'cancelled') {
+      const procs = await lockVisitProceduresInTx(tx, id)
+      proceduresToVoid.push(...procs.filter((p) => p.codingStatus !== 'coded').map((p) => p.id))
+    }
     // WS2 T9: refuse the cancel before any write when a visit charge is already invoiced.
     if (to === 'cancelled') {
       const v = await voidAutoLinesForEncounterInTx(tx, id, session)
@@ -236,6 +248,7 @@ export async function transitionEncounter(
       const c = await cancelLabOrderInTx(tx, orderId, VISIT_CANCELLED_ORDER_REASON, session, at)
       if (!c.ok) throw new Error(`visit cancel: lab order ${orderId} ${c.error}`)
     }
+    if (proceduresToVoid.length > 0) await voidVisitProceduresInTx(tx, id, current.patientId, proceduresToVoid, session, at) // WS2 T11
     const [updated] = await tx.update(encounters).set({
       status: to,
       statusChangedAt: at,
