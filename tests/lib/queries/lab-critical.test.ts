@@ -15,6 +15,7 @@ import {
   acknowledgeCriticalAlert, acknowledgeableCriticalOrderIds, criticalNotifyDenial, criticalSummaryText, listOpenCriticalAlerts, logCriticalNotification,
 } from '@/lib/queries/lab-critical'
 import { loadLabKpis } from '@/lib/queries/hospital-kpis'
+import { signOffLabResult } from '@/lib/queries/lab-signoffs'
 import { createLabDepartmentFixture, type LabDepartmentFixture } from '../../db/lab-verifier-fixtures'
 
 const TAG = randomBytes(4).toString('hex').toUpperCase()
@@ -115,10 +116,15 @@ describe.skipIf(!process.env.DATABASE_URL)('critical-value alerts (DB)', () => {
     const listed = await listOpenCriticalAlerts({ patientId: PID })
     expect(listed.map((a) => a.orderId)).toContain(id)
     expect((await listOpenCriticalAlerts({ providerId: orderingProvider })).map((a) => a.orderId)).toContain(id)
-    expect(await acknowledgeableCriticalOrderIds(doctor(NAME_ORDERING), { patientId: PID })).toContain(id)
-    expect(await acknowledgeableCriticalOrderIds(doctor(NAME_OTHER), { patientId: PID })).not.toContain(id)
+    // Not acknowledgeable until the call is logged.
+    expect(await acknowledgeableCriticalOrderIds(doctor(NAME_ORDERING), { patientId: PID })).not.toContain(id)
 
     // Verify while open: refused, nothing changes.
+    expect(await verifyLabResult(id, pathologist(), CALL)).toEqual({ ok: false, error: 'critical_not_notified' })
+    // Acknowledge while open: refused (the call is logged first); verify still waits.
+    expect(await acknowledgeCriticalAlert(id, null, doctor(NAME_ORDERING), CALL)).toEqual({ ok: false, error: 'not_notified' })
+    expect((await alertsOf(id))[0].status).toBe('open')
+    expect(await getDb().select().from(labResultSignoffs).where(eq(labResultSignoffs.labOrderId, id))).toEqual([])
     expect(await verifyLabResult(id, pathologist(), CALL)).toEqual({ ok: false, error: 'critical_not_notified' })
 
     // The pathologist (linked to the test's department) may log the call; another department's doctor may not.
@@ -133,6 +139,8 @@ describe.skipIf(!process.env.DATABASE_URL)('critical-value alerts (DB)', () => {
       status: 'notified', notifiedToName: 'Dr Rao', notifyChannel: 'phone', readBack: true, notifiedByName: NAME_TECH, notifiedByUserId: userIds[NAME_TECH], notifiedAt: CALL,
     })
     expect(await logCriticalNotification(id, { notifiedToName: 'Dr Rao', channel: 'in_person', readBack: false }, tech(), CALL)).toEqual({ ok: false, error: 'not_open' })
+    expect(await acknowledgeableCriticalOrderIds(doctor(NAME_ORDERING), { patientId: PID })).toContain(id)
+    expect(await acknowledgeableCriticalOrderIds(doctor(NAME_OTHER), { patientId: PID })).not.toContain(id)
     // Still counted until acknowledged.
     expect((await loadLabKpis('2099-05-01')).criticalOpen - before.criticalOpen).toBe(1)
 
@@ -178,6 +186,52 @@ describe.skipIf(!process.env.DATABASE_URL)('critical-value alerts (DB)', () => {
     rows = await alertsOf(id)
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ status: 'open', withdrawnAt: null, summary: 'Haemoglobin 6.5 g/dL' })
+  })
+
+  it('a changed critical amendment re-opens a notified or acknowledged alert; an unchanged one leaves it', async () => {
+    const staff = { kind: 'staff' as const, session: tech() }
+    const LATER = new Date('2099-05-01T06:00:00Z')
+    const callLogCleared = {
+      notifiedAt: null, notifiedByName: null, notifiedByUserId: null, notifiedToName: null, notifyChannel: null, readBack: null,
+      acknowledgedAt: null, acknowledgedByName: null, acknowledgedByUserId: null, ackNote: null,
+    }
+    // Notified: same values keep the call log; a new value re-opens it.
+    const a = await receivedOrder()
+    await recordLabResult(a, cbc({ PLT: '38' }), staff, { now: RESULT })
+    expect(await logCriticalNotification(a, { notifiedToName: 'Dr Rao', channel: 'phone', readBack: true }, tech(), CALL)).toEqual({ ok: true })
+    expect(await recordLabResult(a, cbc({ PLT: '38', HGB: '13.0' }), staff, { now: LATER })).toMatchObject({ ok: true, amended: true, flag: 'critical' })
+    expect((await alertsOf(a))[0]).toMatchObject({ status: 'notified', notifiedToName: 'Dr Rao', summary: 'Platelet count 38 10^3/µL', raisedAt: RESULT })
+    expect(await recordLabResult(a, cbc({ PLT: '31' }), staff, { now: LATER })).toMatchObject({ ok: true, flag: 'critical' })
+    expect((await alertsOf(a))[0]).toMatchObject({ status: 'open', summary: 'Platelet count 31 10^3/µL', raisedAt: LATER, ...callLogCleared })
+    expect(await verifyLabResult(a, pathologist(), LATER)).toEqual({ ok: false, error: 'critical_not_notified' })
+
+    // Acknowledged: same values leave the closed record; a new value re-opens it.
+    const b = await receivedOrder()
+    await recordLabResult(b, cbc({ HGB: '6.5' }), staff, { now: RESULT })
+    await logCriticalNotification(b, { notifiedToName: 'Dr Rao', channel: 'in_person', readBack: false }, tech(), CALL)
+    expect(await acknowledgeCriticalAlert(b, 'Transfuse', doctor(NAME_ORDERING), CALL)).toMatchObject({ ok: true })
+    await recordLabResult(b, cbc({ HGB: '6.5', PLT: '251' }), staff, { now: LATER })
+    expect((await alertsOf(b))[0]).toMatchObject({ status: 'acknowledged', ackNote: 'Transfuse', summary: 'Haemoglobin 6.5 g/dL' })
+    await recordLabResult(b, cbc({ HGB: '5.9' }), staff, { now: LATER })
+    expect((await alertsOf(b))[0]).toMatchObject({ status: 'open', summary: 'Haemoglobin 5.9 g/dL', raisedAt: LATER, ...callLogCleared })
+    expect(await acknowledgeCriticalAlert(b, null, doctor(NAME_ORDERING), LATER)).toEqual({ ok: false, error: 'not_notified' })
+  })
+
+  it('the review acknowledgement (signOffLabResult) refuses an open alert and closes a notified one in the same transaction', async () => {
+    const id = await receivedOrder()
+    await recordLabResult(id, cbc({ PLT: '38' }), { kind: 'staff', session: tech() }, { now: RESULT })
+    expect(await signOffLabResult(id, 'acknowledge', { note: null }, doctor(NAME_ORDERING), CALL)).toEqual({ ok: false, error: 'not_notified' })
+    expect((await alertsOf(id))[0].status).toBe('open')
+    expect(await getDb().select().from(labResultSignoffs).where(eq(labResultSignoffs.labOrderId, id))).toEqual([])
+    await logCriticalNotification(id, { notifiedToName: 'Dr Rao', channel: 'in_app', readBack: false }, tech(), CALL)
+    // Ownership is still checked first.
+    expect(await signOffLabResult(id, 'acknowledge', { note: null }, doctor(NAME_OTHER), CALL)).toEqual({ ok: false, error: 'not_owner' })
+    expect(await signOffLabResult(id, 'acknowledge', { note: 'Seen' }, doctor(NAME_ORDERING), CALL)).toEqual({ ok: true, providerId: orderingProvider })
+    expect((await alertsOf(id))[0]).toMatchObject({
+      status: 'acknowledged', acknowledgedAt: CALL, acknowledgedByName: NAME_ORDERING, acknowledgedByUserId: userIds[NAME_ORDERING], ackNote: 'Seen',
+    })
+    expect((await listOpenCriticalAlerts({ patientId: PID })).map((a) => a.orderId)).not.toContain(id)
+    expect(await signOffLabResult(id, 'acknowledge', { note: null }, doctor(NAME_ORDERING), CALL)).toEqual({ ok: false, error: 'already_signed' })
   })
 
   it('a missing order or an order without an alert is not_found', async () => {

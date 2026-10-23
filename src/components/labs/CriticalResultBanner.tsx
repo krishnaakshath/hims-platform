@@ -1,5 +1,5 @@
 // WS4 T12 (spec 3.5 item 25): open and notified critical alerts, each with its call log and the
-// action this viewer may take (log the call / acknowledge). Hook-free so a Server Component can pass
+// action this viewer may take (log the call while open / acknowledge once the call is logged). Hook-free so a Server Component can pass
 // `canAcknowledge` (a function); the actions themselves are client components.
 import { Siren } from 'lucide-react'
 import { formatIstTime } from '@/lib/india-time'
@@ -42,7 +42,7 @@ export function CriticalResultBanner({ alerts, canNotify, canAcknowledge }: {
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
                 {canNotify && a.status === 'open' && <CriticalNotifyForm orderId={a.orderId} testName={a.testName} />}
-                {canAcknowledge(a) && <CriticalAcknowledgeButton orderId={a.orderId} testName={a.testName} />}
+                {a.status === 'notified' && canAcknowledge(a) && <CriticalAcknowledgeButton orderId={a.orderId} testName={a.testName} />}
               </div>
             </li>
           )

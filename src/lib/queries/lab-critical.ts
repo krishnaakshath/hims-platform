@@ -3,7 +3,8 @@
 // are communicated on the preliminary result -- and withdrawn when an amendment removes the flag.
 // Lifecycle open -> notified (the lab's call log: who called whom, when, how, read-back) ->
 // acknowledged (the ordering doctor or the attending of the active admission), or withdrawn.
-// verifyLabResult refuses `critical_not_notified` while the alert is still `open`.
+// verifyLabResult refuses `critical_not_notified` while the alert is still `open`, and an `open`
+// alert cannot be acknowledged (`not_notified`): the call is always logged first.
 //
 // Lock order: the lab_orders row (`for update`), then the alert row (`for update`). Same first lock
 // as every lab lifecycle write, so no new deadlock path. Audits carry ids only (the called name
@@ -17,7 +18,7 @@ import type { LabResultFlag } from '@/lib/labs/analytes'
 import { verificationDenial } from '@/lib/labs/verification'
 import { resolveSessionProvider } from '@/lib/provider-identity'
 import type { WriteExecutor } from '@/lib/queries/executor'
-import { isResultOwnerInTx, resolveVerifierDepartmentId } from '@/lib/queries/lab-signoffs'
+import { isResultOwnerInTx, markCriticalAlertAcknowledgedInTx, resolveVerifierDepartmentId } from '@/lib/queries/lab-signoffs'
 
 export type CriticalAlertStatus = 'open' | 'notified' | 'acknowledged' | 'withdrawn'
 export type CriticalNotifyChannel = 'phone' | 'in_person' | 'in_app'
@@ -66,32 +67,37 @@ export function criticalSummaryText(i: {
 
 /**
  * Called by recordLabResult on its transaction, under the order lock. A critical result raises the
- * order's one alert (a withdrawn one re-opens with a fresh call log); a critical amendment of a live
- * alert only refreshes its summary ('unchanged', never a duplicate); a non-critical amendment
- * withdraws an open/notified alert. An acknowledged alert is a closed record and is left as it is.
+ * order's one alert (a withdrawn one re-opens with a fresh call log). A critical amendment never
+ * duplicates: an `open` alert just takes the new summary ('unchanged'); a `notified` or
+ * `acknowledged` alert whose summary changes re-opens ('raised') with the call log and the
+ * acknowledgement cleared, because both were about a value that is no longer the result; one whose
+ * summary is unchanged is left as it is. A non-critical amendment withdraws an open/notified alert;
+ * an acknowledged alert is then a closed record and is left as it is.
  */
 export async function raiseOrWithdrawCriticalAlert(
   tx: WriteExecutor,
   i: { orderId: number; patientId: string; flag: LabResultFlag; summary: string },
   now: Date,
 ): Promise<'raised' | 'withdrawn' | 'unchanged'> {
-  const [existing] = await tx.select({ id: labCriticalAlerts.id, status: labCriticalAlerts.status })
+  const [existing] = await tx.select({ id: labCriticalAlerts.id, status: labCriticalAlerts.status, summary: labCriticalAlerts.summary })
     .from(labCriticalAlerts).where(eq(labCriticalAlerts.labOrderId, i.orderId)).for('update')
   if (i.flag === 'critical') {
     if (!existing) {
       await tx.insert(labCriticalAlerts).values({ labOrderId: i.orderId, patientId: i.patientId, summary: i.summary, status: 'open', raisedAt: now })
       return 'raised'
     }
-    if (existing.status === 'withdrawn') {
-      await tx.update(labCriticalAlerts).set({
-        summary: i.summary, status: 'open', raisedAt: now, withdrawnAt: null,
-        notifiedAt: null, notifiedByName: null, notifiedByUserId: null, notifiedToName: null, notifyChannel: null, readBack: null,
-        acknowledgedAt: null, acknowledgedByName: null, acknowledgedByUserId: null, ackNote: null,
-      }).where(eq(labCriticalAlerts.id, existing.id))
-      return 'raised'
+    if (existing.status === 'open') {
+      if (existing.summary !== i.summary) await tx.update(labCriticalAlerts).set({ summary: i.summary }).where(eq(labCriticalAlerts.id, existing.id))
+      return 'unchanged'
     }
-    await tx.update(labCriticalAlerts).set({ summary: i.summary }).where(eq(labCriticalAlerts.id, existing.id))
-    return 'unchanged'
+    // notified / acknowledged with the same critical values: the call log still describes this result.
+    if (existing.status !== 'withdrawn' && existing.summary === i.summary) return 'unchanged'
+    await tx.update(labCriticalAlerts).set({
+      summary: i.summary, status: 'open', raisedAt: now, withdrawnAt: null,
+      notifiedAt: null, notifiedByName: null, notifiedByUserId: null, notifiedToName: null, notifyChannel: null, readBack: null,
+      acknowledgedAt: null, acknowledgedByName: null, acknowledgedByUserId: null, ackNote: null,
+    }).where(eq(labCriticalAlerts.id, existing.id))
+    return 'raised'
   }
   if (existing && OPEN_CRITICAL_STATUSES.includes(existing.status)) {
     await tx.update(labCriticalAlerts).set({ status: 'withdrawn', withdrawnAt: now }).where(eq(labCriticalAlerts.id, existing.id))
@@ -156,7 +162,8 @@ export async function logCriticalNotification(
 }
 
 /**
- * The doctor's acknowledgement closes the alert (from `open` or `notified`) and, in the same
+ * The doctor's acknowledgement closes a `notified` alert (an `open` one is refused `not_notified`:
+ * the lab logs the call first, spec 3.5 item 24) and, in the same
  * transaction, records an `acknowledge` sign-off (WS4 T11) for this provider -- one that already
  * exists is kept. Identity is the staff link only (resolveSessionProvider).
  */
@@ -165,7 +172,7 @@ export async function acknowledgeCriticalAlert(
   note: string | null,
   session: Session,
   now: Date = new Date(),
-): Promise<{ ok: true; providerId: number } | { ok: false; error: 'not_found' | 'not_owner' | 'already_acknowledged' | 'withdrawn' }> {
+): Promise<{ ok: true; providerId: number } | { ok: false; error: 'not_found' | 'not_owner' | 'already_acknowledged' | 'withdrawn' | 'not_notified' }> {
   const provider = await resolveSessionProvider(session)
   return getDb().transaction(async (tx) => {
     const locked = await lockAlert(tx, orderId)
@@ -173,9 +180,8 @@ export async function acknowledgeCriticalAlert(
     if (!provider || !(await isResultOwnerInTx(tx, provider.id, locked.order))) return { ok: false, error: 'not_owner' } as const
     if (locked.alert.status === 'withdrawn') return { ok: false, error: 'withdrawn' } as const
     if (locked.alert.status === 'acknowledged') return { ok: false, error: 'already_acknowledged' } as const
-    await tx.update(labCriticalAlerts).set({
-      status: 'acknowledged', acknowledgedAt: now, acknowledgedByName: session.name, acknowledgedByUserId: session.userId, ackNote: note,
-    }).where(eq(labCriticalAlerts.id, locked.alert.id))
+    if (locked.alert.status === 'open') return { ok: false, error: 'not_notified' } as const
+    await markCriticalAlertAcknowledgedInTx(tx, locked.alert.id, note, session, now)
     const signoff = await tx.insert(labResultSignoffs)
       .values({ labOrderId: orderId, kind: 'acknowledge', providerId: provider.id, userId: session.userId, signedByName: session.name, note, signedAt: now })
       .onConflictDoNothing({ target: [labResultSignoffs.labOrderId, labResultSignoffs.kind, labResultSignoffs.providerId] })
@@ -222,11 +228,12 @@ export async function listOpenCriticalAlerts(filter: { patientId?: string; provi
 }
 
 /**
- * Order ids of the open/notified alerts this session may acknowledge: its staff-linked provider
- * owns them (ordering or attending). Empty without a link. The route re-checks under the lock.
+ * Order ids of the alerts this session may acknowledge: `notified` ones (the call is logged; an
+ * `open` alert is refused `not_notified`) that its staff-linked provider owns (ordering or
+ * attending). Empty without a link. The route re-checks under the lock.
  */
 export async function acknowledgeableCriticalOrderIds(session: Session, filter: { patientId?: string } = {}): Promise<number[]> {
   const provider = await resolveSessionProvider(session)
   if (!provider) return []
-  return (await listOpenCriticalAlerts({ ...filter, providerId: provider.id })).map((a) => a.orderId)
+  return (await listOpenCriticalAlerts({ ...filter, providerId: provider.id })).filter((a) => a.status === 'notified').map((a) => a.orderId)
 }

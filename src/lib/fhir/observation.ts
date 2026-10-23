@@ -61,6 +61,15 @@ export function observationToFhir(patientId: string, order: PatientLabOrderRow, 
 const loincOnly = (b: CodeBinding | undefined): CodeBinding | null => (b && b.kind === 'loinc' ? b : null)
 
 /**
+ * The FHIR id of an analyte's Observation, used for both its `id` and the panel's `hasMember`
+ * reference. Analyte codes allow "_" (^[A-Z][A-Z0-9_]{0,15}$), which a FHIR id ([A-Za-z0-9\-.])
+ * does not, so "_" becomes "-".
+ */
+export function analyteObservationId(orderId: number, analyteCode: string): string {
+  return `observation-${orderId}-${analyteCode.replace(/_/g, '-')}`
+}
+
+/**
  * WS4 T10 (spec 3.7 item 31): the Observations of one order. A single-value test is the one
  * Observation of observationToFhir. An analyte test is a panel `observation-<orderId>` with no
  * value and a `hasMember` per analyte, then one `observation-<orderId>-<analyteCode>` per analyte
@@ -73,7 +82,7 @@ export function observationsForOrder(patientId: string, order: PatientLabOrderRo
   if (panel === null) return []
   const analytes: AnalyteResultRow[] = order.result?.analytes ?? []
   if (analytes.length === 0) return [panel]
-  const memberId = (a: AnalyteResultRow) => `observation-${order.id}-${a.code}`
+  const memberId = (a: AnalyteResultRow) => analyteObservationId(order.id, a.code)
   const members: FhirObservation[] = analytes.map((a) => ({
     resourceType: 'Observation',
     id: memberId(a),

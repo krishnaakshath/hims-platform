@@ -18,10 +18,11 @@ import { getDb } from '@/db/client'
 import { auditLog, labCriticalAlerts, labOrders, labResultSignoffs, labResults, labTests, patients, users } from '@/db/schema'
 import { invalidateDoctorWorkloadCache, invalidateLabKpis } from '@/lib/queries/hospital-kpis'
 import { recordLabResult } from '@/lib/queries/lab-lifecycle'
-import { CRITICAL_MESSAGES } from '@/lib/labs/route-responses'
+import { CRITICAL_MESSAGES, SIGNOFF_MESSAGES } from '@/lib/labs/route-responses'
 import { POST as VERIFY } from '@/app/api/lab-orders/[id]/verify/route'
 import { POST as NOTIFY } from '@/app/api/lab-orders/[id]/critical/notify/route'
 import { POST as ACK } from '@/app/api/lab-orders/[id]/critical/acknowledge/route'
+import { POST as REVIEW_ACK } from '@/app/api/lab-orders/[id]/acknowledge/route'
 import { createLabDepartmentFixture, type LabDepartmentFixture } from '../db/lab-verifier-fixtures'
 
 const TAG = randomBytes(4).toString('hex').toUpperCase()
@@ -152,6 +153,19 @@ describe.skipIf(!process.env.DATABASE_URL)('critical-value routes (DB)', () => {
 
     as('ordering')
     expect((await ACK(post({ note: 'x'.repeat(301) }), ctx(id))).status).toBe(400)
+    // The call is not logged yet: acknowledging is refused and verification still waits.
+    const early = await ACK(post({}), ctx(id))
+    expect(early.status).toBe(409)
+    expect(await early.json()).toEqual({ error: CRITICAL_MESSAGES.not_notified, code: 'not_notified' })
+    expect((await alertOf(id)).status).toBe('open')
+    expect(invalidateLabKpis).not.toHaveBeenCalled()
+    as('pathologist')
+    expect((await (await VERIFY(post(), ctx(id))).json()).code).toBe('critical_not_notified')
+    as('tech')
+    expect((await NOTIFY(post(CALL), ctx(id))).status).toBe(201)
+    vi.mocked(invalidateLabKpis).mockClear()
+
+    as('ordering')
     const ok = await ACK(post({ note: 'Repeat K+ in 2 h' }), ctx(id))
     expect(ok.status).toBe(201)
     expect(invalidateLabKpis).toHaveBeenCalledTimes(1)
@@ -162,6 +176,27 @@ describe.skipIf(!process.env.DATABASE_URL)('critical-value routes (DB)', () => {
     const again = await ACK(post(), ctx(id))
     expect(again.status).toBe(409)
     expect((await again.json()).code).toBe('already_acknowledged')
+  })
+
+  it('the review acknowledgement refuses an open alert (409 not_notified) and closes a notified one', async () => {
+    const id = await criticalOrder()
+    as('ordering')
+    const early = await REVIEW_ACK(post({}), ctx(id))
+    expect(early.status).toBe(409)
+    expect(await early.json()).toEqual({ error: SIGNOFF_MESSAGES.not_notified, code: 'not_notified' })
+    expect((await alertOf(id)).status).toBe('open')
+    expect(await getDb().select().from(labResultSignoffs).where(eq(labResultSignoffs.labOrderId, id))).toEqual([])
+
+    as('tech')
+    expect((await NOTIFY(post(CALL), ctx(id))).status).toBe(201)
+    vi.mocked(invalidateLabKpis).mockClear()
+    as('ordering')
+    const ok = await REVIEW_ACK(post({ note: 'Seen' }), ctx(id))
+    expect(ok.status).toBe(201)
+    expect(invalidateLabKpis).toHaveBeenCalledTimes(1)
+    expect(await alertOf(id)).toMatchObject({ status: 'acknowledged', acknowledgedByName: N.ordering, acknowledgedByUserId: uid.ordering, ackNote: 'Seen' })
+    // The critical acknowledgement now finds the alert closed.
+    expect((await (await ACK(post({}), ctx(id))).json()).code).toBe('already_acknowledged')
   })
 
   it('an unknown order is 404 on both routes', async () => {

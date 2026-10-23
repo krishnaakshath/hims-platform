@@ -190,6 +190,16 @@ describe('observationsToFhir', () => {
     expect(smear.interpretation[0].coding![0].code).toBe('AA')
   })
 
+  it('an analyte code with "_" gives a valid FHIR id ("_" becomes "-") in both the member id and hasMember', () => {
+    const malaria = { ...cbc, result: { ...cbc.result!, analytes: [{ ...CBC_ANALYTES[0], code: 'MAL_PF_AG', loincCode: null }] } } as PatientLabOrderRow
+    const [panel, member] = observationsForOrder('RD-1', malaria, new Map())
+    expect(member.id).toBe('observation-77-MAL-PF-AG')
+    expect(member.id).toMatch(/^[A-Za-z0-9\-.]{1,64}$/)
+    expect(panel.hasMember).toEqual([{ reference: 'Observation/observation-77-MAL-PF-AG' }])
+    // The analyte's own code is unchanged in the coding.
+    expect(member.code.coding).toEqual([{ code: 'MAL_PF_AG', display: 'Haemoglobin' }])
+  })
+
   it('observationsToFhir flattens panels and keeps single-value orders unchanged', () => {
     const out = observationsToFhir('RD-1', [cbc, order])
     expect(out).toHaveLength(15)

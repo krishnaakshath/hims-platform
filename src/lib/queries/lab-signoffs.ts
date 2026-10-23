@@ -6,7 +6,7 @@
 // first lock as every lab lifecycle write, so no new deadlock path.
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { admissions, labOrders, labResultSignoffs, providers, type LabSignoffKind } from '@/db/schema'
+import { admissions, labCriticalAlerts, labOrders, labResultSignoffs, providers, type LabSignoffKind } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import type { LabOrderStatus } from '@/lib/labs/status'
@@ -49,13 +49,33 @@ export async function isResultOwnerInTx(
   return adm !== undefined
 }
 
-export type SignOffError = 'not_found' | 'not_verified' | 'not_owner' | 'name_mismatch' | 'already_signed'
+/**
+ * WS4 T12: closes a `notified` critical alert as acknowledged by this session. Shared by the
+ * critical acknowledgement (acknowledgeCriticalAlert) and the review acknowledgement
+ * (signOffLabResult kind 'acknowledge'); the caller holds the order and alert locks and has
+ * checked the status.
+ */
+export async function markCriticalAlertAcknowledgedInTx(
+  tx: WriteExecutor,
+  alertId: number,
+  note: string | null,
+  session: Session,
+  now: Date,
+): Promise<void> {
+  await tx.update(labCriticalAlerts).set({
+    status: 'acknowledged', acknowledgedAt: now, acknowledgedByName: session.name, acknowledgedByUserId: session.userId, ackNote: note,
+  }).where(eq(labCriticalAlerts.id, alertId))
+}
+
+export type SignOffError = 'not_found' | 'not_verified' | 'not_owner' | 'name_mismatch' | 'already_signed' | 'not_notified'
 
 /**
  * Records an acknowledgement or a co-sign by the session's linked provider. The owner is the
  * ordering provider or the attending of the patient's active admission. One of each kind per
  * provider per order: a repeat (or a concurrent duplicate) is `already_signed`, never a 500.
- * Audits ids only (the note is stored, never audited).
+ * An acknowledgement also closes the order's critical alert (spec 3.4): a `notified` alert is
+ * marked acknowledged in the same transaction; an `open` one is refused `not_notified` (the lab
+ * logs the call first, spec 3.5 item 24). Audits ids only (the note is stored, never audited).
  */
 export async function signOffLabResult(
   orderId: number,
@@ -75,12 +95,25 @@ export async function signOffLabResult(
     if (!(await isResultOwnerInTx(tx, provider.id, order))) return { ok: false, error: 'not_owner' } as const
     if (kind === 'cosign' && !sameSignatureName(i.typedName ?? '', session.name)) return { ok: false, error: 'name_mismatch' } as const
 
+    // WS4 T12: the order's live critical alert (lock order: order row, then alert row).
+    let alert: { id: number; status: string } | undefined
+    if (kind === 'acknowledge') {
+      [alert] = await tx.select({ id: labCriticalAlerts.id, status: labCriticalAlerts.status })
+        .from(labCriticalAlerts).where(eq(labCriticalAlerts.labOrderId, orderId)).for('update')
+      if (alert?.status === 'open') return { ok: false, error: 'not_notified' } as const
+    }
+    const closesAlert = alert?.status === 'notified'
+
     const inserted = await tx.insert(labResultSignoffs)
       .values({ labOrderId: orderId, kind, providerId: provider.id, userId: session.userId, signedByName: session.name, note: i.note, signedAt: now })
       .onConflictDoNothing({ target: [labResultSignoffs.labOrderId, labResultSignoffs.kind, labResultSignoffs.providerId] })
       .returning({ id: labResultSignoffs.id })
-    if (inserted.length === 0) return { ok: false, error: 'already_signed' } as const
-    await logAudit(session, kind === 'acknowledge' ? 'acknowledged lab result' : 'co-signed lab result', order.patientId, `order=${orderId} signoff=${inserted[0].id}`, tx)
+    // An earlier acknowledgement by this provider still closes a later (re-raised, now notified) alert.
+    if (inserted.length === 0 && !closesAlert) return { ok: false, error: 'already_signed' } as const
+    if (closesAlert) await markCriticalAlertAcknowledgedInTx(tx, alert!.id, i.note, session, now)
+    const signoffPart = inserted.length > 0 ? ` signoff=${inserted[0].id}` : ''
+    const alertPart = closesAlert ? ` alert=${alert!.id}` : ''
+    await logAudit(session, kind === 'acknowledge' ? 'acknowledged lab result' : 'co-signed lab result', order.patientId, `order=${orderId}${signoffPart}${alertPart}`, tx)
     return { ok: true, providerId: provider.id } as const
   })
 }

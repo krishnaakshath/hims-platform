@@ -51,6 +51,11 @@ describe('CriticalResultBanner', () => {
     expect(h.sendJson).toHaveBeenCalledWith('/api/lab-orders/42/critical/acknowledge', 'POST', {})
   })
 
+  it('never offers Acknowledge on an open alert, even to its owner', () => {
+    render(<CriticalResultBanner alerts={[OPEN]} canNotify={false} canAcknowledge={() => true} />)
+    expect(screen.queryByRole('button', { name: /acknowledge/i })).toBeNull()
+  })
+
   it('the call form requires read-back for a phone call and shows a server refusal', async () => {
     h.sendJson.mockResolvedValue({ ok: false, error: 'The call for this critical result has already been logged.' })
     render(<CriticalResultBanner alerts={[OPEN]} canNotify canAcknowledge={() => false} />)
