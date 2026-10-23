@@ -9,8 +9,11 @@ import { INDIAN_STATES } from '@/lib/india/reference'
 import type { ShareQueueRow, SharePrefill } from '@/lib/queries/abdm-profile-shares'
 import { SANDBOX_MOCK_LABEL } from './AbhaVerifyDialog'
 import { formatIstTime } from '@/lib/india-time'
+import { Field, INPUT_CLASS } from '@/components/registration/Field'
+import { IDENTITY_MISMATCH_MESSAGE, type IdentityField } from '@/lib/abdm/identity-match'
 
 const GENDER: Record<string, string> = { M: 'male', F: 'female', O: 'other', T: 'transgender' }
+const FIELD_LABEL: Record<IdentityField, string> = { name: 'name', dob: 'date of birth', gender: 'gender' }
 
 export function prefillForm(p: SharePrefill): Partial<RegistrationFormState> {
   const state = p.stateName ? INDIAN_STATES.find((s) => s.label.toLowerCase() === p.stateName!.toLowerCase()) : undefined
@@ -26,6 +29,10 @@ export function ProfileShareQueue({ rows }: { rows: ShareQueueRow[] }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
   const [registering, setRegistering] = useState<{ id: number; initial: Partial<RegistrationFormState> } | null>(null)
+  // WS12 T5: a link refused for an identity mismatch waits here for a reason.
+  const [mismatch, setMismatch] = useState<{ id: number; patientId: string; fields: IdentityField[] } | null>(null)
+  const [reason, setReason] = useState('')
+  const reasonOk = reason.trim().length >= 10 && reason.trim().length <= 300
 
   // New shares arrive from the gateway at any time: refresh every 15 s.
   useEffect(() => {
@@ -33,11 +40,20 @@ export function ProfileShareQueue({ rows }: { rows: ShareQueueRow[] }) {
     return () => clearInterval(t)
   }, [router])
 
-  async function resolve(id: number, body: { action: 'linked' | 'dismissed' | 'registered'; patientId?: string }) {
+  async function resolve(id: number, body: { action: 'linked' | 'dismissed' | 'registered'; patientId?: string; mismatchReason?: string }) {
     setBusy(id); setError(null)
     const r = await sendJson(`/api/abdm/shares/${id}`, 'POST', body)
     setBusy(null)
-    if (!r.ok) { setError(r.error); return false }
+    if (!r.ok) {
+      const b = r.body as { code?: unknown; fields?: unknown } | undefined
+      if (r.status === 409 && b?.code === 'identity_mismatch' && Array.isArray(b.fields) && body.patientId) {
+        setReason('')
+        setMismatch({ id, patientId: body.patientId, fields: b.fields.filter((f): f is IdentityField => f === 'name' || f === 'dob' || f === 'gender') })
+        return false
+      }
+      setError(r.error); return false
+    }
+    setMismatch(null); setReason('')
     router.refresh()
     return true
   }
@@ -82,6 +98,20 @@ export function ProfileShareQueue({ rows }: { rows: ShareQueueRow[] }) {
           ))}
         </tbody>
       </table>
+      {mismatch && (
+        <div className="space-y-2 rounded-md border border-destructive/40 bg-red-50 p-3" aria-label="Identity check">
+          <p role="alert" className="text-sm text-destructive">{IDENTITY_MISMATCH_MESSAGE}</p>
+          <p className="text-sm">Does not match: {mismatch.fields.map((f) => FIELD_LABEL[f]).join(', ')}</p>
+          <Field label="Reason for linking anyway" hint="10 to 300 characters. Recorded with your name.">
+            {(p) => <textarea {...p} rows={2} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} className={INPUT_CLASS} />}
+          </Field>
+          <div className="space-x-2">
+            <Button type="button" size="sm" variant="destructive" disabled={busy === mismatch.id || !reasonOk}
+              onClick={() => resolve(mismatch.id, { action: 'linked', patientId: mismatch.patientId, mismatchReason: reason.trim() })}>Link anyway</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => { setMismatch(null); setReason('') }}>Cancel</Button>
+          </div>
+        </div>
+      )}
       {registering && (
         <AddClientModal
           initial={{ ...EMPTY_REGISTRATION_FORM, ...registering.initial }}

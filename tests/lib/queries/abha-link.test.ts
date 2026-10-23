@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { eq, inArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { abdmConsents, auditLog, patientAadhaar, patientContacts, patients } from '@/db/schema'
+import { abdmConsents, abhaLinkOverrides, auditLog, patientAadhaar, patientContacts, patients } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 import type { AbhaFlow } from '@/lib/abdm/flow-store'
+import type { AbhaIdentityProfile } from '@/lib/abdm/identity-match'
 
 const flows = new Map<string, AbhaFlow>()
 vi.mock('@/lib/abdm/flow-store', () => ({
@@ -40,6 +41,9 @@ function flow(over: Partial<AbhaFlow> = {}): AbhaFlow {
   return f
 }
 
+/** The ABDM profile of the chart makePatient(suffix) creates (WS12 T5: a link compares them). */
+const same = (suffix: string): AbhaIdentityProfile => ({ name: `TEST-SP8 ${suffix} ${RUN}`, gender: 'F', yearOfBirth: 1990, monthOfBirth: null, dayOfBirth: null })
+
 async function makePatient(suffix: string): Promise<string> {
   const id = `TEST-SP8-${RUN.slice(-7)}-${suffix}`
   await getDb().insert(patients).values({ id, name: `TEST-SP8 ${suffix} ${RUN}`, dob: '1990-01-01', gender: 'female' })
@@ -56,6 +60,10 @@ describe.skipIf(!process.env.DATABASE_URL)('ABHA linking (DB)', () => {
     await purgeSp8Consents(flowIds)
     if (ids.length === 0) return
     const db = getDb()
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+      await tx.delete(abhaLinkOverrides).where(inArray(abhaLinkOverrides.patientId, ids))
+    })
     await db.delete(patientContacts).where(inArray(patientContacts.patientId, ids))
     await db.delete(patientAadhaar).where(inArray(patientAadhaar.patientId, ids))
     await db.delete(auditLog).where(sql`${auditLog.userName} = ${STAFF} and ${inArray(auditLog.patientId, ids)}`)
@@ -64,7 +72,7 @@ describe.skipIf(!process.env.DATABASE_URL)('ABHA linking (DB)', () => {
 
   it('linking a verified flow sets number, address and verification columns with an audit row carrying no number', async () => {
     const pid = await makePatient('L1')
-    const f = flow({ verified: { abhaNumber: NUM_A, abhaAddress: ADDR_A, via: 'abha_number_aadhaar_otp', source: 'abdm' } })
+    const f = flow({ verified: { abhaNumber: NUM_A, abhaAddress: ADDR_A, via: 'abha_number_aadhaar_otp', source: 'abdm', profile: same('L1') } })
     const { consentId } = await recordConsent({ flowId: f.flowId, patientId: null, purpose: 'abha_verification', givenBy: 'patient', textSha256: 'a'.repeat(64) }, SESSION)
     f.consentId = consentId
     expect(await applyVerifiedAbha(pid, f, SESSION)).toEqual({ ok: true })
@@ -82,7 +90,7 @@ describe.skipIf(!process.env.DATABASE_URL)('ABHA linking (DB)', () => {
 
   it('linking an ABHA already on another patient is a conflict', async () => {
     const pid = await makePatient('L2')
-    const f = flow({ verified: { abhaNumber: NUM_A, abhaAddress: null, via: 'mobile_otp', source: 'abdm' } })
+    const f = flow({ verified: { abhaNumber: NUM_A, abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: same('L2') } })
     expect(await applyVerifiedAbha(pid, f, SESSION)).toEqual({ ok: false, error: 'abha_conflict' })
     const [p] = await getDb().select().from(patients).where(eq(patients.id, pid))
     expect(p.abhaNumber).toBeNull(); expect(p.abhaVerifiedAt).toBeNull()
@@ -91,6 +99,62 @@ describe.skipIf(!process.env.DATABASE_URL)('ABHA linking (DB)', () => {
   it('an unverified flow or an unknown patient is refused', async () => {
     expect(await applyVerifiedAbha(await makePatient('L3'), flow(), SESSION)).toEqual({ ok: false, error: 'flow_not_verified' })
     expect(await applyVerifiedAbha('TEST-SP8-NOPE', flow({ verified: { abhaNumber: NUM_C, abhaAddress: null, via: 'mobile_otp', source: 'abdm' } }), SESSION)).toEqual({ ok: false, error: 'not_found' })
+  })
+
+  // WS12 T5 (spec R9): the identity guard.
+  it('a mismatched profile without an override is refused and nothing is written', async () => {
+    const pid = await makePatient('M1')
+    const f = flow({ verified: { abhaNumber: abha(41), abhaAddress: null, via: 'mobile_otp', source: 'abdm_sandbox_mock', profile: { ...same('M1'), name: 'Sandbox Mock Patient' } } })
+    expect(await applyVerifiedAbha(pid, f, SESSION)).toEqual({ ok: false, error: 'identity_mismatch', fields: ['name'] })
+    const [p] = await getDb().select().from(patients).where(eq(patients.id, pid))
+    expect(p.abhaNumber).toBeNull(); expect(p.abhaVerifiedAt).toBeNull()
+    expect(await getDb().select().from(abhaLinkOverrides).where(eq(abhaLinkOverrides.patientId, pid))).toEqual([])
+  })
+
+  it('a flow without a stored profile counts as a name mismatch', async () => {
+    const pid = await makePatient('M2')
+    const f = flow({ verified: { abhaNumber: abha(42), abhaAddress: null, via: 'mobile_otp', source: 'abdm' } })
+    expect(await applyVerifiedAbha(pid, f, SESSION)).toEqual({ ok: false, error: 'identity_mismatch', fields: ['name'] })
+  })
+
+  it('an override covering the mismatch links, records the reason and audits field names only', async () => {
+    const pid = await makePatient('M3')
+    const reason = 'Name changed after marriage'
+    const f = flow({ verified: { abhaNumber: abha(43), abhaAddress: null, via: 'mobile_otp', source: 'abdm_sandbox_mock', profile: { ...same('M3'), name: 'Sandbox Mock Patient' } } })
+    expect(await applyVerifiedAbha(pid, f, SESSION, { override: { fields: ['name'], reason } })).toEqual({ ok: true })
+    const [p] = await getDb().select().from(patients).where(eq(patients.id, pid))
+    expect(p).toMatchObject({ abhaNumber: abha(43), abhaVerifiedVia: 'mobile_otp' })
+    const rows = await getDb().select().from(abhaLinkOverrides).where(eq(abhaLinkOverrides.patientId, pid))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ via: 'abha_flow', shareId: null, fields: ['name'], reason, byName: STAFF, byUserId: null })
+    const audit = await getDb().select({ action: auditLog.action, details: auditLog.details }).from(auditLog).where(eq(auditLog.patientId, pid))
+    expect(audit.find((r) => r.action === 'abdm: linked ABHA despite identity mismatch')!.details).toBe('fields=name')
+    const text = JSON.stringify(audit)
+    expect(text).not.toContain('Sandbox Mock'); expect(text).not.toContain(reason); expect(text).not.toContain(`TEST-SP8 M3`); expect(text).not.toContain(abha(43))
+  })
+
+  it('an override that does not cover the mismatch found under the lock is refused', async () => {
+    const pid = await makePatient('M4')
+    const f = flow({ verified: { abhaNumber: abha(44), abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: { ...same('M4'), yearOfBirth: 1970 } } })
+    expect(await applyVerifiedAbha(pid, f, SESSION, { override: { fields: ['name'], reason: 'Checked with the patient' } })).toEqual({ ok: false, error: 'identity_mismatch', fields: ['dob'] })
+    const [p] = await getDb().select().from(patients).where(eq(patients.id, pid))
+    expect(p.abhaNumber).toBeNull()
+  })
+
+  it('a matching profile links without a reason and records no override, even if one is passed', async () => {
+    const pid = await makePatient('M5')
+    const f = flow({ verified: { abhaNumber: abha(45), abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: same('M5') } })
+    expect(await applyVerifiedAbha(pid, f, SESSION, { override: { fields: ['name'], reason: 'Not needed at all' } })).toEqual({ ok: true })
+    expect(await getDb().select().from(abhaLinkOverrides).where(eq(abhaLinkOverrides.patientId, pid))).toEqual([])
+  })
+
+  it('override rows are append-only', async () => {
+    const pid = await makePatient('M6')
+    const f = flow({ verified: { abhaNumber: abha(46), abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: { ...same('M6'), gender: 'M' } } })
+    expect(await applyVerifiedAbha(pid, f, SESSION, { override: { fields: ['gender'], reason: 'Chart gender was entered wrongly' } })).toEqual({ ok: true })
+    const code = async (p: Promise<unknown>) => p.then(() => 'none', (e: { code?: string; cause?: { code?: string } }) => e.cause?.code ?? e.code)
+    expect(await code(getDb().update(abhaLinkOverrides).set({ reason: 'rewritten reason text' }).where(eq(abhaLinkOverrides.patientId, pid)))).toBe('55000')
+    expect(await code(getDb().delete(abhaLinkOverrides).where(eq(abhaLinkOverrides.patientId, pid)))).toBe('55000')
   })
 
   const reg = (name: string, abhaInput: Record<string, unknown>) => patientRegistrationSchema.parse({

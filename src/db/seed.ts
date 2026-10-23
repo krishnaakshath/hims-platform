@@ -58,6 +58,7 @@ import {
   claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
   // SP8
   nhcxInboundCalls, nhcxExchanges, nhcxEligibilityChecks, abdmProfileShares, abdmConsents,
+  abhaLinkOverrides, // WS12 T5
   // SP3
   encounters,
   followUpOrders,
@@ -851,6 +852,7 @@ async function clearExistingData() {
     await tx.delete(nhcxInboundCalls)
     await tx.delete(nhcxExchanges)
     await tx.delete(nhcxEligibilityChecks)
+    await tx.delete(abhaLinkOverrides) // WS12 T5: references shares, patients and users; append-only
     await tx.delete(abdmProfileShares)
     await tx.delete(abdmConsents)
     // end SP8

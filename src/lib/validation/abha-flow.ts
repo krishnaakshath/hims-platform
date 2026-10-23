@@ -84,4 +84,6 @@ export function loginIdForWire(route: LoginRoute, loginId: string): string {
 export const loginVerifySchema = z.object({ flowId, otp }).strict()
 /** The account is chosen by its position in the masked list the server returned. */
 export const accountSchema = z.object({ flowId, accountIndex: z.number().int().min(0).max(19) }).strict()
-export const linkSchema = z.object({ flowId }).strict()
+/** WS12 T5: a reason (10-300 characters) is needed to link an ABHA whose profile does not match the chart. */
+export const mismatchReason = z.string().trim().min(10).max(300)
+export const linkSchema = z.object({ flowId, mismatchReason: mismatchReason.optional() }).strict()
