@@ -13,6 +13,11 @@ vi.mock('@/lib/queries/rcm-policies', () => ({
   uploadPolicyCard: vi.fn(async () => ({ ok: true, value: null })),
   getPolicyCardBlob: vi.fn(async () => ({ url: 'https://blob.test/secret', patientId: 'P-1', contentType: 'image/png' })),
 }))
+// WS12 T4: the auto eligibility check after a policy is added.
+vi.mock('@/lib/queries/coverage', () => ({
+  defaultEligibilityProviderId: vi.fn(async () => 9),
+  maybeStartEligibility: vi.fn(async () => ({ started: true, checkId: 77 })),
+}))
 
 import { POST as postPolicy } from '@/app/api/rcm/policies/route'
 import { PATCH as patchPolicy } from '@/app/api/rcm/policies/[id]/route'
@@ -21,6 +26,7 @@ import { GET as getCard } from '@/app/api/rcm/policies/[id]/card/[side]/route'
 import { createPolicy, uploadPolicyCard, getPolicyCardBlob } from '@/lib/queries/rcm-policies'
 import { streamPrivateBlob } from '@/lib/blob-store'
 import { logAudit } from '@/lib/audit'
+import { defaultEligibilityProviderId, maybeStartEligibility } from '@/lib/queries/coverage'
 
 const POLICY = {
   patientId: 'P-1', insurerPayerId: 1, policyNumber: 'POL/1', memberId: 'M-1', policyType: 'individual', holderName: 'Asha',
@@ -38,7 +44,7 @@ beforeEach(() => { sessionRole = 'frontdesk'; vi.clearAllMocks() })
 describe('/api/rcm/policies', () => {
   it('frontdesk can add a policy; billing reads but gets 403 on POST', async () => {
     const ok = await postPolicy(json('POST', '/api/rcm/policies', POLICY))
-    expect(ok.status).toBe(201); expect(await ok.json()).toEqual({ policyId: 5 })
+    expect(ok.status).toBe(201); expect(await ok.json()).toEqual({ policyId: 5, eligibility: { started: true, checkId: 77 } })
     sessionRole = 'billing'
     const denied = await postPolicy(json('POST', '/api/rcm/policies', '{not json'))
     expect(denied.status).toBe(403); expect(createPolicy).toHaveBeenCalledTimes(1)
@@ -73,5 +79,38 @@ describe('/api/rcm/policies', () => {
     expect(logAudit).not.toHaveBeenCalled()
     sessionRole = 'labs'
     expect((await getCard(new NextRequest('http://localhost/x'), ctx({ id: '5', side: 'front' }))).status).toBe(403)
+  })
+})
+
+describe('POST /api/rcm/policies: validity and the auto eligibility check (WS12 T4)', () => {
+  it('an already-expired active policy is a 422 policy_not_in_force with the dates, and no check is attempted', async () => {
+    const message = 'This policy is not valid on 23 Oct 2026 (valid 1 Apr 2025–22 Oct 2026)'
+    vi.mocked(createPolicy).mockResolvedValueOnce({ ok: false, error: 'policy_not_in_force', message })
+    const res = await postPolicy(json('POST', '/api/rcm/policies', { ...POLICY, validFrom: '2025-04-01', validTo: '2026-10-22' }))
+    expect(res.status).toBe(422)
+    expect(await res.json()).toMatchObject({ error: message })
+    expect(maybeStartEligibility).not.toHaveBeenCalled()
+  })
+  it('after the create, starts a registration check with the latest encounter doctor', async () => {
+    const res = await postPolicy(json('POST', '/api/rcm/policies', POLICY))
+    expect(res.status).toBe(201)
+    expect(defaultEligibilityProviderId).toHaveBeenCalledWith('P-1')
+    expect(maybeStartEligibility).toHaveBeenCalledWith({ policyId: 5, context: 'registration', providerId: 9, purpose: 'validation' }, expect.objectContaining({ role: 'frontdesk' }))
+  })
+  it('a skipped check is reported with its message and the create still succeeds', async () => {
+    vi.mocked(maybeStartEligibility).mockResolvedValueOnce({ started: false, reason: 'nhcx_not_configured', message: 'NHCX not configured: record a manual verification' })
+    const res = await postPolicy(json('POST', '/api/rcm/policies', POLICY))
+    expect(res.status).toBe(201)
+    expect(await res.json()).toEqual({ policyId: 5, eligibility: { started: false, message: 'NHCX not configured: record a manual verification' } })
+  })
+  it('an unexpected failure of the check never fails the create', async () => {
+    vi.mocked(defaultEligibilityProviderId).mockRejectedValueOnce(new Error('boom'))
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const res = await postPolicy(json('POST', '/api/rcm/policies', POLICY))
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    expect(body.policyId).toBe(5); expect(body.eligibility.started).toBe(false)
+    expect(spy.mock.calls.flat().join(' ')).not.toContain('boom')
+    spy.mockRestore()
   })
 })

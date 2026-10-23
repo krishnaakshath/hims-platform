@@ -32,6 +32,9 @@ import { getPatientChannelPreferences, listPatientNotices } from '@/lib/queries/
 import { RecentNoticesPanel } from '@/components/patient-profile/RecentNoticesPanel' // Foundations T9
 import { ABHA_LINK_ROLES, NHCX_ELIGIBILITY_ROLES } from '@/lib/role-policy' // SP8
 import { nhcxEligibilityAvailable, payersOnNhcx } from '@/lib/queries/nhcx-eligibility' // SP8
+import { COVERAGE_READ_ROLES, COVERAGE_VERIFY_ROLES } from '@/lib/role-policy' // WS12 T4
+import { getCoverageSummary } from '@/lib/queries/coverage' // WS12 T4
+import { CoverageBadge } from '@/components/insurance/CoverageBadge' // WS12 T4
 import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
 import { formatIstDate, todayIsoIn } from '@/lib/india-time'
 import { toAadhaarView } from '@/lib/patient-identity'
@@ -261,13 +264,17 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   const [policies, policyPayers, legacyPrefill] = canSeePolicies
     ? await Promise.all([listPatientPolicies(anonId), listRcmPayers(), legacyPolicyPrefill(anonId)])
     : [[], [], null] as const
+  // WS12 T4: coverage verdicts (header badge + Insurance tab) for COVERAGE_READ_ROLES; covered by the same page audit.
+  const coverage = COVERAGE_READ_ROLES.includes(session.role) ? await getCoverageSummary(anonId, 'view') : null
+  const policyOnNhcx = payersOnNhcx(policies, new Map(policyPayers.map((p) => [p.payerId, p.profile?.nhcxParticipantCode ?? null])))
   const policiesTab = canSeePolicies ? (
     <PatientPoliciesPanel patientId={patient.id} policies={[...policies]} todayIso={todayIso} canEdit={POLICY_WRITE_ROLES.includes(session.role)} legacyPrefill={legacyPrefill}
+      coverage={coverage ? { policies: coverage.policies, onNhcx: policyOnNhcx, nhcxAvailable: nhcxEligibilityAvailable(), canVerify: COVERAGE_VERIFY_ROLES.includes(session.role) } : undefined}
       payers={policyPayers.filter((p) => p.profile?.active).map((p) => ({ payerId: p.payerId, name: p.name, kind: p.profile!.kind }))}
       eligibility={NHCX_ELIGIBILITY_ROLES.includes(session.role) ? {
         nhcxConfigured: nhcxEligibilityAvailable(), context: justRegistered ? 'registration' : 'manual', defaultProviderId: null,
         providers: activeProviders.map((p) => ({ id: p.id, name: p.name })),
-        payerOnNhcx: payersOnNhcx(policies, new Map(policyPayers.map((p) => [p.payerId, p.profile?.nhcxParticipantCode ?? null]))),
+        payerOnNhcx: policyOnNhcx,
       } : undefined} />
   ) : null
   // end SP7
@@ -310,6 +317,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
               {patient.uhid && <CopyUhidButton uhid={patient.uhid} />}
               <span>{patient.uhid ? '· ' : ''}Chart ID {patient.id} · DOB {patient.dob}</span>
             </p>
+            {coverage?.primary && <div data-testid="header-coverage" className="mt-1"><CoverageBadge verdict={coverage.primary.verdict} /></div>}
           </div>
         </div>
         <div className="flex items-center gap-3">

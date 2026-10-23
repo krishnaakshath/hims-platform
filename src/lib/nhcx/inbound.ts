@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { and, desc, eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { claims, nhcxEligibilityChecks, nhcxExchanges, nhcxInboundCalls, preauths, type NhcxExchangeRow } from '@/db/schema'
+import { claims, nhcxEligibilityChecks, nhcxExchanges, nhcxInboundCalls, patientPolicies, preauths, type NhcxExchangeRow } from '@/db/schema'
 import { isUniqueViolation } from '@/lib/db-errors'
 import { readNhcxConfig, type ConfigResult, type NhcxConfig } from '@/lib/integrations/config'
 import { sealPayload } from '@/lib/integrations/payload-vault'
@@ -11,6 +11,7 @@ import { checkNhcxCallbackRateLimit } from '@/lib/rate-limit'
 import { parseEligibilityResponse, emptySummary } from '@/lib/fhir/nhcx/eligibility'
 import { parseClaimResponseBundle, parseCommunicationRequestTaskBundle, parsePaymentNoticeTaskBundle } from '@/lib/fhir/nhcx/responses'
 import { addGatewayClaimNote } from '@/lib/queries/nhcx-exchanges'
+import { recordNhcxVerificationTx } from '@/lib/queries/coverage'
 import { callerIp, checkCallerIp, verifyNhcxBearer } from './callback-auth'
 import { ACCEPTED_INBOUND_ACTIONS, type NhcxEntityType, type NhcxResponseSummary } from './constants'
 import { istIsoWithOffset, parseProtocolHeaders, timestampWithin, type ParsedHeaders, type ProtocolHeaders } from './headers'
@@ -67,7 +68,7 @@ async function readCapped(request: Request, cap: number): Promise<string | null>
 }
 
 type Parsed =
-  | { kind: 'eligibility'; summary: NhcxResponseSummary }
+  | { kind: 'eligibility'; summary: NhcxResponseSummary; insurerReference: string | null }
   | { kind: 'claim_response'; summary: NhcxResponseSummary }
   | { kind: 'communication'; summary: NhcxResponseSummary; basedOnIdentifier: string | null }
   | { kind: 'payment'; summary: NhcxResponseSummary }
@@ -75,7 +76,7 @@ type Parsed =
 
 export function parseInbound(action: AcceptedInboundAction, fhir: unknown, headers: ProtocolHeaders): Parsed | null {
   switch (action) {
-    case 'coverageeligibility/on_check': { const r = parseEligibilityResponse(fhir); return r.ok ? { kind: 'eligibility', summary: r.summary } : null }
+    case 'coverageeligibility/on_check': { const r = parseEligibilityResponse(fhir); return r.ok ? { kind: 'eligibility', summary: r.summary, insurerReference: r.insurerReference } : null }
     case 'preauth/on_submit':
     case 'claim/on_submit': { const r = parseClaimResponseBundle(fhir); return r.ok ? { kind: 'claim_response', summary: r.summary } : null }
     case 'communication/request': { const r = parseCommunicationRequestTaskBundle(fhir); return r.ok ? { kind: 'communication', summary: r.summary, basedOnIdentifier: r.basedOnIdentifier } : null }
@@ -150,6 +151,11 @@ export async function processInboundFhir(
     const s = parsed.summary
     const status = s.outcome === 'error' || headers.status === 'response.error' ? 'error' : s.inforce === true ? 'eligible' : s.inforce === false ? 'not_eligible' : 'error'
     await tx.update(nhcxEligibilityChecks).set({ status, inforce: s.inforce, respondedAt: now }).where(eq(nhcxEligibilityChecks.id, outbound.eligibilityCheckId))
+    // WS12 R1: the answer becomes a coverage verification in this same transaction (none for an error).
+    await recordNhcxVerificationTx(tx, {
+      checkId: outbound.eligibilityCheckId, summary: s, insurerReference: parsed.kind === 'eligibility' ? parsed.insurerReference : null,
+      status, isMock: i.isMock || outbound.isMock, now,
+    })
   }
   const note = NOTE[action]
   if (note && outbound.claimId) await addGatewayClaimNote(tx, outbound.claimId, note(parsed.summary), now)
@@ -236,7 +242,40 @@ const MOCK_ANSWER: Partial<Record<string, AcceptedInboundAction>> = {
   'coverageeligibility/check': 'coverageeligibility/on_check', 'preauth/submit': 'preauth/on_submit', 'claim/submit': 'claim/on_submit',
 }
 
-/** Feeds a synthesised insurer answer for a mock row: eligibility in force, a queued pre-auth or claim. Never an approval amount. */
+const rupees = (value: number) => ({ value, currency: 'INR' })
+const coding = (code: string) => ({ coding: [{ code }] })
+
+/**
+ * WS12 R6: the mock's eligibility answer: in force with fixed, labelled limits (sum insured
+ * ₹5,00,000, used ₹50,000, co-pay 10%, room rent ₹4,000/day, ICU ₹8,000/day) and the benefit
+ * period ending on the policy's valid-to. Stored with source 'nhcx_mock' ("Sandbox mock - not real").
+ */
+export function mockEligibilityResponse(policyValidTo: string | null): Record<string, unknown> {
+  return {
+    resourceType: 'Bundle', type: 'collection',
+    entry: [{
+      fullUrl: `urn:uuid:${randomUUID()}`,
+      resource: {
+        resourceType: 'CoverageEligibilityResponse', id: randomUUID(), outcome: 'complete', disposition: 'Sandbox mock - not real',
+        identifier: [{ value: `MOCK-${randomUUID().slice(0, 8)}` }],
+        insurance: [{
+          inforce: true,
+          ...(policyValidTo ? { benefitPeriod: { end: policyValidTo } } : {}),
+          item: [
+            { category: coding('medical'), description: 'Sandbox mock - not real', benefit: [
+              { type: coding('benefit'), allowedMoney: rupees(500000), usedMoney: rupees(50000) },
+              { type: coding('copay-percent'), allowedUnsignedInt: 10 },
+            ] },
+            { category: coding('room-rent'), benefit: [{ type: coding('room'), allowedMoney: rupees(4000) }] },
+            { category: coding('icu'), benefit: [{ type: coding('room'), allowedMoney: rupees(8000) }] },
+          ],
+        }],
+      },
+    }],
+  }
+}
+
+/** Feeds a synthesised insurer answer for a mock row: eligibility in force with fixed limits, a queued pre-auth or claim. Never an approval amount. */
 export async function synthesizeMockResponse(row: NhcxExchangeRow): Promise<void> {
   const action = MOCK_ANSWER[row.action]
   if (!action || !row.isMock) return
@@ -244,8 +283,11 @@ export async function synthesizeMockResponse(row: NhcxExchangeRow): Promise<void
   const headers: ProtocolHeaders = {
     sender: row.recipientCode, recipient: row.senderCode, apiCallId: randomUUID(), correlationId: row.correlationId, timestamp: istIsoWithOffset(now), status: 'response.complete',
   }
+  const policyValidTo = action === 'coverageeligibility/on_check' && row.policyId
+    ? (await getDb().select({ validTo: patientPolicies.validTo }).from(patientPolicies).where(eq(patientPolicies.id, row.policyId)).limit(1))[0]?.validTo ?? null
+    : null
   const fhir = action === 'coverageeligibility/on_check'
-    ? { resourceType: 'Bundle', type: 'collection', entry: [{ fullUrl: `urn:uuid:${randomUUID()}`, resource: { resourceType: 'CoverageEligibilityResponse', id: randomUUID(), outcome: 'complete', disposition: 'Sandbox mock - not real', insurance: [{ inforce: true }] } }] }
+    ? mockEligibilityResponse(policyValidTo)
     : { resourceType: 'Bundle', type: 'collection', entry: [{ fullUrl: `urn:uuid:${randomUUID()}`, resource: { resourceType: 'ClaimResponse', id: randomUUID(), outcome: 'queued', use: action === 'preauth/on_submit' ? 'preauthorization' : 'claim', disposition: 'Sandbox mock - not real' } }] }
   const parsed = parseInbound(action, fhir, headers)
   if (!parsed) return

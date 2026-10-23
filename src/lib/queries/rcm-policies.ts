@@ -10,10 +10,10 @@ import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
 import { isUniqueViolation } from '@/lib/db-errors'
-import { ageOnDate, todayIsoIn } from '@/lib/india-time'
+import { ageOnDate, formatCalendarDate, todayIsoIn } from '@/lib/india-time'
 import { putPrivateBlob } from '@/lib/blob-store'
 import { INSURER_SIDE_KINDS, type PayerKind, type PolicyPriority, type PolicyRelationship, type PolicyStatus, type PolicyType } from '@/lib/rcm/constants'
-import { rcmFail, rcmOk, type RcmWriteResult } from '@/lib/rcm/errors'
+import { policyNotInForceMessage, rcmFail, rcmOk, type RcmWriteResult } from '@/lib/rcm/errors'
 import { sha256Hex } from '@/lib/rcm/hash'
 import type { PolicyInput, PolicyPatchInput } from '@/lib/rcm/validation'
 import type { WriteExecutor } from './executor'
@@ -112,7 +112,13 @@ async function checkPayers(executor: WriteExecutor, insurerPayerId: number, tpaP
 
 const isActivePrimary = (p: { status: PolicyStatus; priority: PolicyPriority }) => p.status === 'active' && p.priority === 'primary'
 
-export async function createPolicy(input: PolicyInput, session: Session): Promise<RcmWriteResult<{ policyId: number }>> {
+export async function createPolicy(input: PolicyInput, session: Session, now: Date = new Date()): Promise<RcmWriteResult<{ policyId: number }>> {
+  // WS12 T4 (R3, R4): an 'active' policy that has already ended is refused; staff record it as
+  // inactive or fix the dates. A future start is allowed (cover begins later).
+  const today = todayIsoIn(undefined, now)
+  if (input.status === 'active' && input.validTo < today) {
+    return rcmFail('policy_not_in_force', policyNotInForceMessage(formatCalendarDate(today), formatCalendarDate(input.validFrom), formatCalendarDate(input.validTo)))
+  }
   let result: RcmWriteResult<{ policyId: number }>
   try {
     result = await getDb().transaction(async (tx) => {

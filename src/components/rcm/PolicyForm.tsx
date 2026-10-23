@@ -8,6 +8,10 @@ import { Field, FormError, buttonClass, inputClass, secondaryButtonClass } from 
 
 export interface PayerOption { payerId: number; name: string; kind: PayerKind }
 
+// WS12 T4: what POST /api/rcm/policies says about the automatic NHCX check.
+type CreatedPolicy = { policyId: number; eligibility?: { started: boolean; checkId?: number; message?: string } }
+export const ELIGIBILITY_STARTED_MESSAGE = "NHCX check started: the insurer's answer will show on the Insurance tab"
+
 const rupees = (p: number | null | undefined) => (p === null || p === undefined ? '' : (p / 100).toFixed(2))
 
 /** Add a policy (POST) or edit one (PATCH). Client-side schema check shows the authored messages first. */
@@ -24,6 +28,7 @@ export function PolicyForm({ patientId, payers, initial, policyId, onDone }: {
     roomRentLimit: rupees(initial?.roomRentLimitPaise), icuLimit: rupees(initial?.icuLimitPaise), priority: initial?.priority ?? 'primary', status: initial?.status ?? 'active',
   })
   const run = useRcmAction()
+  const [added, setAdded] = useState<{ message: string | null } | null>(null)
   const set = (k: keyof typeof v, val: string) => setV((x) => ({ ...x, [k]: val }))
 
   async function submit(e: React.FormEvent) {
@@ -40,8 +45,27 @@ export function PolicyForm({ patientId, payers, initial, policyId, onDone }: {
     if (!parsed.success) { run.setError(parsed.error.issues[0]?.message ?? 'Check the policy details'); return }
     const { patientId: _omit, ...patch } = body
     void _omit
-    const ok = policyId === undefined ? await run.send('/api/rcm/policies', 'POST', body) : await run.send(`/api/rcm/policies/${policyId}`, 'PATCH', patch)
+    if (policyId === undefined) {
+      const created = await run.send<CreatedPolicy>('/api/rcm/policies', 'POST', body)
+      if (!created) return
+      const e = created.eligibility
+      // Keep the form's place to say what happened to the cover check; Close finishes.
+      if (e) { setAdded({ message: e.started ? ELIGIBILITY_STARTED_MESSAGE : e.message ?? null }); return }
+      onDone?.()
+      return
+    }
+    const ok = await run.send(`/api/rcm/policies/${policyId}`, 'PATCH', patch)
     if (ok) onDone?.()
+  }
+
+  if (added !== null) {
+    return (
+      <div role="status" className="space-y-2 rounded-md border border-border p-3 text-sm">
+        <p className="font-medium">Policy added.</p>
+        {added.message && <p className="text-muted-foreground">{added.message}</p>}
+        {onDone && <button type="button" className={secondaryButtonClass} onClick={onDone}>Close</button>}
+      </div>
+    )
   }
 
   const text = (k: keyof typeof v, label: string, type = 'text') => <Field label={label}><input type={type} className={inputClass} value={v[k]} onChange={(e) => set(k, e.target.value)} /></Field>

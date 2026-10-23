@@ -600,6 +600,15 @@ import { ACCOUNT_ROLES, PAYER_LIST_ROLES, PHARMACY_STOCK_READ_ROLES } from '@/li
 import { GET as getReportCsv } from '@/app/api/reports/[report]/csv/route'
 import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
 // end Wave I
+// WS12 T2
+import { GET as getPatientCoverage } from '@/app/api/patients/[anonId]/coverage/route'
+import { COVERAGE_READ_ROLES } from '@/lib/role-policy'
+// end WS12 T2
+// WS12 T3
+import { POST as postPolicyVerification } from '@/app/api/rcm/policies/[id]/verifications/route'
+import { GET as getVerificationDocument } from '@/app/api/rcm/verification-documents/[id]/route'
+import { COVERAGE_VERIFY_ROLES } from '@/lib/role-policy'
+// end WS12 T3
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1058,6 +1067,14 @@ export const API_GATES: ApiGateCase[] = [
   // WS12 T6
   { name: 'POST /api/abdm/shares/simulate', call: () => settle(() => postSimulateAbdmShare(send('POST', '/api/abdm/shares/simulate'))), allowed: [...ABDM_SHARE_QUEUE_ROLES] },
   // end WS12 T6
+  // WS12 T2: patient coverage summary (unknown patient: 404 after the gate).
+  { name: 'GET /api/patients/[anonId]/coverage', call: () => settle(() => getPatientCoverage(get(`/api/patients/${BOGUS_PATIENT}/coverage`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...COVERAGE_READ_ROLES] },
+  // end WS12 T2
+  // WS12 T3: manual verification (multipart: allowed roles get 400 for a JSON body, so no SP8_WRITE_GATES row;
+  // deny-before-readUpload is pinned in tests/api/coverage-manual-verification.test.ts) and its document stream.
+  { name: 'POST /api/rcm/policies/[id]/verifications', call: () => settle(() => postPolicyVerification(send('POST', `/api/rcm/policies/${BOGUS_ID}/verifications`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_VERIFY_ROLES] },
+  { name: 'GET /api/rcm/verification-documents/[id]', call: () => settle(() => getVerificationDocument(get(`/api/rcm/verification-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_READ_ROLES] },
+  // end WS12 T3
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
