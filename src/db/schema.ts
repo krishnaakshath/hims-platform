@@ -2205,6 +2205,7 @@ export const medicationDispenses = pgTable('medication_dispenses', {
   // (Postgres does not treat NULLs as equal) for the many dispenses that are
   // samples or in-office doses and are never billed.
   chargeId: integer('charge_id').references(() => charges.id).unique(),
+  batchId: integer('batch_id').references((): AnyPgColumn => medicationBatches.id), // WS5 T2
 })
 
 export const marStatusEnum = pgEnum('mar_status', ['scheduled', 'given', 'held', 'refused'])
@@ -2911,3 +2912,29 @@ export const abhaLinkOverrides = pgTable('abha_link_overrides', {
 
 export type AbhaLinkOverrideRow = typeof abhaLinkOverrides.$inferSelect
 // end WS12 T5
+// WS5 T2
+// Stock by batch (spec D1/D2). medication_inventory.quantity_on_hand stays the per-drug total,
+// kept equal to the sum of non-written-off batches by syncInventoryTotal in the same transaction.
+// Migration 2026-10-25-ws5-medication-batches.sql backfills one 'OPENING' batch (no expiry) per
+// drug with stock. grn_id gets its FK to pharmacy_grns in WS5 T3.
+export const medicationBatches = pgTable('medication_batches', {
+  id: serial('id').primaryKey(),
+  medicationId: integer('medication_id').notNull().references(() => medications.id),
+  batchNo: text('batch_no').notNull(),
+  expiryDate: date('expiry_date'),
+  mrpPerUnitPaise: integer('mrp_per_unit_paise').notNull(),
+  purchaseRatePaise: integer('purchase_rate_paise').default(0).notNull(),
+  quantityOnHand: integer('quantity_on_hand').default(0).notNull(),
+  grnId: integer('grn_id'),
+  receivedAt: timestamp('received_at').defaultNow().notNull(),
+  writtenOffAt: timestamp('written_off_at'),
+  writeOffReason: text('write_off_reason'),
+}, (t) => [
+  unique('medication_batches_medication_batch_unique').on(t.medicationId, t.batchNo),
+  index('medication_batches_medication_expiry_idx').on(t.medicationId, t.expiryDate),
+  check('medication_batches_quantity_nonneg', sql`${t.quantityOnHand} >= 0`),
+  check('medication_batches_mrp_nonneg', sql`${t.mrpPerUnitPaise} >= 0`),
+])
+
+export type MedicationBatchRow = typeof medicationBatches.$inferSelect
+// end WS5 T2
