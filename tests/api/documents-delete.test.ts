@@ -6,19 +6,22 @@ import { eq } from 'drizzle-orm'
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' = 'admin'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Jamie Ruiz' })) }))
-vi.mock('@vercel/blob', () => ({ del: vi.fn(async () => {}) }))
+// The real local-disk file store in a temp dir; deletePrivateBlob is wrapped to see the calls.
+vi.mock('@/lib/blob-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/blob-store')>()
+  return { ...actual, deletePrivateBlob: vi.fn(actual.deletePrivateBlob) }
+})
 
-import { del as mockedDel } from '@vercel/blob'
+import { deletePrivateBlob as mockedDel, putPrivateBlob, readPrivateBlob } from '@/lib/blob-store'
+import { withTempBlobDir } from '../helpers/temp-blob-dir'
 
-// The routes refuse to reach the (mocked) blob SDK without a configured store.
-beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
+withTempBlobDir()
+beforeEach(() => { vi.mocked(mockedDel).mockClear() })
 
 const createdDocumentIds: number[] = []
 
 afterEach(async () => {
   sessionRole = 'admin'
-  vi.mocked(mockedDel).mockReset()
-  vi.mocked(mockedDel).mockImplementation(async () => {})
   const db = getDb()
   while (createdDocumentIds.length > 0) {
     await db.delete(documents).where(eq(documents.id, createdDocumentIds.pop()!))
@@ -56,8 +59,9 @@ async function getDocumentRow(id: number) {
 }
 
 describe('DELETE /api/documents/[id]', () => {
-  it('admin deletes a document with a fileUrl, and Blob del is called with it', async () => {
-    const doc = await createThrowawayDocument({ fileUrl: 'https://blob.test/documents/some-file.pdf' })
+  it('admin deletes a document with a fileUrl, and its stored file is removed', async () => {
+    const { url } = await putPrivateBlob('documents/some-file.pdf', new Uint8Array([1, 2]), 'application/pdf')
+    const doc = await createThrowawayDocument({ fileUrl: url })
 
     const res = await DELETE(deleteReq(doc.id) as never, { params: Promise.resolve({ id: String(doc.id) }) })
     expect(res.status).toBe(200)
@@ -65,7 +69,8 @@ describe('DELETE /api/documents/[id]', () => {
     const row = await getDocumentRow(doc.id)
     expect(row).toBeUndefined()
     expect(mockedDel).toHaveBeenCalledTimes(1)
-    expect(mockedDel).toHaveBeenCalledWith('https://blob.test/documents/some-file.pdf')
+    expect(mockedDel).toHaveBeenCalledWith('local:documents/some-file.pdf')
+    expect(await readPrivateBlob(url)).toBeNull()
 
     // Row is gone -- nothing left to clean up via createdDocumentIds.
     createdDocumentIds.splice(createdDocumentIds.indexOf(doc.id), 1)
@@ -84,11 +89,9 @@ describe('DELETE /api/documents/[id]', () => {
     createdDocumentIds.splice(createdDocumentIds.indexOf(doc.id), 1)
   })
 
-  it('a Blob del that rejects does not fail the request or reverse the DB delete', async () => {
-    vi.mocked(mockedDel).mockImplementationOnce(async () => {
-      throw new Error('blob store unavailable')
-    })
-    const doc = await createThrowawayDocument({ fileUrl: 'https://blob.test/documents/flaky.pdf' })
+  it('a file store that cannot delete does not fail the request or reverse the DB delete', async () => {
+    vi.stubEnv('BLOB_DRIVER', 'no-such-driver')
+    const doc = await createThrowawayDocument({ fileUrl: 'local:documents/flaky.pdf' })
 
     const res = await DELETE(deleteReq(doc.id) as never, { params: Promise.resolve({ id: String(doc.id) }) })
     expect(res.status).toBe(200)

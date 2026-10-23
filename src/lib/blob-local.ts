@@ -1,5 +1,5 @@
-// SERVER ONLY. Local-disk blob driver: dev and self-hosted fallback when no Vercel Blob store
-// exists. The returned url is opaque ("local:" + a safe key), never a filesystem path. On-disk
+// SERVER ONLY. Local-disk blob driver: the file store of the Docker deployment (the `hims_blobs`
+// volume mounted at /app/data/blobs) and of host development. The returned url is opaque ("local:" + a safe key), never a filesystem path. On-disk
 // names are a hash of the key; the content type lives in a sidecar file together with a digest of
 // the data. Writes go to a unique temp name then rename (data first, sidecar last), and a read
 // whose sidecar is missing or whose digest does not match the data is null, so a torn pair
@@ -8,9 +8,14 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+/** A private file store. The local-disk driver is the only one shipped; another can implement this. */
 export interface BlobDriver {
   put(path: string, body: Uint8Array, contentType: string): Promise<{ url: string }>
   get(url: string): Promise<{ bytes: Uint8Array; contentType: string } | null>
+  /** Removes the stored object. Unknown or foreign urls are a no-op. */
+  delete(url: string): Promise<void>
+  /** True when the store can be written right now (used by GET /api/health). Never throws. */
+  writable(): Promise<boolean>
 }
 
 /** A failed disk write. Carries only the error code: the message of an fs error embeds the path. */
@@ -48,6 +53,11 @@ export function createLocalBlobDriver(rootDir: string): BlobDriver {
     return { data, meta }
   }
 
+  function keyOf(url: string): string | null {
+    if (typeof url !== 'string' || !url.startsWith('local:')) return null
+    try { return toKey(url.slice('local:'.length)) } catch { return null }
+  }
+
   return {
     async put(p, body, contentType) {
       const key = toKey(p)
@@ -68,9 +78,8 @@ export function createLocalBlobDriver(rootDir: string): BlobDriver {
       return { url: `local:${key}` }
     },
     async get(url) {
-      if (typeof url !== 'string' || !url.startsWith('local:')) return null
-      let key: string
-      try { key = toKey(url.slice('local:'.length)) } catch { return null }
+      const key = keyOf(url)
+      if (!key) return null
       try {
         const { data, meta } = locate(key)
         const bytes = new Uint8Array(await readFile(data))
@@ -80,6 +89,26 @@ export function createLocalBlobDriver(rootDir: string): BlobDriver {
         return { bytes, contentType }
       } catch {
         return null
+      }
+    },
+    async delete(url) {
+      const key = keyOf(url)
+      if (!key) return
+      const { data, meta } = locate(key)
+      // Sidecar first: a data file without its sidecar already reads as missing.
+      await rm(meta, { force: true })
+      await rm(data, { force: true })
+    },
+    async writable() {
+      try {
+        // A real write, not access(W_OK): that answers yes for root on a read-only mount.
+        await mkdir(root, { recursive: true })
+        const probe = path.join(root, `.write-probe-${randomUUID()}`)
+        await writeFile(probe, '')
+        await rm(probe, { force: true })
+        return true
+      } catch {
+        return false
       }
     },
   }

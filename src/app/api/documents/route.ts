@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { put } from '@vercel/blob'
-import { requireBlobStore, withServiceGuard } from '@/lib/service-config'
+import { withServiceGuard } from '@/lib/service-config'
+import { putPrivateBlob, safeBlobSegment } from '@/lib/blob-store'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getDb } from '@/db/client'
@@ -93,8 +93,7 @@ export const POST = withServiceGuard('document upload', async function POST(requ
 
   // UUID prefix, not a timestamp -- two coordinators scanning the same
   // standard form name in the same second must not collide.
-  requireBlobStore()
-  const blob = await put(`documents/${crypto.randomUUID()}-${file.name}`, file, { access: 'private', contentType: file.type })
+  const blob = await putPrivateBlob(`documents/${crypto.randomUUID()}-${safeBlobSegment(file.name)}`, new Uint8Array(await file.arrayBuffer()), file.type)
 
   const created = await createDocument({
     name,

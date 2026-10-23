@@ -3,6 +3,9 @@
 // monitors and deploy checks call them. They must never reveal an env var
 // name, a value, or error text -- only fixed status words.
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { runHealthChecks, secretsStatus, type HealthDeps } from '@/lib/config-check'
 import { BASELINE_NAME } from '@/db/migrations'
 
@@ -20,7 +23,7 @@ const KEY32 = Buffer.alloc(32, 7).toString('base64')
 const okDeps = (over: Partial<HealthDeps> = {}): HealthDeps => ({
   pingDatabase: async () => {},
   redisConfigured: () => true,
-  blobConfigured: () => true,
+  blobWritable: async () => true,
   pingRedis: async () => {},
   appliedMigrations: async () => [BASELINE_NAME, 'a.sql'],
   migrationFiles: () => ['a.sql'],
@@ -49,15 +52,15 @@ describe('runHealthChecks', () => {
 
   it('reports each failure as a fixed word, never the error text', async () => {
     const report = await runHealthChecks(okDeps({
-      pingDatabase: async () => { throw new Error('password authentication failed for user "neondb_owner" postgres://u:p@h/db') },
+      pingDatabase: async () => { throw new Error('password authentication failed for user "hims_owner" postgres://u:p@h/db') },
       redisConfigured: () => false,
-      blobConfigured: () => false,
+      blobWritable: async () => false,
       appliedMigrations: async () => { throw new Error('boom') },
       env: {},
     }))
     expect(report).toEqual({
       status: 'down',
-      checks: { database: 'fail', redis: 'not_configured', migrations: 'unknown', secrets: 'missing', blob: 'not_configured' },
+      checks: { database: 'fail', redis: 'not_configured', migrations: 'unknown', secrets: 'missing', blob: 'fail' },
     })
   })
 
@@ -69,9 +72,14 @@ describe('runHealthChecks', () => {
     expect(r2.status).toBe('degraded')
   })
 
-  it('is degraded when the blob store is not configured (file storage is unavailable)', async () => {
-    const r = await runHealthChecks(okDeps({ blobConfigured: () => false }))
-    expect(r).toEqual({ status: 'degraded', checks: { database: 'ok', redis: 'ok', migrations: 'up_to_date', secrets: 'ok', blob: 'not_configured' } })
+  it('is degraded when the file store cannot be written (file storage is unavailable)', async () => {
+    const r = await runHealthChecks(okDeps({ blobWritable: async () => false }))
+    expect(r).toEqual({ status: 'degraded', checks: { database: 'ok', redis: 'ok', migrations: 'up_to_date', secrets: 'ok', blob: 'fail' } })
+  })
+
+  it('reports blob fail when the write probe throws or hangs', async () => {
+    expect((await runHealthChecks(okDeps({ blobWritable: async () => { throw new Error('EACCES /app/data/blobs') } }))).checks.blob).toBe('fail')
+    expect((await runHealthChecks(okDeps({ blobWritable: () => new Promise(() => {}) }), { timeoutMs: 50 })).checks.blob).toBe('fail')
   })
 
   it('reports migrations unknown when the database is down', async () => {
@@ -91,8 +99,11 @@ describe('GET /api/health and /api/health/ready', () => {
   it('answers with exactly {status, checks} and no session, no env names, no error text', async () => {
     vi.stubEnv('KV_REST_API_URL', '')
     vi.stubEnv('KV_REST_API_TOKEN', '')
-    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
-    vi.stubEnv('BLOB_STORE_ID', '')
+    // A file where the blob directory should be: the write probe fails.
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'hims-health-'))
+    await writeFile(path.join(tmp, 'not-a-dir'), 'x')
+    vi.stubEnv('BLOB_DRIVER', '')
+    vi.stubEnv('BLOB_LOCAL_DIR', path.join(tmp, 'not-a-dir', 'blobs'))
     const { GET } = await import('@/app/api/health/route')
     const res = await GET()
     expect(res.status).toBe(200)
@@ -101,8 +112,9 @@ describe('GET /api/health and /api/health/ready', () => {
     expect(Object.keys(body).sort()).toEqual(['checks', 'status'])
     expect(Object.keys(body.checks).sort()).toEqual(['blob', 'database', 'migrations', 'redis', 'secrets'])
     expect(body.checks.redis).toBe('not_configured')
-    expect(body.checks.blob).toBe('not_configured')
+    expect(body.checks.blob).toBe('fail')
     expect(JSON.stringify(body)).not.toMatch(ENV_LEAK)
+    await rm(tmp, { recursive: true, force: true })
   })
 
   it('/ready answers 503 unless every check passes', async () => {

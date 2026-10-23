@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { parseId, readJsonBody } from '@/lib/http'
 import { z } from 'zod'
-import { del } from '@vercel/blob'
-import { isBlobConfigured } from '@/lib/service-config'
+import { deletePrivateBlob } from '@/lib/blob-store'
 import { getDb } from '@/db/client'
 import { patients, documentTypeEnum } from '@/db/schema'
 import { eq } from 'drizzle-orm'
@@ -136,16 +135,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const deleted = await deleteDocument(numericId)
   if (!deleted) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (deleted.fileUrl && isBlobConfigured()) {
-    // Best-effort: a failed Blob delete must never block or reverse the DB
-    // delete. The record that this document existed and was removed lives in
-    // auditLog and outlives storage cleanup either way; an orphaned blob is a
-    // janitorial problem, a half-deleted document row is a data-integrity one.
-    try {
-      await del(deleted.fileUrl)
-    } catch (err) {
-      console.error(`Failed to delete blob for document ${id}:`, err)
-    }
+  if (deleted.fileUrl) {
+    // Best-effort (deletePrivateBlob never throws): a failed file delete must
+    // never block or reverse the DB delete. The record that this document
+    // existed and was removed lives in auditLog and outlives storage cleanup
+    // either way; an orphaned file is a janitorial problem, a half-deleted
+    // document row is a data-integrity one.
+    await deletePrivateBlob(deleted.fileUrl)
   }
 
   await invalidateCache(documentsListCacheKey())

@@ -91,24 +91,37 @@ describe('local blob driver', () => {
   })
 })
 
+describe('local blob driver delete and writable', () => {
+  it('delete removes data and sidecar; unknown urls are a no-op', async () => {
+    const d = createLocalBlobDriver(dir)
+    const { url } = await d.put('k/del', new Uint8Array([1]), 'text/a')
+    await d.delete(url)
+    expect(await d.get(url)).toBeNull()
+    expect((await readdir(dir, { recursive: true })).filter((f) => f.includes(path.sep))).toEqual([])
+    await expect(d.delete('local:../../etc/passwd')).resolves.toBeUndefined()
+    await expect(d.delete('https://x.example/y')).resolves.toBeUndefined()
+  })
+  it('writable is true for a usable dir and false when the root cannot be created, leaving no probe file', async () => {
+    expect(await createLocalBlobDriver(path.join(dir, 'new')).writable()).toBe(true)
+    expect((await readdir(path.join(dir, 'new')))).toEqual([])
+    await writeFile(path.join(dir, 'f'), 'x')
+    expect(await createLocalBlobDriver(path.join(dir, 'f', 'sub')).writable()).toBe(false)
+  })
+})
+
 describe('getBlobDriver selection', () => {
-  it('local when BLOB_DRIVER=local, even in production', () => {
+  it('local by default, in any NODE_ENV', () => {
+    expect(getBlobDriver({ NODE_ENV: 'production', BLOB_LOCAL_DIR: dir })).not.toBeNull()
+    expect(getBlobDriver({ NODE_ENV: 'development' })).not.toBeNull()
+  })
+  it('local when BLOB_DRIVER=local', () => {
     expect(getBlobDriver({ BLOB_DRIVER: 'local', NODE_ENV: 'production', BLOB_LOCAL_DIR: dir })).not.toBeNull()
   })
-  it('local with no token outside production', () => {
-    expect(getBlobDriver({ NODE_ENV: 'development', BLOB_LOCAL_DIR: dir })).not.toBeNull()
-  })
-  it('null with no token in production', () => {
-    expect(getBlobDriver({ NODE_ENV: 'production' })).toBeNull()
-  })
-  it('vercel driver when a token exists', () => {
-    expect(getBlobDriver({ BLOB_READ_WRITE_TOKEN: 'vercel_blob_rw_x', NODE_ENV: 'production' })).not.toBeNull()
+  it('null when BLOB_DRIVER names an unknown driver (no cloud driver exists)', () => {
+    expect(getBlobDriver({ BLOB_DRIVER: 'vercel' })).toBeNull()
   })
   it('putPrivateBlob throws ServiceNotConfiguredError(blob) with no driver', async () => {
-    vi.stubEnv('NODE_ENV', 'production')
-    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
-    vi.stubEnv('BLOB_STORE_ID', '')
-    vi.stubEnv('BLOB_DRIVER', '')
+    vi.stubEnv('BLOB_DRIVER', 's3')
     await expect(putPrivateBlob('a/b.pdf', new Uint8Array([1]), 'application/pdf')).rejects.toBeInstanceOf(ServiceNotConfiguredError)
   })
 })

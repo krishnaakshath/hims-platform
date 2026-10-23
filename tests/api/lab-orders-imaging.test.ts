@@ -9,7 +9,7 @@
 // though it's a genuine File -- see tests/api/documents-receive.test.ts and
 // tests/api/patients-insurance-card.test.ts for the same class of
 // jsdom/Node realm mismatch.
-import { describe, it, expect, vi, afterEach, afterAll, beforeEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { POST as attachImaging } from '@/app/api/lab-orders/[id]/imaging/route'
 import { getDb } from '@/db/client'
@@ -21,14 +21,17 @@ let sessionRole: Role = 'admin'
 const PROBE = `TEST_SP5_IMG-${Date.now()}`
 let sessionName = PROBE
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: sessionName })) }))
-vi.mock('@vercel/blob', () => ({
-  put: vi.fn(async (path: string) => ({ url: `https://blob.test/${path}` })),
-}))
+// The real local-disk file store in a temp dir; putPrivateBlob is wrapped so tests can assert
+// that rejected requests never store anything.
+vi.mock('@/lib/blob-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/blob-store')>()
+  return { ...actual, putPrivateBlob: vi.fn(actual.putPrivateBlob) }
+})
 
-import { put as mockedPut } from '@vercel/blob'
+import { putPrivateBlob as mockedPut } from '@/lib/blob-store'
+import { withTempBlobDir } from '../helpers/temp-blob-dir'
 
-// The routes refuse to reach the (mocked) blob SDK without a configured store.
-beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
+withTempBlobDir()
 
 const createdOrderIds: number[] = []
 const createdDocumentIds: number[] = []
@@ -201,7 +204,7 @@ describe('POST /api/lab-orders/[id]/imaging', () => {
     expect(row.filedAt).not.toBeNull()
     expect(row.status).toBe('new')
     expect(row.fileType).toBe('JPG')
-    expect(row.fileUrl).toContain('https://blob.test/imaging/')
+    expect(row.fileUrl).toMatch(/^local:imaging\//)
     expect(row.name).toBe('chest-ap.jpg')
   })
 

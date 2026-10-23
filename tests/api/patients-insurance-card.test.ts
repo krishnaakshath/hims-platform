@@ -8,18 +8,20 @@
 // strict webidl brand check on each value, which a jsdom File fails even
 // though it's a genuine File -- see tests/api/login.test.ts and
 // tests/lib/auth.test.ts for the same class of jsdom/Node realm mismatch.
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { POST as uploadRoute } from '@/app/api/patients/[anonId]/insurance-card/route'
 import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
 
-// The routes refuse to reach the (mocked) blob SDK without a configured store.
-beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
+import { readPrivateBlob } from '@/lib/blob-store'
+import { withTempBlobDir } from '../helpers/temp-blob-dir'
+
+// The real local-disk file store, in a temp dir per test.
+withTempBlobDir()
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' = 'frontdesk'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Taylor Nguyen' })) }))
-vi.mock('@vercel/blob', () => ({ put: vi.fn(async (path: string) => ({ url: `https://blob.test/${path}` })) }))
 
 afterEach(async () => {
   sessionRole = 'frontdesk'
@@ -41,7 +43,10 @@ describe('POST /api/patients/[anonId]/insurance-card', () => {
     const res = await uploadRoute(formDataReq('front', file) as never, { params: Promise.resolve({ anonId: patientRow.id }) })
     expect(res.status).toBe(200)
     const [updated] = await getDb().select().from(patients).where(eq(patients.id, patientRow.id))
-    expect(updated.primaryCardFrontUrl).toContain('https://blob.test/')
+    expect(updated.primaryCardFrontUrl).toMatch(/^local:insurance-cards\//)
+    const stored = await readPrivateBlob(updated.primaryCardFrontUrl!)
+    expect(stored?.contentType).toBe('image/jpeg')
+    expect(Array.from(stored!.bytes)).toEqual([1, 2, 3])
   })
 
   it('rejects a non-image content type', async () => {
