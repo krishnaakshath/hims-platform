@@ -1,5 +1,5 @@
 import { getDb } from '@/db/client'
-import { providers, serviceCatalog, tariffRates } from '@/db/schema'
+import { departments, providers, serviceCatalog, tariffRates } from '@/db/schema'
 import { and, desc, eq, gte, isNull, lte, or } from 'drizzle-orm'
 import { istDateOf } from '@/lib/india-time'
 import type { ProviderProfileInput } from '@/lib/validation/provider-profile'
@@ -86,3 +86,24 @@ export async function listAllProvidersWithTariffFee() {
   return rows.map((p) => ({ ...p, tariffFeePaise: p.departmentId === null ? null : rates.get(p.departmentId) ?? null }))
 }
 // end Foundations T10
+
+// WS6 T8 (spec D6): active doctors in active clinical departments, for the registration
+// dialog's "Next available" hint. Ids, names, department and OPD room only.
+export interface ClinicalDoctor {
+  id: number
+  name: string
+  departmentId: number
+  departmentName: string
+  opdRoom: string | null
+}
+
+export async function listClinicalDoctors(): Promise<ClinicalDoctor[]> {
+  const rows = await getDb()
+    .select({ id: providers.id, name: providers.name, departmentId: departments.id, departmentName: departments.name, opdRoom: providers.opdRoom })
+    .from(providers)
+    .innerJoin(departments, eq(providers.departmentId, departments.id))
+    .where(and(eq(providers.isActive, true), eq(departments.isActive, true), eq(departments.kind, 'clinical')))
+    .orderBy(departments.name, providers.name, providers.id)
+  return rows
+}
+// end WS6 T8

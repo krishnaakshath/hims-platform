@@ -77,6 +77,9 @@ export function makePatientRow(overrides: Partial<PatientRow> = {}): PatientRow 
     abhaVerifiedAt: null,
     abhaVerificationSource: null,
     abhaVerifiedVia: null,
+    // WS6 T8
+    referralSource: null,
+    referralNote: null,
     ...overrides,
   }
 }

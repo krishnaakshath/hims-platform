@@ -12,6 +12,8 @@ export interface ToastInput {
   description?: string
   tone?: ToastTone
   action?: { label: string; href: string }
+  // WS6 T8: an optional second next-step link, shown after `action`.
+  secondaryAction?: { label: string; href: string }
 }
 
 interface ToastItem extends ToastInput {
@@ -51,13 +53,18 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
       <div className="min-w-0 flex-1">
         <p className="font-medium">{toast.title}</p>
         {toast.description ? <p className="mt-0.5 text-muted-foreground">{toast.description}</p> : null}
-        {toast.action ? (
-          <Link
-            href={toast.action.href}
-            className="mt-1 inline-block font-medium text-primary underline-offset-4 hover:underline"
-          >
-            {toast.action.label}
-          </Link>
+        {toast.action || toast.secondaryAction ? (
+          <div className="mt-1 flex flex-wrap gap-x-4">
+            {[toast.action, toast.secondaryAction].map((a) => a ? (
+              <Link
+                key={a.label}
+                href={a.href}
+                className="inline-block font-medium text-primary underline-offset-4 hover:underline"
+              >
+                {a.label}
+              </Link>
+            ) : null)}
+          </div>
         ) : null}
       </div>
       <button

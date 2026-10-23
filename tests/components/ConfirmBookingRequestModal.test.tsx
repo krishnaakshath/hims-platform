@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ConfirmBookingRequestModal } from '@/components/ConfirmBookingRequestModal'
 import { BookingRequestsQueue } from '@/components/BookingRequestsQueue'
+import { ToastProvider } from '@/components/ui/toast' // WS6 T8: registration shows toasts
 import type { BookingRequestRow } from '@/lib/queries/booking-requests'
 
 const push = vi.fn()
@@ -118,24 +119,27 @@ describe('Register from this request', () => {
       return new Response(JSON.stringify({ results: [], page: 1, pageSize: 10, hasMore: false }), { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<BookingRequestsQueue canResolve providers={[{ id: 1, name: 'Dr. Test' }]} requests={[publicRow]} />)
+    render(<ToastProvider><BookingRequestsQueue canResolve providers={[{ id: 1, name: 'Dr. Test' }]} requests={[publicRow]} /></ToastProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Register from this request' }))
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent('Add New Patient')
     expect(screen.getByDisplayValue('Morgan Lee')).toBeInTheDocument()
     expect(screen.getByDisplayValue('1985-06-20')).toBeInTheDocument()
     expect(screen.getByDisplayValue('+919812345678')).toBeInTheDocument()
-    // The rest of registration is filled by the front desk as usual.
+    // The rest of registration is filled by the front desk as usual, step by step (WS6 T8).
     fireEvent.change(screen.getByLabelText('Gender'), { target: { value: 'female' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     fireEvent.change(screen.getByLabelText('Address line 1'), { target: { value: '12 MG Road' } })
     fireEvent.change(screen.getByLabelText('City'), { target: { value: 'Bengaluru' } })
     fireEvent.change(screen.getByLabelText('District'), { target: { value: 'Bengaluru Urban' } })
     fireEvent.change(screen.getByLabelText('State / UT'), { target: { value: 'IN-KA' } })
     fireEvent.change(screen.getByLabelText('PIN code'), { target: { value: '560001' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     fireEvent.click(screen.getByLabelText('ABHA not available'))
     fireEvent.change(screen.getByLabelText('Reason ABHA is not available'), { target: { value: 'not_created' } })
     fireEvent.click(screen.getByLabelText('Patient does not provide Aadhaar'))
     fireEvent.change(screen.getByLabelText('Reason for no Aadhaar'), { target: { value: 'patient_declined' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Confirm Booking Request')).toBeInTheDocument()
     const post = fetchMock.mock.calls.find(([u, i]) => u === '/api/patients' && i?.method === 'POST')!

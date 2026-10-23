@@ -116,6 +116,18 @@ describe.skipIf(!process.env.DATABASE_URL)('registerPatient (DB)', () => {
     expect(await getDb().select().from(identityVerifications).where(eq(identityVerifications.patientId, res.id))).toHaveLength(0)
   })
 
+  // WS6 T8
+  it('stores referral_source and referral_note (both null when not recorded)', async () => {
+    const decline = { aadhaar: { status: 'declined', reason: 'patient_declined' }, abha: { status: 'unavailable', reason: 'not_created' }, contacts: [] }
+    const referred = await registerPatient(input({ ...decline, referralSource: 'doctor', referralNote: 'Dr Kulkarni' }), SESSION)
+    createdIds.push(referred.id)
+    const plain = await registerPatient(input(decline), SESSION)
+    createdIds.push(plain.id)
+    const rows = await getDb().select({ id: patients.id, src: patients.referralSource, note: patients.referralNote }).from(patients).where(inArray(patients.id, [referred.id, plain.id]))
+    expect(rows.find((r) => r.id === referred.id)).toMatchObject({ src: 'doctor', note: 'Dr Kulkarni' })
+    expect(rows.find((r) => r.id === plain.id)).toMatchObject({ src: null, note: null })
+  })
+
   it('a second registration with the same ABHA number throws a unique violation and leaves nothing behind', async () => {
     const first = await registerPatient(input({ abha: { status: 'provided', abhaNumber: ABHA_NUMBER } }), SESSION)
     createdIds.push(first.id)

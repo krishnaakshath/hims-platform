@@ -149,10 +149,13 @@ export const patients = pgTable('patients', {
   abhaVerifiedAt: timestamp('abha_verified_at'),
   abhaVerificationSource: text('abha_verification_source', { enum: ABHA_VERIFICATION_SOURCES }),
   abhaVerifiedVia: text('abha_verified_via', { enum: ABHA_VERIFIED_VIA }),
+  referralSource: text('referral_source', { enum: ['self', 'doctor', 'hospital', 'camp', 'insurer', 'online', 'other'] }), // WS6 T8
+  referralNote: text('referral_note'), // WS6 T8
 }, (t) => [
   // SP8
   check('patients_abha_verification_complete', sql`(${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerificationSource} IS NULL) AND (${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerifiedVia} IS NULL)`),
   check('patients_abha_verification_source_valid', sql`${t.abhaVerificationSource} IS NULL OR ${t.abhaVerificationSource} IN ('abdm', 'abdm_sandbox_mock')`),
+  check('patients_referral_source_valid', sql`${t.referralSource} IS NULL OR ${t.referralSource} IN ('self', 'doctor', 'hospital', 'camp', 'insurer', 'online', 'other')`), // WS6 T8
   // abha_verified_via is checked in TypeScript only (ABHA_VERIFIED_VIA): the SP8 migration carries no
   // Aadhaar-named literal, which its static test pins.
 ])
