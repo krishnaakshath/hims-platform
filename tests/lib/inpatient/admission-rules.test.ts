@@ -17,6 +17,10 @@ describe('wardGenderConflict', () => {
   it('exempts young children', () => {
     expect(CHILD_EXEMPT_AGE_YEARS).toBe(12)
     expect(wardGenderConflict({ patientGender: 'female', ageYears: 7, ward: 'male' })).toBeNull()
+    expect(wardGenderConflict({ patientGender: 'female', ageYears: 11, ward: 'male' })).toBeNull()
+    expect(wardGenderConflict({ patientGender: 'female', ageYears: 12, ward: 'male' })).toBe('opposite_sex')
+    // Current behaviour: the child exemption also covers an unknown gender.
+    expect(wardGenderConflict({ patientGender: 'unknown', ageYears: 5, ward: 'male' })).toBeNull()
   })
   it('treats unverifiable gender as a conflict in a restricted ward', () => {
     for (const g of ['transgender', 'other', 'unknown', null] as const) {
