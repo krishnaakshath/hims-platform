@@ -886,7 +886,7 @@ export async function seedIndiaOperations(input: OperationsInput): Promise<Opera
       frequencyPerDay: r.perDay, durationDays: r.days, instructions: 'After food', prescribedByProviderId: doctorId(r.doctor), enteredByName: r.doctor, prescribedAt: istAt(day(-1), '12:00'),
     }).returning({ id: medicationEpisodes.id })
     if (k === rx.length - 1) continue // left in the pharmacy queue, not yet dispensed
-    const d = await dispenseMedication({ patientId: r.patientId, medicationId, medicationEpisodeId: episode.id, quantity: r.qty, dispensedByName: sessions.pharmacy.name, notes: null })
+    const d = await dispenseMedication({ patientId: r.patientId, medicationId, medicationEpisodeId: episode.id, quantity: r.qty, dispensedByName: sessions.pharmacy.name, notes: null, batchId: null, todayIso: today })
     if (!d.ok || d.dispenseId === undefined) throw new Error(`Seed step failed: dispense (${d.error})`)
     must(await createChargeForDispense({
       dispenseId: d.dispenseId, patientId: r.patientId, providerName: r.doctor, dateOfService: today,

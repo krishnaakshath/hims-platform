@@ -24,8 +24,11 @@ import {
   abhaLinkOverrides, // WS12 T5
   bookingRequests, // Wave J
   payers,
+  medicationBatches, // WS5 T5
 } from '@/db/schema'
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { isExpired, type BatchStock } from '@/lib/pharmacy/fefo' // WS5 T5
+import { todayIsoIn } from '@/lib/india-time' // WS5 T5
+import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
@@ -256,6 +259,7 @@ export interface PharmacyEpisode {
   startDate: string
   stopDate: string | null
   catalogMedicationId: number | null
+  batches: BatchStock[] // WS5 T5: the catalogue drug's dispensable batches (live, unexpired), FEFO order
 }
 
 export interface PharmacyPatientView {
@@ -331,7 +335,7 @@ export interface PharmacyPatientView {
  * this view needs to see a dispense or a just-logged bill immediately; a
  * stale "not billed yet" at the counter invites a double-bill attempt.
  */
-export async function getPatientPharmacyView(patientId: string): Promise<PharmacyPatientView | null> {
+export async function getPatientPharmacyView(patientId: string, todayIso: string = todayIsoIn()): Promise<PharmacyPatientView | null> {
   const db = getDb()
   const trimmed = patientId.trim()
 
@@ -371,15 +375,33 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
   const catalogRows = await db.select({ id: medications.id, name: medications.name }).from(medications)
   const catalogIdByName = new Map(catalogRows.map((m) => [m.name.toLowerCase(), m.id]))
 
-  const toEpisode = (e: (typeof episodeRows)[number]): PharmacyEpisode => ({
-    id: e.id,
-    name: e.name,
-    medicationClass: e.medicationClass,
-    dose: e.dose,
-    startDate: e.startDate,
-    stopDate: e.stopDate,
-    catalogMedicationId: catalogIdByName.get(e.name.toLowerCase()) ?? null,
-  })
+  // WS5 T5: one read of the live batches of every catalogue drug these episodes name.
+  const catalogIds = [...new Set(episodeRows.map((e) => catalogIdByName.get(e.name.toLowerCase())).filter((id) => id !== undefined))]
+  const batchRows = catalogIds.length === 0 ? [] : await db
+    .select({
+      medicationId: medicationBatches.medicationId, id: medicationBatches.id, batchNo: medicationBatches.batchNo, expiryDate: medicationBatches.expiryDate,
+      quantityOnHand: medicationBatches.quantityOnHand, mrpPerUnitPaise: medicationBatches.mrpPerUnitPaise,
+    })
+    .from(medicationBatches)
+    .where(and(inArray(medicationBatches.medicationId, catalogIds), isNull(medicationBatches.writtenOffAt), gt(medicationBatches.quantityOnHand, 0)))
+    .orderBy(sql`${medicationBatches.expiryDate} ASC NULLS LAST`, asc(medicationBatches.id))
+  const batchesOf = (medicationId: number | null): BatchStock[] => batchRows
+    .filter((b) => b.medicationId === medicationId && !isExpired(b, todayIso))
+    .map((b) => ({ id: b.id, batchNo: b.batchNo, expiryDate: b.expiryDate, quantityOnHand: b.quantityOnHand, mrpPerUnitPaise: b.mrpPerUnitPaise, writtenOff: false }))
+
+  const toEpisode = (e: (typeof episodeRows)[number]): PharmacyEpisode => {
+    const catalogMedicationId = catalogIdByName.get(e.name.toLowerCase()) ?? null
+    return {
+      id: e.id,
+      name: e.name,
+      medicationClass: e.medicationClass,
+      dose: e.dose,
+      startDate: e.startDate,
+      stopDate: e.stopDate,
+      catalogMedicationId,
+      batches: batchesOf(catalogMedicationId),
+    }
+  }
 
   const activeMedications = episodeRows.filter((e) => e.status === 'active').map(toEpisode)
   const pastMedications = episodeRows.filter((e) => e.status === 'inactive').map(toEpisode)

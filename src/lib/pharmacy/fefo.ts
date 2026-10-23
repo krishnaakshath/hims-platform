@@ -37,6 +37,14 @@ export function expiryMonth(expiryDate: string | null): string | null {
   return expiryDate === null ? null : expiryDate.slice(0, 7)
 }
 
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** WS5 T5: 'Mon YYYY' for an expiry date ('2030-12-31' -> 'Dec 2030'), or 'no expiry'. */
+export function expiryMonthLabel(expiryDate: string | null): string {
+  if (expiryDate === null) return 'no expiry'
+  return `${MONTHS_SHORT[Number(expiryDate.slice(5, 7)) - 1]} ${expiryDate.slice(0, 4)}`
+}
+
 function fefoOrder(a: BatchStock, b: BatchStock): number {
   if (a.expiryDate !== b.expiryDate) {
     if (a.expiryDate === null) return 1
@@ -47,6 +55,8 @@ function fefoOrder(a: BatchStock, b: BatchStock): number {
 }
 
 export function pickFefo(batches: BatchStock[], quantity: number, todayIso: string): FefoResult {
+  // WS5 T5: a non-positive or fractional quantity is a caller bug, never a stock outcome.
+  if (!Number.isInteger(quantity) || quantity <= 0) throw new RangeError('quantity must be a positive integer')
   const live = batches.filter((b) => !b.writtenOff && b.quantityOnHand > 0)
   const usable = live.filter((b) => !isExpired(b, todayIso)).sort(fefoOrder)
   const usableTotal = usable.reduce((s, b) => s + b.quantityOnHand, 0)

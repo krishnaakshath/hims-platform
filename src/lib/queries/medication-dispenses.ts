@@ -1,6 +1,6 @@
 import { getDb } from '@/db/client'
-import { medicationDispenses, medicationInventory, medicationEpisodes, patients, medications, charges, admissions, chargeLines } from '@/db/schema'
-import { and, desc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm'
+import { medicationDispenses, medicationEpisodes, patients, medications, charges, admissions, chargeLines } from '@/db/schema'
+import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import { invalidateChargesList } from '@/lib/queries/charges'
 // SP4
 import { MAX_LINE_QUANTITY, lineTaxablePaise } from '@/lib/billing/amounts'
@@ -8,6 +8,7 @@ import { getBillingSettings } from '@/lib/queries/billing-settings'
 import { lockPatientBilling } from '@/lib/queries/charge-capture'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
+import { allocateDispenseBatches, OpeningBatchWrittenOffError, type DispenseAllocationError } from '@/lib/queries/medication-batches' // WS5 T5
 
 export interface DispenseInput {
   patientId: string
@@ -16,35 +17,47 @@ export interface DispenseInput {
   quantity: number
   dispensedByName: string
   notes: string | null
+  batchId: number | null // WS5 T5: a picked batch, or null for FEFO
+  todayIso: string // WS5 T5: IST business date that decides which batches are expired
+}
+
+// WS5 T5: stock refusals carry a code the route maps to a status (batch_mismatch 400, rest 409).
+export type DispenseRefusal = DispenseAllocationError | 'opening_batch_written_off'
+export const DISPENSE_REFUSAL_MESSAGES: Record<DispenseRefusal, string> = {
+  insufficient_stock: 'Not enough stock on hand for this quantity',
+  batch_expired: 'This batch has expired and cannot be dispensed',
+  only_expired_stock: 'Only expired stock is left for this quantity; write it off and receive fresh stock',
+  batch_mismatch: 'That batch is not stock of this medication',
+  opening_batch_written_off: 'The OPENING batch of this medication is written off; receive stock before dispensing',
 }
 
 export interface DispenseResult {
   ok: boolean
   error?: string
-  dispenseId?: number
+  code?: DispenseRefusal
+  dispenseId?: number // the first of dispenseIds, for older callers
+  dispenseIds?: number[]
+  allocations?: { dispenseId: number; batchId: number; batchNo: string; expiryMonth: string | null; quantity: number }[]
 }
 
-// The stock decrement is a single conditional UPDATE (quantity_on_hand >=
-// requested in the WHERE, not a separate read-then-write) so two concurrent
-// dispenses of the same drug can't both succeed past the actual stock --
-// same race-safety pattern as Front Desk's room assignment and the MAR's
-// administerMedication elsewhere in this codebase.
-//
-// patientId/medicationId existence is validated BEFORE the decrement
+class DispenseRefused extends Error {
+  constructor(readonly code: DispenseRefusal) { super(code) }
+}
+
+// patientId/medicationId existence is validated BEFORE the transaction
 // (matching the getPayerById/'Unknown payer' pattern in the eligibility-check
-// route) for two reasons: (1) it turns a bad FK into a clean 400 instead of
-// an unhandled FK-violation 500 on the medicationDispenses insert -- with no
-// existence check, an unknown patientId would let the stock decrement commit
-// and then fail the insert, silently destroying stock with no audit trail;
-// (2) it removes the ambiguity where an unknown medicationId previously fell
-// through the conditional UPDATE's WHERE clause (no matching row) and was
-// misreported as "not enough stock" (409) instead of "unknown medication" (400).
+// route) so a bad FK is a clean 400 instead of an FK-violation 500 on the
+// medicationDispenses insert, and an unknown medicationId is reported as
+// "unknown medication" (400), not "not enough stock" (409).
 //
-// The decrement and the dispense insert are wrapped in a single
-// db.transaction() so they commit or roll back together -- without this, a
-// post-existence-check failure (or any other error) between the two
-// statements could still leave stock decremented with no matching dispense
-// row.
+// WS5 T5: stock comes out of batches. allocateDispenseBatches (inside the same
+// transaction as the dispense rows) locks the drug's inventory row and batches,
+// moves any unbatched stock into the OPENING batch, allocates FEFO or the picked
+// batch with guarded decrements, and recomputes medication_inventory from the
+// batches -- so this path no longer decrements medication_inventory itself.
+// One dispense row per allocation, each with its batch_id; a drug with no stock
+// at all is refused exactly as before. Any refusal throws inside the transaction
+// so the reconcile and partial decrements roll back with it.
 export async function dispenseMedication(input: DispenseInput): Promise<DispenseResult> {
   const db = getDb()
 
@@ -61,20 +74,29 @@ export async function dispenseMedication(input: DispenseInput): Promise<Dispense
     }
   }
 
-  return db.transaction(async (tx) => {
-    const decremented = await tx.update(medicationInventory)
-      .set({ quantityOnHand: sql`${medicationInventory.quantityOnHand} - ${input.quantity}`, updatedAt: new Date() })
-      .where(and(eq(medicationInventory.medicationId, input.medicationId), gte(medicationInventory.quantityOnHand, input.quantity)))
-      .returning({ id: medicationInventory.id })
-    if (decremented.length === 0) return { ok: false, error: 'Not enough stock on hand for this quantity' }
+  try {
+    return await db.transaction(async (tx) => {
+      const allocated = await allocateDispenseBatches(tx, {
+        medicationId: input.medicationId, quantity: input.quantity, batchId: input.batchId, todayIso: input.todayIso,
+      })
+      if (!allocated.ok) throw new DispenseRefused(allocated.error)
 
-    const [created] = await tx.insert(medicationDispenses).values({
-      patientId: input.patientId, medicationId: input.medicationId, medicationEpisodeId: input.medicationEpisodeId,
-      quantity: input.quantity, dispensedByName: input.dispensedByName, notes: input.notes,
-    }).returning()
-
-    return { ok: true, dispenseId: created.id }
-  })
+      const allocations: NonNullable<DispenseResult['allocations']> = []
+      for (const a of allocated.allocations) {
+        const [created] = await tx.insert(medicationDispenses).values({
+          patientId: input.patientId, medicationId: input.medicationId, medicationEpisodeId: input.medicationEpisodeId,
+          quantity: a.quantity, dispensedByName: input.dispensedByName, notes: input.notes, batchId: a.batchId,
+        }).returning({ id: medicationDispenses.id })
+        allocations.push({ dispenseId: created.id, batchId: a.batchId, batchNo: a.batchNo, expiryMonth: a.expiryMonth, quantity: a.quantity })
+      }
+      const dispenseIds = allocations.map((a) => a.dispenseId)
+      return { ok: true, dispenseId: dispenseIds[0], dispenseIds, allocations }
+    })
+  } catch (err) {
+    const code = err instanceof DispenseRefused ? err.code : err instanceof OpeningBatchWrittenOffError ? 'opening_batch_written_off' : null
+    if (code === null) throw err
+    return { ok: false, code, error: DISPENSE_REFUSAL_MESSAGES[code] }
+  }
 }
 
 export async function listDispensesForPatient(patientId: string) {

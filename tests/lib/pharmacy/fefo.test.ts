@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pickFefo, isExpired, expiresWithinDays, expiryMonth, type BatchStock } from '@/lib/pharmacy/fefo'
+import { pickFefo, isExpired, expiresWithinDays, expiryMonth, expiryMonthLabel, type BatchStock } from '@/lib/pharmacy/fefo'
 
 const TODAY = '2026-10-23'
 
@@ -76,5 +76,18 @@ describe('expiry helpers', () => {
   it("expiryMonth('2026-11-30') is '2026-11'", () => {
     expect(expiryMonth('2026-11-30')).toBe('2026-11')
     expect(expiryMonth(null)).toBeNull()
+  })
+})
+
+// WS5 T5
+describe('pickFefo quantity guard and expiryMonthLabel', () => {
+  it('throws on a zero, negative or fractional quantity', () => {
+    for (const q of [0, -1, 1.5]) expect(() => pickFefo([batch(1, null, 10)], q, TODAY)).toThrow(RangeError)
+  })
+
+  it('labels an expiry as Mon YYYY, or no expiry', () => {
+    expect(expiryMonthLabel('2030-12-31')).toBe('Dec 2030')
+    expect(expiryMonthLabel('2027-01-01')).toBe('Jan 2027')
+    expect(expiryMonthLabel(null)).toBe('no expiry')
   })
 })

@@ -1,7 +1,7 @@
 import { getDb } from '@/db/client'
 import { medicationBatches, medicationInventory } from '@/db/schema'
 import { and, asc, eq, gte, isNull, sql } from 'drizzle-orm'
-import type { BatchStock } from '@/lib/pharmacy/fefo'
+import { expiryMonth, isExpired, pickFefo, type BatchStock } from '@/lib/pharmacy/fefo'
 import type { WriteExecutor } from './executor'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
@@ -129,4 +129,75 @@ export async function writeOffBatch(batchId: number, reason: WriteOffReason, ses
     if (err instanceof OpeningBatchWrittenOffError) return { ok: false, error: 'opening_batch_written_off' }
     throw err
   }
+}
+
+// WS5 T5: the batches a dispense draws from.
+export interface DispenseAllocation {
+  batchId: number
+  batchNo: string
+  expiryDate: string | null
+  expiryMonth: string | null
+  mrpPerUnitPaise: number
+  quantity: number
+}
+export type DispenseAllocationError = 'batch_expired' | 'insufficient_stock' | 'batch_mismatch' | 'only_expired_stock'
+export type AllocateDispenseResult = { ok: true; allocations: DispenseAllocation[] } | { ok: false; error: DispenseAllocationError }
+
+/**
+ * Takes `quantity` units of a drug from its batches inside the caller's transaction: FEFO over the
+ * usable batches, or only the picked `batchId`. Self-contained so any dispense transaction can call
+ * it before writing its dispense rows (one per allocation).
+ *   1. reconcileUnbatchedStock (ruling R7): locks the inventory row, which serialises every batch
+ *      writer of this drug, and moves unbatched stock into the OPENING batch.
+ *   2. Locks all the drug's batch rows FOR UPDATE in id order and reads them under the lock.
+ *   3. Picked batch: another drug's (or unknown) -> batch_mismatch; written off -> insufficient_stock
+ *      (it holds nothing to dispense; "expired" would misname a damaged or recalled batch);
+ *      expired -> batch_expired; short of the quantity -> insufficient_stock (a picked batch never
+ *      spills into another). No pick: pickFefo (insufficient_stock / only_expired_stock).
+ *   4. Guarded decrement per allocation (`WHERE quantity_on_hand >= n`), then syncInventoryTotal.
+ * A refusal after step 1 may leave the reconcile (and, for a guarded decrement that finds 0 rows,
+ * earlier decrements) written: the caller must roll its transaction back on any `ok: false`.
+ */
+export async function allocateDispenseBatches(
+  tx: WriteExecutor,
+  input: { medicationId: number; quantity: number; batchId: number | null; todayIso: string },
+): Promise<AllocateDispenseResult> {
+  const { medicationId, quantity, batchId, todayIso } = input
+  if (!Number.isInteger(quantity) || quantity <= 0) throw new RangeError('quantity must be a positive integer')
+  await reconcileUnbatchedStock(tx, medicationId)
+
+  const rows = await tx.select({
+    id: medicationBatches.id, batchNo: medicationBatches.batchNo, expiryDate: medicationBatches.expiryDate,
+    quantityOnHand: medicationBatches.quantityOnHand, mrpPerUnitPaise: medicationBatches.mrpPerUnitPaise, writtenOffAt: medicationBatches.writtenOffAt,
+  }).from(medicationBatches).where(eq(medicationBatches.medicationId, medicationId)).orderBy(asc(medicationBatches.id)).for('update')
+  const batches: BatchStock[] = rows.map(({ writtenOffAt, ...b }) => ({ ...b, writtenOff: writtenOffAt !== null }))
+
+  let picked: { batchId: number; quantity: number }[]
+  if (batchId !== null) {
+    const chosen = batches.find((b) => b.id === batchId)
+    if (!chosen) return { ok: false, error: 'batch_mismatch' }
+    if (chosen.writtenOff) return { ok: false, error: 'insufficient_stock' }
+    if (isExpired(chosen, todayIso)) return { ok: false, error: 'batch_expired' }
+    if (chosen.quantityOnHand < quantity) return { ok: false, error: 'insufficient_stock' }
+    picked = [{ batchId, quantity }]
+  } else {
+    const fefo = pickFefo(batches, quantity, todayIso)
+    if (!fefo.ok) return fefo
+    picked = fefo.allocations
+  }
+
+  const allocations: DispenseAllocation[] = []
+  for (const a of picked) {
+    const taken = await tx.update(medicationBatches).set({ quantityOnHand: sql`${medicationBatches.quantityOnHand} - ${a.quantity}` })
+      .where(and(eq(medicationBatches.id, a.batchId), gte(medicationBatches.quantityOnHand, a.quantity)))
+      .returning({ id: medicationBatches.id })
+    if (taken.length === 0) return { ok: false, error: 'insufficient_stock' }
+    const b = batches.find((x) => x.id === a.batchId)!
+    allocations.push({
+      batchId: b.id, batchNo: b.batchNo, expiryDate: b.expiryDate, expiryMonth: expiryMonth(b.expiryDate),
+      mrpPerUnitPaise: b.mrpPerUnitPaise, quantity: a.quantity,
+    })
+  }
+  await syncInventoryTotal(tx, medicationId)
+  return { ok: true, allocations }
 }

@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { patients, medications, medicationInventory, medicationDispenses, medicationEpisodes } from '@/db/schema'
+import { patients, medications, medicationInventory, medicationDispenses, medicationEpisodes, medicationBatches } from '@/db/schema'
 import { dispenseMedication, listDispensesForPatient } from '@/lib/queries/medication-dispenses'
 
+const TODAY = '2026-10-23'
 const createdDispenseIds: number[] = []
 const createdEpisodeIds: number[] = []
 const createdMedIds: number[] = []
@@ -12,6 +13,8 @@ afterEach(async () => {
   while (createdEpisodeIds.length > 0) await getDb().delete(medicationEpisodes).where(eq(medicationEpisodes.id, createdEpisodeIds.pop()!))
   while (createdMedIds.length > 0) {
     const id = createdMedIds.pop()!
+    await getDb().delete(medicationDispenses).where(eq(medicationDispenses.medicationId, id)) // WS5 T5: rows reference batches
+    await getDb().delete(medicationBatches).where(eq(medicationBatches.medicationId, id))
     await getDb().delete(medicationInventory).where(eq(medicationInventory.medicationId, id))
     await getDb().delete(medications).where(eq(medications.id, id))
   }
@@ -29,7 +32,7 @@ describe('medication dispenses', () => {
   it('dispenses and decrements stock', async () => {
     const med = await makeMedWithStock(50)
     const [patientRow] = await getDb().select().from(patients).limit(1)
-    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null, batchId: null, todayIso: TODAY })
     expect(result.ok).toBe(true)
     createdDispenseIds.push(result.dispenseId!)
 
@@ -43,7 +46,7 @@ describe('medication dispenses', () => {
   it('rejects dispensing more than is on hand', async () => {
     const med = await makeMedWithStock(5)
     const [patientRow] = await getDb().select().from(patients).limit(1)
-    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null, batchId: null, todayIso: TODAY })
     expect(result.ok).toBe(false)
     const [inv] = await getDb().select().from(medicationInventory).where(eq(medicationInventory.medicationId, med.id))
     expect(inv.quantityOnHand).toBe(5) // unchanged
@@ -53,9 +56,9 @@ describe('medication dispenses', () => {
     const med = await makeMedWithStock(100)
     const patientsRows = await getDb().select().from(patients).limit(2)
     const [patientA, patientB] = patientsRows
-    const resultA = await dispenseMedication({ patientId: patientA.id, medicationId: med.id, medicationEpisodeId: null, quantity: 5, dispensedByName: 'Staff A', notes: null })
+    const resultA = await dispenseMedication({ patientId: patientA.id, medicationId: med.id, medicationEpisodeId: null, quantity: 5, dispensedByName: 'Staff A', notes: null, batchId: null, todayIso: TODAY })
     createdDispenseIds.push(resultA.dispenseId!)
-    const resultB = await dispenseMedication({ patientId: patientB.id, medicationId: med.id, medicationEpisodeId: null, quantity: 7, dispensedByName: 'Staff B', notes: null })
+    const resultB = await dispenseMedication({ patientId: patientB.id, medicationId: med.id, medicationEpisodeId: null, quantity: 7, dispensedByName: 'Staff B', notes: null, batchId: null, todayIso: TODAY })
     createdDispenseIds.push(resultB.dispenseId!)
 
     const historyA = await listDispensesForPatient(patientA.id)
@@ -73,7 +76,7 @@ describe('medication dispenses', () => {
     createdEpisodeIds.push(episode.id)
 
     // patientB's dispense request forges patientA's episode id.
-    const result = await dispenseMedication({ patientId: patientB.id, medicationId: med.id, medicationEpisodeId: episode.id, quantity: 5, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: patientB.id, medicationId: med.id, medicationEpisodeId: episode.id, quantity: 5, dispensedByName: 'Test Staff', notes: null, batchId: null, todayIso: TODAY })
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/does not belong/)
 
@@ -85,7 +88,7 @@ describe('medication dispenses', () => {
 
   it('rejects an unknown patientId and leaves stock untouched (no orphaned dispense row)', async () => {
     const med = await makeMedWithStock(50)
-    const result = await dispenseMedication({ patientId: 'rd-does-not-exist', medicationId: med.id, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: 'rd-does-not-exist', medicationId: med.id, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null, batchId: null, todayIso: TODAY })
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Unknown patient')
     expect(result.dispenseId).toBeUndefined()
@@ -99,7 +102,7 @@ describe('medication dispenses', () => {
 
   it('rejects an unknown medicationId (not a misleading "not enough stock" result)', async () => {
     const [patientRow] = await getDb().select().from(patients).limit(1)
-    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: 999999999, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null })
+    const result = await dispenseMedication({ patientId: patientRow.id, medicationId: 999999999, medicationEpisodeId: null, quantity: 10, dispensedByName: 'Test Staff', notes: null, batchId: null, todayIso: TODAY })
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Unknown medication')
   })
@@ -113,8 +116,8 @@ describe('medication dispenses', () => {
     const med = await makeMedWithStock(10)
     const [patientRow] = await getDb().select().from(patients).limit(1)
     const [resultA, resultB] = await Promise.all([
-      dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 6, dispensedByName: 'Staff A', notes: null }),
-      dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 6, dispensedByName: 'Staff B', notes: null }),
+      dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 6, dispensedByName: 'Staff A', notes: null, batchId: null, todayIso: TODAY }),
+      dispenseMedication({ patientId: patientRow.id, medicationId: med.id, medicationEpisodeId: null, quantity: 6, dispensedByName: 'Staff B', notes: null, batchId: null, todayIso: TODAY }),
     ])
     if (resultA.dispenseId) createdDispenseIds.push(resultA.dispenseId)
     if (resultB.dispenseId) createdDispenseIds.push(resultB.dispenseId)

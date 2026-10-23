@@ -333,7 +333,7 @@ export function PharmacyDashboard({
       </section>
 
       {dispensing && (
-        <DispenseMedicationModal medication={dispensing} onClose={() => setDispensing(null)} />
+        <DispenseMedicationModal medication={dispensing} today={today} onClose={() => setDispensing(null)} />
       )}
 
       {/* Practice-wide "currently prescribed" summary -- counts and drug
