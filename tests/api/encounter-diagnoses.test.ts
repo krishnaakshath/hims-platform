@@ -39,6 +39,8 @@ describe.skipIf(!process.env.DATABASE_URL)('encounter diagnoses routes (DB)', ()
   let secondCodeId = 0 // J06.9 in the same version
   let sampleCodeId = 0 // R50.9 in a SAMPLE version
   let oldCodeId = 0 // R50.9 in an older, non-current licensed version
+  let maleOnlyCodeId = 0 // N40 (male only) in the current version; the patient is female
+  let infantCodeId = 0 // P07.3 (age 0..1) in the current version; the patient was born 1980
   let savedCurrent: number[] = []
   const encounterIds: number[] = []
   const systemIds: number[] = []
@@ -48,16 +50,19 @@ describe.skipIf(!process.env.DATABASE_URL)('encounter diagnoses routes (DB)', ()
     const cur = await db.select({ id: codeSystems.id }).from(codeSystems).where(and(eq(codeSystems.kind, 'icd10'), eq(codeSystems.isCurrent, true)))
     savedCurrent = cur.map((c) => c.id)
     if (savedCurrent.length) await db.update(codeSystems).set({ isCurrent: false }).where(inArray(codeSystems.id, savedCurrent))
-    const load = async (version: string, isSample: boolean, isCurrent: boolean, rows: { code: string; display: string }[]) => {
+    const load = async (version: string, isSample: boolean, isCurrent: boolean, rows: { code: string; display: string; sexRestriction?: 'male' | 'female'; ageMinYears?: number; ageMaxYears?: number }[]) => {
       const [cs] = await db.insert(codeSystems).values({
         kind: 'icd10', version, name: 'T', isSample, isCurrent, licenceNote: isSample ? null : 'test',
         sourceFileName: 't.csv', sourceSha256: 'x', codeCount: rows.length, importedByName: 'test',
       }).returning({ id: codeSystems.id })
       systemIds.push(cs.id)
-      const ins = await db.insert(codes).values(rows.map((r) => ({ codeSystemId: cs.id, code: r.code, display: r.display, selectable: true, active: true, excludes: [] }))).returning({ id: codes.id })
+      const ins = await db.insert(codes).values(rows.map((r) => ({ selectable: true, active: true, excludes: [], ...r, codeSystemId: cs.id }))).returning({ id: codes.id })
       return ins.map((r) => r.id)
     }
-    ;[currentCodeId, secondCodeId] = await load(`TEST-WS1T4-${RUN}`, false, true, [{ code: 'R50.9', display: 'Fever, unspecified' }, { code: 'J06.9', display: 'Acute upper respiratory infection, unspecified' }])
+    ;[currentCodeId, secondCodeId, maleOnlyCodeId, infantCodeId] = await load(`TEST-WS1T4-${RUN}`, false, true, [
+      { code: 'R50.9', display: 'Fever, unspecified' }, { code: 'J06.9', display: 'Acute upper respiratory infection, unspecified' },
+      { code: 'N40', display: 'Hyperplasia of prostate', sexRestriction: 'male' }, { code: 'P07.3', display: 'Other preterm infants', ageMinYears: 0, ageMaxYears: 1 },
+    ])
     ;[sampleCodeId] = await load(`SAMPLE-TEST-WS1T4-${RUN}`, true, false, [{ code: 'R50.9', display: 'SAMPLE fever' }])
     ;[oldCodeId] = await load(`TEST-WS1T4-OLD-${RUN}`, false, false, [{ code: 'R50.9', display: 'Old fever' }])
 
@@ -115,6 +120,18 @@ describe.skipIf(!process.env.DATABASE_URL)('encounter diagnoses routes (DB)', ()
       expect(res.status).toBe(422)
       expect((await res.json()).code).toBe('code_not_current')
     }
+  })
+
+  it('SP6 code checks apply: a code that does not fit the patient\'s sex or age is 422 code_not_valid_for_patient', async () => {
+    for (const [codeId, issue] of [[maleOnlyCodeId, 'sex_mismatch'], [infantCodeId, 'age_out_of_range']] as const) {
+      const res = await post(openA, { codeId, diagnosisType: 'secondary' })
+      expect(res.status).toBe(422)
+      const body = await res.json()
+      expect(body.code).toBe('code_not_valid_for_patient')
+      expect(body.issues.map((i: { code: string }) => i.code)).toContain(issue)
+    }
+    const rows = await getDb().select({ id: diagnoses.id }).from(diagnoses).where(inArray(diagnoses.codeId, [maleOnlyCodeId, infantCodeId]))
+    expect(rows).toEqual([])
   })
 
   it('free text is uncoded with an empty code', async () => {

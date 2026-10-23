@@ -15,7 +15,8 @@ export const patchDiagnosisSchema = z.object({
 }).strict()
 export type PatchDiagnosis = z.infer<typeof patchDiagnosisSchema>
 
-export type DiagnosisError = 'code_not_current' | 'coding_locked' | 'primary_exists' | 'not_found'
+// + code_not_valid_for_patient (fix round 1): SP6's sex/age checks refused the code for this patient.
+export type DiagnosisError = 'code_not_current' | 'coding_locked' | 'primary_exists' | 'not_found' | 'code_not_valid_for_patient'
 
 export const referralSchema = z.discriminatedUnion('kind', [
   z.object({

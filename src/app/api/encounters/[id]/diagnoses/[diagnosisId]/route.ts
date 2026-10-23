@@ -36,7 +36,7 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
 
   try {
     const result = await updateEncounterDiagnosis(check.encounter, target.diagnosisId, parsed.data, session)
-    if (!result.ok) return diagnosisErrorResponse(result.error)
+    if (!result.ok) return diagnosisErrorResponse(result.error, result.issues)
     return NextResponse.json({ ok: true })
   } catch (err) {
     return diagnosisFailure(err, 'update')
@@ -58,7 +58,7 @@ export async function DELETE(_request: NextRequest, ctx: Ctx) {
 
   try {
     const result = await voidEncounterDiagnosis(check.encounter, target.diagnosisId, session)
-    if (!result.ok) return diagnosisErrorResponse(result.error)
+    if (!result.ok) return diagnosisErrorResponse(result.error, result.issues)
     return NextResponse.json({ ok: true })
   } catch (err) {
     return diagnosisFailure(err, 'remove')

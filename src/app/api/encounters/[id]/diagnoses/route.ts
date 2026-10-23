@@ -30,7 +30,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const result = await addEncounterDiagnosis(check.encounter, parsed.data, session)
-    if (!result.ok) return diagnosisErrorResponse(result.error)
+    if (!result.ok) return diagnosisErrorResponse(result.error, result.issues)
     return NextResponse.json({ diagnosis: result.diagnosis }, { status: 201 })
   } catch (err) {
     return diagnosisFailure(err, 'add')
