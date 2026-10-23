@@ -112,11 +112,12 @@ describe('/collections', () => {
     const inputs = screen.getAllByRole('textbox', { name: /scan or type the tube's sample id/i })
     expect(inputs).toHaveLength(2)
     fireEvent.change(inputs[0], { target: { value: displaySampleId(SID_A) } })
+    fireEvent.change(screen.getByLabelText('Handover code from the patient'), { target: { value: '123456' } }) // WS6 T11
     fireEvent.click(screen.getByRole('button', { name: /save collection/i }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/home-collections/77/collect')
-    expect(JSON.parse(init.body)).toEqual({ sampleIds: [displaySampleId(SID_A)] })
+    expect(JSON.parse(init.body)).toEqual({ sampleIds: [displaySampleId(SID_A)], otp: '123456' })
     await waitFor(() => expect(refresh).toHaveBeenCalled())
   })
 
@@ -125,6 +126,7 @@ describe('/collections', () => {
     fireEvent.click(screen.getByRole('button', { name: /mark collected/i }))
     const inputs = screen.getAllByRole('textbox', { name: /scan or type the tube's sample id/i })
     const typo = `${SID_A.slice(0, -1)}${(Number(SID_A.at(-1)) + 1) % 10}`
+    fireEvent.change(screen.getByLabelText('Handover code from the patient'), { target: { value: '123456' } }) // WS6 T11
     fireEvent.change(inputs[0], { target: { value: typo } })
     fireEvent.click(screen.getByRole('button', { name: /save collection/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/not valid/i)
