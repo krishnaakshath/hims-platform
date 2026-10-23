@@ -12,11 +12,12 @@
 // `skipped` and never fails the batch, and a repeat run finds nothing left to draft.
 import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { admissions, chargeLines, encounterProcedures, encounters, labOrders, labTests, patients, serviceCatalog } from '@/db/schema'
+import { admissions, chargeLines, encounterProcedures, encounters, labOrders, labTests, medicationDispenses, medications, patients, serviceCatalog } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { groupReadyLines, type ReadyLineInput } from '@/lib/billing/ready-lines'
 import { createDraftInvoice } from './invoices'
+import { dispenseNotBilledSql } from './medication-dispenses' // WS2 T14
 import type { WriteExecutor } from './executor'
 
 type ReadRow = ReadyLineInput & { taxablePaise: number }
@@ -91,7 +92,8 @@ const UNBILLED_LIMIT = 200
 
 /**
  * Orders with no live charge line (spec section 3, automatic charges, "never block the clinical
- * act": a blocked or unpriced automatic charge leaves the order without a line). Non-cancelled lab orders, and
+ * act": a blocked or unpriced automatic charge leaves the order without a line). Dispenses not
+ * billed (WS2 T14, dispenseNotBilledSql). Non-cancelled lab orders, and
  * non-void procedures that name a service (a description-only coding entry is not an order). A
  * cancelled visit cancels its pending orders and soft-voids its uncoded procedures, and refuses the
  * cancel when a test was performed or a procedure is coded, so none of them appear here.
@@ -101,7 +103,7 @@ export async function listUnbilledOrders(): Promise<UnbilledOrder[]> {
   const db = getDb()
   const liveLine = (column: typeof chargeLines.labOrderId | typeof chargeLines.encounterProcedureId, id: typeof labOrders.id | typeof encounterProcedures.id) =>
     sql`not exists (select 1 from ${chargeLines} where ${column} = ${id} and ${chargeLines.status} <> 'void')`
-  const [labs, procs] = await Promise.all([
+  const [labs, procs, dispenses] = await Promise.all([
     db.select({ id: labOrders.id, patientId: labOrders.patientId, patientName: patients.name, uhid: patients.uhid, itemName: labTests.name, createdAt: labOrders.orderedAt })
       .from(labOrders).innerJoin(patients, eq(patients.id, labOrders.patientId)).innerJoin(labTests, eq(labTests.id, labOrders.labTestId))
       .where(and(ne(labOrders.status, 'cancelled'), liveLine(chargeLines.labOrderId, labOrders.id)))
@@ -110,12 +112,17 @@ export async function listUnbilledOrders(): Promise<UnbilledOrder[]> {
       .from(encounterProcedures).innerJoin(patients, eq(patients.id, encounterProcedures.patientId)).innerJoin(serviceCatalog, eq(serviceCatalog.id, encounterProcedures.serviceId))
       .where(and(isNull(encounterProcedures.voidedAt), liveLine(chargeLines.encounterProcedureId, encounterProcedures.id)))
       .orderBy(sql`${encounterProcedures.createdAt} desc`, sql`${encounterProcedures.id} desc`).limit(UNBILLED_LIMIT),
+    // WS2 T14: dispenses not billed (WS2 T8's rule: no live line, no free-dispense reason, and no
+    // pre-SP4 bill on the legacy charges table, which counts as billed).
+    db.select({ id: medicationDispenses.id, patientId: medicationDispenses.patientId, patientName: patients.name, uhid: patients.uhid, itemName: medications.name, createdAt: medicationDispenses.dispensedAt })
+      .from(medicationDispenses).innerJoin(patients, eq(patients.id, medicationDispenses.patientId)).innerJoin(medications, eq(medications.id, medicationDispenses.medicationId))
+      .where(dispenseNotBilledSql)
+      .orderBy(sql`${medicationDispenses.dispensedAt} desc`, sql`${medicationDispenses.id} desc`).limit(UNBILLED_LIMIT),
   ])
-  // TODO(Task 14): add dispenses with no charge line and no `medication_dispenses.no_charge_reason`
-  // (kind 'dispense'). That column comes with the pharmacy stream, merged after this one.
   const rows: UnbilledOrder[] = [
     ...labs.map((r) => ({ kind: 'lab_order' as const, ...r })),
     ...procs.map((r) => ({ kind: 'procedure' as const, ...r })),
+    ...dispenses.map((r) => ({ kind: 'dispense' as const, ...r })),
   ]
   return rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id).slice(0, UNBILLED_LIMIT)
 }

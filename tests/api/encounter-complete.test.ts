@@ -117,6 +117,7 @@ describe.skipIf(!process.env.DATABASE_URL)('completing a visit (DB)', () => {
     const body = await res.json()
     expect(body.encounter).toMatchObject({ id, status: 'completed' })
     expect(body.warnings).toEqual(['no_vitals', 'unsigned_notes'])
+    expect(body.charges).toEqual([]) // WS2 T14: a visit with no department owes no consultation
   })
 
   it('no warnings when vitals are recorded and no draft note is linked', async () => {

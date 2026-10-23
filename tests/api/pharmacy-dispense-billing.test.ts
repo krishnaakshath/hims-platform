@@ -8,7 +8,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
   admissions, allergies, auditLog, billingSettings, chargeLines, encounters, medicationDispenses, medicationEpisodes, medicationInventory,
-  medications, patients, prescriptions, providers,
+  medications, patients, payers, prescriptions, providers,
 } from '@/db/schema'
 import type { Role } from '@/lib/auth'
 import { purgeBillingFixtures } from '../db/billing-fixtures'
@@ -133,6 +133,32 @@ describe('POST /api/pharmacy/dispense bills the dispense', () => {
     const body = await res.json()
     const [line] = await linesFor(body.id)
     expect(line).toMatchObject({ admissionId, encounterId: null })
+  })
+
+  // WS2 T14 (ruling on T8): a pharmacy line in an admission follows the automatic bill-to rule
+  // (autoBillTo: the primary payer when set), at the same MRP-backed price; an OPD line stays self-pay.
+  it('an admitted patient with a primary payer: the line bills the payer, at the MRP-backed price', async () => {
+    const db = getDb()
+    const [payer] = await db.insert(payers).values({ name: `${TAG} Insurer`, payerId: `${TAG}-P`, requiresPreauth: true }).returning()
+    await db.update(patients).set({ primaryPayerId: payer.id }).where(inArray(patients.id, [IPD, OPD]))
+    try {
+      const res = await dispense({ patientId: IPD, medicationId: med.priced, quantity: 15, ...BATCH })
+      expect(res.status).toBe(201)
+      const body = await res.json()
+      expect(body.charge).toEqual({ lineId: expect.any(Number), quantity: 15, unitMrpPaise: 350, totalPaise: 5242 })
+      const lines = await linesFor(body.id)
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatchObject({ admissionId, encounterId: null, payerId: payer.id, unitPricePaise: 312, taxablePaise: 4680, priceSource: 'pharmacy', serviceId: null })
+
+      const opd = await dispense({ patientId: OPD, medicationId: med.priced, quantity: 1, ...BATCH })
+      expect(opd.status).toBe(201)
+      const [opdLine] = await linesFor((await opd.json()).id)
+      expect(opdLine.payerId).toBeNull()
+    } finally {
+      await purgeBillingFixtures(PIDS)
+      await db.update(patients).set({ primaryPayerId: null }).where(inArray(patients.id, PIDS))
+      await db.delete(payers).where(eq(payers.id, payer.id))
+    }
   })
 
   it('a prescription on a cancelled visit: a line with no visit or stay', async () => {

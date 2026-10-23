@@ -131,6 +131,85 @@ role-capability summary on each user's own account).
 surface with its own sidebar: overview, forms to complete, medications,
 appointments, and messages with the care team.
 
+## Consultation workspace and automatic billing
+
+**The workspace** (`/encounters/<id>`) is the visit. Opening it never changes
+anything. A checked-in visit shows **Start consultation**, which is a POST.
+The patient strip shows the UHID (never the chart id), the allergy status and
+a **Visit charges ₹… (n lines)** chip. The chip counts the visit's live charge
+lines and shows their GST-inclusive total, estimated per line as intra-state.
+
+The tabs are:
+- **Vitals**
+- **History**: the consult and earlier visits.
+- **Diagnosis**: ICD-10 diagnoses, the problem list, advice and follow-up,
+  and referrals.
+- **Rx**: the multi-drug prescription builder. Doses use the Indian `1-0-1`
+  pattern, and the builder checks the patient's allergies.
+- **Orders**: lab orders and procedures, both raised from the visit.
+- **Notes**: visit notes, signed with a typed name.
+
+**Complete visit** needs a diagnosis on an OPD visit, or a stated reason for
+having none. After completion, the bar shows what the consultation did:
+**Consultation ₹… on the bill**, or why it was not billed. A visit whose
+charges sit on a finalised invoice cannot be cancelled. The refusal names the
+invoice ("This visit is on invoice INV-…. Cancel that invoice first."). A visit
+whose tests or procedures were already performed cannot be cancelled either.
+
+**Automatic charges.** Every automatic charge is written in the same
+transaction as the clinical act that causes it:
+
+| Charge | When it is written | Price |
+|---|---|---|
+| Registration | At the patient's first ever visit that is not cancelled | `billing_settings.registration_service_id` (no fee when unset) |
+| OPD consultation | At check-in, and checked again at completion | The department's consultation service (its lowest-id `consultation` service) at the tariff |
+| Lab test | When the test is ordered | The test's mapped tariff service. A test that is unmapped or has no price cannot be ordered. |
+| Procedure | When the procedure is ordered | The procedure's tariff service |
+| Pharmacy | One line per dispense, written in the dispense | The medicine's MRP (see below) |
+
+Where each line is billed:
+- OPD and walk-in lines are self-pay.
+- A line in an admission bills the patient's primary payer when one is set.
+  This includes pharmacy lines.
+- When a payer line is blocked only by the pre-authorisation rule, the line
+  falls back to self-pay, and an audit row records the fallback.
+
+An automatic charge never blocks the clinical act. When a rule blocks the line
+or no price resolves:
+- The order or dispense is still saved, without a line.
+- The response says why no line was written.
+- Charge Capture lists the order under **Orders not billed**. That list covers
+  lab orders, procedures and dispenses that have no live line and no
+  no-charge reason. A dispense billed before SP4, on the old charges table,
+  counts as billed.
+
+**Invoice all ready lines** creates draft invoices for every ready line:
+- a completed OPD visit
+- a lab visit
+- a discharged stay
+- a line with no visit or stay
+
+Finalising, which numbers the invoice, stays a deliberate step at the Cash
+Desk or on the invoice.
+
+**Free review period.** `billing_settings.free_review_days` (0 to 30, under
+**Billing → Rules**) waives the consultation on a follow-up or review visit
+when it falls within that many days of the last charged consultation in the
+same department. The default is 0, which charges every visit.
+
+**Medicine prices (MRP).** Pharmacy sets each medicine's MRP per dispensing
+unit (GST-inclusive). It can also set a GST rate and an HSN code. Without
+them, the medicine uses `pharmacy_gst_rate_bp` and `pharmacy_hsn` from the
+billing settings. Pharmacy sets prices from the pharmacy dashboard, through
+`PATCH /api/pharmacy/medications/<id>/price`. The tariff is never used for
+drugs.
+
+A dispense line's taxable value is backed out of the MRP, so that the taxable
+value plus GST never exceeds MRP × quantity. Other rules for dispensing:
+- A charged dispense needs a batch number and an expiry month. Both are
+  printed on the line, and an expired batch is refused.
+- An unpriced medicine can be dispensed only free of charge, with a reason.
+
 ## Compliance posture (India)
 
 HIMS is built to be deployed for Indian clients, but **it is not certified

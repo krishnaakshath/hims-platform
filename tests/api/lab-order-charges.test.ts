@@ -399,7 +399,7 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
       const { POST } = await import('@/app/api/encounters/[id]/status/route')
       const res = await POST(new Request('http://localhost', { method: 'POST', body: JSON.stringify({ to: 'cancelled', cancelReason: 'Left' }) }) as never, { params: Promise.resolve({ id: String(e.id) }) })
       expect(res.status).toBe(409)
-      expect(await res.json()).toEqual({ error: 'A sample has already been collected for this visit; it cannot be cancelled.', code: 'visit_has_performed_orders' })
+      expect(await res.json()).toEqual({ error: 'Tests or procedures on this visit have already been performed; it cannot be cancelled.', code: 'visit_has_performed_orders' }) // WS2 T14: generic
     })
 
     it('a lab line on a finalised invoice blocks the visit cancel (visit_billed) and changes nothing', async () => {
@@ -417,6 +417,12 @@ describe.skipIf(!process.env.DATABASE_URL)('lab orders billed at order time (DB)
       expect((await linesOf(pid)).map((l) => l.status)).toEqual(['invoiced', 'captured'])
       const [after] = await getDb().select().from(encounters).where(eq(encounters.id, e.id))
       expect(after.status).toBe('checked_in')
+      // WS2 T14: the status route names the invoice to cancel first.
+      role = 'admin'
+      const { POST } = await import('@/app/api/encounters/[id]/status/route')
+      const res = await POST(new Request('http://localhost', { method: 'POST', body: JSON.stringify({ to: 'cancelled', cancelReason: 'Left' }) }) as never, { params: Promise.resolve({ id: String(e.id) }) })
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: `This visit is on invoice ${f.invoiceNumber}. Cancel that invoice first.`, code: 'visit_billed' })
     })
   })
 

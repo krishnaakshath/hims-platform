@@ -6,7 +6,7 @@ import { ENCOUNTER_TRANSITION_ROLES, encounterStatusRequestSchema } from '@/lib/
 import { transitionEncounter } from '@/lib/queries/encounters'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { completeEncounter } from '@/lib/queries/encounter-workspace'
-import { DIAGNOSIS_MISSING_BODY, encounterResponse } from '@/lib/encounters/encounter-projection'
+import { DIAGNOSIS_MISSING_BODY, VISIT_HAS_PERFORMED_ORDERS_BODY, encounterResponse, visitBilledBody } from '@/lib/encounters/encounter-projection'
 import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
 
 const MAX_INT = 2147483647
@@ -53,11 +53,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (result.error === 'not_found') return NextResponse.json({ error: 'Not found' }, { status: 404 })
       if (result.error === 'not_owner') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       if (result.error === 'admission_active') return NextResponse.json({ error: 'This patient is still admitted. Discharge them before cancelling the visit.' }, { status: 409 })
-      if (result.error === 'visit_has_performed_orders') return NextResponse.json({ error: 'A sample has already been collected for this visit; it cannot be cancelled.', code: 'visit_has_performed_orders' }, { status: 409 }) // WS2 T10
+      if (result.error === 'visit_has_performed_orders') return NextResponse.json(VISIT_HAS_PERFORMED_ORDERS_BODY, { status: 409 }) // WS2 T10, T14
+      if (result.error === 'visit_billed') return NextResponse.json(visitBilledBody(result.invoiceNumber), { status: 409 }) // WS2 T14
       return NextResponse.json({ error: 'This visit can no longer change to that status.' }, { status: 409 })
     }
     // Explicit projection (M7): no free text (cancel reason) and no internal links ride along.
-    return NextResponse.json({ encounter: encounterResponse(result.encounter) })
+    // WS2 T14: the automatic charge outcomes (consultation at completion; none otherwise).
+    return NextResponse.json({ encounter: encounterResponse(result.encounter), charges: result.charges ?? [] })
   } catch (err) {
     if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     console.error(`[encounters] status change failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)

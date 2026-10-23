@@ -137,7 +137,7 @@ describe.skipIf(!process.env.DATABASE_URL)('invoice all ready lines; orders not 
   })
 
   async function purge() {
-    const { getDb, labOrders, labRequisitions, encounterProcedures, encounters, admissions, medicationDispenses, inArray } = await m()
+    const { getDb, labOrders, labRequisitions, encounterProcedures, encounters, admissions, medicationDispenses, charges, inArray } = await m()
     const { purgeBillingFixtures } = await import('../db/billing-fixtures')
     await purgeBillingFixtures([...PIDS])
     if (PIDS.length === 0) return
@@ -145,6 +145,7 @@ describe.skipIf(!process.env.DATABASE_URL)('invoice all ready lines; orders not 
     await db.delete(labOrders).where(inArray(labOrders.patientId, PIDS))
     await db.delete(labRequisitions).where(inArray(labRequisitions.patientId, PIDS))
     await db.delete(medicationDispenses).where(inArray(medicationDispenses.patientId, PIDS))
+    await db.delete(charges).where(inArray(charges.patientId, PIDS)) // WS2 T14: legacy (pre-SP4) bills
     await db.delete(encounterProcedures).where(inArray(encounterProcedures.patientId, PIDS))
     await db.delete(encounters).where(inArray(encounters.patientId, PIDS))
     await db.delete(admissions).where(inArray(admissions.patientId, PIDS))
@@ -310,6 +311,37 @@ describe.skipIf(!process.env.DATABASE_URL)('invoice all ready lines; orders not 
     expect(rows).toHaveLength(2)
     expect(rows.map((r) => r.id)).not.toContain(billed.lines[0].orderId)
     expect(rows.map((r) => r.id)).not.toContain(pv.id)
+  })
+
+  // WS2 T14: dispenses not billed, the twin of T8's dispenseNotBilledSql (spec section 3: "an order
+  // or dispense with no live line and no no-charge reason"; a pre-SP4 legacy bill counts as billed).
+  it('orders not billed: a dispense with no line or a voided line is listed; billed, free and legacy-billed ones are not', async () => {
+    const { ir, getDb, medicationDispenses, chargeLines, charges, eq } = await m()
+    const db = getDb()
+    const pid = await newPatient()
+    const at = (minute: number) => new Date(`2099-07-01T06:${String(minute).padStart(2, '0')}:00Z`)
+    const dispense = async (minute: number, over: Record<string, unknown> = {}) => (await db.insert(medicationDispenses).values({
+      patientId: pid, medicationId: fx.med, quantity: 2, dispensedByName: 'TEST-WS2T12', dispensedAt: at(minute), ...over,
+    } as never).returning())[0]
+    const unbilled = await dispense(1)
+    const free = await dispense(2, { noChargeReason: 'Free sample for the trial' })
+    const billedLine = await pharmacyLine(pid, null)
+    const voidedLine = await pharmacyLine(pid, null)
+    await db.update(chargeLines).set({ status: 'void', voidReason: 'Test void', voidedAt: NOW, voidedByName: 'TEST-WS2T12' }).where(eq(chargeLines.id, voidedLine.id))
+    const [legacyCharge] = await db.insert(charges).values({ patientId: pid, providerName: 'TEST-WS2T12', dateOfService: DAY, diagnosisCodes: [], procedureCodes: [], amountCents: 5000 }).returning()
+    const legacy = await dispense(3, { chargeId: legacyCharge.id })
+
+    const rows = (await ir.listUnbilledOrders()).filter((r) => r.patientId === pid)
+    const item = { patientId: pid, patientName: `Test WS2T12 ${seq}`, uhid: `${CODE}${seq}`, itemName: `Test WS2T12 drug ${RUN}` }
+    expect(rows).toEqual(expect.arrayContaining([
+      { kind: 'dispense', id: unbilled.id, ...item, createdAt: at(1) },
+      { kind: 'dispense', id: voidedLine.medicationDispenseId, ...item, createdAt: expect.any(Date) },
+    ]))
+    expect(rows).toHaveLength(2)
+    const ids = rows.map((r) => r.id)
+    expect(ids).not.toContain(free.id)
+    expect(ids).not.toContain(billedLine.medicationDispenseId)
+    expect(ids).not.toContain(legacy.id)
   })
 
   it('route: frontdesk (and other non-capture roles) 403; strict body and query 400; unknown patient 404', async () => {
