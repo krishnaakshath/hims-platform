@@ -4,8 +4,7 @@ import { sendJson } from '@/lib/client-fetch'
 
 // Wave J (P1-20): portal sign-in with the UHID or registered mobile number and a one-time
 // code sent by SMS to the number the hospital has on file.
-const INPUT = 'flex h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary'
-const PRIMARY = 'inline-flex h-11 w-full items-center justify-center rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50'
+import { AUTH_ALERT as ALERT, AUTH_INPUT as INPUT, AUTH_LABEL, AUTH_LINK_BUTTON, AUTH_PRIMARY_BUTTON as PRIMARY, AUTH_QUIET_BUTTON } from '@/components/auth/auth-styles'
 
 export function PortalOtpSignIn({ onSignedIn, onMfaRequired, onUsePassword }: { onSignedIn: () => void; onMfaRequired: () => void; onUsePassword: () => void }) {
   const [identifier, setIdentifier] = useState('')
@@ -39,32 +38,32 @@ export function PortalOtpSignIn({ onSignedIn, onMfaRequired, onUsePassword }: { 
 
   return (
     <div>
-      <div className="mb-8 text-center">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Sign in with a mobile code</h1>
-        <p className="mt-2 text-sm text-muted-foreground">We will text a 6-digit code to the mobile number the hospital has on file.</p>
+      <div className="mb-8">
+        <h1 className="text-2xl font-semibold leading-8 tracking-[-0.015em] text-foreground">Sign in with a mobile code</h1>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">We will text a 6-digit code to the mobile number the hospital has on file.</p>
       </div>
       {step === 'identify' ? (
-        <form onSubmit={sendCode} className="space-y-5">
-          <div className="space-y-1.5">
-            <label htmlFor="otp-identifier" className="text-sm font-medium leading-none">UHID or mobile number</label>
+        <form onSubmit={sendCode} className="space-y-6">
+          <div>
+            <label htmlFor="otp-identifier" className={`${AUTH_LABEL} mb-2`}>UHID or mobile number</label>
             <input id="otp-identifier" value={identifier} onChange={(e) => setIdentifier(e.target.value)} autoComplete="username" autoCapitalize="characters" spellCheck={false} placeholder="UHID or 10-digit mobile" className={INPUT} />
           </div>
-          {error && <div role="alert" className="rounded-md bg-destructive/10 p-3 text-sm font-medium text-destructive">{error}</div>}
+          {error && <div role="alert" className={ALERT}>{error}</div>}
           <button type="submit" disabled={busy || !identifier.trim()} className={PRIMARY}>{busy ? 'Sending…' : 'Send code'}</button>
         </form>
       ) : (
-        <form onSubmit={verify} className="space-y-5">
+        <form onSubmit={verify} className="space-y-6">
           {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
-          <div className="space-y-1.5">
-            <label htmlFor="otp-code" className="text-sm font-medium leading-none">6-digit code</label>
+          <div>
+            <label htmlFor="otp-code" className={`${AUTH_LABEL} mb-2`}>6-digit code</label>
             <input id="otp-code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" className={INPUT} />
           </div>
-          {error && <div role="alert" className="rounded-md bg-destructive/10 p-3 text-sm font-medium text-destructive">{error}</div>}
+          {error && <div role="alert" className={ALERT}>{error}</div>}
           <button type="submit" disabled={busy || code.length !== 6} className={PRIMARY}>{busy ? 'Checking…' : 'Sign in'}</button>
-          <button type="button" onClick={() => { setStep('identify'); setCode(''); setError(null) }} className="inline-flex min-h-11 w-full items-center justify-center text-sm text-muted-foreground hover:underline">Send a new code</button>
+          <button type="button" onClick={() => { setStep('identify'); setCode(''); setError(null) }} className={AUTH_QUIET_BUTTON}>Send a new code</button>
         </form>
       )}
-      <button type="button" onClick={onUsePassword} className="mt-2 inline-flex min-h-11 w-full items-center justify-center text-sm font-medium text-primary hover:underline">Use my password instead</button>
+      <button type="button" onClick={onUsePassword} className={`${AUTH_LINK_BUTTON} mt-3`}>Use my password instead</button>
     </div>
   )
 }

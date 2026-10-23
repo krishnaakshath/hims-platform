@@ -141,6 +141,127 @@
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Sign-in experience (components/auth). Original code.
+
+   Palette: everything derives from `--brand` (BRAND_PRIMARY_COLOR via
+   brandThemeCss, else the stock blue), so white-label clients get their own
+   hue in light AND dark: a deep tone for the badge band and lanyard, a bright
+   accent for strokes, a tint for the ECG paper.
+
+   Motion rules: only transform/opacity/stroke-dashoffset animate, never a
+   layout property, so nothing on the page can shift or resize. The badge's
+   box never moves -- only decorative aria-hidden layers (the sweep trace, the
+   lanyard straps). All motion stops under prefers-reduced-motion (and when JS
+   marks [data-motion="reduce"]); looping motion pauses while the tab is
+   hidden ([data-motion="paused"]).
+   --------------------------------------------------------------------------- */
+/* Default brand hue. Layered, so the unlayered `:root{--brand}` emitted by
+   brandThemeCss always wins regardless of stylesheet order. */
+@layer base {
+  :root { --brand: oklch(0.42 0.1 250); }
+}
+:root {
+  --auth-panel: color-mix(in oklch, var(--brand) 62%, oklch(0.16 0.03 260));
+  --auth-panel-deep: color-mix(in oklch, var(--brand) 38%, oklch(0.12 0.03 260));
+  --auth-panel-foreground: oklch(0.985 0 0);
+  --auth-panel-muted: color-mix(in oklch, oklch(0.985 0 0) 74%, transparent);
+  --auth-line: color-mix(in oklch, var(--brand) 30%, oklch(0.93 0.06 190));
+}
+.dark {
+  --auth-panel: color-mix(in oklch, var(--brand) 42%, oklch(0.17 0.02 260));
+  --auth-panel-deep: color-mix(in oklch, var(--brand) 25%, oklch(0.11 0.015 260));
+}
+
+@keyframes auth-rise {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes auth-trace {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: -1; }
+}
+@keyframes auth-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes auth-sheen {
+  from { transform: translateX(-120%) skewX(-18deg); }
+  to { transform: translateX(260%) skewX(-18deg); }
+}
+@keyframes auth-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ECG paper behind the sign-in badge -- 8px minor and 40px major grid in the brand tint. */
+.auth-ecg-paper {
+  --minor: color-mix(in oklch, var(--brand) 9%, transparent);
+  --major: color-mix(in oklch, var(--brand) 16%, transparent);
+  background-image:
+    linear-gradient(to right, var(--major) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--major) 1px, transparent 1px),
+    linear-gradient(to right, var(--minor) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--minor) 1px, transparent 1px);
+  background-size: 40px 40px, 40px 40px, 8px 8px, 8px 8px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%);
+}
+.dark .auth-ecg-paper {
+  --minor: color-mix(in oklch, var(--brand) 14%, transparent);
+  --major: color-mix(in oklch, var(--brand) 26%, transparent);
+}
+
+/* The lanyard straps sway a degree either side (decorative group only). */
+@keyframes auth-sway {
+  0%, 100% { transform: rotate(-1deg); }
+  50% { transform: rotate(1deg); }
+}
+.auth-sway { animation: auth-sway 6s ease-in-out infinite; }
+
+/* Entrance choreography: staggered by --i (0, 1, 2 ...), runs once. */
+.auth-rise {
+  animation: auth-rise 560ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(80ms + var(--i, 0) * 70ms);
+}
+
+.auth-trace { stroke-dasharray: 0.22 0.78; animation: auth-trace 7s linear infinite; }
+.auth-draw { stroke-dasharray: 1; animation: auth-draw 1400ms cubic-bezier(0.6, 0, 0.2, 1) 200ms both; }
+
+/* Primary button: a soft light sweep on hover, a press state. */
+.auth-cta { isolation: isolate; overflow: hidden; }
+.auth-cta::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary-foreground) 22%, transparent), transparent);
+  transform: translateX(-120%) skewX(-18deg);
+  pointer-events: none;
+  z-index: -1;
+}
+.auth-cta:not(:disabled):hover::after { animation: auth-sheen 900ms cubic-bezier(0.4, 0, 0.2, 1); }
+.auth-pop { animation: auth-pop 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes auth-menu {
+  from { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.auth-pop-menu { animation: auth-menu 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+[data-motion="paused"] .auth-sway,
+[data-motion="paused"] .auth-trace { animation-play-state: paused; }
+
+[data-motion="reduce"] :is(.auth-sway, .auth-pop-menu, .auth-rise, .auth-trace, .auth-draw, .auth-pop),
+[data-motion="reduce"] .auth-cta:not(:disabled):hover::after {
+  animation: none !important;
+}
+[data-motion="reduce"] * { transition-duration: 0ms !important; }
+@media (prefers-reduced-motion: reduce) {
+  .auth-sway, .auth-pop-menu, .auth-rise, .auth-trace, .auth-draw, .auth-pop,
+  .auth-cta:not(:disabled):hover::after { animation: none !important; }
+}
+
 /* First print styling in this codebase (spec §6). Forces light-on-white
    regardless of the active theme: this page's one job is to come out of a
    printer legibly, and .dark's oklch background would otherwise print as
