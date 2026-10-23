@@ -8,6 +8,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import type { MedicationWithInventory } from '@/lib/queries/medications'
 import { suggestMedicationsForDiagnoses } from '@/lib/medication-suggestions'
+import { parseDosePattern } from '@/lib/prescriptions/dose-pattern'
+import type { AllergyConflict } from '@/lib/prescriptions/allergy-check'
+
+// WS1 T7: quick dose-pattern chips (the pattern is optional here; the times-per-day box still works).
+const PATTERN_CHIPS = ['1-0-0', '0-0-1', '1-0-1', '1-1-1', '1-1-1-1'] as const
 
 function today(): string {
   return todayIsoIn()
@@ -36,6 +41,9 @@ export function AddPrescriptionModal({
   const [medicationClass, setMedicationClass] = useState('')
   const [dose, setDose] = useState('')
   const [frequencyPerDay, setFrequencyPerDay] = useState(1)
+  const [dosePattern, setDosePattern] = useState('')
+  const [conflicts, setConflicts] = useState<AllergyConflict[]>([])
+  const [overrideReason, setOverrideReason] = useState('')
   const [durationDays, setDurationDays] = useState(30)
   const [startDate, setStartDate] = useState(today)
   const [instructions, setInstructions] = useState('')
@@ -64,8 +72,17 @@ export function AddPrescriptionModal({
     }
   }
 
+  const reasonOk = conflicts.length === 0 || overrideReason.trim().length >= 5
+
+  function pickPattern(p: string) {
+    setDosePattern(p)
+    const parsed = parseDosePattern(p)
+    if (parsed) setFrequencyPerDay(parsed.perDay)
+  }
+
   const canSubmit =
     !submitting &&
+    reasonOk &&
     name.trim().length > 0 &&
     medicationClass.trim().length > 0 &&
     dose.trim().length > 0 && // WS1 T6: dose is mandatory
@@ -83,6 +100,8 @@ export function AddPrescriptionModal({
       medicationClass,
       dose: dose.trim(),
       frequencyPerDay,
+      ...(dosePattern.trim() !== '' ? { dosePattern: dosePattern.trim() } : {}),
+      ...(conflicts.length > 0 ? { allergyOverrideReason: overrideReason.trim() } : {}),
       durationDays,
       startDate,
       instructions: instructions.trim() === '' ? null : instructions,
@@ -91,6 +110,11 @@ export function AddPrescriptionModal({
     setSubmitting(false)
     if (res.ok) {
       setCreated(res.data)
+      return
+    }
+    const body = res.body as { code?: string; conflicts?: AllergyConflict[] } | undefined
+    if (res.status === 422 && body?.code === 'allergy_conflict' && Array.isArray(body.conflicts) && body.conflicts.length > 0) {
+      setConflicts(body.conflicts)
       return
     }
     setError(res.error)
@@ -195,6 +219,19 @@ export function AddPrescriptionModal({
                 aria-label="Dose"
                 className="w-full rounded-md border border-border px-3 py-2 text-sm"
               />
+              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Dose pattern">
+                {PATTERN_CHIPS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    aria-pressed={dosePattern === p}
+                    onClick={() => pickPattern(dosePattern === p ? '' : p)}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium ${dosePattern === p ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-white'}`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
               <input
                 type="number"
                 min={1}
@@ -238,6 +275,22 @@ export function AddPrescriptionModal({
                   <option value="">Select a provider…</option>
                   {activeProviders.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.specialty}</option>)}
                 </select>
+              )}
+              {conflicts.length > 0 && (
+                <div role="alert" className="space-y-2 rounded-md border border-red-300 bg-red-50 p-2.5 text-sm text-red-800">
+                  <p className="font-semibold">Allergy conflict</p>
+                  <ul className="list-disc pl-5">
+                    {conflicts.map((c) => <li key={c.allergen}>{c.allergen} ({c.severity})</li>)}
+                  </ul>
+                  <input
+                    value={overrideReason}
+                    onChange={(e) => setOverrideReason(e.target.value)}
+                    maxLength={300}
+                    placeholder="Reason for prescribing anyway (min 5 characters)"
+                    aria-label="Allergy override reason"
+                    className="w-full rounded-md border border-red-300 bg-white px-3 py-2 text-sm text-foreground"
+                  />
+                </div>
               )}
               {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             </div>

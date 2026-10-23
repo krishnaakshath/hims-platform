@@ -191,6 +191,15 @@ export interface PrintablePrescription {
   prescriber: SessionProvider
   /** Wave F P1-16: "NMC 12345" / "SMC IN-MH 12345", or null when not on file. */
   prescriberRegistration: string | null
+  /** WS1 T7: the catalogue generic name (null for an off-catalogue or legacy row). */
+  genericName: string | null
+  dosePattern: string | null
+  route: string | null
+  foodTiming: string | null
+  isSos: boolean
+  quantityPrescribed: number | null
+  /** The prescription header's advice (null for a legacy row with no header). */
+  advice: string | null
 }
 
 /** Null unless EVERY id exists, they all belong to ONE patient, and each has
@@ -203,9 +212,16 @@ export async function getPrintablePrescriptions(ids: number[]): Promise<Printabl
   if (ids.length === 0) return null
 
   const rows = await getDb()
-    .select({ episode: medicationEpisodes, provider: providers })
+    .select({
+      episode: medicationEpisodes,
+      provider: providers,
+      genericName: medications.genericName,
+      advice: prescriptions.advice,
+    })
     .from(medicationEpisodes)
     .innerJoin(providers, eq(medicationEpisodes.prescribedByProviderId, providers.id))
+    .leftJoin(medications, eq(medicationEpisodes.medicationId, medications.id))
+    .leftJoin(prescriptions, eq(medicationEpisodes.prescriptionId, prescriptions.id))
     .where(and(
       inArray(medicationEpisodes.id, ids),
       isNotNull(medicationEpisodes.prescribedAt),
@@ -235,5 +251,12 @@ export async function getPrintablePrescriptions(ids: number[]): Promise<Printabl
       specialty: r.provider.specialty,
     },
     prescriberRegistration: formatDoctorRegistration(r.provider),
+    genericName: r.genericName,
+    dosePattern: r.episode.dosePattern,
+    route: r.episode.route,
+    foodTiming: r.episode.foodTiming,
+    isSos: r.episode.isSos,
+    quantityPrescribed: r.episode.quantityPrescribed,
+    advice: r.advice,
   }))
 }
