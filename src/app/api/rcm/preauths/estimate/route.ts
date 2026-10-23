@@ -6,6 +6,7 @@ import { estimateForPolicy } from '@/lib/queries/preauths'
 import { invalid, rcmErrorResponse, rcmServerError, readJsonBody } from '@/lib/rcm/route-responses'
 
 // SP7: price a pre-auth estimate with the policy's billing payer tariff (no write, not audited).
+// WS12 T8 (R8): the response also carries the indicative insurer/patient split (`coverage`, or null).
 export async function POST(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session

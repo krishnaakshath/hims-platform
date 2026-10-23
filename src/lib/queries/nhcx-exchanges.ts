@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lt, lte, notInArray, or, sql } from 'drizzle-orm'
 import { after } from 'next/server'
 import { getDb } from '@/db/client'
 import { claimDocuments, claimEvents, claims, claimSubmissions, nhcxExchanges, nhcxInboundCalls, preauthEvents, preauths, providers, type NhcxExchangeRow } from '@/db/schema'
@@ -13,7 +13,8 @@ import { safeLog } from '@/lib/integrations/safe-log'
 import { logGatewayEvent } from '@/lib/integrations/system-audit'
 import { rcmFail, rcmOk, type RcmWriteResult } from '@/lib/rcm/errors'
 import type { SubmissionKind } from '@/lib/rcm/constants'
-import type { ClaimSnapshot, PayerRef, PreauthSnapshot } from '@/lib/rcm/snapshot'
+import { NHCX_UNDELIVERED_EXCHANGE_STATES, PREAUTH_SNAPSHOT_ACTIONS } from '@/lib/rcm/preauth-status'
+import type { ClaimSnapshot, PayerRef, PreauthSnapshot, SnapshotHospital, SnapshotPolicy } from '@/lib/rcm/snapshot'
 import { buildClaimBundle, buildPreauthBundle, claimBundleProblems, type ClaimBundleContext } from '@/lib/fhir/nhcx/claim'
 import { NHCX_BUILD_ERROR_COPY, type NhcxBuildErrorCode } from '@/lib/fhir/nhcx/resources'
 import { buildCommunicationResponseTaskBundle, buildStatusTaskBundle, parseCommunicationRequestTaskBundle } from '@/lib/fhir/nhcx/responses'
@@ -30,6 +31,7 @@ import { lockPatientBilling } from './charge-capture'
 import { expireShares } from './abdm-profile-shares'
 import { registrationOf } from './claim-submissions'
 import type { WriteExecutor } from './executor'
+import { loadPolicyContext, loadSnapshotHospital } from './rcm-context'
 
 // SP8 NHCX exchanges: the transactional outbox and its dispatcher (Task 11).
 // - An outbound exchange row is written in the same transaction as the thing
@@ -106,9 +108,49 @@ async function preauthPractitioner(executor: WriteExecutor, preauthId: number): 
   return p ? { name: p.name, registrationNumber: registrationOf(p) } : { name: 'Treating doctor', registrationNumber: null }
 }
 
+export const STALE_SNAPSHOT_PAYER = 'This request was saved before the insurer\'s NHCX code was added. Use "Refresh snapshot", then send.'
+export const STALE_SNAPSHOT_HOSPITAL = 'This request was saved before the hospital\'s HFR or ROHINI ID was added. Use "Refresh snapshot", then send.'
+
+type SnapshotSide = { policy: Pick<SnapshotPolicy, 'insurer' | 'tpa'>; hospital: Pick<SnapshotHospital, 'hfrId' | 'rohiniId'> }
+
+/**
+ * Why a saved pre-auth snapshot cannot go to NHCX although live data now could (WS12 T7, R11):
+ * it has no recipient code while the payers now have one, or no hospital HFR/ROHINI ID while
+ * settings now do. Null when the snapshot is not behind live data on either.
+ */
+export function staleSnapshotReason(snap: SnapshotSide, live: SnapshotSide): string | null {
+  if (!recipientCodeFor(snap.policy) && recipientCodeFor(live.policy)) return STALE_SNAPSHOT_PAYER
+  if (!snap.hospital.hfrId && !snap.hospital.rohiniId && (live.hospital.hfrId || live.hospital.rohiniId)) return STALE_SNAPSHOT_HOSPITAL
+  return null
+}
+
+/** Live payers and hospital IDs for comparing with a snapshot (null when the policy is gone). */
+export async function liveSnapshotSide(executor: WriteExecutor, policyId: number): Promise<SnapshotSide | null> {
+  const [ctx, hospital] = await Promise.all([loadPolicyContext(executor, policyId), loadSnapshotHospital(executor)])
+  return ctx ? { policy: ctx.policy, hospital } : null
+}
+
+/** The latest pre-auth event carrying a snapshot NHCX would be sent. */
+export async function latestPreauthSnapshotEvent(executor: WriteExecutor, preauthId: number) {
+  const [ev] = await executor.select().from(preauthEvents)
+    .where(and(eq(preauthEvents.preauthId, preauthId), inArray(preauthEvents.action, [...PREAUTH_SNAPSHOT_ACTIONS])))
+    .orderBy(desc(preauthEvents.id)).limit(1)
+  return ev ?? null
+}
+
+/** True when an outbound exchange of this pre-auth event may have reached NHCX (any state but send_failed/error). */
+export async function preauthEventWithNhcx(executor: WriteExecutor, preauthEventId: number): Promise<boolean> {
+  const [x] = await executor.select({ id: nhcxExchanges.id }).from(nhcxExchanges).where(and(
+    eq(nhcxExchanges.preauthEventId, preauthEventId), eq(nhcxExchanges.direction, 'outbound'), notInArray(nhcxExchanges.state, [...NHCX_UNDELIVERED_EXCHANGE_STATES]),
+  )).limit(1)
+  return Boolean(x)
+}
+
+export const PREAUTH_ALREADY_SENT = 'Already sent through NHCX; waiting for the insurer.'
+
 export interface PreauthSendDeps { now?: () => Date; schedule?: (fn: () => Promise<unknown>) => void; dispatch?: (id: number) => Promise<unknown> }
 
-/** Queues the latest pre-auth request (or enhancement request) for NHCX. */
+/** Queues the latest pre-auth request snapshot (request, enhancement request or refresh) for NHCX. */
 export async function createPreauthExchange(preauthId: number, session: Session, deps: PreauthSendDeps = {}): Promise<RcmWriteResult<{ exchangeId: number; correlationId: string }>> {
   const cfg = readNhcxConfig()
   if (cfg.state === 'not_configured') return rcmFail('gateway_not_configured', 'NHCX is not configured')
@@ -124,18 +166,21 @@ export async function createPreauthExchange(preauthId: number, session: Session,
       const [p] = await tx.select().from(preauths).where(eq(preauths.id, preauthId)).for('update')
       if (!p) return rcmFail('preauth_not_found')
       if (p.status !== 'requested' && p.status !== 'enhancement_requested') return rcmFail('invalid_transition')
-      const [ev] = await tx.select().from(preauthEvents)
-        .where(and(eq(preauthEvents.preauthId, preauthId), inArray(preauthEvents.action, ['request', 'request_enhancement'])))
-        .orderBy(desc(preauthEvents.id)).limit(1)
+      const ev = await latestPreauthSnapshotEvent(tx, preauthId)
       if (!ev?.snapshot) return rcmFail('invalid_transition')
-      const [dupe] = await tx.select({ id: nhcxExchanges.id }).from(nhcxExchanges)
-        .where(and(eq(nhcxExchanges.preauthEventId, ev.id), eq(nhcxExchanges.direction, 'outbound'))).limit(1)
-      if (dupe) return rcmFail('duplicate_reference', 'Already sent through NHCX')
+      // A send that failed (send_failed/error) never reached the insurer: the same snapshot may go again.
+      if (await preauthEventWithNhcx(tx, ev.id)) return rcmFail('duplicate_reference', 'Already sent through NHCX')
       const snap = ev.snapshot
       const recipient = recipientCodeFor(snap.policy)
-      if (!recipient) return rcmFail('not_ready', NHCX_BUILD_ERROR_COPY.payer_not_on_nhcx)
       const ctx: ClaimBundleContext = { created: now, practitioner, priorPreauthRef: p.approvalReference }
       const problems = claimBundleProblems(snap, ctx)
+      if (!recipient || problems.includes('hospital_ids_missing')) {
+        // WS12 T7: when live data has what the saved snapshot lacks, say to refresh it.
+        const live = await liveSnapshotSide(tx, p.policyId)
+        const stale = live ? staleSnapshotReason(snap, live) : null
+        if (stale) return rcmFail('not_ready', stale)
+      }
+      if (!recipient) return rcmFail('not_ready', NHCX_BUILD_ERROR_COPY.payer_not_on_nhcx)
       if (problems.length > 0) return rcmFail('not_ready', NHCX_BUILD_ERROR_COPY[problems[0]])
       if (validateNhcxBundle(buildPreauthBundle(snap, ctx), 'ClaimBundle').length > 0) return rcmFail('not_ready', 'The pre-authorisation could not be prepared for NHCX')
       const correlationId = randomUUID()

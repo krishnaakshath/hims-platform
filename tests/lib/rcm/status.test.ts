@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { nextPreauthStatus, preauthReferenceStatus, PREAUTH_ACTIONS, PREAUTH_STATUSES, PREAUTH_STATUS_LABEL } from '@/lib/rcm/preauth-status'
 import { nextClaimStatus, approvalActionFor, claimWorklists, CLAIM_STATUSES, CLAIM_STATUS_LABEL, CLAIM_EVENT_ACTIONS } from '@/lib/rcm/claim-status'
 import { formatRcmNumber } from '@/lib/rcm/constants'
+import { preauthActionSchema } from '@/lib/rcm/validation'
 
 describe('pre-auth status machine', () => {
   it('pre-auth walks request, query, response, approval, enhancement', () => {
@@ -22,6 +23,14 @@ describe('pre-auth status machine', () => {
     expect(nextPreauthStatus('enhanced', 'request_enhancement')).toBe('enhancement_requested'); expect(nextPreauthStatus('approved', 'approve_enhancement')).toBeNull()
   })
   it('every status has a label', () => { for (const s of PREAUTH_STATUSES) expect(PREAUTH_STATUS_LABEL[s].length).toBeGreaterThan(2) })
+  it('refresh_snapshot (WS12 T7) keeps the status, only while a request is with the insurer', () => {
+    expect(PREAUTH_ACTIONS).toContain('refresh_snapshot')
+    expect(nextPreauthStatus('requested', 'refresh_snapshot')).toBe('requested')
+    expect(nextPreauthStatus('enhancement_requested', 'refresh_snapshot')).toBe('enhancement_requested')
+    for (const s of PREAUTH_STATUSES) if (s !== 'requested' && s !== 'enhancement_requested') expect(nextPreauthStatus(s, 'refresh_snapshot'), s).toBeNull()
+    expect(preauthActionSchema.safeParse({ action: 'refresh_snapshot' }).success).toBe(true)
+    expect(preauthActionSchema.safeParse({ action: 'refresh_snapshot', note: 'x' }).success).toBe(false)
+  })
   it('reference status checks in order', () => {
     const p = { status: 'approved' as const, payerIds: [7, 9], validUntil: '2026-10-31' }
     expect(preauthReferenceStatus(null, { payerId: 7, serviceDate: '2026-10-20' })).toBe('not_found')

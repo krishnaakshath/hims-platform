@@ -1577,6 +1577,7 @@ export const preauthStatusEnum = pgEnum('preauth_status', [
 ])
 export const preauthActionEnum = pgEnum('preauth_action', [
   'request', 'record_query', 'respond_query', 'approve', 'reject', 'request_enhancement', 'approve_enhancement', 'reject_enhancement', 'cancel',
+  'refresh_snapshot', // WS12 T7
 ])
 export const claimStatusEnum = pgEnum('claim_status', [
   'draft', 'submitted', 'queried', 'approved', 'partially_approved', 'rejected', 'appealed', 'settled', 'closed', 'withdrawn',

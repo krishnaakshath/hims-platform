@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
+const refresh = vi.hoisted(() => vi.fn())
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 import { NhcxExchangePanel, type ExchangeRow } from '@/components/nhcx/NhcxExchangePanel'
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -11,7 +12,7 @@ const ROW = (over: Partial<ExchangeRow>): ExchangeRow => ({
 })
 const VIEW = { exchangeId: 7, reviewState: 'pending', claimId: 12, preauthId: null, dispositionText: 'Approved subject to terms', preAuthRef: null, queryText: null, isMock: false }
 let fetchMock: ReturnType<typeof vi.fn>
-beforeEach(() => { fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock) })
+beforeEach(() => { fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock); refresh.mockReset() })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('NhcxExchangePanel', () => {
@@ -50,5 +51,14 @@ describe('NhcxExchangePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check status' }))
     await screen.findByText('Status requested')
     expect(String(fetchMock.mock.calls[0][0])).toBe('/api/rcm/nhcx/exchanges/8/status')
+  })
+  it('a refused send still refreshes the page so the server recomputes the NHCX state (WS12 T7)', async () => {
+    const stale = 'This request was saved before the insurer\'s NHCX code was added. Use "Refresh snapshot", then send.'
+    render(<NhcxExchangePanel exchanges={[]} canAct sendPreauthId={3} canSendPreauth sendReason={null} />)
+    fetchMock.mockResolvedValueOnce(json(422, { error: stale }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send via NHCX' }))
+    expect(await screen.findByText(stale)).toBeInTheDocument()
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/rcm/preauths/3/nhcx')
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 })

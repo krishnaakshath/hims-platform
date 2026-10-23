@@ -1,14 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { and, eq, like } from 'drizzle-orm'
+import { and, eq, inArray, like } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { auditLog, claims, preauthEvents, preauths, rcmQueries } from '@/db/schema'
+import { randomUUID } from 'node:crypto'
+import { admissionCoverage, admissions, auditLog, claims, coverageVerifications, nhcxExchanges, patientPolicies, payerProfiles, preauthEvents, preauths, rcmQueries, roomCategories, rooms, serviceCatalog, tariffRates } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 
 vi.mock('@/lib/blob-store', () => ({ putPrivateBlob: vi.fn(async (path: string) => ({ url: `https://blob.test/${path}` })), streamPrivateBlob: vi.fn() }))
-import { applyPreauthAction, createPreauth, estimatePreauth, getPreauthDetail, getPreauthDocumentBlob, listPreauths, uploadPreauthDocument } from '@/lib/queries/preauths'
+import { applyPreauthAction, createPreauth, estimateForPolicy, estimatePreauth, getPreauthDetail, getPreauthDocumentBlob, listPreauths, preauthDefaultsFor, uploadPreauthDocument } from '@/lib/queries/preauths'
 import { snapshotSha256 } from '@/lib/rcm/hash'
 import type { PreauthCreateInput } from '@/lib/rcm/validation'
 import { makePreauthWorld, destroyPreauthWorld, type PreauthWorld } from './preauth-world'
+import { purgeSp8Fixtures } from '../../db/sp8-fixtures'
+import { purgeCoverageFixtures } from '../../db/ws12-fixtures'
 
 const RUN = `${Date.now()}`.slice(-7)
 const PROBE = `TEST-SP7-${RUN} Preauth Probe`
@@ -22,7 +25,16 @@ describe.skipIf(!process.env.DATABASE_URL)('pre-authorisations (DB)', () => {
     treatingProviderId: w.providerId, diagnosisCodeIds: [w.dxId], procedureCodeIds: [w.pxId], estimate: [{ serviceId: w.pricedServiceId, quantity: 2 }], ...over,
   })
   beforeAll(async () => { w = await makePreauthWorld(RUN, 'A') })
+  const t8 = { roomIds: [] as number[], serviceIds: [] as number[], categoryIds: [] as number[] }
   afterAll(async () => {
+    await purgeCoverageFixtures([w.patientId], { dropAdmissions: true })
+    if (t8.roomIds.length > 0) await getDb().delete(rooms).where(inArray(rooms.id, t8.roomIds))
+    if (t8.serviceIds.length > 0) {
+      await getDb().delete(tariffRates).where(inArray(tariffRates.serviceId, t8.serviceIds))
+      await getDb().delete(serviceCatalog).where(inArray(serviceCatalog.id, t8.serviceIds))
+    }
+    if (t8.categoryIds.length > 0) await getDb().delete(roomCategories).where(inArray(roomCategories.id, t8.categoryIds))
+    await purgeSp8Fixtures([w.patientId])
     await destroyPreauthWorld(w)
     await getDb().delete(auditLog).where(eq(auditLog.userName, PROBE))
   })
@@ -127,6 +139,162 @@ describe.skipIf(!process.env.DATABASE_URL)('pre-authorisations (DB)', () => {
     expect(rows.length).toBeGreaterThan(5)
     for (const r of rows) expect(`${r.details}`).not.toMatch(/AR\/|scan|stay|patient left|needed/i)
     expect(rows.find((r) => r.action === 'rcm: pre-authorisation approve')?.details).toMatch(/^preauth=\d+ from=(requested|queried) to=approved amount=8000000$/)
+  })
+
+  // ---- WS12 T7: refresh_snapshot -------------------------------------------------------------
+  const LATER = new Date(NOW.getTime() + 60_000)
+  const REFRESH = { action: 'refresh_snapshot' as const }
+  const setTpaCode = (code: string | null) => getDb().update(payerProfiles).set({ nhcxParticipantCode: code }).where(eq(payerProfiles.payerId, w.tpaId))
+  const eventsOf = async (id: number) => (await getDb().select().from(preauthEvents).where(eq(preauthEvents.preauthId, id))).sort((a, b) => a.id - b.id)
+  const outbound = async (id: number, eventId: number, state: 'sent' | 'send_failed' | 'pending_send' | 'error') => (await getDb().insert(nhcxExchanges).values({
+    entityType: 'preauth', direction: 'outbound', action: 'preauth/submit', correlationId: randomUUID(), apiCallId: randomUUID(), senderCode: 'sandbox-mock@sbx',
+    recipientCode: 'TPA-OLD@sbx', state, patientId: w.patientId, policyId: w.policyId, preauthId: id, preauthEventId: eventId, bodySha256: 'a'.repeat(64), isMock: true,
+  }).returning())[0]
+
+  it('refresh_snapshot appends a fresh snapshot with the status unchanged; nothing changed is not_ready', async () => {
+    await setTpaCode(null)
+    const id = await newPreauth()
+    expect(await applyPreauthAction(id, REFRESH, RCM, NOW)).toEqual({ ok: false, error: 'invalid_transition' })
+    await applyPreauthAction(id, { action: 'request' }, RCM, NOW)
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: false, error: 'not_ready', message: 'Nothing has changed since this request was prepared' })
+    await setTpaCode(`TPA${RUN}R1@sbx`)
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: true, value: { status: 'requested' } })
+    const events = await eventsOf(id)
+    expect(events.map((e) => e.action)).toEqual(['request', 'refresh_snapshot'])
+    const [req, ref] = events
+    expect(ref).toMatchObject({ fromStatus: 'requested', toStatus: 'requested', amountPaise: null })
+    expect(ref.snapshot?.kind).toBe('initial'); expect(ref.snapshot?.requestedPaise).toBe(req.snapshot?.requestedPaise)
+    expect(ref.snapshot?.policy.tpa?.nhcxParticipantCode).toBe(`TPA${RUN}R1@sbx`); expect(req.snapshot?.policy.tpa?.nhcxParticipantCode).toBeNull()
+    expect(ref.snapshotSha256).toBe(snapshotSha256(ref.snapshot)); expect(ref.snapshotSha256).not.toBe(req.snapshotSha256)
+    const [row] = await getDb().select().from(preauths).where(eq(preauths.id, id))
+    expect(row).toMatchObject({ status: 'requested', requestedPaise: 100_000_00 })
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: false, error: 'not_ready', message: 'Nothing has changed since this request was prepared' })
+    const [a] = await getDb().select().from(auditLog).where(and(eq(auditLog.userName, PROBE), eq(auditLog.action, 'rcm: pre-authorisation refresh_snapshot')))
+    expect(a.details).toBe(`preauth=${id} from=requested to=requested`)
+    await applyPreauthAction(id, approve(`AR/${RUN}/R1`), RCM, LATER)
+    await setTpaCode(`TPA${RUN}R1b@sbx`)
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: false, error: 'invalid_transition' })
+  })
+
+  it('refresh_snapshot is refused once NHCX has the latest snapshot, and allowed after a failed send', async () => {
+    await setTpaCode(null)
+    const id = await newPreauth()
+    await applyPreauthAction(id, { action: 'request' }, RCM, NOW)
+    const [req] = await eventsOf(id)
+    const x = await outbound(id, req.id, 'sent')
+    await setTpaCode(`TPA${RUN}R2@sbx`)
+    for (const state of ['sent', 'pending_send'] as const) {
+      await getDb().update(nhcxExchanges).set({ state }).where(eq(nhcxExchanges.id, x.id))
+      expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: false, error: 'preauth_in_use', message: 'Already sent through NHCX; the insurer has this version' })
+    }
+    await getDb().update(nhcxExchanges).set({ state: 'send_failed' }).where(eq(nhcxExchanges.id, x.id))
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: true, value: { status: 'requested' } })
+  })
+
+  it('an enhancement request refreshes as an enhancement with the same amount', async () => {
+    await setTpaCode(null)
+    const id = await newPreauth()
+    await applyPreauthAction(id, { action: 'request' }, RCM, NOW)
+    await applyPreauthAction(id, approve(`AR/${RUN}/R3`), RCM, NOW)
+    await applyPreauthAction(id, { action: 'request_enhancement', requestedPaise: 1_00_000_00, note: 'longer stay' }, RCM, NOW)
+    await setTpaCode(`TPA${RUN}R3@sbx`)
+    expect(await applyPreauthAction(id, REFRESH, RCM, LATER)).toEqual({ ok: true, value: { status: 'enhancement_requested' } })
+    const ref = (await eventsOf(id)).at(-1)!
+    expect(ref).toMatchObject({ action: 'refresh_snapshot', fromStatus: 'enhancement_requested', toStatus: 'enhancement_requested' })
+    expect(ref.snapshot).toMatchObject({ kind: 'enhancement', requestedPaise: 1_00_000_00 })
+  })
+
+  it('two concurrent refreshes append one event; the other finds nothing changed', async () => {
+    await setTpaCode(null)
+    const id = await newPreauth()
+    await applyPreauthAction(id, { action: 'request' }, RCM, NOW)
+    await setTpaCode(`TPA${RUN}R4@sbx`)
+    const [x, y] = await Promise.all([applyPreauthAction(id, REFRESH, RCM, LATER), applyPreauthAction(id, REFRESH, RCM, LATER)])
+    expect([x.ok, y.ok].sort()).toEqual([false, true])
+    expect(x.ok ? y : x).toMatchObject({ ok: false, error: 'not_ready' })
+    expect((await eventsOf(id)).filter((e) => e.action === 'refresh_snapshot')).toHaveLength(1)
+  })
+
+  // ---- WS12 T8: defaults from the admission, the coverage gate and the indicative split -------
+  const categoryId = async (code: string) => {
+    const [found] = await getDb().select({ id: roomCategories.id }).from(roomCategories).where(eq(roomCategories.code, code)).limit(1)
+    if (found) return found.id
+    const [made] = await getDb().insert(roomCategories).values({ code, name: `Test ${code}` }).returning({ id: roomCategories.id })
+    t8.categoryIds.push(made.id)
+    return made.id
+  }
+  const room = async (code: string) => {
+    const [r] = await getDb().insert(rooms).values({ ward: `TEST-WS12-${RUN}`, roomNumber: `R${t8.roomIds.length + 1}`, bedNumber: '1', roomCategoryId: await categoryId(code) }).returning({ id: rooms.id })
+    t8.roomIds.push(r.id)
+    return r.id
+  }
+
+  it('preauthDefaultsFor: an ICU admission gives the attending doctor, its IST date, ICU and the primary policy', async () => {
+    const [adm] = await getDb().insert(admissions).values({
+      patientId: w.patientId, attendingProviderId: w.providerId, currentRoomId: await room('ICU'), admittedAt: new Date('2026-10-19T20:00:00Z'), status: 'admitted',
+    }).returning({ id: admissions.id })
+    const expected = { admissionId: adm.id, encounterId: null, claimType: 'ipd', plannedAdmissionDate: '2026-10-20', treatingProviderId: w.providerId, policyId: w.policyId, roomCategoryCode: 'ICU' }
+    expect(await preauthDefaultsFor(w.patientId, { admissionId: adm.id }, NOW)).toEqual(expected)
+    // The only active admission is used when no id is given.
+    expect(await preauthDefaultsFor(w.patientId, {}, NOW)).toEqual(expected)
+    // Another patient's admission id is ignored.
+    expect(await preauthDefaultsFor(w.patientId, { admissionId: 2147483000 }, NOW)).toEqual(expected)
+
+    // admission_coverage.policy_id wins over the primary policy.
+    const [second] = await getDb().insert(patientPolicies).values({
+      patientId: w.patientId, insurerPayerId: w.insurerId, tpaPayerId: w.tpaId, policyNumber: 'POL-T8', memberId: 'MEM-T8', policyType: 'individual',
+      holderName: 'Holder', relationship: 'self', validFrom: '2026-04-01', validTo: '2099-12-31', priority: 'secondary', createdByName: 'Test',
+    }).returning({ id: patientPolicies.id })
+    await getDb().insert(admissionCoverage).values({ admissionId: adm.id, mode: 'cashless', policyId: second.id, coverageState: 'unverified', recordedByName: 'Test' })
+    expect(await preauthDefaultsFor(w.patientId, { admissionId: adm.id }, NOW)).toMatchObject({ policyId: second.id })
+
+    // A visit: OPD with the visit's doctor and date.
+    expect(await preauthDefaultsFor(w.patientId, { encounterId: w.encounterId }, NOW)).toEqual({
+      admissionId: null, encounterId: w.encounterId, claimType: 'opd', plannedAdmissionDate: '2026-10-01', treatingProviderId: w.providerId, policyId: w.policyId, roomCategoryCode: null,
+    })
+    await getDb().delete(admissionCoverage).where(eq(admissionCoverage.admissionId, adm.id))
+    await getDb().update(admissions).set({ status: 'discharged', dischargedAt: NOW }).where(eq(admissions.id, adm.id))
+    await getDb().delete(patientPolicies).where(eq(patientPolicies.id, second.id))
+    // No active admission: nothing but the primary policy.
+    expect(await preauthDefaultsFor(w.patientId, {}, NOW)).toEqual({
+      admissionId: null, encounterId: null, claimType: 'ipd', plannedAdmissionDate: null, treatingProviderId: null, policyId: w.policyId, roomCategoryCode: null,
+    })
+  })
+
+  const AT8 = new Date(NOW.getTime() + 10 * 86_400_000)
+  it('createPreauth refuses a planned date outside the policy dates and a current inactive verification', async () => {
+    expect(await createPreauth(create({ plannedAdmissionDate: '2100-01-05' }), RCM, AT8))
+      .toEqual({ ok: false, error: 'policy_not_in_force', message: 'This policy is not valid on 5 Jan 2100 (valid 1 Apr 2026–31 Dec 2099)' })
+    expect(await createPreauth(create({ plannedAdmissionDate: '2026-03-31' }), RCM, AT8)).toMatchObject({ ok: false, error: 'policy_not_in_force' })
+    const [v] = await getDb().insert(coverageVerifications).values({
+      patientId: w.patientId, policyId: w.policyId, source: 'manual', result: 'inactive', context: 'manual', method: 'phone',
+      verifiedByName: 'Test Desk', verifiedAt: new Date(AT8.getTime() - 3_600_000), validUntil: new Date(AT8.getTime() + 3_600_000),
+    }).returning({ id: coverageVerifications.id })
+    expect(await createPreauth(create(), RCM, AT8)).toEqual({ ok: false, error: 'coverage_inactive' })
+    // Once that verification is no longer current, the create goes through.
+    expect((await createPreauth(create(), RCM, new Date(AT8.getTime() + 2 * 3_600_000))).ok).toBe(true)
+    expect(v.id).toBeGreaterThan(0)
+    await purgeCoverageFixtures([w.patientId]) // verifications are current by valid_until only
+  })
+
+  it('estimateForPolicy returns the indicative split with the room-rent warning when the room rate is over the limit', async () => {
+    const code = `T8${RUN}`.slice(0, 16)
+    const cat = await categoryId(code)
+    const [svc] = await getDb().insert(serviceCatalog).values({ code: `TSP7${RUN}RR`, name: 'Test room day', departmentId: w.departmentId, category: 'room_rent', hsnSac: '999312', gstRateBp: 0 }).returning({ id: serviceCatalog.id })
+    t8.serviceIds.push(svc.id)
+    await getDb().insert(tariffRates).values({ serviceId: svc.id, scope: 'base', roomCategoryId: cat, amountPaise: 5_000_00, validFrom: '2026-01-01', createdByName: 'TEST-SP7' })
+    await getDb().update(patientPolicies).set({ roomRentLimitPaise: 3_000_00, copayBp: null, sumInsuredPaise: 5_00_000_00 }).where(eq(patientPolicies.id, w.policyId))
+    const r = await estimateForPolicy({ policyId: w.policyId, plannedAdmissionDate: '2026-10-01', roomCategoryCode: code, expectedLengthOfStayDays: 3, estimate: [{ serviceId: svc.id, quantity: 3 }] }, NOW)
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect(r.value.totalPaise).toBe(15_000_00)
+    expect(r.value.coverage).toEqual({
+      insurerPaise: 9_000_00, patientPaise: 6_000_00,
+      warnings: ['Room charge of ₹5,000.00 a day is over the policy room rent limit of ₹3,000.00 a day: ₹6,000.00 for 3 days is payable by the patient.'],
+    })
+    // A policy with no limits at all gives no split.
+    await getDb().update(patientPolicies).set({ roomRentLimitPaise: null, sumInsuredPaise: null }).where(eq(patientPolicies.id, w.policyId))
+    const none = await estimateForPolicy({ policyId: w.policyId, plannedAdmissionDate: '2026-10-01', estimate: [{ serviceId: w.pricedServiceId, quantity: 1 }] }, NOW)
+    expect(none.ok && none.value.coverage).toBeNull()
   })
 
   it('stores a pre-auth document by hash and reads the detail and list without URLs', async () => {

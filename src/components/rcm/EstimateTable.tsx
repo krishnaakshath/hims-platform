@@ -4,29 +4,37 @@ import { fetchJson, sendJson } from '@/lib/client-fetch'
 import { formatPaise } from '@/lib/format'
 import type { EstimateLine } from '@/lib/rcm/snapshot'
 import { PRICE_SOURCE_LABEL } from '@/lib/rcm/constants'
+import { ESTIMATE_SPLIT_LABEL } from '@/lib/insurance/estimate-split'
 import { inputClass, secondaryButtonClass } from './ui'
 
 export interface EstimateItem { serviceId: number; code: string; name: string; quantity: number }
+/** WS12 R8: the indicative insurer/patient split the estimate route returns (null when no limit is known). */
+export interface EstimateCoverage { insurerPaise: number; patientPaise: number; warnings: string[] }
 
-/** Service rows with quantities; every change is priced by POST /api/rcm/preauths/estimate (debounced 300 ms). */
-export function EstimateTable({ policyId, plannedAdmissionDate, roomCategoryCode, items, onItems, onTotal }: {
-  policyId: number | null; plannedAdmissionDate: string; roomCategoryCode: string; items: EstimateItem[]; onItems: (i: EstimateItem[]) => void; onTotal: (paise: number | null) => void
+/**
+ * Service rows with quantities; every change is priced by POST /api/rcm/preauths/estimate
+ * (debounced 300 ms), with the indicative insurer/patient split below the total (WS12 T8).
+ */
+export function EstimateTable({ policyId, plannedAdmissionDate, roomCategoryCode, lengthOfStayDays, items, onItems, onTotal }: {
+  policyId: number | null; plannedAdmissionDate: string; roomCategoryCode: string; lengthOfStayDays?: number; items: EstimateItem[]; onItems: (i: EstimateItem[]) => void; onTotal: (paise: number | null) => void
 }) {
   const [q, setQ] = useState('')
   const [hits, setHits] = useState<{ id: number; code: string; name: string }[]>([])
   const [lines, setLines] = useState<EstimateLine[]>([])
   const [problem, setProblem] = useState<string | null>(null)
+  const [coverage, setCoverage] = useState<EstimateCoverage | null>(null)
 
   useEffect(() => {
     const t = setTimeout(async () => {
-      if (policyId === null || items.length === 0 || !plannedAdmissionDate) { setLines([]); setProblem(null); onTotal(null); return }
-      const r = await sendJson<{ lines: EstimateLine[]; totalPaise: number }>('/api/rcm/preauths/estimate', 'POST', {
-        policyId, plannedAdmissionDate, estimate: items.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })), ...(roomCategoryCode ? { roomCategoryCode } : {}),
+      if (policyId === null || items.length === 0 || !plannedAdmissionDate) { setLines([]); setCoverage(null); setProblem(null); onTotal(null); return }
+      const stay = lengthOfStayDays !== undefined && Number.isInteger(lengthOfStayDays) && lengthOfStayDays >= 1 && lengthOfStayDays <= 365 ? { expectedLengthOfStayDays: lengthOfStayDays } : {}
+      const r = await sendJson<{ lines: EstimateLine[]; totalPaise: number; coverage?: EstimateCoverage | null }>('/api/rcm/preauths/estimate', 'POST', {
+        policyId, plannedAdmissionDate, estimate: items.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity })), ...(roomCategoryCode ? { roomCategoryCode } : {}), ...stay,
       })
-      if (r.ok) { setLines(r.data.lines); setProblem(null); onTotal(r.data.totalPaise) } else { setLines([]); setProblem(r.error); onTotal(null) }
+      if (r.ok) { setLines(r.data.lines); setCoverage(r.data.coverage ?? null); setProblem(null); onTotal(r.data.totalPaise) } else { setLines([]); setCoverage(null); setProblem(r.error); onTotal(null) }
     }, 300)
     return () => clearTimeout(t)
-  }, [policyId, plannedAdmissionDate, roomCategoryCode, items, onTotal])
+  }, [policyId, plannedAdmissionDate, roomCategoryCode, lengthOfStayDays, items, onTotal])
 
   async function search() {
     if (q.trim().length < 2) return
@@ -68,6 +76,18 @@ export function EstimateTable({ policyId, plannedAdmissionDate, roomCategoryCode
       </table>
       {problem && <p role="alert" className="text-xs text-destructive">{problem}</p>}
       {lines.length > 0 && <p className="text-right text-sm font-semibold">Estimate {formatPaise(lines.reduce((a, l) => a + l.amountPaise, 0))}</p>}
+      {lines.length > 0 && coverage && (
+        <div role="group" aria-label="Indicative split" className="rounded-md border border-border bg-muted/40 p-2 text-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ESTIMATE_SPLIT_LABEL} split: the insurer&apos;s decision is final</p>
+          <div className="flex flex-wrap justify-end gap-4 tabular-nums">
+            <span>Insurer {formatPaise(coverage.insurerPaise)}</span>
+            <span>Patient {formatPaise(coverage.patientPaise)}</span>
+          </div>
+          {coverage.warnings.length > 0 && (
+            <ul className="mt-1 list-disc pl-5 text-xs text-amber-800">{coverage.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+          )}
+        </div>
+      )}
     </div>
   )
 }
