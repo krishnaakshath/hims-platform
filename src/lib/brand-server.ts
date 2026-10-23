@@ -71,7 +71,7 @@ export async function getBrandAssetRow(kind: BrandAssetKind): Promise<{ blobUrl:
 }
 
 /**
- * The stored PNG bytes of a brand asset for the icon metadata routes, or null when there is none or
+ * The stored PNG bytes of a brand asset (icon metadata routes, lab report logo), or null when there is none or
  * it cannot be read (the caller then renders the built-in icon). Logs the error class only.
  */
 export async function readStoredBrandPng(kind: BrandAssetKind): Promise<Uint8Array | null> {
@@ -80,7 +80,7 @@ export async function readStoredBrandPng(kind: BrandAssetKind): Promise<Uint8Arr
   try {
     return await getPrivateBlobBytes(row.blobUrl)
   } catch (err) {
-    warnThrottled(`[brand] icon read failed (${errorClass(err)})`)
+    warnThrottled(`[brand] asset read failed (${errorClass(err)})`)
     return null
   }
 }

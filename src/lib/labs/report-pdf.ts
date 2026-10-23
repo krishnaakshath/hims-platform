@@ -26,6 +26,8 @@ const FOOTER_Y = 40
 const LOGO_MAX_HEIGHT = 36
 const LOGO_MAX_WIDTH = 160
 const FOOTER_TEXT_LINES = 2
+/** The header subline (billing address, up to 500 chars) is wrapped and capped at this many lines. */
+const SUBLINE_LINES = 3
 
 const BLACK = rgb(0, 0, 0)
 const GREY = rgb(0.35, 0.35, 0.35)
@@ -85,6 +87,17 @@ function wrap(text: string, font: PDFFont, size: number, maxWidth: number): stri
   return lines
 }
 
+/** `wrap`, capped at `max` lines; a cut last line ends in "..." and still fits `maxWidth`. */
+function wrapCapped(s: string, font: PDFFont, size: number, maxWidth: number, max: number): string[] {
+  const lines = wrap(s, font, size, maxWidth)
+  if (lines.length <= max) return lines
+  const kept = lines.slice(0, max)
+  let last = kept[max - 1]
+  while (last !== '' && font.widthOfTextAtSize(`${last}...`, size) > maxWidth) last = last.slice(0, -1)
+  kept[max - 1] = `${last.trimEnd()}...`
+  return kept
+}
+
 function text(page: PDFPage, s: string, x: number, y: number, font: PDFFont, size = BODY, color = BLACK) {
   const safe = toPdfSafeText(s)
   if (safe !== '') page.drawText(safe, { x, y, size, font, color })
@@ -124,8 +137,10 @@ class Layout {
         y -= 18
       }
       if (this.data.hospital.site) {
-        text(this.page, this.data.hospital.site, MARGIN, y - 10, regular, 10, GREY)
-        y -= 14
+        // Wrapped beside the logo, so a long billing address never runs off the page or under the logo.
+        const lines = wrapCapped(this.data.hospital.site, regular, 10, headerWidth, SUBLINE_LINES)
+        lines.forEach((line, i) => text(this.page, line, MARGIN, y - 10 - i * 12, regular, 10, GREY))
+        y -= lines.length * 12 + 2
       }
       text(this.page, 'LABORATORY REPORT', MARGIN, y - 16, bold, 12)
       y -= 24
