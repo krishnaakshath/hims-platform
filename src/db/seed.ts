@@ -61,6 +61,7 @@ import {
   admissionCoverage, coverageVerifications, // WS12 T1
   abhaLinkOverrides, // WS12 T5
   portalSubmissions, // WS7 T9
+  dataPrincipalRequests, // WS8 T14
   // SP3
   encounters,
   followUpOrders,
@@ -914,6 +915,7 @@ async function clearExistingData() {
   await db.delete(regulatoryDocuments)
   // end Wave D
   await db.delete(portalSubmissions) // WS7 T9: references documents and patients
+  await db.delete(dataPrincipalRequests) // WS8 T14: references patients
   await db.delete(faxes)
   await db.delete(documents)
   await db.delete(mockPayments)
