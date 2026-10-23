@@ -5,15 +5,9 @@ let role: string = 'billing'
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'T', userId: null })) }))
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
 vi.mock('@/lib/queries/patient-collections', () => ({ listPatientCollections: vi.fn(async () => []) }))
-vi.mock('@/lib/queries/patient-statements', () => ({ listPatientStatements: vi.fn(async () => []) }))
-vi.mock('@/lib/queries/insurance-claims', () => ({ listInsuranceClaims: vi.fn(async () => []) }))
 vi.mock('@/components/PatientCollectionsTable', () => ({ PatientCollectionsTable: () => null }))
-vi.mock('@/components/PatientStatementsTable', () => ({ PatientStatementsTable: () => null }))
-vi.mock('@/components/InsuranceClaimsTable', () => ({ InsuranceClaimsTable: () => null }))
 
 import PatientCollectionsPage from '@/app/(dashboard)/billing/patient-collections/page'
-import PatientStatementsPage from '@/app/(dashboard)/billing/statements/page'
-import InsuranceCollectionsPage from '@/app/(dashboard)/billing/insurance-collections/page'
 
 // Walk the returned element tree and find the table element's props.
 function findProps(node: unknown, name: string): Record<string, unknown> | null {
@@ -28,10 +22,10 @@ function findProps(node: unknown, name: string): Record<string, unknown> | null 
   return null
 }
 
+// Foundations T11: the statements and insurance collections pages now redirect
+// (tests/pages/cash-desk-modes.test.tsx), so only patient collections renders a table here.
 const pages = [
   { name: 'PatientCollectionsTable', page: PatientCollectionsPage },
-  { name: 'PatientStatementsTable', page: PatientStatementsPage },
-  { name: 'InsuranceClaimsTable', page: InsuranceCollectionsPage },
 ]
 
 describe.each(pages)('$name page', ({ name, page }) => {

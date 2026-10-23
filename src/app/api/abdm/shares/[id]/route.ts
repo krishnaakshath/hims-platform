@@ -7,6 +7,8 @@ import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
 import { getSharePrefill, resolveShare } from '@/lib/queries/abdm-profile-shares'
 import { RETRY_MESSAGE, isRetryableConflict, pgErrorCode } from '@/lib/db-errors'
 import { safeLog } from '@/lib/integrations/safe-log'
+import { IDENTITY_MISMATCH_MESSAGE } from '@/lib/abdm/identity-match'
+import { mismatchReason } from '@/lib/validation/abha-flow'
 
 // The Scan & Share registration queue (ABDM_SHARE_QUEUE_ROLES). GET: the
 // registration prefill of one pending share. POST: register (after the
@@ -15,6 +17,8 @@ import { safeLog } from '@/lib/integrations/safe-log'
 const resolveSchema = z.object({
   action: z.enum(['registered', 'linked', 'dismissed']),
   patientId: z.string().trim().min(1).max(40).optional(),
+  // WS12 T5: needed to link a share whose profile does not match the chart.
+  mismatchReason: mismatchReason.optional(),
 }).strict()
 
 const ERROR: Record<string, [number, string]> = {
@@ -57,6 +61,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'Could not update the share' }, { status: 500 })
   }
   if (!r.ok) {
+    if (r.error === 'identity_mismatch') return NextResponse.json({ error: IDENTITY_MISMATCH_MESSAGE, code: 'identity_mismatch', fields: r.fields }, { status: 409 })
     const [status, error] = ERROR[r.error]
     return NextResponse.json({ error }, { status })
   }

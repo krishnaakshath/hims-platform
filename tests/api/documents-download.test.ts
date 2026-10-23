@@ -5,41 +5,26 @@ import { documents, auditLog, labOrders, labTests, patients, providers } from '@
 import { eq } from 'drizzle-orm'
 
 import type { Role } from '@/lib/auth'
-import { get as mockedGet } from '@vercel/blob'
-
-// The routes refuse to reach the (mocked) blob SDK without a configured store.
-beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
+import { putPrivateBlob, readPrivateBlob as mockedGet } from '@/lib/blob-store'
+import { withTempBlobDir } from '../helpers/temp-blob-dir'
 
 let sessionRole: Role = 'crc'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Jamie Ruiz' })) }))
 
-// The blob store is private -- the download route can no longer redirect to
-// the stored URL (a browser can't authenticate to it), it streams the bytes
-// itself via @vercel/blob's get(). Mocked the same way as the upload routes
-// mock put().
-vi.mock('@vercel/blob', () => ({
-  get: vi.fn(async (urlOrPathname: string) => ({
-    statusCode: 200 as const,
-    stream: new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode('fake-file-bytes'))
-        controller.close()
-      },
-    }),
-    headers: new Headers(),
-    blob: {
-      url: urlOrPathname,
-      downloadUrl: urlOrPathname,
-      pathname: urlOrPathname,
-      contentDisposition: '',
-      cacheControl: '',
-      uploadedAt: new Date(),
-      etag: 'test-etag',
-      contentType: 'application/pdf',
-      size: 15,
-    },
-  })),
-}))
+// The file store is private -- the download route can't redirect to the
+// stored URL (a browser can't authenticate to it), it streams the bytes
+// itself. The real local-disk store in a temp dir, with readPrivateBlob
+// wrapped so tests can assert that forbidden requests never touch it.
+vi.mock('@/lib/blob-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/blob-store')>()
+  return { ...actual, readPrivateBlob: vi.fn(actual.readPrivateBlob) }
+})
+withTempBlobDir()
+beforeEach(async () => {
+  for (const name of ['some-file.pdf', 'audited.pdf', 'imaging.pdf']) {
+    await putPrivateBlob(`documents/${name}`, new TextEncoder().encode('fake-file-bytes'), 'application/pdf')
+  }
+})
 
 const createdDocumentIds: number[] = []
 const createdOrderIds: number[] = []
@@ -98,7 +83,7 @@ function downloadReq(id: number) {
 
 describe('GET /api/documents/[id]/download', () => {
   it('streams the file bytes for a crc', async () => {
-    const doc = await createThrowawayDocument({ fileUrl: 'https://blob.test/documents/some-file.pdf' })
+    const doc = await createThrowawayDocument({ fileUrl: 'local:documents/some-file.pdf' })
 
     const res = await GET(downloadReq(doc.id) as never, { params: Promise.resolve({ id: String(doc.id) }) })
     expect(res.status).toBe(200)
@@ -119,7 +104,7 @@ describe('GET /api/documents/[id]/download', () => {
   })
 
   it('writes an audit row on a successful download', async () => {
-    const doc = await createThrowawayDocument({ fileUrl: 'https://blob.test/documents/audited.pdf' })
+    const doc = await createThrowawayDocument({ fileUrl: 'local:documents/audited.pdf' })
 
     const res = await GET(downloadReq(doc.id) as never, { params: Promise.resolve({ id: String(doc.id) }) })
     expect(res.status).toBe(200)
@@ -130,7 +115,7 @@ describe('GET /api/documents/[id]/download', () => {
 
   it.each(['admin', 'crc', 'pi', 'frontdesk'] as const)('streams the file bytes for %s', async (role) => {
     sessionRole = role
-    const doc = await createThrowawayDocument({ fileUrl: 'https://blob.test/documents/some-file.pdf' })
+    const doc = await createThrowawayDocument({ fileUrl: 'local:documents/some-file.pdf' })
 
     const res = await GET(downloadReq(doc.id) as never, { params: Promise.resolve({ id: String(doc.id) }) })
     expect(res.status).toBe(200)
@@ -139,7 +124,7 @@ describe('GET /api/documents/[id]/download', () => {
 
   it.each(['pharmacy', 'billing', 'collector'] as const)('403s %s without touching the blob store', async (role) => {
     sessionRole = role
-    const doc = await createThrowawayDocument({ fileUrl: 'https://blob.test/documents/some-file.pdf' })
+    const doc = await createThrowawayDocument({ fileUrl: 'local:documents/some-file.pdf' })
 
     const res = await GET(downloadReq(doc.id) as never, { params: Promise.resolve({ id: String(doc.id) }) })
     expect(res.status).toBe(403)
@@ -152,7 +137,7 @@ describe('GET /api/documents/[id]/download', () => {
   it('admits labs for a document attached to a lab order', async () => {
     sessionRole = 'labs'
     const order = await createThrowawayLabOrder()
-    const doc = await createThrowawayDocument({ fileUrl: 'https://blob.test/documents/imaging.pdf', labOrderId: order.id })
+    const doc = await createThrowawayDocument({ fileUrl: 'local:documents/imaging.pdf', labOrderId: order.id })
 
     const res = await GET(downloadReq(doc.id) as never, { params: Promise.resolve({ id: String(doc.id) }) })
     expect(res.status).toBe(200)
@@ -161,7 +146,7 @@ describe('GET /api/documents/[id]/download', () => {
 
   it('403s labs for a document with no lab order, without touching the blob store', async () => {
     sessionRole = 'labs'
-    const doc = await createThrowawayDocument({ fileUrl: 'https://blob.test/documents/some-file.pdf', labOrderId: null })
+    const doc = await createThrowawayDocument({ fileUrl: 'local:documents/some-file.pdf', labOrderId: null })
 
     const res = await GET(downloadReq(doc.id) as never, { params: Promise.resolve({ id: String(doc.id) }) })
     expect(res.status).toBe(403)
@@ -171,11 +156,8 @@ describe('GET /api/documents/[id]/download', () => {
     expect(rows).toHaveLength(0)
   })
 
-  it('404s with "Stored file is missing" when the blob SDK throws (non-Blob URL), with no audit row and no URL logged', async () => {
+  it('404s with "Stored file is missing" for a URL the store cannot read, with no audit row and no URL logged', async () => {
     const doc = await createThrowawayDocument({ fileUrl: 'https://not-a-blob.example/secret-path/file.pdf' })
-    const err = new Error('Vercel Blob: Invalid URL: https://not-a-blob.example/secret-path/file.pdf')
-    err.name = 'BlobError'
-    vi.mocked(mockedGet).mockRejectedValueOnce(err)
     const logs: unknown[][] = []
     const spies = (['error', 'warn', 'log'] as const).map((m) => vi.spyOn(console, m).mockImplementation((...a) => { logs.push(a) }))
 
@@ -187,6 +169,11 @@ describe('GET /api/documents/[id]/download', () => {
     const rows = await getDb().select().from(auditLog).where(eq(auditLog.action, `downloaded document ${doc.id}`))
     expect(rows).toHaveLength(0)
     expect(JSON.stringify(logs)).not.toContain('secret-path')
-    expect(JSON.stringify(logs)).toContain('BlobError')
+  })
+
+  it('404s when a local file was removed from the store', async () => {
+    const doc = await createThrowawayDocument({ fileUrl: 'local:documents/never-stored.pdf' })
+    const res = await GET(downloadReq(doc.id) as never, { params: Promise.resolve({ id: String(doc.id) }) })
+    expect(res.status).toBe(404)
   })
 })

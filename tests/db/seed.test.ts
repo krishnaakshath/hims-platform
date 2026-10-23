@@ -108,6 +108,11 @@ describe('seed', () => {
 })
 
 describe('India masters (topped up on every run)', () => {
+  it('maps every seeded lab and imaging test to a tariff service (Foundations T10)', async () => {
+    const rows = await getDb().execute(sql`select code from lab_tests where service_id is null`)
+    expect(rows.rows.map((r) => (r as { code: string }).code)).toEqual([])
+  })
+
   it('departments, Indian payers, room categories, services and every kind of tariff exist', async () => {
     const db = getDb()
     const deptCodes = new Set((await db.select({ code: departments.code }).from(departments)).map((d) => d.code))
@@ -150,7 +155,10 @@ describe('India hospital demo (after a fresh seed or SEED_RESET=1)', () => {
   it('patients carry Indian addresses, +91 mobiles, ABHA numbers and synthetic, encrypted Aadhaar', async (ctx) => {
     if (!rebuilt) ctx.skip()
     const db = getDb()
-    const rows = await db.select().from(patients)
+    // Other test files insert short-lived fixture patients tagged W<xx><pid>-<x> into the same
+    // database (and a killed run can leave one behind); they are not demo data, so only the
+    // seeded patients are checked here.
+    const rows = (await db.select().from(patients)).filter((p) => !/^W[A-Z]{2}\d+-[A-Z0-9]+$/.test(p.id))
     for (const p of rows) {
       expect(isIndianStateCode(p.stateCode ?? ''), p.id).toBe(true)
       expect(isValidPinCode(p.pinCode ?? ''), p.id).toBe(true)

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { serviceUnavailableBody, type Service } from '@/lib/http/service-message'
 
 // The backing services a request can depend on, and what a route answers when
 // one is missing or unreachable: a generic 503 for the client, and ONE log
@@ -10,11 +11,11 @@ import { NextResponse } from 'next/server'
 // limited routes are unavailable. There is deliberately no in-memory fallback
 // (it would reset per serverless instance and stop protecting anything).
 
-export type Service = 'database' | 'redis' | 'blob'
+export type { Service }
 
 export const SERVICE_UNAVAILABLE_MESSAGE = 'Service temporarily unavailable'
 
-const SERVICE_LABEL: Record<Service, string> = { database: 'DATABASE_URL', redis: 'REDIS', blob: 'BLOB_READ_WRITE_TOKEN' }
+const SERVICE_LABEL: Record<Service, string> = { database: 'DATABASE_URL', redis: 'REDIS', blob: 'BLOB_DRIVER' }
 
 export class ServiceNotConfiguredError extends Error {
   constructor(public service: Service) {
@@ -44,21 +45,10 @@ export function databaseUnavailableCode(e: unknown): string | null {
   return null
 }
 
-/**
- * The private file store (Vercel Blob): a read-write token, or a store id for
- * OIDC auth on Vercel. Without either, every stored-file read and write fails.
- */
-export function isBlobConfigured(env: Record<string, string | undefined> = process.env): boolean {
-  return (env.BLOB_READ_WRITE_TOKEN ?? '').trim() !== '' || (env.BLOB_STORE_ID ?? '').trim() !== ''
-}
-
-/** Throws ServiceNotConfiguredError('blob') before any stored-file read or write when there is no store. */
-export function requireBlobStore(): void {
-  if (!isBlobConfigured()) throw new ServiceNotConfiguredError('blob')
-}
-
-export function serviceUnavailableResponse(): NextResponse {
-  return NextResponse.json({ error: SERVICE_UNAVAILABLE_MESSAGE }, { status: 503, headers: { 'Retry-After': '30' } })
+/** 503 for a missing service. Only a missing file store carries a `code` (the UI explains it); the rest keep the generic body. */
+export function serviceUnavailableResponse(service?: Service): NextResponse {
+  const body = service === 'blob' ? serviceUnavailableBody('blob') : { error: SERVICE_UNAVAILABLE_MESSAGE }
+  return NextResponse.json(body, { status: 503, headers: { 'Retry-After': '30' } })
 }
 
 /**
@@ -89,7 +79,7 @@ export function withServiceGuard<A extends unknown[], R extends Response>(
 export function serviceErrorResponse(e: unknown, feature: string): NextResponse | null {
   if (e instanceof ServiceNotConfiguredError) {
     console.error(`[config] ${SERVICE_LABEL[e.service]} not configured: ${feature} is unavailable`)
-    return serviceUnavailableResponse()
+    return serviceUnavailableResponse(e.service)
   }
   const code = databaseUnavailableCode(e)
   if (code) {

@@ -57,6 +57,16 @@ describe.skipIf(!process.env.DATABASE_URL)('rcm policies (DB)', () => {
     expect(list.map((p) => p.priority)).toEqual(['primary', 'secondary'])
     expect(JSON.stringify(list)).not.toMatch(/blob/i)
   })
+  it('WS12: the ICU limit is stored on create, changed on update and shown in the view', async () => {
+    const r = await createPolicy(input({ policyNumber: 'POL/80', priority: 'secondary', icuLimitPaise: 8_000_00 }), RCM)
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const view = async () => (await listPatientPolicies(b.patientId)).find((p) => p.id === r.value.policyId)!
+    expect((await view()).icuLimitPaise).toBe(8_000_00)
+    expect((await updatePolicy(r.value.policyId, { icuLimitPaise: 9_000_00 }, RCM)).ok).toBe(true)
+    expect((await view()).icuLimitPaise).toBe(9_000_00)
+    expect((await updatePolicy(r.value.policyId, { planName: 'Gold' }, RCM)).ok).toBe(true)
+    expect((await view()).icuLimitPaise).toBe(9_000_00)
+  })
   it('a TPA in the insurer field is payer_kind_invalid; an unprofiled legacy payer too', async () => {
     expect(await createPolicy(input({ insurerPayerId: b.tpaId, tpaPayerId: null, priority: 'secondary' }), RCM)).toEqual({ ok: false, error: 'payer_kind_invalid' })
     expect(await createPolicy(input({ insurerPayerId: legacyPayerId, tpaPayerId: null, priority: 'secondary' }), RCM)).toEqual({ ok: false, error: 'payer_kind_invalid' })

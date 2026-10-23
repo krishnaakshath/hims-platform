@@ -8,6 +8,8 @@ import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { listFormSubmissions } from '@/lib/queries/form-submissions'
+import { brand } from '@/lib/brand' // Foundations T9
+import { sendPatientNotice } from '@/lib/queries/notifications' // Foundations T9
 import { copyTemplateConsentsToSubmission } from '@/lib/queries/form-submission-consents'
 
 const sendFormSchema = z.object({
@@ -54,5 +56,10 @@ export async function POST(request: NextRequest) {
     return row
   })
   await logAudit(session, 'sent intake form', parsed.data.patientId)
+  // Foundations T9: tell the patient through the notification service. The text is generic (sign in to
+  // the patient portal); the access token never leaves this response. Never throws, never blocks the send;
+  // the dialog still shows the link as a fallback.
+  await sendPatientNotice({ patientId: parsed.data.patientId, templateKey: 'form_sent', vars: { hospitalName: brand.name }, dedupeKey: `form:${created.id}` })
+  // end Foundations T9
   return NextResponse.json(created, { status: 201 })
 }

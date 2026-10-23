@@ -117,7 +117,7 @@ describe.skipIf(!process.env.DATABASE_URL)('service procedure codes (DB)', () =>
   it('refuses a sample code set in production', async () => {
     await getDb().update(codeSystems).set({ isSample: true }).where(eq(codeSystems.id, systemIds[0]))
     try {
-      vi.stubEnv('VERCEL_ENV', 'production')
+      vi.stubEnv('NODE_ENV', 'production')
       expect(await replaceServiceProcedureCodes(packageId, [{ kind: 'hbp', code: 'SMP001A', isPrimary: false }], CODER))
         .toEqual({ ok: false, error: 'code_not_found', problems: ['SMP001A is from a sample (fictional) code set'] })
       vi.unstubAllEnvs()

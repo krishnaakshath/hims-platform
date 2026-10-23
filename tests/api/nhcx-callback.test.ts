@@ -9,7 +9,7 @@ vi.mock('@/lib/nhcx/jwe', async () => {
 const dbTouched = vi.fn()
 vi.mock('@/db/client', () => ({ getDb: () => { dbTouched(); throw new Error('DB_BLOCKED') } }))
 
-import { handleNhcxCallback, actionFromPath, type InboundDeps } from '@/lib/nhcx/inbound'
+import { handleNhcxCallback, actionFromPath, parseInbound, type InboundDeps } from '@/lib/nhcx/inbound'
 import { NextRequest } from 'next/server'
 import { GET, POST } from '@/app/api/nhcx/callback/[...action]/route'
 import { makeCallbackKit } from '../helpers/nhcx-callback'
@@ -81,5 +81,19 @@ describe('NHCX callback receiver (before any write)', () => {
     expect(r.status).toBe(405)
     const p = await POST(new NextRequest('https://app.example/api/nhcx/callback/claim/submit', { method: 'POST', body: '{}' }), { params: Promise.resolve({ action: ['claim', 'submit'] }) })
     expect(p.status).toBe(404)
+  })
+})
+
+// WS12 T2: the eligibility parse carries limits in the summary and the insurer reference beside it.
+describe('NHCX eligibility callback parse (WS12)', () => {
+  it('returns limits in the summary and the reference outside it', () => {
+    const fhir = { resourceType: 'Bundle', type: 'collection', entry: [{ resource: {
+      resourceType: 'CoverageEligibilityResponse', outcome: 'complete', identifier: [{ value: 'INS-REF-778' }],
+      insurance: [{ inforce: true, item: [{ benefit: [{ type: { coding: [{ code: 'benefit' }] }, allowedMoney: { value: 300000, currency: 'INR' } }] }] }],
+    } }] }
+    const headers = { sender: 'TPA1@sbx', recipient: 'P1@sbx', apiCallId: 'a', correlationId: 'c', timestamp: 't', status: 'response.complete' as const }
+    const p = parseInbound('coverageeligibility/on_check', fhir, headers)
+    expect(p).toMatchObject({ kind: 'eligibility', insurerReference: 'INS-REF-778', summary: { inforce: true, coverage: { sumInsuredPaise: 30_000_000, balancePaise: null } } })
+    expect(JSON.stringify(p && p.summary)).not.toContain('INS-REF')
   })
 })

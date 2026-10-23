@@ -63,7 +63,7 @@ describe('StaffLoginForm', () => {
   const portal = { key: 'crc', label: 'Coordinator', description: 'd', icon: () => null, iconBg: '', iconText: '' }
   async function signIn() {
     render(<StaffLoginForm portal={portal} />)
-    fireEvent.change(screen.getByLabelText('Email Address'), { target: { value: 'a@b.co' } })
+    fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'a@b.co' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } })
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
   }

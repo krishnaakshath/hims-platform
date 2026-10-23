@@ -66,6 +66,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return labServerError('lab requisition create', err, 'Could not order the tests')
   }
   if (!result.ok) {
+    if (result.error === 'test_unmapped') return errorResponse(422, 'This test has no price. Map it to a tariff service first.', 'test_unmapped')
+    if (result.error === 'test_unpriced') return errorResponse(422, 'This test has no price. Map it to a tariff service first.', 'test_unpriced')
+    if (result.error === 'test_inactive') return errorResponse(422, 'This test is not active.', 'test_inactive')
     if (result.error === 'encounter_mismatch') return errorResponse(409, 'That visit belongs to a different patient.')
     return errorResponse(404, NOT_FOUND_MESSAGE[result.error])
   }

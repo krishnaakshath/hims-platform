@@ -8,7 +8,7 @@
 // strict webidl brand check on each value, which a jsdom File fails even
 // though it's a genuine File -- see tests/api/patients-insurance-card.test.ts
 // for the same class of jsdom/Node realm mismatch.
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { POST as receiveDocument } from '@/app/api/documents/route'
 import { getDb } from '@/db/client'
@@ -16,15 +16,17 @@ import { documents, admissions, providers } from '@/db/schema'
 
 let sessionRole: 'admin' | 'pi' | 'crc' | 'frontdesk' = 'crc'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: sessionRole, name: 'Jamie Ruiz' })) }))
-vi.mock('@vercel/blob', () => ({
-  put: vi.fn(async (path: string) => ({ url: `https://blob.test/${path}` })),
-  del: vi.fn(async () => {}),
-}))
+// The real local-disk file store in a temp dir; putPrivateBlob is wrapped so tests can assert
+// that rejected requests never store anything.
+vi.mock('@/lib/blob-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/blob-store')>()
+  return { ...actual, putPrivateBlob: vi.fn(actual.putPrivateBlob) }
+})
 
-import { put as mockedPut } from '@vercel/blob'
+import { putPrivateBlob as mockedPut } from '@/lib/blob-store'
+import { withTempBlobDir } from '../helpers/temp-blob-dir'
 
-// The routes refuse to reach the (mocked) blob SDK without a configured store.
-beforeEach(() => { vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'vercel_blob_rw_test_token') })
+withTempBlobDir()
 
 const createdDocumentIds: number[] = []
 const createdAdmissionIds: number[] = []
@@ -75,7 +77,7 @@ describe('POST /api/documents', () => {
     expect(row.patientId).toBeNull()
     expect(row.status).toBe('new')
     expect(row.filedByName).toBeNull()
-    expect(row.fileUrl).toContain('https://blob.test/documents/')
+    expect(row.fileUrl).toMatch(/^local:documents\//)
     expect(row.fileType).toBe('JPG')
   })
 

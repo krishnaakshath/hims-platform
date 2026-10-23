@@ -1,4 +1,4 @@
-// Local-only HTTP shim in front of the docker-compose Redis REST endpoint
+// HTTP shim in front of the docker-compose Redis REST endpoint
 // (serverless-redis-http). @upstash/ratelimit's Lua scripts start with
 // `#!lua flags=allow-key-locking`, a flag only Upstash's own Redis accepts;
 // stock Redis 7 rejects the script, so every rate-limited route (staff and
@@ -12,7 +12,8 @@
 //
 //   SHIM_PORT=8078 SHIM_TARGET=http://127.0.0.1:8079 node scripts/dev/redis-rest-shim.mjs
 //
-// Never point a deployment at this; it is for local runs only.
+// It is part of the Docker deployment (the `redis-rest` service); it listens
+// only inside the compose network and on the host's loopback port.
 import http from 'node:http'
 
 const LISTEN = Number(process.env.SHIM_PORT ?? 8078)

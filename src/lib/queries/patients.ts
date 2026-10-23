@@ -11,6 +11,8 @@ import {
   chargeLines, invoices, patientPayments, refunds,
   // SP5
   labRequisitions, homeCollectionVisits, labReports, notificationDeliveries,
+  notificationLog, patientNotificationPreferences, // Foundations T8
+  paymentRequests, // Foundations T11
   // SP6
   codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures,
   // SP7
@@ -18,7 +20,10 @@ import {
   claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
   // SP8
   abdmConsents, abdmProfileShares, nhcxEligibilityChecks, nhcxExchanges,
+  admissionCoverage, coverageVerifications, // WS12 T1
+  abhaLinkOverrides, // WS12 T5
   bookingRequests, // Wave J
+  payers,
 } from '@/db/schema'
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
@@ -46,7 +51,16 @@ export interface CriteriaSummary {
 // `mfaEnabled` (a non-sensitive flag the staff UI shows) stays, and
 // `portalConfigured` is computed in SQL.
 
-export type PatientWithStatus = PublicPatientRow & { trialId?: string; overallStatus?: Verdict; criteriaSummary?: CriteriaSummary }
+export type PatientWithStatus = PublicPatientRow & {
+  trialId?: string
+  overallStatus?: Verdict
+  criteriaSummary?: CriteriaSummary
+  /** Latest encounter check-in, else latest past appointment (ISO string once cached); null if none. */
+  lastVisitAt: string | null
+  /** Insurer of the primary active policy; null when the patient has none. */
+  primaryPayerName: string | null
+}
+export type PatientListRow = PatientWithStatus
 
 /**
  * Shared by the /api/patients route handler and any Server Component that
@@ -123,8 +137,40 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Js
       summaryByPatient.set(row.patientId, summary)
     }
 
+    // Two grouped queries (not per patient) for the hospital list columns.
+    const visitRows = await getDb()
+      .select({ patientId: encounters.patientId, at: sql<Date | null>`max(${encounters.checkedInAt})` })
+      .from(encounters)
+      .groupBy(encounters.patientId)
+    const apptRows = await getDb()
+      .select({ patientId: appointments.patientId, at: sql<Date | null>`max(${appointments.startsAt})` })
+      .from(appointments)
+      .where(sql`${appointments.startsAt} <= now()`)
+      .groupBy(appointments.patientId)
+    const lastVisitByPatient = new Map<string, Date>()
+    for (const v of [...visitRows, ...apptRows]) {
+      if (!v.at) continue
+      // A raw max() of a timestamp-without-tz column skips drizzle's column mapping: node-postgres
+      // parses the stored UTC wall clock as local time (a Date) or leaves a string. Re-read it as UTC.
+      const at = v.at instanceof Date
+        ? new Date(Date.UTC(v.at.getFullYear(), v.at.getMonth(), v.at.getDate(), v.at.getHours(), v.at.getMinutes(), v.at.getSeconds(), v.at.getMilliseconds()))
+        : new Date(`${String(v.at).replace(' ', 'T')}Z`)
+      const prev = lastVisitByPatient.get(v.patientId)
+      if (!prev || at > prev) lastVisitByPatient.set(v.patientId, at)
+    }
+    const payerRows = await getDb()
+      .select({ patientId: patientPolicies.patientId, name: payers.name })
+      .from(patientPolicies)
+      .innerJoin(payers, eq(payers.id, patientPolicies.insurerPayerId))
+      .where(and(eq(patientPolicies.priority, 'primary'), eq(patientPolicies.status, 'active')))
+      .orderBy(patientPolicies.id)
+    const payerByPatient = new Map<string, string>()
+    for (const r of payerRows) payerByPatient.set(r.patientId, r.name) // later policy wins
+
     return rows.map((r) => ({
       ...r.patient,
+      lastVisitAt: lastVisitByPatient.get(r.patient.id)?.toISOString() ?? null,
+      primaryPayerName: payerByPatient.get(r.patient.id) ?? null,
       trialId: r.screening?.trialId,
       overallStatus: r.screening?.overallStatus,
       criteriaSummary: summaryByPatient.get(r.patient.id),
@@ -434,7 +480,9 @@ async function hasFinancialRecords(db: DeleteTx, anonId: string): Promise<boolea
   const result = await db.execute<{ found: boolean }>(sql`
     select exists (select 1 from invoices where patient_id = ${anonId} and status in ('finalised', 'cancelled'))
         or exists (select 1 from patient_payments where patient_id = ${anonId})
-        or exists (select 1 from refunds where patient_id = ${anonId}) as found`)
+        or exists (select 1 from refunds where patient_id = ${anonId})
+        -- Foundations T11: a confirmed UPI request is money received (it also has a receipt row).
+        or exists (select 1 from payment_requests where patient_id = ${anonId} and status = 'confirmed') as found`)
   return Boolean(result.rows[0]?.found)
 }
 // end SP4
@@ -501,12 +549,22 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   if (await hasRetainedClaimRecords(db, anonId)) throw new PatientHasFinancialRecordsError() // SP7
   if (await hasNhcxExchanges(db, anonId)) throw new PatientHasFinancialRecordsError() // SP8
 
+  // WS12 T1, before SP8 and SP7: verifications reference eligibility checks and policies;
+  // admission coverage references admissions, policies, pre-auths and verifications.
+  // coverage_verifications is append-only, so the purge setting is on for these deletes only.
+  await db.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+  await db.delete(admissionCoverage).where(inArray(admissionCoverage.admissionId, db.select({ id: admissions.id }).from(admissions).where(eq(admissions.patientId, anonId))))
+  await db.delete(coverageVerifications).where(eq(coverageVerifications.patientId, anonId))
+  await db.execute(sql`select set_config('hims.allow_document_purge', 'off', true)`)
+  // end WS12 T1
+
   // SP8, before the SP7 deletes (eligibility checks reference policies; exchanges reference
   // claims, pre-auths and policies). abdm_consents is append-only, so the purge setting is on for
   // these deletes only. The exchanges delete is a backstop: the check above leaves none.
   await db.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
   await db.delete(nhcxExchanges).where(eq(nhcxExchanges.patientId, anonId))
   await db.delete(nhcxEligibilityChecks).where(eq(nhcxEligibilityChecks.patientId, anonId))
+  await db.delete(abhaLinkOverrides).where(eq(abhaLinkOverrides.patientId, anonId)) // WS12 T5 (append-only)
   await db.delete(abdmProfileShares).where(eq(abdmProfileShares.patientId, anonId))
   await db.delete(abdmConsents).where(eq(abdmConsents.patientId, anonId))
   await db.execute(sql`select set_config('hims.allow_document_purge', 'off', true)`)
@@ -564,6 +622,10 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // the invoice_lines FK (23503) and the invoice guard trigger. Lines also reference
   // medication_dispenses, charges, encounters and admissions, so they go before those.
   await db.delete(refunds).where(eq(refunds.patientId, anonId))
+  // Foundations T11: payment_requests references patients, invoices, admissions and
+  // patient_payments with no ON DELETE action. The check above refuses a patient with a
+  // confirmed request, so only pending/cancelled QR requests (no money moved) remain here.
+  await db.delete(paymentRequests).where(eq(paymentRequests.patientId, anonId))
   await db.delete(patientPayments).where(eq(patientPayments.patientId, anonId))
   await db.delete(chargeLines).where(eq(chargeLines.patientId, anonId))
   await db.delete(invoices).where(eq(invoices.patientId, anonId))
@@ -689,6 +751,9 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // SP5: notification_deliveries and lab_reports reference patients(id) (and lab_reports
   // references lab_requisitions) with no ON DELETE action, so both go before the lab block.
   await db.delete(notificationDeliveries).where(eq(notificationDeliveries.patientId, anonId))
+  // Foundations T8: the notification log and channel preferences reference patients(id).
+  await db.delete(notificationLog).where(eq(notificationLog.patientId, anonId))
+  await db.delete(patientNotificationPreferences).where(eq(patientNotificationPreferences.patientId, anonId))
   await db.delete(labReports).where(eq(labReports.patientId, anonId))
   // end SP5
 

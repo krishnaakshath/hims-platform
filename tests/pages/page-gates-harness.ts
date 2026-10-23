@@ -136,22 +136,12 @@ export const PAGE_GATES: PageGateCase[] = [
     allowed: ['admin', 'crc', 'billing'],
   },
   // LeftNav.tsx:98 — showBilling
-  { route: '/billing/insurance-collections', load: () => import('@/app/(dashboard)/billing/insurance-collections/page'), allowed: ['admin', 'crc', 'billing'] },
-  // LeftNav.tsx:98 — showBilling
   { route: '/billing/patient-collections', load: () => import('@/app/(dashboard)/billing/patient-collections/page'), allowed: ['admin', 'crc', 'billing'] },
-  // LeftNav.tsx:98 — showBilling
-  { route: '/billing/statements', load: () => import('@/app/(dashboard)/billing/statements/page'), allowed: ['admin', 'crc', 'billing'] },
   // LeftNav.tsx:98 — showBilling
   { route: '/billing/ar-dashboard', load: () => import('@/app/(dashboard)/billing/ar-dashboard/page'), allowed: ['admin', 'crc', 'billing'] },
   // LeftNav.tsx:98 — showBilling
   { route: '/billing/analytics', load: () => import('@/app/(dashboard)/billing/analytics/page'), allowed: ['admin', 'crc', 'billing'] },
   // LeftNav.tsx:98 — showBilling
-  {
-    route: '/billing/pay',
-    load: () => import('@/app/(dashboard)/billing/pay/page'),
-    props: { searchParams: Promise.resolve({}) },
-    allowed: ['admin', 'crc', 'billing'],
-  },
   // ReportsSidebar legacy leaves (src/lib/reports/catalog.ts) -- admin, crc. Wave I: the /reports
   // landing page has its own row (REPORTS_ROLES) below.
   { route: '/reports/patients', load: () => import('@/app/(dashboard)/reports/patients/page'), allowed: ['admin', 'crc'] },
@@ -401,4 +391,9 @@ export const PAGE_GATES: PageGateCase[] = [
   { route: '/reports/hospital/lab-tat', load: () => import('@/app/(dashboard)/reports/hospital/lab-tat/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'labs'] },
   { route: '/reports/hospital/pharmacy', load: () => import('@/app/(dashboard)/reports/hospital/pharmacy/page'), props: { searchParams: Promise.resolve({}) }, allowed: ['admin', 'crc', 'pharmacy'] },
   // end Wave I
+  // Foundations T11: retired legacy billing pages -- every role is sent on (RCM claims, the cash
+  // desk) before any query; the destination page gates. allowed: [] so every role must redirect.
+  { route: '/billing/insurance-collections', load: () => import('@/app/(dashboard)/billing/insurance-collections/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/rcm/claims'])) },
+  { route: '/billing/statements', load: () => import('@/app/(dashboard)/billing/statements/page'), allowed: [], deniedRedirect: Object.fromEntries(ALL_ROLES.map((r) => [r, '/cash-desk'])) },
+  // end Foundations T11
 ]

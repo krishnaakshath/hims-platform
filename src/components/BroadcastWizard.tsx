@@ -61,7 +61,7 @@ const FORM_STATUS_OPTIONS = [
   { value: 'none', label: 'No form sent yet' },
 ]
 
-export function BroadcastWizard({ trials }: { trials: Trial[] }) {
+export function BroadcastWizard({ trials, showTrialFilters = true }: { trials: Trial[]; showTrialFilters?: boolean }) {
   const router = useRouter()
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [channel, setChannel] = useState<'sms' | 'email' | 'both'>('sms')
@@ -182,6 +182,8 @@ export function BroadcastWizard({ trials }: { trials: Trial[] }) {
 
       {step === 2 && (
         <div className="space-y-4">
+          {showTrialFilters && (
+            <>
           <div>
             <label htmlFor="broadcast-trial" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trial</label>
             <select id="broadcast-trial" value={trialId} onChange={(e) => { setTrialId(e.target.value); setCandidates(null) }} className={FIELD}>
@@ -195,6 +197,8 @@ export function BroadcastWizard({ trials }: { trials: Trial[] }) {
               {OVERALL_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
+            </>
+          )}
           <div>
             <label htmlFor="broadcast-form-status" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Form Status</label>
             <select id="broadcast-form-status" value={formStatus} onChange={(e) => { setFormStatus(e.target.value); setCandidates(null) }} className={FIELD}>

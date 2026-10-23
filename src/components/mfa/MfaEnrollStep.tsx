@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { AUTH_ALERT, AUTH_CODE_INPUT, AUTH_PRIMARY_BUTTON } from '@/components/auth/auth-styles'
 import Image from 'next/image'
 
 export function MfaEnrollStep({ qrDataUrl, manualKey, onSubmit }: {
@@ -25,19 +26,19 @@ export function MfaEnrollStep({ qrDataUrl, manualKey, onSubmit }: {
 
   return (
     <div>
-      <div className="mb-4 text-center">
-        <h1 className="text-xl font-bold text-foreground">Set up two-factor authentication</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Scan this code with an authenticator app (Google Authenticator, 1Password, Authy), then enter the 6-digit code it shows.</p>
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold leading-8 tracking-[-0.015em] text-foreground">Set up two-factor authentication</h1>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">Scan this code with an authenticator app (Google Authenticator, 1Password, Authy), then enter the 6-digit code it shows.</p>
       </div>
-      <div className="mb-4 flex justify-center">
-        <Image src={qrDataUrl} alt="Scan with your authenticator app" width={180} height={180} className="rounded-lg border border-border" unoptimized />
+      <div className="mb-5 flex justify-center rounded-lg border border-border bg-white p-4">
+        <Image src={qrDataUrl} alt="Scan with your authenticator app" width={180} height={180} unoptimized />
       </div>
-      <p className="mb-4 text-center text-xs text-muted-foreground">
+      <p className="mb-6 text-xs leading-5 text-muted-foreground">
         Can&apos;t scan it? Enter this key manually: <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-foreground">{manualKey}</code>
       </p>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label htmlFor="mfa-enroll-code" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">6-digit code</label>
+          <label htmlFor="mfa-enroll-code" className="mb-2 block text-[13px] font-medium leading-5 text-foreground">6-digit code</label>
           <input
             id="mfa-enroll-code"
             inputMode="numeric"
@@ -46,14 +47,15 @@ export function MfaEnrollStep({ qrDataUrl, manualKey, onSubmit }: {
             required
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            className="w-full rounded-lg border border-border bg-background px-3.5 py-2.5 text-center text-lg tracking-[0.5em] text-foreground focus:border-primary focus:outline-none"
+            placeholder="000000"
+            className={AUTH_CODE_INPUT}
           />
         </div>
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {error && <div role="alert" className={AUTH_ALERT}>{error}</div>}
         <button
           type="submit"
           disabled={submitting || code.length !== 6}
-          className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          className={AUTH_PRIMARY_BUTTON}
         >
           {submitting ? 'Confirming…' : 'Confirm and finish setup'}
         </button>

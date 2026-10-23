@@ -8,7 +8,6 @@ const { mockNotFound, mockGetDb } = vi.hoisted(() => ({
 }))
 
 const PAGES: { route: string; load: () => Promise<{ default: (props: never) => Promise<unknown> }>; props?: unknown }[] = [
-  { route: '/billing/pay', load: () => import('@/app/(dashboard)/billing/pay/page'), props: { searchParams: Promise.resolve({}) } },
   { route: '/broadcasts', load: () => import('@/app/(dashboard)/broadcasts/page'), props: { searchParams: Promise.resolve({}) } },
   { route: '/broadcasts/[id]', load: () => import('@/app/(dashboard)/broadcasts/[id]/page'), props: { params: Promise.resolve({ id: '1' }) } },
   { route: '/experience-surveys', load: () => import('@/app/(dashboard)/experience-surveys/page'), props: { searchParams: Promise.resolve({}) } },

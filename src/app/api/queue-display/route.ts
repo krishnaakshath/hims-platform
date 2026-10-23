@@ -8,7 +8,7 @@ import { withServiceGuard } from '@/lib/service-config'
 const PIN_HEADER = 'x-queue-display-pin'
 
 // Same client-IP derivation as src/app/api/login/route.ts's getClientIp --
-// Vercel/most proxies set the real client IP as the first x-forwarded-for
+// Reverse proxies (Caddy/nginx in front of the container) set the real client IP as the first x-forwarded-for
 // entry; NextRequest no longer exposes `.ip` directly.
 function getClientIp(request: NextRequest): string {
   const forwardedFor = request.headers.get('x-forwarded-for')

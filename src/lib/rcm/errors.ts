@@ -10,6 +10,8 @@ export const RCM_ERRORS = [
   'service_not_found', 'price_unresolved', 'duplicate_reference', 'duplicate_utr', 'amounts_invalid', 'write_off_exceeds',
   'same_approver', 'no_user_account', 'close_blocked', 'gateway_not_configured', 'already_acknowledged', 'already_reconciled',
   'already_decided', 'query_closed', 'upload_invalid', 'lab_report_unavailable',
+  // WS12
+  'policy_not_in_force', 'coverage_inactive',
 ] as const
 export type RcmWriteError = (typeof RCM_ERRORS)[number]
 
@@ -26,7 +28,7 @@ export function rcmFail(error: RcmWriteError, message?: string): { ok: false; er
 
 const STATUS_400: readonly RcmWriteError[] = ['payer_kind_invalid', 'context_mismatch', 'code_not_found', 'service_not_found', 'upload_invalid']
 const STATUS_403: readonly RcmWriteError[] = ['same_approver', 'no_user_account']
-const STATUS_422: readonly RcmWriteError[] = ['not_ready', 'amounts_invalid', 'write_off_exceeds', 'price_unresolved']
+const STATUS_422: readonly RcmWriteError[] = ['not_ready', 'amounts_invalid', 'write_off_exceeds', 'price_unresolved', 'policy_not_in_force']
 
 export const RCM_ERROR_STATUS = Object.fromEntries(
   RCM_ERRORS.map((e) => [
@@ -80,4 +82,12 @@ export const RCM_ERROR_MESSAGE: Record<RcmWriteError, string> = {
   query_closed: 'This query is already answered or closed',
   upload_invalid: 'Upload a PDF, JPEG or PNG file of at most 4 MB',
   lab_report_unavailable: 'That lab report is not this patient\'s current report',
+  // WS12: callers pass the specific "This policy is not valid on <date> (valid <from>–<to>)" via policyNotInForceMessage.
+  policy_not_in_force: 'This policy is not valid on that date',
+  coverage_inactive: 'The last verification says this policy is not in force',
+}
+
+/** WS12: the policy_not_in_force message, "This policy is not valid on <date> (valid <from>–<to>)", dates as shown to users. */
+export function policyNotInForceMessage(onDate: string, validFrom: string, validTo: string): string {
+  return `This policy is not valid on ${onDate} (valid ${validFrom}–${validTo})`
 }

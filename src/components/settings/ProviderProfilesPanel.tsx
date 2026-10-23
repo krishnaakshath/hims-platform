@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Pencil } from 'lucide-react'
 import type { Department } from '@/db/schema'
 import { INDIAN_STATES } from '@/lib/india/reference'
-import { formatPaise, parseRupeesToPaise } from '@/lib/money'
+import { formatPaise } from '@/lib/money'
 
 const INPUT = 'w-full rounded-md border border-border px-2 py-1 text-sm'
 
@@ -31,6 +31,8 @@ export interface ProviderRow {
   registrationStateCode: string | null
   registrationNumber: string | null
   consultationFeePaise: number | null
+  /** Foundations T10: the department's current consultation rate from the tariff (read-only). */
+  tariffFeePaise?: number | null
 }
 
 function ProviderRowItem({ provider, departments, isAdmin }: { provider: ProviderRow; departments: Department[]; isAdmin: boolean }) {
@@ -41,17 +43,11 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
   const [council, setCouncil] = useState<string>(provider.registrationCouncil ?? '')
   const [stateCode, setStateCode] = useState(provider.registrationStateCode ?? '')
   const [regNumber, setRegNumber] = useState(provider.registrationNumber ?? '')
-  const [fee, setFee] = useState(provider.consultationFeePaise != null ? (provider.consultationFeePaise / 100).toFixed(2) : '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function save() {
     setError(null)
-    let consultationFeePaise: number | null = null
-    if (fee.trim() !== '') {
-      consultationFeePaise = parseRupeesToPaise(fee)
-      if (consultationFeePaise === null) { setError('Enter a valid fee in rupees.'); return }
-    }
     setSaving(true)
     const res = await sendJson(`/api/providers/${provider.id}`, 'PUT', {
       name,
@@ -59,7 +55,6 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
       registrationCouncil: council === '' ? null : council,
       registrationStateCode: council === 'smc' ? stateCode || null : null,
       registrationNumber: regNumber.trim() === '' ? null : regNumber.trim(),
-      consultationFeePaise,
     })
     setSaving(false)
     if (res.status === 409) { setError('Conflicts with an existing provider.'); return }
@@ -90,7 +85,7 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
           )}
           <p className="truncate text-xs text-muted-foreground">
             {provider.specialty}
-            {provider.consultationFeePaise != null ? ` · ${formatPaise(provider.consultationFeePaise)}` : ''}
+            {provider.tariffFeePaise != null ? ` · ${formatPaise(provider.tariffFeePaise)}` : ' · No tariff fee'}
             {!provider.isActive ? ' · Inactive' : ''}
           </p>
           {editing && (
@@ -119,9 +114,7 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
               <label className="text-xs text-muted-foreground">Registration number
                 <input value={regNumber} onChange={(e) => setRegNumber(e.target.value)} maxLength={20} autoComplete="off" className={INPUT} />
               </label>
-              <label className="text-xs text-muted-foreground">Consultation fee (₹)
-                <input value={fee} onChange={(e) => setFee(e.target.value)} inputMode="decimal" className={INPUT} />
-              </label>
+              <p className="text-xs text-muted-foreground">Consultation fee: {provider.tariffFeePaise != null ? formatPaise(provider.tariffFeePaise) : 'not set'}. Set in Tariffs.</p>
             </div>
           )}
         </div>

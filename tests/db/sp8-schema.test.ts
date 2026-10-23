@@ -140,6 +140,9 @@ describe.skipIf(!process.env.DATABASE_URL)('SP8 schema (DB)', () => {
   it('an eligibility check needs its policy and payer', async () => {
     const [chk] = await db().insert(nhcxEligibilityChecks).values({ patientId: b.patientId, policyId: b.policyId, payerId: b.insurerId, purpose: 'validation', context: 'manual', requestedByName: 'Test' }).returning()
     expect(chk.status).toBe('pending')
+    // WS12: the context list gains 'checkin' (OPD check-in auto eligibility).
+    await expect(db().insert(nhcxEligibilityChecks).values({ patientId: b.patientId, policyId: b.policyId, payerId: b.insurerId, purpose: 'validation', context: 'checkin', requestedByName: 'Test' })).resolves.toBeDefined()
+    expect(await code(db().insert(nhcxEligibilityChecks).values({ patientId: b.patientId, policyId: b.policyId, payerId: b.insurerId, purpose: 'validation', context: 'opd' as never, requestedByName: 'Test' }))).toBe('23514')
     expect(await code(db().insert(nhcxEligibilityChecks).values({ patientId: b.patientId, policyId: 2_000_000_000, payerId: b.insurerId, purpose: 'validation', context: 'manual', requestedByName: 'Test' }))).toBe('23503')
   })
 })

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { buildFullWorkbookXlsx } from '@/lib/excel-export'
 import { logAudit } from '@/lib/audit'
+import { trialsEnabled } from '@/lib/features'
+import { trialsOffResponse } from '@/lib/features-gate'
 import { requireSession } from '@/lib/auth'
 import { WORKBOOK_EXPORT_ROLES } from '@/lib/role-policy'
 import { listWorkbookRows } from '@/lib/queries/workbook'
@@ -8,6 +10,7 @@ import { listWorkbookRows } from '@/lib/queries/workbook'
 export async function GET() {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
+  if (!trialsEnabled()) return trialsOffResponse()
 
   // The complete 30-column pre-screening workbook for every patient: admin
   // and crc only (WORKBOOK_EXPORT_ROLES). Narrower than the /workbook page,

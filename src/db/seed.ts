@@ -47,6 +47,7 @@ import {
   billingSettings,
   refunds,
   patientPayments,
+  paymentRequests, // Foundations T11
   creditNotes,
   invoiceLines,
   invoices,
@@ -57,6 +58,8 @@ import {
   claimSubmissions, claimDispatches, claimEvents, claimDocuments, claimDisallowances, claimSettlements, claimWriteOffs,
   // SP8
   nhcxInboundCalls, nhcxExchanges, nhcxEligibilityChecks, abdmProfileShares, abdmConsents,
+  admissionCoverage, coverageVerifications, // WS12 T1
+  abhaLinkOverrides, // WS12 T5
   // SP3
   encounters,
   followUpOrders,
@@ -70,6 +73,7 @@ import {
   labServiceAreaPins,
   labReports,
   notificationDeliveries,
+  notificationLog, patientNotificationPreferences, // Foundations T8
   // Wave D: every remaining child of patients/appointments/rooms/providers, so a reset can clear
   appointments,
   admissions,
@@ -161,10 +165,10 @@ const ADHD_TRIAL = {
 
 /** Throws when the seed must not run: production without explicit opt-in. */
 export function assertSeedAllowed(env: NodeJS.ProcessEnv = process.env): void {
-  const isProd = env.NODE_ENV === 'production' || env.VERCEL_ENV === 'production'
+  const isProd = env.NODE_ENV === 'production'
   if (isProd && env.ALLOW_PRODUCTION_SEED !== '1') {
     throw new Error(
-      'Refusing to seed: this looks like a production environment (NODE_ENV or VERCEL_ENV is "production"). ' +
+      'Refusing to seed: this looks like a production environment (NODE_ENV is "production"). ' +
         'The seed writes demo data and accounts. Set ALLOW_PRODUCTION_SEED=1 only if you really intend this.',
     )
   }
@@ -843,12 +847,17 @@ async function clearExistingData() {
   // service link is released before service_catalog is deleted below.
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('hims.allow_document_purge', 'on', true)`)
+    // WS12 T1: admission coverage references admissions, policies, pre-auths and verifications;
+    // verifications (append-only, purge flag above) reference eligibility checks and policies.
+    await tx.delete(admissionCoverage)
+    await tx.delete(coverageVerifications)
     // SP8: NHCX exchanges reference claims, claim versions, pre-auths, queries, policies and
     // eligibility checks; eligibility checks reference policies and payers; consents and shares
     // reference patients. Inbound calls and consents are append-only (purge flag above).
     await tx.delete(nhcxInboundCalls)
     await tx.delete(nhcxExchanges)
     await tx.delete(nhcxEligibilityChecks)
+    await tx.delete(abhaLinkOverrides) // WS12 T5: references shares, patients and users; append-only
     await tx.delete(abdmProfileShares)
     await tx.delete(abdmConsents)
     // end SP8
@@ -870,6 +879,7 @@ async function clearExistingData() {
     await tx.delete(preauthEvents)
     await tx.delete(preauths)
     // end SP7
+    await tx.delete(paymentRequests) // Foundations T11: references patient_payments
     await tx.delete(refunds)
     await tx.delete(patientPayments)
     await tx.delete(creditNotes)
@@ -933,6 +943,10 @@ async function clearExistingData() {
   // SP5: mirrors deletePatient's order -- deliveries and reports, then results -> orders, then
   // visits -> requisitions, then the reference windows/PINs -- all before patients/users.
   await db.delete(notificationDeliveries)
+  // Foundations T8: both reference patients (preferences cascade, but are cleared explicitly like
+  // every other patient child). notification_template_config has no FK and is configuration.
+  await db.delete(notificationLog)
+  await db.delete(patientNotificationPreferences)
   await db.delete(labReports)
   await db.delete(labResults)
   await db.delete(labOrders)

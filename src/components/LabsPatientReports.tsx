@@ -168,7 +168,7 @@ export function LabsPatientReports({ roster }: { roster: LabPatientRosterRow[] }
             value={patientId}
             onChange={(e) => setPatientId(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') lookup() }}
-            placeholder="Anonymous #, e.g. RD-0001"
+            placeholder="UHID or chart ID, e.g. RD-0001"
             aria-label="Patient ID"
             className="w-full rounded-md border border-border px-3 py-2 text-sm"
           />

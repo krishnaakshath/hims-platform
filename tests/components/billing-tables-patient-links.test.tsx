@@ -39,11 +39,11 @@ describe.each(tables)('$name patient links', ({ el }) => {
   })
 })
 
-// Wave B P1-21: "Collect Payment" opens the demo card form -- hidden when DEMO_FEATURES is off.
+// Foundations T11: "Collect Payment" opens the Cash Desk for the patient and balance.
 describe('PatientCollectionsTable Collect Payment', () => {
-  it('links to the demo card payment by default', () => {
+  it('links to the cash desk by default', () => {
     render(<PatientCollectionsTable rows={rows} />)
-    expect(screen.getByRole('link', { name: /collect payment/i })).toHaveAttribute('href', expect.stringContaining('/billing/pay'))
+    expect(screen.getByRole('link', { name: /collect payment/i })).toHaveAttribute('href', expect.stringMatching(/^\/cash-desk\?patientId=RD-0001&amountPaise=\d+$/))
   })
   it('hides the link when showCollectPayment is false', () => {
     render(<PatientCollectionsTable rows={rows} showCollectPayment={false} />)

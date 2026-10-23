@@ -2,8 +2,9 @@
 // npm run db:migrate -- --dry-run   show what would run, write nothing
 // npm run db:migrate:status     list every file with applied/pending, flag changed files
 //
-// Uses DATABASE_URL (from .env.local via dotenv, or the environment, which wins).
-// For Neon use the DIRECT endpoint: DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:migrate
+// Uses DATABASE_URL from the environment only (no dotenv file). In Docker the
+// one-shot `migrate` service and the app entrypoint run it automatically
+// against the compose `postgres` service; by hand: npm run docker:migrate.
 // See docs/DEPLOYING.md and docs/OPERATIONS.md.
 import dns from 'node:dns'
 import { BASELINE_NAME } from '../../src/db/migrations'

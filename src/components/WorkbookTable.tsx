@@ -21,7 +21,7 @@ const SECTION = 'rounded-xl border border-primary/10 bg-card/80 p-5 shadow-sm ba
 // column LABEL below is genericized: the app's own UI never names a
 // third-party product.
 const COLUMNS: { key: keyof WorkbookRow | 'name'; label: string }[] = [
-  { key: 'id', label: 'Anonymous Number' },
+  { key: 'id', label: 'UHID or chart ID' },
   { key: 'dateAdded', label: 'Date Added to Tab' },
   { key: 'patientName', label: 'Patient Name' },
   { key: 'currentProvider', label: 'Current Provider' },
@@ -82,7 +82,7 @@ export function WorkbookTable({ rows, isAdmin }: { rows: WorkbookRow[]; isAdmin:
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or anon #…"
+            placeholder="Search by name, UHID or chart ID…"
             aria-label="Search workbook"
             className="w-full rounded-lg border border-border bg-card px-3 py-2 pl-9 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none"
           />

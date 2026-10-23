@@ -1,272 +1,283 @@
-# Deploying HIMS for a client
+# Deploying HIMS for a client (Docker only)
 
-One client = one Vercel project = one set of backing services. Do not share a
-database, Redis, Blob store or secret between clients. Branding is
-configuration (`BRAND_*`), so the same repository serves every client.
+One client = one host = one Docker Compose stack = one set of volumes and
+secrets. Everything runs on that host: Postgres, Redis, the file store and the
+app. There is no cloud database, cache or file store, and nothing in the stack
+calls the internet at run time unless the operator configures an optional
+integration (SMTP, SMS/WhatsApp, Google SSO, ABDM/NHCX) or runs the WHO
+ICD-10 loader. Branding is configuration (`BRAND_*`), so the same repository
+serves every client.
 
-## 1. Provision the client's services
+## What runs
 
-| Service | Provider | Gives you |
-|---|---|---|
-| Postgres | Neon (Vercel Marketplace) or any TLS Postgres, in the client's region | `DATABASE_URL` |
-| Redis | Upstash Redis (Vercel Marketplace) | `KV_REST_API_URL`, `KV_REST_API_TOKEN` |
-| Blob store | Vercel Blob, connected to the project | `BLOB_READ_WRITE_TOKEN` |
-| Email | SMTP account for the client's sender address | `SMTP_*` |
-| SMS (optional) | Twilio | `TWILIO_*` |
+| Service | Image | Role | Data |
+|---|---|---|---|
+| `postgres` | `postgres:15-alpine` | the database (source of truth) | volume `hims_pg` |
+| `redis` | `redis:7-alpine` | cache, rate limits, one-time codes | volume `hims_redis` (disposable) |
+| `redis-http`, `redis-rest` | `hiett/serverless-redis-http`, `node:22-alpine` | the Upstash-compatible REST endpoint the app talks to (`scripts/dev/redis-rest-shim.mjs` in front) | none |
+| `migrate` | this repository's image | one-shot: applies pending migrations, exits 0 | none |
+| `app` | this repository's image | Next.js on port 3000 (host `APP_PORT`, default 3001), non-root, health-checked | volume `hims_blobs` at `/app/data/blobs` (uploaded and generated files) |
+| `seed` (profile) | this repository's image | one-shot demo data | none |
+| `codes` (profile) | this repository's image | one-shot WHO ICD-10 download and import (the only internet use) | none |
+| `test` (profile) | this repository's image, `test` target | the test suite against a throwaway `hims_test` database | none |
 
-Choose regions close to the client's users (for Indian clients, an India
-region where the provider offers one) for latency and data-localisation.
+Host ports (all overridable when starting compose): app `APP_PORT` (3001) on
+`APP_BIND` (0.0.0.0); Postgres `POSTGRES_PORT` (55432) and Redis REST
+`REDIS_REST_PORT` (8079), both on `PORT_BIND` (127.0.0.1, loopback only).
 
-## 2. Create the Vercel project
+## Host requirements and sizing
 
-1. Create a new Vercel project from this repository (framework: Next.js).
-   Name it for the client, e.g. `hims-acme`.
-2. Connect the client's Postgres, Redis and Blob store to that project
-   (Marketplace integrations set their variables automatically).
-3. Add the client's domain under Settings > Domains and set
-   `NEXT_PUBLIC_APP_URL` to it (`https://...`).
-4. Set the environment variables below for the **Production** environment
-   (and Preview if you use it, with separate preview services; never point a
-   preview at production data).
+- Linux host with Docker Engine 24+ and the Compose plugin (v2.20+). macOS
+  with Docker Desktop works for evaluation.
+- Small clinic (up to ~30 concurrent staff): 2 vCPU, 4 GB RAM, 40 GB SSD.
+  Hospital (up to ~150 concurrent staff): 4 vCPU, 8 GB RAM, 100 GB SSD plus
+  room for uploaded files and backups. Building the image (`next build`) is
+  the most memory-hungry step; build on a machine with spare RAM if the host is small.
+- Disk grows with the database and the `hims_blobs` volume (documents,
+  insurance cards, imaging, lab report PDFs); watch both.
+- These figures are starting points, not load-tested numbers.
 
-## 3. Environment variables
+**Data residency.** Every record and file stays on this host (the Docker
+volumes). Choosing where the host runs (an Indian data centre or an India
+region of a hosting provider, or on the hospital's premises) is what puts the
+data in India. Backups go where you copy them; keep those in India too.
 
-`.env.example` is the authoritative list; this is the same grouped by need.
-
-| Variable | Required | Notes |
-|---|---|---|
-| `DATABASE_URL` | yes | Client's own Postgres. On Vercel+Neon this is the pooled URL, used by the app |
-| `DATABASE_URL_UNPOOLED` | set by Neon | Direct URL; used only when running `db:migrate` / `db:backup` (not read by the app) |
-| `SESSION_SECRET` | yes | Unique per client, 32+ random chars: `openssl rand -base64 48` |
-| `IDENTITY_ENCRYPTION_KEY` | yes | Unique per client, 32 bytes base64: `openssl rand -base64 32`. Back it up; losing it makes encrypted ID numbers unreadable |
-| `NEXT_PUBLIC_APP_URL` | yes | Public https URL of the deployment |
-| `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD_HASH` | yes | Always-available admin account. Hash generator: see README, "Admin password hash" |
-| `KV_REST_API_URL`, `KV_REST_API_TOKEN` | yes | Rate limits, MFA replay protection, cache. Rate limiters fail closed without Redis |
-| `BLOB_READ_WRITE_TOKEN` | yes | Insurance cards, imaging, documents, lab report PDFs |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | yes for email codes | One-time sign-in codes by email |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | for SMS codes | |
-| `BRAND_NAME`, `BRAND_LEGAL_NAME`, `BRAND_TAGLINE`, `BRAND_SUPPORT_EMAIL`, `BRAND_LOGO_URL`, `BRAND_PRIMARY_COLOR`, `BRAND_COOKIE_PREFIX` | optional | See README, "White-label a client". Read at build time |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | optional | Admin Google SSO; routes answer 503 when unset |
-| `LIS_INTEGRATION_TOKEN` | optional | Bearer token for `/api/webhooks/fhir-labs`; unset = webhook disabled |
-| `DEMO_FEATURES` | leave unset in production | `true` turns on simulated features (virtual card payment, broadcasts, experience surveys, insurance eligibility check, fax history), each labelled "Demo". Unset = off in production, on in development. When off they are hidden, their pages 404 and their routes answer 503 `Not configured` |
-| `DISABLE_STAFF_MFA` | never in production | Demo toggle that skips staff MFA; ignored unless `DEMO_FEATURES` is on |
-| `SEED_EMAIL_DOMAIN`, `SEED_DEMO_PASSWORD`, `ALLOW_PRODUCTION_SEED` | non-production only | See "Seeding" |
-
-Set secrets with `vercel env add NAME production` (or the dashboard); never
-commit them. Generate each client's secrets fresh.
-
-> **Brand changes need a rebuild.** `BRAND_*` is baked in at build time. After
-> editing it, redeploy (`vercel --prod`, or "Redeploy" without the build
-> cache). **Changing `BRAND_COOKIE_PREFIX` signs everyone out**, so set it once
-> before go-live.
-
-## 4. Create the schema (`npm run db:migrate`)
-
-The schema of every client database is created and upgraded by one command,
-`npm run db:migrate`. It is safe to run on every deploy: it takes an advisory
-lock (two runs cannot overlap), applies only what the `schema_migrations`
-ledger does not already record, refuses to run if an applied file was edited,
-and stops (rolling back that file) at the first error. **`db:push` is not part
-of any deployment or production flow**; see "Never" below.
-
-Step by step, for a new client:
-
-1. **Create the database.** In the client's Vercel project: Storage > Create
-   Database > **Neon** (Marketplace). Pick the region nearest the client's
-   users (an India region for Indian clients) and connect it to the
-   Production environment. The integration sets `DATABASE_URL` (pooled, used
-   by the app) and `DATABASE_URL_UNPOOLED` (direct, used for migrations and
-   backups), among others.
-2. **Create Redis.** Storage > Create Database > **Upstash for Redis**
-   (Marketplace), same region, connected to the project. It sets
-   `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Without Redis, sign-in, MFA,
-   one-time codes and the booking widget answer 503 (rate limits fail closed
-   on purpose; there is no in-memory fallback).
-3. **Create the Blob store** (Storage > Blob) and connect it: `BLOB_READ_WRITE_TOKEN`.
-4. **Set the secrets** from section 3 (`SESSION_SECRET`,
-   `IDENTITY_ENCRYPTION_KEY`, `ADMIN_*`, `NEXT_PUBLIC_APP_URL`, SMTP/SMS).
-   Record `IDENTITY_ENCRYPTION_KEY` in the client's key escrow first (see
-   [OPERATIONS.md](OPERATIONS.md#encryption-keys)).
-5. **Run the migration** from a trusted machine with this repository checked
-   out at the commit you are deploying:
-
-   ```bash
-   npm ci
-   vercel link                                   # the client's project
-   vercel env pull .env.production.local --environment=production
-   # direct (unpooled) endpoint: the runner refuses the "-pooler" host
-   npx dotenv -e .env.production.local -- sh -c 'DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:migrate:status'
-   npx dotenv -e .env.production.local -- sh -c 'DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:migrate'
-   rm .env.production.local                      # it holds production secrets
-   ```
-
-   On the empty database this applies `scripts/db/baseline.sql` and then
-   every `scripts/migrations/*.sql` in name order, including the parts
-   `schema.ts` cannot express (the `btree_gist` and `pg_trgm` extensions,
-   the `tariff_rates_no_overlap` exclusion constraint, the
-   `codes_display_trgm_idx` index, the billing immutability triggers).
-   Run `db:migrate:status` again: every line must read `applied`.
-6. **Deploy** (section 5) and check `https://<client-domain>/api/health/ready`
-   answers 200 with `{"status":"ok","checks":{"database":"ok","redis":"ok","migrations":"up_to_date","secrets":"ok","blob":"ok"}}`.
-   Any other word names the missing piece; it never shows values.
-7. **Create the first admin** (section 6).
-8. **Code sets.** No code sets ship with the app. The owner loads the licensed
-   ones (ICD-10, ICD-10-PCS, SNOMED CT, LOINC, PM-JAY HBP) with
-   `npm run codes:import`; see [docs/CODE-SYSTEMS.md](CODE-SYSTEMS.md). Until a
-   set is loaded, coders cannot assign codes of that kind.
-
-**Every later release** that adds files to `scripts/migrations/`: run step 5
-(`db:migrate:status`, then `db:migrate`) against production **before**
-promoting the deployment, because new code may read the new columns. The
-migrations are additive and idempotent, so the old deployment keeps working
-on the migrated database. `/api/health` shows `"migrations":"pending"` while a
-deployment's files are not all applied.
-
-**An existing database built with `db:push`** (before the ledger existed) is
-adopted on the first `db:migrate`: the baseline is recorded as already
-present, every migration file is re-run (all are idempotent) and recorded.
-Nothing is dropped. Take a backup first anyway (OPERATIONS.md).
-
-**Never**:
-
-- run `npm run db:push` (or `db:generate`) against a client, staging or shared
-  database. It diffs `schema.ts` against the whole database and offers to
-  drop what it does not declare: the exclusion constraint, the trigram index,
-  tables of a newer release.
-- edit a migration file or `scripts/db/baseline.sql` after it has been applied
-  anywhere. Put the change in a new dated file; `db:migrate` refuses to run on
-  a changed file and names it.
-- point `db:migrate` at the pooled `-pooler` host; it refuses, because the
-  advisory lock and per-file transactions need a direct connection.
-
-## 5. Deploy
+## First run
 
 ```bash
-vercel --prod
+git clone <this repository> hims && cd hims
+cp .env.docker.example .env.docker
 ```
 
-(or push to the branch the project deploys from). Confirm the build log shows
-no brand validation warnings; a warning names the invalid variable.
+Edit `.env.docker` (it is gitignored; every variable is documented inline):
 
-## 6. First admin
+```bash
+openssl rand -base64 48   # SESSION_SECRET
+openssl rand -base64 32   # IDENTITY_ENCRYPTION_KEY  (escrow it now: docs/OPERATIONS.md)
+openssl rand -base64 32   # INTEGRATION_PAYLOAD_KEY
+```
 
-No staff accounts exist after migration. The admin defined by `ADMIN_EMAIL` /
-`ADMIN_PASSWORD_HASH` is always available and needs no database row:
+Also set `NEXT_PUBLIC_APP_URL` (the public https URL), `ADMIN_EMAIL`,
+`ADMIN_NAME` and `ADMIN_PASSWORD_HASH` (generator: README, "Admin password
+hash"), and the client's `BRAND_*`. Leave the demo switches empty for a real
+deployment.
+
+Optional, before the **first** `up` only: put `HIMS_DB_PASSWORD` and
+`HIMS_REDIS_TOKEN` in a `.env` file next to `docker-compose.yml` to replace
+the default internal credentials (Postgres keeps the password it was
+initialised with; changing it later needs `ALTER USER` as well).
+
+```bash
+docker compose up -d --build
+docker compose ps                 # app: "healthy" within a minute or two
+curl -s http://127.0.0.1:3001/api/health
+```
+
+`up` builds the image, starts Postgres and Redis, runs the one-shot `migrate`
+service (on an empty database: the frozen baseline and then every file in
+`scripts/migrations/`), and starts the app only after `migrate` exited 0. The
+app's entrypoint (`scripts/docker-entrypoint.sh`) also waits for the database
+and re-runs the migration runner on every start, which is a no-op when nothing
+is pending. Expected health:
+
+```json
+{"status":"ok","checks":{"database":"ok","redis":"ok","migrations":"up_to_date","secrets":"ok","blob":"ok"}}
+```
+
+Any other word names the missing piece without values: `secrets: missing`
+(`SESSION_SECRET` empty or `IDENTITY_ENCRYPTION_KEY` not 32 bytes), `blob:
+fail` (the `hims_blobs` volume is not writable), `migrations: pending`
+(`docker compose run --rm migrate`).
+
+### First admin, or demo data
+
+**Real deployment.** No staff accounts exist after migration. The admin
+defined by `ADMIN_EMAIL` / `ADMIN_PASSWORD_HASH` is always available and needs
+no database row:
 
 1. Sign in at `/login` as that admin and complete MFA enrolment.
-2. In Settings, create the other staff accounts (admin, coordinator, PI,
-   front desk, pharmacy, billing, labs). Each gets a generated password,
-   shown once; hand it over securely and have the person change it.
-3. Enable patient portal access per patient from the patient page (admin
-   only; a random password is shown once).
+2. In Settings, create the other staff accounts. Each gets a generated
+   password, shown once; hand it over securely and have the person change it.
+3. Enable patient portal access per patient from the patient page (admin only;
+   a random password is shown once).
 
-## 7. Seeding (non-production only)
-
-`npm run db:seed` loads fictional demo patients and one demo account per role
-(`<role>@<SEED_EMAIL_DOMAIN>`, default `example.test`, all sharing
-`SEED_DEMO_PASSWORD`). Use it for demo, staging and preview databases only:
+**Demo / evaluation stack.** The seed writes fictional patients and one demo
+account per role (`<role>@<SEED_EMAIL_DOMAIN>`, all sharing
+`SEED_DEMO_PASSWORD`, 12+ characters, no default). The container runs with
+`NODE_ENV=production`, so the seed refuses unless `ALLOW_PRODUCTION_SEED=1` is
+set in `.env.docker`; set it only on a demo stack. Then either:
 
 ```bash
-SEED_DEMO_PASSWORD='<12+ chars>' npm run db:seed
+docker compose --profile seed run --rm seed     # once, by hand
+# or SEED_ON_START=true: the app seeds on start when the database has no patients and no users
 ```
 
-- `SEED_DEMO_PASSWORD` is required; there is no default.
-- The seed throws if `NODE_ENV` or `VERCEL_ENV` is `production` unless
-  `ALLOW_PRODUCTION_SEED=1`. A client's live database must never be seeded.
-- The demo is an Indian multispeciality hospital: departments, doctors with
-  NMC/SMC numbers, Indian insurers/TPAs/schemes with RCM payer profiles and
-  TPA networks, wards with room-category
-  tariffs, a service master, and a working day relative to today (IST): OPD
-  queue, inpatients, lab orders in every status with home collection, coding
-  on the fictional SAMPLE code sets, charges, invoices, receipts and advances,
-  and an insurance desk: patient policies, an approved and a queried
-  pre-authorisation, a settled claim (both copies recorded; the demo copies are
-  not uploaded to the blob store) and a draft claim.
-  Every identifier is synthetic (Aadhaar test values start `9999 0000` and are
-  stored only encrypted; ABHA numbers start `99-9999-0000`; mobiles `+91 90000`).
-- On a database that already has patients the seed only tops up reference
-  data and issues missing UHIDs. `SEED_RESET=1` clears the demo data and
-  rebuilds it (it still needs `SEED_DEMO_PASSWORD` and still refuses
-  production): `SEED_RESET=1 SEED_DEMO_PASSWORD='<12+ chars>' npm run db:seed`.
+On a populated database the seed only tops up reference data; `SEED_RESET=1`
+clears the demo data and rebuilds it. Every identifier is synthetic (Aadhaar
+test values start `9999 0000` and are stored only encrypted; ABHA numbers
+start `99-9999-0000`; mobiles `+91 90000`).
 
-## 8. Smoke test
+### Code sets (optional)
 
-After each deploy, check (replace the host with the client's):
+No code sets ship with the app (the seed loads fictional `SAMPLE-` sets for
+demos). To load WHO ICD-10 (2019):
 
-- [ ] `/api/health/ready` answers 200 and every check reads `ok` /
-      `up_to_date`. A 503 names the failing piece: `database: fail` (wrong
-      `DATABASE_URL` or Neon suspended), `redis: not_configured` (sign-in
-      will answer 503 "Service temporarily unavailable"), `migrations:
-      pending` (run `db:migrate`), `secrets: missing` (`SESSION_SECRET` or a
-      32-byte `IDENTITY_ENCRYPTION_KEY`). The function log carries one
-      `[config] ...` line per refused request naming what is missing.
-- [ ] `/login` loads and shows the client's name, logo and colour (and not
-      "HIMS" when `BRAND_NAME` is set).
-- [ ] `/patient-portal/login` loads with the same branding.
-- [ ] `/book` loads with the client's branding.
-- [ ] Page title (`<title>`) is the client's name.
+```bash
+docker compose --profile codes run --rm codes
+```
+
+This is the **only** part of the stack that uses the internet: it downloads
+`https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip` (who.int hosts only;
+it prints the SHA-256), converts it and imports it as version `WHO-2019`. It
+runs only when you start it. Offline, pass a file you downloaded elsewhere:
+
+```bash
+docker compose --profile codes run --rm -v /path/icd102019en.xml.zip:/in/who.zip:ro codes --file /in/who.zip
+```
+
+Other licensed sets (ICD-10-PCS, SNOMED CT, LOINC, PM-JAY HBP) are imported
+with `docker compose run --rm migrate npm run codes:import -- ...` after
+copying the file into the container, or through the web importer; see
+[CODE-SYSTEMS.md](CODE-SYSTEMS.md).
+
+## HTTPS (reverse proxy, operator-provided)
+
+The stack serves plain HTTP on `APP_PORT`. Put the operator's own reverse
+proxy in front for TLS, and set `APP_BIND=127.0.0.1` when the proxy runs on
+the same host so the app is not reachable directly. The proxy must **replace**
+`X-Forwarded-For` with the real client address (rate limits key on its first
+entry). Examples (not part of the stack):
+
+Caddy (automatic certificates):
+
+```
+hims.example.org {
+    reverse_proxy 127.0.0.1:3001 {
+        header_up X-Forwarded-For {remote_host}
+    }
+}
+```
+
+nginx:
+
+```
+server {
+    listen 443 ssl http2;
+    server_name hims.example.org;
+    ssl_certificate     /etc/ssl/hims/fullchain.pem;
+    ssl_certificate_key /etc/ssl/hims/privkey.pem;
+    client_max_body_size 20m;
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+## Upgrades
+
+```bash
+git pull
+docker compose build
+docker compose up -d
+```
+
+`up` re-runs `migrate` before the new app starts; migrations are additive and
+idempotent, and the runner refuses to start if an already-applied file was
+edited. Take a database backup first (docs/OPERATIONS.md). Check
+`/api/health` afterwards. To roll back the app, check out the previous commit
+and repeat `build` + `up -d`; the previous version runs on the migrated
+schema. Database changes are never rolled back by hand on a live database:
+restore a backup instead.
+
+## Environment variables
+
+`.env.docker.example` is the authoritative, commented list (grouped:
+backing services, secrets, admin, branding, features, demo switches, seed,
+optional integrations). `npm run check:env-docs` (and its test) fails if the
+code reads a variable that file does not document.
+
+> **Brand changes need a rebuild.** `BRAND_*` is read when the app starts, but
+> pages prerendered at build time keep the values the image was built with:
+> after editing them run `docker compose build app && docker compose up -d`.
+> **Changing `BRAND_COOKIE_PREFIX` signs everyone out**, so set it once before
+> go-live.
+
+Never set `DISABLE_STAFF_MFA`, `DEMO_FEATURES`, `ABDM_USE_MOCKS`,
+`ALLOW_DEMO_MOCKS`, `SEED_ON_START` or `ALLOW_PRODUCTION_SEED` on a deployment
+holding real data.
+
+## Migrations: rules
+
+- The `migrate` service runs `npm run db:migrate` (`scripts/db/migrate.ts`)
+  inside the image. On an empty database it applies `scripts/db/baseline.sql`
+  and then every `scripts/migrations/*.sql` in name order, including the parts
+  `schema.ts` cannot express (the `btree_gist` and `pg_trgm` extensions, the
+  `tariff_rates_no_overlap` exclusion constraint, the `codes_display_trgm_idx`
+  index, the billing immutability triggers). An existing database built with
+  `db:push` before the ledger existed is adopted: baseline recorded, every
+  (idempotent) migration re-run and recorded, nothing dropped.
+- `scripts/db/baseline.sql` is frozen; every change is a new dated file in
+  `scripts/migrations/`. The runner records a checksum per file and refuses to
+  run when an applied file changes.
+- **Never** run `npm run db:push` (or `db:generate`) against a client or
+  shared database: `drizzle-kit push` diffs `schema.ts` against the whole
+  database and offers to drop what it does not declare.
+- Status: `docker compose run --rm migrate migrate --status`; dry run:
+  `docker compose run --rm migrate migrate --dry-run`.
+
+## Smoke test
+
+After each deploy or upgrade:
+
+- [ ] `/api/health/ready` answers 200 and every check reads `ok` / `up_to_date`.
+- [ ] `/login`, `/patient-portal/login` and `/book` load with the client's
+      name, logo and colour; the `<title>` is the client's name.
 - [ ] Signing in as the admin works, including MFA, and sets a cookie named
       `<BRAND_COOKIE_PREFIX>_session`.
-- [ ] Role dashboards, one account per role (create test accounts, remove
-      them afterwards):
-  - admin: `/` (admin dashboard), `/audit-log`, Settings
-  - coordinator: `/` (coordinator dashboard), Patients, Workbook
-  - principal investigator: `/` ("My Patients"), a patient chart
-  - front desk: `/front-desk/check-in`
-  - pharmacy: `/pharmacy`
-  - billing: `/billing`
-  - labs: `/labs`
-- [ ] A role is redirected away from a page it may not see (for example a
-      billing user opening `/audit-log`).
-- [ ] An email or SMS one-time code arrives, carrying the client's name.
-- [ ] Authenticator enrolment shows the client's name as issuer.
-- [ ] An upload (document or insurance card) succeeds (Blob configured).
-- [ ] Logging out and back in works; no other client's data is visible.
-- [ ] No `DISABLE_STAFF_MFA`, `SEED_*` or `ALLOW_PRODUCTION_SEED` variable is
-      set in the production environment.
+- [ ] Role dashboards load for one account per role (admin `/`, front desk
+      `/front-desk/check-in`, pharmacy `/pharmacy`, billing `/billing`, labs `/labs`).
+- [ ] A role is redirected away from a page it may not see.
+- [ ] An upload (document or insurance card) succeeds and downloads again
+      (proves the `hims_blobs` volume).
+- [ ] If configured: an email or SMS one-time code arrives with the client's name.
+- [ ] None of the demo switches above is set.
 
 ## Lab report PDFs
 
 Released lab reports are PDFs generated on the server with `pdf-lib` and stored
-privately in the Blob store (`lab-reports/<requisition>/<report number>-<random>.pdf`).
-Staff download them from the chart and the lab worklist, patients from the
-portal; every download is audited and the stored file's address never reaches
-the browser.
+in the local file store (`lab-reports/<requisition>/<report number>-<random>.pdf`
+on the `hims_blobs` volume, under hashed file names). Staff download them from
+the chart and the lab worklist, patients from the portal; every download is
+audited and the stored file's address never reaches the browser.
 
-Known limitation: the PDF uses the standard Latin (WinAnsi) fonts only. No font
-with Indian-script glyphs ships with the app, and none is downloaded at runtime,
-so a name or value written in Devanagari, Tamil, Bengali or any other
-non-Latin script prints as `[non-Latin text]`, with a note under the patient
-details pointing to the chart or the patient portal, where the name is shown
-correctly. Latin-1 accents (é, ü) print normally; the rupee sign prints as
-`Rs.`. To lift this, add `@pdf-lib/fontkit` and a font such as Noto Sans
-Devanagari to the repository and embed it in `src/lib/labs/report-pdf.ts`.
+Known limitation: the PDF uses the standard Latin (WinAnsi) fonts only, so a
+name written in a non-Latin script prints as `[non-Latin text]` with a note
+pointing to the chart or portal. To lift this, add `@pdf-lib/fontkit` and a
+font such as Noto Sans Devanagari to the repository and embed it in
+`src/lib/labs/report-pdf.ts`.
 
-## Rolling back and rotating
+## Rotating secrets
 
-- Roll back an app change from the Vercel deployments list (Promote a
-  previous deployment). Database changes are not rolled back: migrations are
-  additive, so the previous deployment runs on the migrated schema. To undo
-  data damage, use Neon point-in-time restore (OPERATIONS.md), never a
-  hand-written down-migration on the live database.
-- Rotating `SESSION_SECRET` signs everyone out. Rotating
-  `IDENTITY_ENCRYPTION_KEY` requires re-encrypting stored values first;
-  do not change it on a live database without that plan. Backups, restore
-  drills and key custody: [OPERATIONS.md](OPERATIONS.md).
+Rotating `SESSION_SECRET` signs everyone out. Rotating
+`IDENTITY_ENCRYPTION_KEY` requires re-encrypting stored values first; never
+change it on a live database without that plan. Key custody, backups and
+restore drills: [OPERATIONS.md](OPERATIONS.md).
 
+## Host development against the stack
 
-## Local development with Docker
+The published loopback ports let a developer run the app or the test suite on
+the host against this stack. Host scripts read configuration only from the
+environment (there is no `.env.local` and no dotenv loading):
 
-`docker-compose.yml` starts Postgres 15 (port 55432) and Redis with an Upstash-compatible REST endpoint (port 8079; set `REDIS_REST_PORT` to use another host port):
-
-```
-docker compose up -d
+```bash
+docker compose up -d postgres redis redis-http redis-rest
 export DATABASE_URL=postgres://postgres:hims_local_dev@127.0.0.1:55432/hims
 export KV_REST_API_URL=http://127.0.0.1:8079 KV_REST_API_TOKEN=hims_local_redis_token
-npm run db:migrate
-SEED_DEMO_PASSWORD='choose-a-password' npm run db:seed
+npm run db:migrate && npm run dev
 ```
 
-Production uses Neon (Postgres) and Upstash (Redis) from the Vercel Marketplace; the Docker stack is for local development and tests only.
-
-The REST endpoint on 8079 is `redis-rest`, a small Node proxy (`scripts/dev/redis-rest-shim.mjs`) in front of `redis-http` (serverless-redis-http, not published). Upstash's rate-limit library sends Lua scripts marked `#!lua flags=allow-key-locking`, a flag only Upstash's own Redis accepts; plain Redis 7 rejects them, which made every rate-limited route (staff and patient sign-in, OTP, booking) answer 500 locally. The proxy rewrites that line to `#!lua` and forwards everything else unchanged, so sign-in and `tests/lib/rate-limit.test.ts` work against the local stack. A stack created before this change picks it up with `docker compose up -d` (it replaces the old `redis-rest` container). Never point a deployment at the proxy.
+The test suite does not need host Node at all: `docker compose --profile test
+run --rm test` (README, "Tests").

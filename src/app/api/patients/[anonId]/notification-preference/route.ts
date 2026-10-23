@@ -3,6 +3,7 @@ import { requireSession } from '@/lib/auth'
 import { NOTIFICATION_PREFERENCE_ROLES } from '@/lib/role-policy'
 import { notificationPreferenceSchema } from '@/lib/labs/validation'
 import { setNotificationOptOut } from '@/lib/queries/notifications'
+import { setPatientChannelPreferences } from '@/lib/queries/notification-log' // Foundations T8
 import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
 import { errorResponse, labServerError, readJsonBody } from '@/lib/labs/route-responses'
 
@@ -18,10 +19,17 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!parsed.success) return errorResponse(400, 'Invalid notification preference')
   const { anonId } = await params
 
-  const { optOut } = parsed.data
+  const { optOut, ...channels } = parsed.data
   try {
-    const found = await setNotificationOptOut(anonId, optOut, session)
-    if (!found) return errorResponse(404, 'Patient not found')
+    if (optOut !== undefined) {
+      const found = await setNotificationOptOut(anonId, optOut, session)
+      if (!found) return errorResponse(404, 'Patient not found')
+    }
+    // Foundations T8: per-channel preferences (SMS, WhatsApp, email).
+    if (Object.keys(channels).length > 0) {
+      const found = await setPatientChannelPreferences(anonId, channels, session)
+      if (!found) return errorResponse(404, 'Patient not found')
+    }
   } catch (err) {
     return labServerError('notification preference', err, 'Could not save the notification preference')
   }
@@ -32,5 +40,5 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   } catch (err) {
     console.error(`[notify] cache invalidation failed (${err instanceof Error ? err.name : typeof err})`)
   }
-  return NextResponse.json({ optOut })
+  return NextResponse.json(parsed.data)
 }

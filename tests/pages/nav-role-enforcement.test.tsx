@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { readdirSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { ALL_ROLES, PAGE_GATES, gateIt, mockGetDb, mockRedirect, runPage } from './page-gates-harness'
+import { isTrialsPath } from '@/lib/features'
 import { NAV_ITEMS, NAV_TRAILING_ITEMS, NAV_BILLING_ITEMS, BILLING_ROLES } from '@/components/LeftNav'
 
 // The harness itself (PageGateCase, runPage, PAGE_GATES, ALL_ROLES, and the
@@ -168,3 +169,19 @@ describe('every page file in src/app has a PAGE_GATES row or a documented exempt
   })
 })
 // end Wave I
+
+// ENABLE_TRIALS off: every role, including the ones the nav normally admits,
+// is redirected home from a trials page before any query runs.
+describe('trial pages with ENABLE_TRIALS off', () => {
+  afterEach(() => vi.unstubAllEnvs())
+  for (const c of PAGE_GATES.filter((r) => isTrialsPath(r.route.replace(/\/\[.*$/, '')))) {
+    it(`${c.route} redirects every role and never touches the database`, async () => {
+      vi.stubEnv('ENABLE_TRIALS', '')
+      for (const role of ALL_ROLES) {
+        await runPage(c, role)
+        expect.soft(mockRedirect, `${c.route} must redirect ${role}`).toHaveBeenCalledWith('/')
+        expect.soft(mockGetDb, `${c.route} queried for ${role}`).not.toHaveBeenCalled()
+      }
+    })
+  }
+})

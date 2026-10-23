@@ -37,6 +37,26 @@ describe('NotificationPreferenceToggle', () => {
   })
 })
 
+// Foundations T8: per-channel switches under the master toggle.
+describe('NotificationPreferenceToggle channels', () => {
+  it('shows SMS, WhatsApp and email checkboxes and saves one channel', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ whatsapp: false }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<NotificationPreferenceToggle anonId="RD-0001" initialOptOut={false} initialChannels={{ sms: true, whatsapp: true, email: false }} />)
+    expect(screen.getByRole('checkbox', { name: 'SMS' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Email' })).not.toBeChecked()
+    const wa = screen.getByRole('checkbox', { name: 'WhatsApp' })
+    fireEvent.click(wa)
+    await waitFor(() => expect(wa).not.toBeChecked())
+    expect(fetchMock).toHaveBeenCalledWith('/api/patients/RD-0001/notification-preference', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ whatsapp: false }) }))
+  })
+
+  it('disables the channel checkboxes while the patient is opted out of all notices', () => {
+    render(<NotificationPreferenceToggle anonId="RD-0001" initialOptOut initialChannels={{ sms: true, whatsapp: true, email: true }} />)
+    expect(screen.getByRole('checkbox', { name: 'SMS' })).toBeDisabled()
+  })
+})
+
 describe('PatientProfilePanel notifications', () => {
   it('renders the toggle only when canEditNotifications', () => {
     const { unmount } = render(<PatientProfilePanel patient={patient} aadhaar={aadhaar as never} canEdit={false} canWriteAadhaar={false} canEditNotifications />)

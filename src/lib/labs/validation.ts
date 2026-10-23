@@ -104,6 +104,7 @@ export const labTestSetupSchema = z
     sampleType: z.enum(SAMPLE_TYPES).nullable().optional(),
     container: z.enum(SAMPLE_CONTAINERS).nullable().optional(),
     serviceId: positiveInt.nullable().optional(),
+    isActive: z.boolean().optional(), // Foundations T10
   })
   .strict()
   .refine((s) => Object.values(s).some((v) => v !== undefined), 'Nothing to change')
@@ -162,4 +163,8 @@ export const collectHomeVisitSchema = z
   .object({ sampleIds: z.array(z.string().trim().min(1).max(32)).min(1).max(20) })
   .strict()
 
-export const notificationPreferenceSchema = z.object({ optOut: z.boolean() }).strict()
+// Foundations T8: the master notices opt-out and/or per-channel switches; at least one key.
+export const notificationPreferenceSchema = z
+  .object({ optOut: z.boolean().optional(), sms: z.boolean().optional(), whatsapp: z.boolean().optional(), email: z.boolean().optional() })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, 'Nothing to change')

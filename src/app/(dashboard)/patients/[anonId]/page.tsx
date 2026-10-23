@@ -28,11 +28,17 @@ import { listRcmPayers } from '@/lib/queries/rcm-payers'
 import { POLICY_READ_ROLES, POLICY_WRITE_ROLES } from '@/lib/role-policy'
 import { PATIENT_DIRECTORY_ROLES, PATIENT_PROFILE_EDIT_ROLES, AADHAAR_WRITE_ROLES, FOLLOW_UP_VIEW_ROLES, FOLLOW_UP_PLAN_ROLES, FOLLOW_UP_BOOKING_ROLES, CHECK_IN_ROLES } from '@/lib/role-policy'
 import { NOTIFICATION_PREFERENCE_ROLES } from '@/lib/role-policy' // SP5
+import { getPatientChannelPreferences, listPatientNotices } from '@/lib/queries/notification-log' // Foundations T8, T9
+import { RecentNoticesPanel } from '@/components/patient-profile/RecentNoticesPanel' // Foundations T9
 import { ABHA_LINK_ROLES, NHCX_ELIGIBILITY_ROLES } from '@/lib/role-policy' // SP8
 import { nhcxEligibilityAvailable, payersOnNhcx } from '@/lib/queries/nhcx-eligibility' // SP8
+import { COVERAGE_READ_ROLES, COVERAGE_VERIFY_ROLES } from '@/lib/role-policy' // WS12 T4
+import { getCoverageSummary } from '@/lib/queries/coverage' // WS12 T4
+import { CoverageBadge } from '@/components/insurance/CoverageBadge' // WS12 T4
 import { ENCOUNTER_TRANSITION_ROLES } from '@/lib/encounters/status'
 import { formatIstDate, todayIsoIn } from '@/lib/india-time'
 import { toAadhaarView } from '@/lib/patient-identity'
+import { trialsEnabled } from '@/lib/features'
 import { logAudit } from '@/lib/audit'
 import { getPatientDetail } from '@/lib/queries/patients'
 import { listAdmissionsForPatient } from '@/lib/queries/admissions'
@@ -70,6 +76,9 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   // only, discharge clinical fields nulled). No screening, eligibility
   // verdict, chart summary, quick glance or form-vs-chart discrepancies.
   const isFrontDesk = session.role === 'frontdesk'
+  // Trials off: no screening, eligibility or discrepancy surfaces, for any role.
+  const trialsOn = trialsEnabled()
+  const showTrialData = trialsOn && !isFrontDesk
 
   const { anonId } = await params
   const justRegistered = (await searchParams)?.registered === '1' // Wave C
@@ -96,6 +105,11 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   // this view (never the summary, whose last4 is role-gated) is handed to a
   // client component.
   const aadhaarView = toAadhaarView(patient.aadhaar, session.role)
+  // Foundations T8: per-channel notice preferences (read live, not from the cached detail).
+  const channelPrefs = NOTIFICATION_PREFERENCE_ROLES.includes(session.role) ? await getPatientChannelPreferences(patient.id) : null
+  // Foundations T9: recent notices (no bodies), same roles as GET /api/patients/[anonId]/notices.
+  const canSeeNotices = ['admin', 'crc', 'pi', 'frontdesk'].includes(session.role)
+  const notices = canSeeNotices ? (await listPatientNotices(patient.id, 10)).map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })) : []
   const profileTab = (
     <PatientProfilePanel
       patient={{
@@ -107,6 +121,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         abhaUnavailableNote: patient.abhaUnavailableNote ?? null, // Wave C P2-11
         isMlc: patient.isMlc, mlcNumber: patient.mlcNumber,
         notificationOptOut: patient.notificationOptOut, // SP5
+        notificationChannels: channelPrefs ? { sms: channelPrefs.sms, whatsapp: channelPrefs.whatsapp, email: channelPrefs.email } : undefined, // Foundations T8
         abhaVerifiedAt: patient.abhaVerifiedAt ? String(patient.abhaVerifiedAt) : null, abhaVerificationSource: patient.abhaVerificationSource ?? null, // SP8
         contacts: patient.contacts.map((c) => ({ kind: c.kind, name: c.name, relationship: c.relationship, phone: c.phone, addressText: c.addressText, isPrimary: c.isPrimary })),
       }}
@@ -189,7 +204,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         )}
       </section>
 
-      {!isFrontDesk && (
+      {showTrialData && (
         <section className={SECTION}>
           <h2 className={SECTION_HEADING}>Form vs. Chart Discrepancies</h2>
           <p className="mb-3 text-xs text-muted-foreground">Dual verification between what the patient self-reported on their intake form and what their actual chart shows.</p>
@@ -209,6 +224,13 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         <h2 className={SECTION_HEADING}>Patient Portal Access</h2>
         <PatientPortalAccessPanel anonId={patient.id} initialConfigured={patient.portalConfigured} mfaEnabled={patient.mfaEnabled} isAdmin={session.role === 'admin'} />
       </section>
+
+      {canSeeNotices && (
+        <section className={SECTION}>
+          <h2 className={SECTION_HEADING}>Recent notices</h2>
+          <RecentNoticesPanel items={notices} />
+        </section>
+      )}
     </div>
   )
 
@@ -242,13 +264,17 @@ export default async function PatientDetailPage({ params, searchParams }: { para
   const [policies, policyPayers, legacyPrefill] = canSeePolicies
     ? await Promise.all([listPatientPolicies(anonId), listRcmPayers(), legacyPolicyPrefill(anonId)])
     : [[], [], null] as const
+  // WS12 T4: coverage verdicts (header badge + Insurance tab) for COVERAGE_READ_ROLES; covered by the same page audit.
+  const coverage = COVERAGE_READ_ROLES.includes(session.role) ? await getCoverageSummary(anonId, 'view') : null
+  const policyOnNhcx = payersOnNhcx(policies, new Map(policyPayers.map((p) => [p.payerId, p.profile?.nhcxParticipantCode ?? null])))
   const policiesTab = canSeePolicies ? (
     <PatientPoliciesPanel patientId={patient.id} policies={[...policies]} todayIso={todayIso} canEdit={POLICY_WRITE_ROLES.includes(session.role)} legacyPrefill={legacyPrefill}
+      coverage={coverage ? { policies: coverage.policies, onNhcx: policyOnNhcx, nhcxAvailable: nhcxEligibilityAvailable(), canVerify: COVERAGE_VERIFY_ROLES.includes(session.role) } : undefined}
       payers={policyPayers.filter((p) => p.profile?.active).map((p) => ({ payerId: p.payerId, name: p.name, kind: p.profile!.kind }))}
       eligibility={NHCX_ELIGIBILITY_ROLES.includes(session.role) ? {
         nhcxConfigured: nhcxEligibilityAvailable(), context: justRegistered ? 'registration' : 'manual', defaultProviderId: null,
         providers: activeProviders.map((p) => ({ id: p.id, name: p.name })),
-        payerOnNhcx: payersOnNhcx(policies, new Map(policyPayers.map((p) => [p.payerId, p.profile?.nhcxParticipantCode ?? null]))),
+        payerOnNhcx: policyOnNhcx,
       } : undefined} />
   ) : null
   // end SP7
@@ -291,12 +317,13 @@ export default async function PatientDetailPage({ params, searchParams }: { para
               {patient.uhid && <CopyUhidButton uhid={patient.uhid} />}
               <span>{patient.uhid ? '· ' : ''}Chart ID {patient.id} · DOB {patient.dob}</span>
             </p>
+            {coverage?.primary && <div data-testid="header-coverage" className="mt-1"><CoverageBadge verdict={coverage.primary.verdict} /></div>}
           </div>
         </div>
         <div className="flex items-center gap-3">
           {DEMOGRAPHICS_CORRECTION_ROLES.includes(session.role) && <CorrectDemographicsButton anonId={patient.id} name={name} dob={String(patient.dob)} />}
           {session.role === 'admin' && <DeletePatientButton patientId={patient.id} patientName={name} />}
-          {isFrontDesk ? null : patient.selectionConfirmedAt ? (
+          {!showTrialData ? null : patient.selectionConfirmedAt ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />
               <span>
@@ -306,7 +333,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
           ) : patient.overallStatus === 'green' && ['admin', 'pi', 'crc'].includes(session.role) ? (
             <ConfirmEligibilityButton anonId={patient.id} />
           ) : null}
-          {!isFrontDesk && <StatusChip status={patient.overallStatus ?? 'yellow'} />}
+          {showTrialData && <StatusChip status={patient.overallStatus ?? 'yellow'} />}
         </div>
       </div>
       {/* Wave C front-desk quick path. */}
@@ -314,7 +341,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         patientId={patient.id}
         can={{ checkIn: CHECK_IN_ROLES.includes(session.role), book: SCHEDULING_ROLES.includes(session.role), printCard: REGISTRATION_ROLES.includes(session.role) }}
       />
-      {!isFrontDesk && !patient.overallStatus && (
+      {showTrialData && !patient.overallStatus && (
         <p className="text-xs text-muted-foreground">Not currently enrolled in a trial — assign this patient to a trial to run an eligibility check.</p>
       )}
 
@@ -324,6 +351,7 @@ export default async function PatientDetailPage({ params, searchParams }: { para
           chartDataAsOf={patient.chartDataAsOf.toString()}
           identityVerified={!!patient.identityVerification?.verified}
           criteriaCount={patient.criteria.length}
+          showCriteria={trialsOn}
         />
       )}
 
@@ -331,8 +359,8 @@ export default async function PatientDetailPage({ params, searchParams }: { para
         { id: 'profile', label: 'Profile', content: profileTab },
         ...(isFrontDesk ? [] : [
           { id: 'overview', label: 'Overview', content: overviewTab },
-          { id: 'screening', label: 'Screening', content: screeningTab },
         ]),
+        ...(showTrialData ? [{ id: 'screening', label: 'Screening', content: screeningTab }] : []),
         { id: 'identity', label: 'Verification', content: identityAndPortalTab },
         ...(FOLLOW_UP_VIEW_ROLES.includes(session.role) ? [{ id: 'follow-up', label: 'Visits & follow-up', content: followUpTab }] : []),
         ...(policiesTab ? [{ id: 'insurance', label: 'Insurance', content: policiesTab }] : []), // SP7

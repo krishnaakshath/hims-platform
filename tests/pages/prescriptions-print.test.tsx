@@ -138,7 +138,7 @@ describe('GET /prescriptions/print', () => {
     expect(screen.getByText(/for 30 days/i)).toBeInTheDocument()
     expect(screen.getByText(/take with food, in the morning\./i)).toBeInTheDocument()
     expect(screen.getByText(new RegExp(providerName))).toBeInTheDocument()
-    if (providerCredentials) expect(screen.getByText(new RegExp(providerCredentials))).toBeInTheDocument()
+    if (providerCredentials) expect(screen.getByText(new RegExp(`, ${providerCredentials}$`))).toBeInTheDocument()
     expect(screen.getByText(providerSpecialty)).toBeInTheDocument()
     expect(screen.getByText(
       `This printout is a record of a prescription entered in ${brand.name}. It was not transmitted electronically to a pharmacy.`,

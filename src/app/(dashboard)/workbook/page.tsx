@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { redirectUnlessTrials } from '@/lib/features-gate'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CLINICAL_ROLES, WORKBOOK_EXPORT_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
@@ -7,6 +8,7 @@ import { WorkbookTable } from '@/components/WorkbookTable'
 
 export default async function WorkbookPage() {
   const session = await requireSessionOrRedirect()
+  redirectUnlessTrials() // ENABLE_TRIALS off: this area is hidden
   // Same roles as the Workbook nav entry (admin, crc, pi); the nav only hides
   // the link, this is the enforcement.
   if (!CLINICAL_ROLES.includes(session.role)) redirect('/')

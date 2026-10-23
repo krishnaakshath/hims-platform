@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { put } from '@vercel/blob'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
-import { requireBlobStore, withServiceGuard } from '@/lib/service-config'
+import { withServiceGuard } from '@/lib/service-config'
+import { putPrivateBlob, safeBlobSegment } from '@/lib/blob-store'
 
 // Scope Decision 2 (docs/superpowers/sdd .../document-insurance-assignment plan):
 // this list stays image-only on purpose, and it is an intended divergence
@@ -37,8 +37,7 @@ export const POST = withServiceGuard('insurance card upload', async function POS
   if (!ALLOWED_TYPES.includes(file.type)) return NextResponse.json({ error: 'File must be a JPEG, PNG, or WebP image' }, { status: 400 })
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'File must be under 8MB' }, { status: 400 })
 
-  requireBlobStore()
-  const blob = await put(`insurance-cards/${anonId}-primary-${side}-${Date.now()}`, file, { access: 'private', contentType: file.type })
+  const blob = await putPrivateBlob(`insurance-cards/${safeBlobSegment(anonId)}-primary-${side}-${Date.now()}`, new Uint8Array(await file.arrayBuffer()), file.type)
 
   const column = side === 'front' ? { primaryCardFrontUrl: blob.url } : { primaryCardBackUrl: blob.url }
   await getDb().update(patients).set(column).where(eq(patients.id, anonId))

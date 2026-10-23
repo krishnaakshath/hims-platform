@@ -67,6 +67,7 @@ export const LOGIN_ROUTES = {
 /** The only messages a browser ever sees for an ABDM failure. ABDM response bodies are never echoed. */
 export const ABDM_ERROR_COPY = {
   not_configured: 'ABDM is not configured',
+  payload_key_missing: 'Integration encryption key is not set. Ask your administrator.',
   otp_invalid: 'The OTP is incorrect or has expired',
   rate_limited: 'Too many attempts; wait a minute and try again',
   abdm_unavailable: 'ABDM did not respond; try again shortly',

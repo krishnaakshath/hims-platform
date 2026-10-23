@@ -22,7 +22,7 @@ export function backupFileName(database: string, at: Date): string {
 
 /** Why a restore target is unsafe, or null if it is acceptable. */
 export function refuseRestoreTarget(target: string | undefined, live: string | undefined): string | null {
-  if (!target) return 'Set RESTORE_DATABASE_URL to an EMPTY scratch database (a new Neon branch or a local database). It is never the live DATABASE_URL.'
+  if (!target) return 'Set RESTORE_DATABASE_URL to an EMPTY scratch database (e.g. a hims_restore_check database in the compose postgres service). It is never the live DATABASE_URL.'
   if (live) {
     const a = new URL(target)
     const b = new URL(live)
@@ -42,7 +42,9 @@ export function findPgTool(name: 'pg_dump' | 'pg_restore' | 'psql'): { bin: stri
 }
 
 export const INSTALL_HELP = `PostgreSQL client tools (pg_dump, pg_restore) are not installed or not on PATH.
-Install a version at least as new as the server (Neon runs PostgreSQL 16/17):
+The app image ships them (run inside it: docker compose exec app npm run db:backup), or use
+docker compose exec postgres pg_dump ... directly. On a host, install a version at least as new
+as the server (the compose postgres service runs PostgreSQL 15):
   macOS:   brew install libpq && export PATH="$(brew --prefix libpq)/bin:$PATH"
-  Debian:  sudo apt-get install postgresql-client-17
+  Debian:  sudo apt-get install postgresql-client
 or point PG_BIN_DIR at the directory that holds them. See docs/OPERATIONS.md.`

@@ -1,29 +1,61 @@
-# Local development stack: Postgres + Redis (with an Upstash-compatible REST
-# endpoint, because the app talks to Redis over HTTP like Upstash does).
+# HIMS: the whole product on one host, Docker only. Nothing here needs the
+# internet at run time.
 #
-#   docker compose up -d
-#   DATABASE_URL=postgres://postgres:hims_local_dev@127.0.0.1:55432/hims
-#   KV_REST_API_URL=http://127.0.0.1:8079   KV_REST_API_TOKEN=hims_local_redis_token
-#   npm run db:migrate && SEED_DEMO_PASSWORD=... npm run db:seed
+#   cp .env.docker.example .env.docker      # then set the secrets (see README)
+#   docker compose up -d --build            # postgres, redis, migrate (one-shot), app
+#   docker compose ps                       # app turns "healthy" once /api/health answers
+#
+# Optional one-shot jobs (profiles):
+#   docker compose --profile seed  run --rm seed    # demo data (refused in production
+#                                                   #   unless ALLOW_PRODUCTION_SEED=1)
+#   docker compose --profile codes run --rm codes   # WHO ICD-10 from who.int: the ONLY
+#                                                   #   job that uses the internet
+#   docker compose --profile test  run --rm test [vitest args]
+#                                                   # test suite inside Docker against a
+#                                                   #   throwaway hims_test database
+#
+# Services and volume keys are stable (hims_pg, hims_redis, hims_blobs), so an
+# existing stack keeps its data. Host ports are parameterised and bound to
+# loopback by default except the app:
+#   APP_PORT (3001), APP_BIND (0.0.0.0), POSTGRES_PORT (55432),
+#   REDIS_REST_PORT (8079), PORT_BIND (127.0.0.1 for postgres and redis-rest)
+# Internal credentials (only reachable inside the compose network and on
+# loopback): HIMS_DB_PASSWORD (hims_local_dev), HIMS_REDIS_TOKEN
+# (hims_local_redis_token). Set them in a `.env` file next to this one before
+# the FIRST `up`; Postgres keeps the password it was initialised with.
+# The app's own settings and secrets live in .env.docker (HIMS_ENV_FILE
+# overrides the path), never in this file.
 #
 # Redis REST is two services: `redis-http` (serverless-redis-http, internal
-# only) and `redis-rest`, a tiny Node proxy (scripts/dev/redis-rest-shim.mjs)
-# published on 8079. Upstash's rate-limit library sends Lua scripts with a
-# flag (allow-key-locking) that only Upstash's own Redis accepts; the proxy
-# strips it, so login, OTP and booking rate limits and
-# tests/lib/rate-limit.test.ts work against this stack. Set REDIS_REST_PORT to
-# publish it on another host port.
-# Local only: the credentials below are throwaway development values.
+# only) and `redis-rest`, a tiny Node proxy (scripts/dev/redis-rest-shim.mjs).
+# Upstash's rate-limit library sends Lua scripts with a flag
+# (allow-key-locking) that only Upstash's own Redis accepts; the proxy strips
+# it, so login, OTP and booking rate limits work against plain Redis 7.
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://postgres:${HIMS_DB_PASSWORD:-hims_local_dev}@postgres:5432/hims
+  KV_REST_API_URL: http://redis-rest:8079
+  KV_REST_API_TOKEN: ${HIMS_REDIS_TOKEN:-hims_local_redis_token}
+  BLOB_DRIVER: local
+  BLOB_LOCAL_DIR: /app/data/blobs
+
+x-app-image: &app-image
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runner
+  image: hims-app:${HIMS_IMAGE_TAG:-local}
+
 services:
   postgres:
     image: postgres:15-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: hims_local_dev
+      POSTGRES_PASSWORD: ${HIMS_DB_PASSWORD:-hims_local_dev}
       POSTGRES_DB: hims
     ports:
-      - "55432:5432"
+      - "${PORT_BIND:-127.0.0.1}:${POSTGRES_PORT:-55432}:5432"
     volumes:
       - hims_pg:/var/lib/postgresql/data
     healthcheck:
@@ -31,6 +63,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -41,6 +74,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
   redis-http:
     image: hiett/serverless-redis-http:latest
     restart: unless-stopped
@@ -49,8 +83,9 @@ services:
         condition: service_healthy
     environment:
       SRH_MODE: env
-      SRH_TOKEN: hims_local_redis_token
+      SRH_TOKEN: ${HIMS_REDIS_TOKEN:-hims_local_redis_token}
       SRH_CONNECTION_STRING: redis://redis:6379
+
   redis-rest:
     image: node:22-alpine
     restart: unless-stopped
@@ -64,12 +99,159 @@ services:
     volumes:
       - ./scripts/dev/redis-rest-shim.mjs:/shim/redis-rest-shim.mjs:ro
     ports:
-      - "${REDIS_REST_PORT:-8079}:8079"
+      - "${PORT_BIND:-127.0.0.1}:${REDIS_REST_PORT:-8079}:8079"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8079/',{method:'POST',headers:{authorization:'Bearer hims_local_redis_token','content-type':'application/json'},body:'[\"PING\"]'}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8079/',{method:'POST',headers:{authorization:'Bearer ${HIMS_REDIS_TOKEN:-hims_local_redis_token}','content-type':'application/json'},body:'[\"PING\"]'}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 20
+
+  # One-shot: applies pending migrations (checksummed runner, advisory lock,
+  # idempotent) and exits 0. The app starts only after it succeeded.
+  migrate:
+    <<: *app-image
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ${HIMS_ENV_FILE:-.env.docker}
+    environment:
+      <<: *app-env
+
+  app:
+    <<: *app-image
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-rest:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - ${HIMS_ENV_FILE:-.env.docker}
+    environment:
+      <<: *app-env
+    volumes:
+      - hims_blobs:/app/data/blobs
+    ports:
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3001}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>r.json()).then(b=>process.exit(b.checks&&b.checks.database==='ok'?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+
+  # Profile `seed`: the demo data. Uses SEED_DEMO_PASSWORD (and
+  # SEED_EMAIL_DOMAIN, SEED_RESET) from the env file. The image runs with
+  # NODE_ENV=production, so the seed refuses unless ALLOW_PRODUCTION_SEED=1 is
+  # set there: set it only on a demo/evaluation stack.
+  seed:
+    <<: *app-image
+    profiles: ["seed"]
+    command: ["seed"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-rest:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - ${HIMS_ENV_FILE:-.env.docker}
+    environment:
+      <<: *app-env
+    volumes:
+      - hims_blobs:/app/data/blobs
+
+  # Profile `codes`: downloads WHO ICD-10 (2019) from who.int and imports it.
+  # The ONLY service that needs the internet, and only when run explicitly.
+  codes:
+    <<: *app-image
+    profiles: ["codes"]
+    command: ["codes"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - ${HIMS_ENV_FILE:-.env.docker}
+    environment:
+      <<: *app-env
+
+  # Profile `test`: the vitest suite inside Docker (no host Node needed).
+  # Database: a throwaway `hims_test` in the postgres service, created,
+  # migrated and seeded by scripts/docker/test-runner.sh; never `hims`.
+  # Redis: logical database 1 through its own REST pair below, so test keys
+  # never mix with the app's cache and rate limits in database 0.
+  # Secrets: fixed, fake test values; the operator's env file is not used.
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    image: hims-test:${HIMS_IMAGE_TAG:-local}
+    profiles: ["test"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-rest-test:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGPASSWORD: ${HIMS_DB_PASSWORD:-hims_local_dev}
+      TEST_DATABASE_NAME: hims_test
+      KV_REST_API_URL: http://redis-rest-test:8079
+      KV_REST_API_TOKEN: hims_test_redis_token
+      SESSION_SECRET: test-only-session-secret-not-for-any-deployment-000000
+      IDENTITY_ENCRYPTION_KEY: dGVzdC1vbmx5LWlkZW50aXR5LWtleS0zMi1ieXRlcyE=
+      INTEGRATION_PAYLOAD_KEY: dGVzdC1vbmx5LWludGVncmF0aW9uLWtleS0zMmJ5dGU=
+      ADMIN_EMAIL: admin@example.test
+      ADMIN_NAME: Test Admin
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      DEMO_FEATURES: "true"
+      SEED_EMAIL_DOMAIN: example.test
+      SEED_DEMO_PASSWORD: test-only-demo-password-1234
+      NEXT_TELEMETRY_DISABLED: "1"
+
+  redis-http-test:
+    image: hiett/serverless-redis-http:latest
+    profiles: ["test"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: hims_test_redis_token
+      SRH_CONNECTION_STRING: redis://redis:6379/1
+
+  redis-rest-test:
+    image: node:22-alpine
+    profiles: ["test"]
+    depends_on:
+      - redis-http-test
+    command: ["node", "/shim/redis-rest-shim.mjs"]
+    environment:
+      SHIM_HOST: 0.0.0.0
+      SHIM_PORT: "8079"
+      SHIM_TARGET: http://redis-http-test:80
+    volumes:
+      - ./scripts/dev/redis-rest-shim.mjs:/shim/redis-rest-shim.mjs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8079/',{method:'POST',headers:{authorization:'Bearer hims_test_redis_token','content-type':'application/json'},body:'[\"PING\"]'}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
 volumes:
   hims_pg:
   hims_redis:
+  hims_blobs:

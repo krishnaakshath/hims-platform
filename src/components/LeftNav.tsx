@@ -4,8 +4,8 @@ import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import {
   LayoutDashboard, Stethoscope, Users, ClipboardList, FlaskConical,
-  Calendar, FileText, FileSignature, MessageSquare, Wallet, Receipt, ShieldCheck, HandCoins,
-  FileBarChart, TrendingUp, BarChart3, CreditCard, FileBarChart2, FolderOpen,
+  Calendar, FileText, FileSignature, MessageSquare, Wallet, Receipt, HandCoins,
+  TrendingUp, BarChart3, FileBarChart2, FolderOpen,
   Megaphone, Star, Activity, Settings, ChevronDown, ChevronRight, History,
   ClipboardCheck, ListChecks, BedDouble, Pill, TestTube2, IdCard, CalendarClock, Search,
   DollarSign, ScrollText, Tags, CalendarSync,
@@ -40,7 +40,7 @@ type Icon = React.ComponentType<{ className?: string }>
 //  pi/doctor  — clinical workflow: My Patients, Patients, Calendar, Client Forms, Labs, Staff directory (view-only); NO billing
 //  crc/admin  — full operational access
 
-export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[] }[] = [
+export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[]; trials?: true }[] = [
   // Visible to all roles that reach a dashboard
   { href: '/', label: 'Home', icon: LayoutDashboard },
 
@@ -51,10 +51,10 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   { href: '/patients', label: 'Patients', icon: Users, roles: ['crc', 'pi', 'admin', 'frontdesk'] as Role[] },
 
   // Admin/CRC/PI operational tools
-  { href: '/workbook', label: 'Workbook', icon: ClipboardList, roles: ['admin', 'crc', 'pi'] as Role[] },
+  { href: '/workbook', label: 'Workbook', icon: ClipboardList, roles: ['admin', 'crc', 'pi'] as Role[], trials: true },
 
   // Trials & Protocols — clinical only
-  { href: '/trials', label: 'Trials & Protocols', icon: FlaskConical, roles: ['crc', 'pi', 'admin'] as Role[] },
+  { href: '/trials', label: 'Trials & Protocols', icon: FlaskConical, roles: ['crc', 'pi', 'admin'] as Role[], trials: true },
 
   // Calendar — clinical scheduling
   { href: '/calendar', label: 'Calendar', icon: Calendar, roles: ['crc', 'pi', 'admin', 'frontdesk'] as Role[] },
@@ -136,22 +136,19 @@ export const NAV_BILLING_ITEMS: { href: string; label: string; icon: Icon; demo?
   { href: '/billing/capture', label: 'Charge Capture', icon: ClipboardPlus },
   { href: '/billing/invoices', label: 'Invoices', icon: FileText },
   { href: '/billing/charges', label: 'Charges', icon: Receipt },
-  { href: '/billing/insurance-collections', label: 'Insurance Collections', icon: ShieldCheck },
   { href: '/billing/patient-collections', label: 'Patient Collections', icon: HandCoins },
-  { href: '/billing/statements', label: 'Statements', icon: FileBarChart },
   { href: '/billing/analytics', label: 'Analytics', icon: BarChart3 },
-  { href: '/billing/pay', label: 'Virtual Card Payment', icon: CreditCard, demo: true },
   // SP4
   { href: '/billing/rules', label: 'Rules & Settings', icon: SlidersHorizontal },
 ]
 
-export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[]; demo?: boolean }[] = [
+export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[]; demo?: boolean; trials?: true }[] = [
   // Wave I (P1-23): REPORTS_ROLES -- the /reports landing page; ReportsSidebar lists each role only its own reports.
   { href: '/reports', label: 'Reports', icon: FileBarChart2, roles: [...REPORTS_ROLES] },
   { href: '/documents', label: 'Documents', icon: FolderOpen, roles: ['admin', 'crc', 'pi', 'frontdesk'] as Role[] },
   { href: '/broadcasts', label: 'Broadcasts', icon: Megaphone, roles: ['admin', 'crc'] as Role[], demo: true },
   { href: '/experience-surveys', label: 'Experience Surveys', icon: Star, roles: ['admin', 'crc'] as Role[], demo: true },
-  { href: '/pipeline-dashboard', label: 'Pipeline Dashboard', icon: Activity, roles: ['admin', 'crc'] as Role[] },
+  { href: '/pipeline-dashboard', label: 'Pipeline Dashboard', icon: Activity, roles: ['admin', 'crc'] as Role[], trials: true },
   { href: '/audit-log', label: 'Audit Log', icon: History, roles: ['admin'] as Role[] },
   // Tariffs: service catalogue and price lists -- admin and billing (TARIFF_MANAGE_ROLES). crc/frontdesk only use the lookup API.
   { href: '/tariffs', label: 'Tariffs', icon: Tags, roles: ['admin', 'billing'] as Role[] },
@@ -208,12 +205,12 @@ function NavLink({ href, label, icon: Icon, active, badge, demo }: { href: strin
 
 export const BILLING_ROLES: Role[] = ['admin', 'crc', 'billing']
 
-export function LeftNav({ role, badges: initialBadges, demoFeatures = false }: { role: Role; badges?: NavBadges; demoFeatures?: boolean }) {
+export function LeftNav({ role, badges: initialBadges, demoFeatures = false, trials = true }: { role: Role; badges?: NavBadges; demoFeatures?: boolean; trials?: boolean }) {
   const pathname = usePathname()
   // Server-computed counts are the initial state; the hook keeps them live.
   const badges = useLiveNavBadges(initialBadges)
-  const items = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role))
-  const trailingItems = NAV_TRAILING_ITEMS.filter((item) => (!item.roles || item.roles.includes(role)) && (!item.demo || demoFeatures))
+  const items = NAV_ITEMS.filter((item) => (!item.roles || item.roles.includes(role)) && (!item.trials || trials))
+  const trailingItems = NAV_TRAILING_ITEMS.filter((item) => (!item.roles || item.roles.includes(role)) && (!item.demo || demoFeatures) && (!item.trials || trials))
   const billingItems = NAV_BILLING_ITEMS.filter((item) => !item.demo || demoFeatures)
   const showBilling = BILLING_ROLES.includes(role)
   const billingActive = pathname?.startsWith('/billing') ?? false

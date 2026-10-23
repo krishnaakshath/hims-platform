@@ -4,6 +4,7 @@ import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { notFound, redirect } from 'next/navigation'
 import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
+import { trialsEnabled } from '@/lib/features'
 import { logAudit } from '@/lib/audit'
 import { getBroadcast } from '@/lib/queries/broadcasts'
 
@@ -24,7 +25,7 @@ export default async function BroadcastDetailPage({ params }: { params: Promise<
   return (
     <div className="max-w-2xl">
       <h1 className="mb-1 text-2xl font-bold text-foreground">{broadcast.subject || 'Broadcast'}</h1>
-      <p className="mb-6 text-sm text-muted-foreground">{formatIstDateTime(broadcast.sentAt)} · {broadcast.trialCondition ?? 'All trials'} · Sent by {broadcast.sentBy}</p>
+      <p className="mb-6 text-sm text-muted-foreground">{formatIstDateTime(broadcast.sentAt)} · {trialsEnabled() ? `${broadcast.trialCondition ?? 'All trials'} · ` : ''}Sent by {broadcast.sentBy}</p>
       <div className="mb-6 rounded-lg border border-border bg-card p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message</p>
         <p className="mt-1 text-sm text-foreground">{broadcast.message}</p>

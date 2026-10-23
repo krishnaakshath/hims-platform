@@ -29,6 +29,7 @@ describe('RCM pages', () => {
       getRcmDashboard: vi.fn(async () => DASH),
       listClaimCandidates: vi.fn(async () => [{ patient: { id: 'P-1', name: 'Asha Rao', uhid: 'UH1' }, admissionId: null, encounterId: 7, policyId: 2, payerName: 'Star TPA', invoiceCount: 1, availablePaise: 50_000_00, episodeEndDate: '2026-10-01', slaFlags: [] }]),
     }))
+    vi.doMock('@/lib/queries/coverage-attention', () => ({ getInsuranceAttention: vi.fn(async () => ({ policiesExpiringIn7Days: 0, admissionsTodayUnverified: [], claimsBlockedByIdentifiers: 0 })) }))
     const { default: Page } = await import('@/app/(dashboard)/rcm/page')
     const { render, screen } = await import('@testing-library/react')
     render(await Page())

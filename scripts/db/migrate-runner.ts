@@ -22,7 +22,7 @@ import {
   type MigrationFile,
   type MigrationPlan,
 } from '../../src/db/migrations'
-import { describeDatabaseUrl, isPooledNeonUrl, sslFor } from '../../src/db/url'
+import { describeDatabaseUrl, sslFor } from '../../src/db/url'
 
 const ROOT = path.resolve(__dirname, '../..')
 export const DEFAULT_MIGRATIONS_DIR = path.join(ROOT, 'scripts/migrations')
@@ -76,13 +76,9 @@ export function loadBaseline(file = DEFAULT_BASELINE_PATH): MigrationFile {
 
 function connect(connectionString: string | undefined): pg.Client {
   if (!connectionString) {
-    throw new MigrationError('config', 'DATABASE_URL is not set. Set it to the target database (for Neon, the direct, non-pooled URL).')
+    throw new MigrationError('config', 'DATABASE_URL is not set. Set it to the target database (in Docker: postgres://postgres:...@postgres:5432/hims).')
   }
-  if (isPooledNeonUrl(connectionString)) {
-    throw new MigrationError('pooler',
-      'DATABASE_URL points at the Neon pooled endpoint ("-pooler" host). Migrations need a direct connection ' +
-      '(advisory lock, per-file transactions): use DATABASE_URL_UNPOOLED, e.g. DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:migrate')
-  }
+
   return new pg.Client({ connectionString, ssl: sslFor(connectionString), connectionTimeoutMillis: 15_000 })
 }
 

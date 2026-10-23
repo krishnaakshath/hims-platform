@@ -30,7 +30,8 @@ export function NhcxExchangePanel({ exchanges, canAct, sendPreauthId, canSendPre
     const r = await sendJson<{ result?: string }>(url, 'POST', {}, { passThrough: [409, 422, 429, 503] })
     setBusy(false)
     setMessage(r.ok ? done : r.error)
-    if (r.ok) router.refresh()
+    // WS12 T7 (R11): refresh after a refusal too, so the server recomputes whether this can be sent.
+    router.refresh()
   }
 
   return (

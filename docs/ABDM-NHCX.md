@@ -14,7 +14,7 @@ Sources cited in code comments are S1 to S6 in `docs/superpowers/plans/2026-10-0
   The real ABDM and NHCX *sandboxes* (`dev.abdm.gov.in`, `abhasbx.abdm.gov.in`, `apisbx.abdm.gov.in`) go through these same adapters, with sandbox URLs in env.
 - **Mocked.** The mocks (the ABDM sandbox mock and the NHCX mock transport) run only when both of these hold:
   - `ABDM_USE_MOCKS=1`;
-  - neither `NODE_ENV` nor `VERCEL_ENV` is `production`.
+  - `NODE_ENV` is not `production` (the Docker image always runs with `production`, so there the mocks also need `DEMO_FEATURES` set on and `ALLOW_DEMO_MOCKS=true`: an explicit demo stack).
   Every mock row is flagged (`is_mock = true` or source `abdm_sandbox_mock`), and every screen that shows one shows the badge **Sandbox mock - not real**. A mock never invents an approval amount.
 - **Neither.** With no credentials and no mock flag:
   - every capability reports **Not configured**;
@@ -37,7 +37,7 @@ This is owner and legal work (spec section 7). The steps:
 
 ## Environment variables
 
-`.env.example` lists every variable, with empty values. Store the values with `vercel env add`, and never commit them.
+`.env.docker.example` lists every variable, with empty values. Store the values in the host's `.env.docker` (gitignored), and never commit them.
 
 | Variable | Required for | Notes |
 |---|---|---|
@@ -80,7 +80,7 @@ base64 < nhcx.key | tr -d '\n'   # NHCX_ENCRYPTION_PRIVATE_KEY
 base64 < nhcx.crt | tr -d '\n'   # NHCX_ENCRYPTION_CERT
 ```
 
-1. Store each one-line value with `vercel env add`.
+1. Store each one-line value in `.env.docker`, then `docker compose up -d` to apply it.
 2. Upload `nhcx.crt` to the NHCX participant record.
 3. Delete both local files.
 
@@ -116,13 +116,12 @@ The NHCX sweep needs a scheduler. Its jobs are:
 - optional status polling;
 - the retention purges.
 
-On Vercel, add a `crons` entry to `vercel.json`:
+The Docker stack has no scheduler of its own. Call the sweep from the host's
+cron every 15 minutes, with `CRON_SECRET` set in `.env.docker`:
 
-```json
-{ "crons": [{ "path": "/api/cron/nhcx-sweep", "schedule": "*/15 * * * *" }] }
+```cron
+*/15 * * * * curl -fsS -H "Authorization: Bearer <CRON_SECRET>" http://127.0.0.1:3001/api/cron/nhcx-sweep > /dev/null
 ```
-
-Set `CRON_SECRET` too. The repository does not ship a `vercel.json`, because adding one changes the deployment configuration; that is the owner's decision (A3).
 
 ## Rollback
 
@@ -145,6 +144,27 @@ java -jar validator_cli.jar out/*.json -version 4.0.1 -ig ndhm.in#6.5.0
 ```
 
 The result is advisory: terminology-binding warnings for the hospital-local service codes are expected (U15).
+
+## Insurance verification (WS12)
+
+Every cover check is saved in one append-only table, `coverage_verifications`, with who, when, source, result and the limits returned. The Insurance tab, the patient header badge, the policy add flow, pre-auth creation and the charge rules all read the current verification from it.
+
+- **Sources.**
+  - `nhcx`: a real NHCX eligibility answer, written by the callback in the same transaction that settles the eligibility check.
+  - `nhcx_mock`: the sandbox mock's answer. It is labelled **Sandbox mock - not real** wherever it appears.
+  - `manual`: staff recorded a confirmation from an insurer or TPA that is not on NHCX.
+  - With NHCX unconfigured the surface says **Not configured**; no result is invented.
+- **Freshness.** An NHCX or mock result is current for 24 hours from `verified_at` (`COVERAGE_FRESH_HOURS`). After that the badge shows it as stale and the check can be re-run.
+- **Manual verification.** Recorded from the Insurance tab (`POST /api/rcm/policies/[id]/verifications`, roles admin, rcm, frontdesk). It needs a method (insurer portal, TPA portal, phone, email or letter) and an insurer reference (3 to 64 characters), and may carry one PDF, JPEG or PNG document (at most 4 MB). The "valid until" date defaults to 7 days from today (IST), may be at most 30 days from today, and never later than the policy's end date. The document is stored privately and opened through an authenticated route; its URL is never returned in the coverage API.
+- **Limits.** Effective limits are the current verification's values where it gave them, otherwise the policy's own fields (sum insured, co-pay, room rent, ICU). The charge rules `room_rent_over_limit` and `sum_insured_exceeded` warn (never block) when a line goes over. The ICU limit applies for room categories ICU, HDU, NICU, PICU and CCU.
+- **ABHA identity guard.** Linking an ABHA, or resolving a Scan & Share, compares name, date of birth and gender with the chart on the server. A field ABDM did not give counts as unavailable, not a mismatch. If any field mismatches, the link is refused until the user gives a reason of 10 to 300 characters; the reason is stored in `abha_link_overrides` and the audit entry carries only the names of the mismatched fields. A flow with no stored profile counts as a name mismatch.
+- **Simulate share (mock only).** `POST /api/abdm/shares/simulate` and its button exist only when ABDM is in mock mode (`ABDM_USE_MOCKS=1`, not production, with `ALLOW_DEMO_MOCKS` and `DEMO_FEATURES` where production-like mode requires them). Otherwise the route answers 404 after the role and body checks. It writes an ordinary pending share row flagged `is_mock`, optionally copying an existing patient's name, date of birth and gender (to test the match path) or taking typed values (to test the mismatch path). No gateway is called.
+- **Limit codes.** The codes read from the eligibility response are unverified fact U21, below.
+- **Environment.** Names only: `ABDM_USE_MOCKS`, `ALLOW_DEMO_MOCKS`, `DEMO_FEATURES`, `INTEGRATION_PAYLOAD_KEY` (required for the ABHA and NHCX flows), `BLOB_DRIVER` (where verification documents are stored).
+
+### Not yet built
+
+Coverage at admission and OPD check-in (WS12 Task 9) is pending. The `admission_coverage` table exists, but the check-in and inpatient admission screens do not yet show or record a coverage verdict, so cashless admission is not yet blocked on an expired policy. This waits for the inpatient `admitPatient` work.
 
 ## Phase 2 (not built): ABDM M2/M3
 
@@ -174,3 +194,4 @@ Each item is a single constant or env value, so it can be corrected without a re
 - **U18** The legal retention period for claim correspondence payloads (IRDAI / DPDP); see A1.
 - **U19** The `x-hcx-ben-abha-id` and `x-hcx-request_id` headers (S3 only). ABHA is sent only when the snapshot carries it; `request_id` is not sent.
 - **U20** The NHCX callback 30-second ack deadline and 5 retries (S3). Our handler answers well within 30 s because all work is one short transaction.
+- **U21** (the insurance-verification spec calls this U20; that number was already taken) The eligibility-response limit codes read from `CoverageEligibilityResponse.insurance[0]` (WS12 R6, `src/lib/fhir/nhcx/eligibility.ts`): benefit `type` codes `benefit` (sum insured = `allowedMoney`, balance = `allowedMoney` − `usedMoney`) and `copay-percent` (`allowedUnsignedInt` × 100 basis points), and item `category` codes `room-rent` and `icu` (per-day limit = the first `allowedMoney`). Codes are matched whatever their system. Not confirmed against the NRCeS profile or a live insurer answer; the sandbox mock answers with these codes and fixed, labelled values (sum insured ₹5,00,000, used ₹50,000, co-pay 10%, room rent ₹4,000/day, ICU ₹8,000/day). The response `identifier[0].value` is stored as the insurer reference (at most 64 characters), never logged or returned by the coverage API.

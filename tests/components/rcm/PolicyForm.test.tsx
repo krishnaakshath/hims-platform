@@ -42,6 +42,23 @@ describe('PolicyForm', () => {
   })
 })
 
+describe('PolicyForm ICU limit (WS12)', () => {
+  it('posts the ICU limit per day in paise and pre-fills it when editing', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ policyId: 5 }), { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { unmount } = render(<PolicyForm patientId="P-1" payers={PAYERS} />)
+    fill()
+    fireEvent.change(screen.getByLabelText('ICU limit per day (₹)'), { target: { value: '8,000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add policy' }))
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)
+    expect(body).toMatchObject({ icuLimitPaise: 8_000_00, roomRentLimitPaise: null })
+    unmount()
+    render(<PolicyForm patientId="P-1" payers={PAYERS} policyId={3} initial={{ icuLimitPaise: 6_500_00 }} />)
+    expect(screen.getByLabelText('ICU limit per day (₹)')).toHaveValue('6500.00')
+  })
+})
+
 describe('PatientPoliciesPanel', () => {
   it('offers the legacy prefill only when there is no policy, and editing only when allowed', () => {
     const { rerender } = render(<PatientPoliciesPanel patientId="P-1" policies={[]} payers={PAYERS} canEdit legacyPrefill={{ memberId: 'OLD-1' }} todayIso="2026-10-08" />)
@@ -49,7 +66,7 @@ describe('PatientPoliciesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use them' }))
     expect(screen.getByLabelText('Member / card ID')).toHaveValue('OLD-1')
     const policy = { id: 3, patientId: 'P-1', insurer: { payerId: 1, name: 'Star Health' }, tpa: null, policyNumber: 'POL/1', memberId: 'M-1', planName: null, policyType: 'individual' as const, corporateName: null,
-      holderName: 'Asha', relationship: 'self' as const, validFrom: '2025-04-01', validTo: '2026-03-31', sumInsuredPaise: null, copayBp: null, roomRentLimitPaise: null, priority: 'primary' as const, status: 'active' as const, hasCardFront: true, hasCardBack: false }
+      holderName: 'Asha', relationship: 'self' as const, validFrom: '2025-04-01', validTo: '2026-03-31', sumInsuredPaise: null, copayBp: null, roomRentLimitPaise: null, icuLimitPaise: null, priority: 'primary' as const, status: 'active' as const, hasCardFront: true, hasCardBack: false }
     rerender(<PatientPoliciesPanel patientId="P-1" policies={[policy]} payers={PAYERS} canEdit={false} legacyPrefill={{ memberId: 'OLD-1' }} todayIso="2026-10-08" />)
     expect(screen.queryByText(LEGACY_PREFILL_NOTICE, { exact: false })).not.toBeInTheDocument()
     expect(screen.getByText('Expired')).toBeInTheDocument()

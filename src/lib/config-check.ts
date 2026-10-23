@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { LEDGER_TABLE, migrationStatus, orderMigrationNames, type MigrationStatus } from '@/db/migrations'
 import { getRedis, isCacheConfigured } from '@/lib/cache'
-import { isBlobConfigured } from '@/lib/service-config'
+import { isBlobStoreWritable } from '@/lib/blob-store'
 
 // Backing-service checks behind the public GET /api/health and
 // GET /api/health/ready. The report holds fixed status words only: never an
@@ -17,15 +17,15 @@ export type HealthChecks = {
   redis: 'ok' | 'fail' | 'not_configured'
   migrations: MigrationStatus
   secrets: 'ok' | 'missing'
-  // Configured or not only: no network round trip to the store.
-  blob: 'ok' | 'not_configured'
+  // The local file store (hims_blobs volume) accepts a write right now.
+  blob: 'ok' | 'fail'
 }
 export type HealthReport = { status: 'ok' | 'degraded' | 'down'; checks: HealthChecks }
 
 export type HealthDeps = {
   pingDatabase: () => Promise<unknown>
   redisConfigured: () => boolean
-  blobConfigured: () => boolean
+  blobWritable: () => Promise<boolean>
   pingRedis: () => Promise<unknown>
   appliedMigrations: () => Promise<string[]>
   migrationFiles: () => string[]
@@ -59,7 +59,7 @@ async function passes(fn: () => Promise<unknown>, ms: number): Promise<boolean> 
 export const defaultHealthDeps: HealthDeps = {
   pingDatabase: () => getDb().execute(sql`select 1`),
   redisConfigured: isCacheConfigured,
-  blobConfigured: () => isBlobConfigured(),
+  blobWritable: () => isBlobStoreWritable(),
   pingRedis: () => getRedis().ping(),
   appliedMigrations: async () => {
     try {
@@ -80,9 +80,10 @@ export const defaultHealthDeps: HealthDeps = {
 export async function runHealthChecks(deps: HealthDeps = defaultHealthDeps, opts: { timeoutMs?: number } = {}): Promise<HealthReport> {
   const ms = opts.timeoutMs ?? 3000
   const redisConfigured = deps.redisConfigured()
-  const [dbOk, redisOk] = await Promise.all([
+  const [dbOk, redisOk, blobOk] = await Promise.all([
     passes(deps.pingDatabase, ms),
     redisConfigured ? passes(deps.pingRedis, ms) : Promise.resolve(false),
+    withTimeout(Promise.resolve().then(deps.blobWritable), ms).catch(() => false),
   ])
 
   let applied: string[] | null = null
@@ -105,7 +106,7 @@ export async function runHealthChecks(deps: HealthDeps = defaultHealthDeps, opts
     redis: !redisConfigured ? 'not_configured' : redisOk ? 'ok' : 'fail',
     migrations: migrationStatus(applied, files),
     secrets: secretsStatus(deps.env),
-    blob: deps.blobConfigured() ? 'ok' : 'not_configured',
+    blob: blobOk ? 'ok' : 'fail',
   }
   const status: HealthReport['status'] =
     checks.database === 'fail' || checks.secrets === 'missing' ? 'down'

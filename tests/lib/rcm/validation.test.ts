@@ -27,6 +27,13 @@ describe('RCM request schemas', () => {
     expect(policySchema.safeParse({ ...POLICY, validFrom: '2026-10-02', validTo: '2026-10-01' }).error!.issues[0].message).toBe('The policy end date is before its start')
     expect(policySchema.parse(POLICY).status).toBe('active')
   })
+  it('WS12: an optional, non-negative integer ICU limit', () => {
+    expect(policySchema.parse({ ...POLICY, icuLimitPaise: 8_000_00 }).icuLimitPaise).toBe(8_000_00)
+    expect(policySchema.safeParse({ ...POLICY, icuLimitPaise: null }).success).toBe(true)
+    expect(policySchema.safeParse({ ...POLICY, icuLimitPaise: -1 }).success).toBe(false)
+    expect(policySchema.safeParse({ ...POLICY, icuLimitPaise: 10.5 }).success).toBe(false)
+    expect(policyPatchSchema.safeParse({ icuLimitPaise: 0 }).success).toBe(true)
+  })
   it('a policy patch needs a key and keeps the refinements', () => {
     expect(policyPatchSchema.safeParse({}).success).toBe(false)
     expect(policyPatchSchema.safeParse({ status: 'inactive' }).success).toBe(true)

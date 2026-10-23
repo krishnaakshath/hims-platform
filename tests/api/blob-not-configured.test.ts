@@ -1,5 +1,5 @@
 // @vitest-environment node
-// A deployment without a Blob store (BLOB_READ_WRITE_TOKEN unset) must answer
+// A deployment without a usable file store (BLOB_DRIVER naming a driver that does not exist) must answer
 // the routes that read or write stored files with a generic 503, never a 500,
 // and say what is missing in ONE server-side [config] log line. The client
 // never sees an env var name.
@@ -14,7 +14,7 @@ vi.mock('@/lib/patient-session', () => ({ requirePatientSession: vi.fn(async () 
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
 vi.mock('@/lib/patient-portal-audit', () => ({ logPatientPortalAction: vi.fn(async () => undefined) }))
 
-const BLOB_URL = 'https://store.private.blob.vercel-storage.com/lab-reports/5/x.pdf'
+const BLOB_URL = 'local:lab-reports/5/x.pdf'
 vi.mock('@/lib/queries/lab-reports', () => ({
   // The real release renders first and then stores the PDF through putPrivateBlob.
   releaseLabReport: vi.fn(async () => {
@@ -45,8 +45,7 @@ const idParams = (id: string) => ({ params: Promise.resolve({ id }) })
 
 let log: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
-  vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
-  vi.stubEnv('BLOB_STORE_ID', '')
+  vi.stubEnv('BLOB_DRIVER', 'no-such-driver')
   log = vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
@@ -58,10 +57,10 @@ afterEach(() => {
 async function expect503(res: Response, feature: string) {
   expect(res.status).toBe(503)
   const body = await res.json()
-  expect(body).toEqual({ error: 'Service temporarily unavailable' })
+  expect(body).toEqual({ error: 'File storage is not set up. Ask your administrator.', code: 'storage_not_configured' })
   expect(JSON.stringify(body)).not.toMatch(ENV_NAMES)
   expect(log).toHaveBeenCalledTimes(1)
-  expect(log.mock.calls[0][0]).toBe(`[config] BLOB_READ_WRITE_TOKEN not configured: ${feature} is unavailable`)
+  expect(log.mock.calls[0][0]).toBe(`[config] BLOB_DRIVER not configured: ${feature} is unavailable`)
 }
 
 describe('blob store not configured', () => {

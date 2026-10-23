@@ -7,10 +7,12 @@ vi.mock('@/lib/auth', () => ({
   requireSession: vi.fn(async () => (signedIn ? { role, name: 'Probe Desk', userId: 3 } : NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))),
 }))
 vi.mock('@/lib/queries/notifications', () => ({ setNotificationOptOut: vi.fn() }))
+vi.mock('@/lib/queries/notification-log', () => ({ setPatientChannelPreferences: vi.fn() })) // Foundations T8
 vi.mock('@/lib/cache', () => ({ invalidateCache: vi.fn(async () => undefined), patientDetailCacheKey: (id: string) => `patient:${id}` }))
 
 import { PUT } from '@/app/api/patients/[anonId]/notification-preference/route'
 import { setNotificationOptOut } from '@/lib/queries/notifications'
+import { setPatientChannelPreferences } from '@/lib/queries/notification-log' // Foundations T8
 import { invalidateCache } from '@/lib/cache'
 
 const put = (body: unknown, anonId = 'RD-0001') =>
@@ -20,6 +22,7 @@ beforeEach(() => {
   role = 'frontdesk'
   signedIn = true
   vi.mocked(setNotificationOptOut).mockReset().mockResolvedValue(true)
+  vi.mocked(setPatientChannelPreferences).mockReset().mockResolvedValue(true)
   vi.mocked(invalidateCache).mockClear()
 })
 
@@ -81,5 +84,28 @@ describe('PUT /api/patients/[anonId]/notification-preference', () => {
     expect(JSON.stringify(await res.json())).not.toContain('secret')
     expect(err.mock.calls.flat().join(' ')).not.toContain('secret')
     err.mockRestore()
+  })
+
+  // Foundations T8: per-channel preferences (SMS, WhatsApp, email) next to the master toggle.
+  it('saves channel preferences only, without touching the master opt-out', async () => {
+    const res = await put({ whatsapp: false, email: true })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ whatsapp: false, email: true })
+    expect(setPatientChannelPreferences).toHaveBeenCalledWith('RD-0001', { whatsapp: false, email: true }, expect.objectContaining({ role: 'frontdesk' }))
+    expect(setNotificationOptOut).not.toHaveBeenCalled()
+  })
+
+  it('saves the master toggle and a channel together', async () => {
+    expect((await put({ optOut: false, sms: false })).status).toBe(200)
+    expect(setNotificationOptOut).toHaveBeenCalledWith('RD-0001', false, expect.anything())
+    expect(setPatientChannelPreferences).toHaveBeenCalledWith('RD-0001', { sms: false }, expect.anything())
+  })
+
+  it('400s an empty body or a non-boolean channel; 404s an unknown patient on a channel change', async () => {
+    expect((await put({})).status).toBe(400)
+    expect((await put({ sms: 'no' })).status).toBe(400)
+    expect((await put({ in_app: false })).status).toBe(400)
+    vi.mocked(setPatientChannelPreferences).mockResolvedValueOnce(false)
+    expect((await put({ sms: false })).status).toBe(404)
   })
 })

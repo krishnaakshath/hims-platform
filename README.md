@@ -23,6 +23,11 @@ HIMS covers the day-to-day running of a clinic or hospital in one place:
 - **Pharmacy and labs**: a dispensing counter and inventory; a lab worklist
   with collection, results, imaging and an electronic lab-results webhook.
 - **Billing**: charges, claims, collections, statements, A/R and analytics.
+- **Insurance verification**: every cover check is saved with who, when,
+  source and limits; manual verification (with a document) for insurers not on
+  NHCX; policy validity and sub-limits feed pre-auth and the charge rules; an
+  ABHA identity guard stops silent wrong-person links. NHCX and ABDM run as a
+  labelled sandbox mock until credentials exist (`docs/ABDM-NHCX.md`).
 - **Pre-screening**: a rule engine screens each patient against a trial's
   criteria and marks every criterion Meets, Needs Verification or Potential
   Exclusion, backed by the exact chart quote. See **Pre-screening** below.
@@ -153,9 +158,10 @@ expectations:
 - **Protection of identifiers**: government ID numbers are encrypted at rest
   with AES-256-GCM (`IDENTITY_ENCRYPTION_KEY`); passwords are scrypt-hashed;
   the Excel export neutralises formula injection.
-- **Isolation and residency**: one database, cache and file store per client,
-  so a client can pick an Indian region for its Postgres, Redis and Vercel
-  project to meet data-localisation expectations.
+- **Isolation and residency**: one Docker stack per client (its own database,
+  cache and file store, all on the client's host), so every record and file
+  stays wherever the client runs that host; an Indian data centre or premises
+  meets data-localisation expectations.
 - **Consent and notices**: consent documents and a patient-portal terms and
   privacy flow exist, but the seeded text is a **draft, not reviewed by legal
   counsel**. Replace it before real patients rely on it.
@@ -302,9 +308,9 @@ variable, never the value) and rendered as text, never as HTML.
 | `BRAND_PRIMARY_COLOR` | Accent colour | `#rgb` or `#rrggbb` | built-in blue |
 | `BRAND_COOKIE_PREFIX` | Prefix of every session cookie (`<prefix>_session`, `_patient_session`, ...) | `[a-z0-9_]{1,24}` | `hims` |
 
-> **Brand changes require a rebuild and redeploy.** `BRAND_*` is read when the
-> app is built and baked into prerendered pages, so editing the variable in
-> Vercel has no effect until you redeploy.
+> **Brand changes require an image rebuild.** `BRAND_*` lives in
+> `.env.docker`; pages prerendered at build time keep the values the image was
+> built with, so after editing run `docker compose build app && docker compose up -d`.
 >
 > **Changing `BRAND_COOKIE_PREFIX` logs everyone out** (staff and patients),
 > and abandons any in-progress MFA or Google sign-in. Pick it once per client
@@ -314,54 +320,87 @@ variable, never the value) and rendered as text, never as HTML.
 
 Every client gets its own of each of these. Never share one across clients.
 
-1. **Postgres database**: a new, empty one (Neon or any TLS Postgres) ->
-   `DATABASE_URL`.
-2. **Redis**: its own Upstash Redis -> `KV_REST_API_URL`, `KV_REST_API_TOKEN`.
-3. **Blob store**: its own Vercel Blob store -> `BLOB_READ_WRITE_TOKEN`.
-4. **`SESSION_SECRET`**: unique, 32+ random characters (`openssl rand -base64 48`).
-5. **`IDENTITY_ENCRYPTION_KEY`**: unique 32 random bytes, base64
-   (`openssl rand -base64 32`). Back it up: losing it makes encrypted ID
+1. **Host**: a Linux server with Docker and the Compose plugin, in the region
+   the client's data must stay in (an Indian data centre for Indian clients).
+   Postgres, Redis and the file store run on it as part of the stack.
+2. **`.env.docker`**: copied from `.env.docker.example`, never committed.
+3. **`SESSION_SECRET`**: unique, 32+ random characters (`openssl rand -base64 48`).
+4. **`IDENTITY_ENCRYPTION_KEY`**: unique 32 random bytes, base64
+   (`openssl rand -base64 32`). Escrow it: losing it makes encrypted ID
    numbers unreadable.
-6. **SMTP and SMS**: the client's `SMTP_*` sender and, if SMS sign-in is used,
-   `TWILIO_*` credentials.
-7. **Domain**: the client's domain on the Vercel project, mirrored in
+5. **`INTEGRATION_PAYLOAD_KEY`**: unique 32 random bytes, base64
+   (`openssl rand -base64 32`).
+6. **Domain and HTTPS**: the client's domain on the operator's reverse proxy
+   (Caddy or nginx; examples in `docs/DEPLOYING.md`), mirrored in
    `NEXT_PUBLIC_APP_URL`.
-8. **Admin account**: `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD_HASH`.
-9. **Branding**: the `BRAND_*` values above.
+7. **Admin account**: `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD_HASH`.
+8. **Branding**: the `BRAND_*` values above.
+9. **Optional integrations** (off until set): SMTP sender, Twilio SMS,
+   WhatsApp, Google SSO, ABDM/NHCX.
+10. **Backups**: daily database dump and file-store archive to encrypted
+    storage off the host (`docs/OPERATIONS.md`).
 
-Then run `npm run db:migrate` against the new database, create the first admin, and smoke-test. The full
-procedure, env var table and smoke-test list are in
-[`docs/DEPLOYING.md`](docs/DEPLOYING.md). `.env.example` lists every variable
-the app reads.
+Then `docker compose up -d --build` (migrations run automatically), create the
+first admin, and smoke-test. The full procedure, sizing, upgrades and
+smoke-test list are in [`docs/DEPLOYING.md`](docs/DEPLOYING.md).
+`.env.docker.example` documents every variable the app reads.
 
 ## Run and operate locally
 
+Docker is the only supported runtime, for development, demos and production
+alike. Nothing in the stack needs the internet at run time.
+
 ```bash
-npm install
-cp .env.example .env.local   # then fill in values (never commit it)
-npm run dev                  # http://localhost:3000, redirects to /login
-npm test                     # full Vitest suite (loads .env.local via dotenv-cli; needs a database and Redis)
-npm run build                # production build + typecheck
-npm run db:migrate           # create/upgrade the schema of DATABASE_URL
-npm run db:seed              # demo data; see below
+cp .env.docker.example .env.docker   # set the secrets (openssl commands inside); never commit it
+docker compose up -d --build         # postgres, redis, migrate (one-shot), app -> http://localhost:3001
+docker compose ps                    # app becomes "healthy"
+docker compose logs -f app           # or: npm run docker:logs
+docker compose --profile seed run --rm seed     # demo data (needs ALLOW_PRODUCTION_SEED=1, see below)
+docker compose --profile codes run --rm codes   # optional: WHO ICD-10 from who.int (the only internet use)
+docker compose exec postgres psql -U postgres -d hims   # or: npm run docker:psql
+docker compose down                  # stop (keeps the data volumes)
 ```
+
+The same commands exist as npm scripts: `docker:up`, `docker:down`,
+`docker:logs`, `docker:migrate`, `docker:migrate:status`, `docker:seed`,
+`docker:codes`, `docker:test`, `docker:psql`, `docker:backup`.
 
 `GET /api/health` reports `database`, `redis`, `migrations`, `secrets` and `blob`
 as fixed words (`ok`, `fail`, `not_configured`, `pending`, ...); it is the
 first thing to check when sign-in fails on a new deployment.
 
-**Demo seed.** `npm run db:seed` writes fictional patients and one demo
-account per staff role at `<role>@<SEED_EMAIL_DOMAIN>` (default
-`example.test`). `SEED_DEMO_PASSWORD` (12+ characters) is required and has no
-default; there is no password in the source. The seed refuses to run when
-`NODE_ENV` or `VERCEL_ENV` is `production` unless `ALLOW_PRODUCTION_SEED=1`.
-It is safe to re-run: on an already-populated database it tops up reference
-data (and issues any missing UHIDs) instead of wiping anything. The demo is an
-Indian multispeciality hospital with a working day relative to today (IST);
-`SEED_RESET=1` clears and rebuilds it. All identifiers are synthetic.
+**Tests** run inside Docker against a throwaway `hims_test` database in the
+postgres service (created, migrated and seeded by `scripts/docker/test-runner.sh`;
+the app's `hims` database is never touched) and Redis logical database 1:
+
+```bash
+docker compose --profile test run --rm test                          # whole suite (or: npm run docker:test)
+docker compose --profile test run --rm test tests/lib/brand tests/api/health.test.ts   # a subset
+docker compose --profile test run --rm test tests/api/login.test.ts -t "rate limit"    # by test name
+```
+
+Arguments go straight to `vitest run`. After changing code, rebuild the test
+image first: `docker compose --profile test build test`. Host scripts
+(`npm test`, `npm run db:*`) still work but read `DATABASE_URL` and every
+other setting only from the environment you export (no `.env` file is ever
+loaded), so they cannot reach a database by accident.
+
+**Demo seed.** The seed writes fictional patients and one demo account per
+staff role at `<role>@<SEED_EMAIL_DOMAIN>` (default `example.test`).
+`SEED_DEMO_PASSWORD` (12+ characters) is required and has no default; there is
+no password in the source. The seed refuses to run when `NODE_ENV` is
+`production` (always the case in the app image) unless
+`ALLOW_PRODUCTION_SEED=1`: set that only in a demo stack's `.env.docker`.
+`SEED_ON_START=true` seeds automatically when the app starts on an empty
+database. It is safe to re-run: on an already-populated database it tops up
+reference data (and issues any missing UHIDs) instead of wiping anything. The
+demo is an Indian multispeciality hospital with a working day relative to
+today (IST); `SEED_RESET=1` clears and rebuilds it. All identifiers are
+synthetic.
 
 **Admin password hash.** `ADMIN_PASSWORD_HASH` is a `salt:hash` pair (scrypt)
-matching `hashPassword()` in `src/lib/password.ts`:
+matching `hashPassword()` in `src/lib/password.ts` (run it with any Node 22,
+or inside the image: `docker compose run --rm --no-deps migrate node -e "..."`):
 
 ```bash
 node -e "const{randomBytes,scryptSync}=require('crypto');const s=randomBytes(16).toString('hex');console.log(s+':'+scryptSync(process.argv[1],s,64,{N:131072,r:8,p:1,maxmem:256*1024*1024}).toString('hex'))" "your-new-password"
@@ -373,12 +412,13 @@ node -e "const{randomBytes,scryptSync}=require('crypto');const s=randomBytes(16)
 ### Database changes: read before touching the schema
 
 Every database (production, staging, a developer's local one) is built and
-upgraded by one command, `npm run db:migrate`
-([`scripts/db/migrate.ts`](scripts/db/migrate.ts)). On an empty database it
+upgraded by one runner, [`scripts/db/migrate.ts`](scripts/db/migrate.ts),
+which the `migrate` service and the app entrypoint run on every
+`docker compose up`. On an empty database it
 applies the frozen baseline (`scripts/db/baseline.sql`) and then every file in
 `scripts/migrations/` in name order; afterwards it applies only the files not
-yet recorded in the `schema_migrations` ledger. `npm run db:migrate:status`
-shows what is applied and pending. Details: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+yet recorded in the `schema_migrations` ledger.
+`docker compose run --rm migrate migrate --status` shows what is applied and pending. Details: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 To change the schema:
 
@@ -388,7 +428,7 @@ To change the schema:
    `ADD COLUMN IF NOT EXISTS`, guarded `DO $$ ... $$` blocks) and wrapped in
    `BEGIN; ... COMMIT;`. `ALTER TYPE ... ADD VALUE` goes in its own earlier
    file, because a new enum value cannot be used in the transaction that adds it.
-3. `npm run db:migrate`, then `npm run db:schema-diff -- <your db> <a db built from empty>`
+3. `docker compose run --rm migrate`, then `npm run db:schema-diff -- <your db> <a db built from empty>`
    to confirm both routes reach the same schema.
 
 Never edit a migration file (or the baseline) once it has run anywhere:
@@ -402,10 +442,13 @@ database.
 ## Stack
 
 Next.js 16 (App Router, TypeScript), Tailwind v4 (oklch design tokens,
-`src/app/globals.css`), Drizzle ORM, Postgres (a node-postgres TCP pool,
-`drizzle-orm/node-postgres`; see `src/db/client.ts`), Upstash Redis
-(read-through cache, `src/lib/cache.ts`), Vercel Blob, recharts, Vitest +
-Testing Library.
+`src/app/globals.css`), Geist fonts bundled from the `geist` npm package (no
+font CDN), Drizzle ORM, Postgres 15 (a node-postgres TCP pool,
+`drizzle-orm/node-postgres`; see `src/db/client.ts`), Redis 7 behind an
+Upstash-compatible REST endpoint (`@upstash/redis`, read-through cache and
+rate limits, `src/lib/cache.ts`), a local-disk file store
+(`src/lib/blob-local.ts`, the `hims_blobs` volume), recharts, Vitest +
+Testing Library. All of it runs from `docker-compose.yml`.
 
 ## Where things live
 
@@ -419,7 +462,8 @@ Testing Library.
 - `src/app/patient-portal/*`: the patient-facing portal
 - `src/connectors/*.mock.ts`: mock connectors for the external intake/forms
   and EHR systems
-- `docs/DEPLOYING.md`: deployment guide
+- `docker-compose.yml`, `Dockerfile`, `scripts/docker-entrypoint.sh`, `scripts/docker/`: the Docker stack, image, entrypoint and one-shot jobs
+- `docs/DEPLOYING.md`: deployment guide (Docker only)
 - `docs/OPERATIONS.md`: migrations, backups and restore drills, key custody, data-safety review
 - `scripts/db/`: `db:migrate` runner and frozen baseline, backup, restore drill, schema diff
 - `docs/superpowers/`: historical design specs and implementation plans

@@ -25,7 +25,8 @@ export type NhcxReviewState = (typeof NHCX_REVIEW_STATES)[number]
 export const ELIGIBILITY_PURPOSES = ['validation', 'benefits', 'auth-requirements', 'discovery'] as const
 export type EligibilityPurpose = (typeof ELIGIBILITY_PURPOSES)[number]
 
-export const ELIGIBILITY_CONTEXTS = ['registration', 'admission', 'preauth', 'manual'] as const
+// WS12: + 'checkin' (OPD check-in auto eligibility; scripts/migrations/2026-10-24-ws12-coverage.sql).
+export const ELIGIBILITY_CONTEXTS = ['registration', 'checkin', 'admission', 'preauth', 'manual'] as const
 export type EligibilityContext = (typeof ELIGIBILITY_CONTEXTS)[number]
 
 export const ELIGIBILITY_STATUSES = ['pending', 'eligible', 'not_eligible', 'error', 'no_response'] as const
@@ -50,6 +51,21 @@ export type NhcxResponseSummary = {
   paymentAmountPaise: number | null
   paymentDate: string | null
   hasQueryText: boolean
+  /**
+   * WS12 R6: limits an eligibility answer reported (CoverageEligibilityResponse.insurance[0]);
+   * paise, basis points and an ISO date only. Null when the answer carried none.
+   */
+  coverage?: NhcxCoverageLimits | null
+}
+
+/** WS12 R6: what an eligibility answer said about the cover. Codes UNVERIFIED (docs/ABDM-NHCX.md U21). */
+export type NhcxCoverageLimits = {
+  sumInsuredPaise: number | null
+  balancePaise: number | null
+  copayBp: number | null
+  roomRentLimitPaise: number | null
+  icuLimitPaise: number | null
+  benefitPeriodEnd: string | null
 }
 
 // ---- Protocol (Task 7) ----

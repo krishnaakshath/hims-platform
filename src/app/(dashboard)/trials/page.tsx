@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { FlaskConical, Users } from 'lucide-react'
+import { redirectUnlessTrials } from '@/lib/features-gate'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { listAllTrials } from '@/lib/queries/trials'
@@ -8,6 +9,7 @@ import { listAllTrials } from '@/lib/queries/trials'
 export default async function TrialsPage() {
   // Must be the first statement — see the comment in patients/page.tsx.
   const session = await requireSessionOrRedirect()
+  redirectUnlessTrials() // ENABLE_TRIALS off: this area is hidden
   // Matches LeftNav's roles for this route -- previously nav-hidden only,
   // with no actual server-side check, so a role the nav hides this from
   // could still reach it by URL.

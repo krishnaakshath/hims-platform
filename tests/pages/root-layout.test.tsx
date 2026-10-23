@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-vi.mock('next/font/google', () => ({
-  Geist: () => ({ variable: 'font-geist-sans' }),
-  Geist_Mono: () => ({ variable: 'font-geist-mono' }),
-}))
+vi.mock('geist/font/sans', () => ({ GeistSans: { variable: 'font-geist-sans' } }))
+vi.mock('geist/font/mono', () => ({ GeistMono: { variable: 'font-geist-mono' } }))
 
 async function loadLayout() {
   vi.resetModules()

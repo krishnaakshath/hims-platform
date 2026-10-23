@@ -1528,6 +1528,8 @@ export const patientPolicies = pgTable('patient_policies', {
   sumInsuredPaise: bigint('sum_insured_paise', { mode: 'number' }),
   copayBp: integer('copay_bp'),
   roomRentLimitPaise: bigint('room_rent_limit_paise', { mode: 'number' }),
+  // WS12 T1 (scripts/migrations/2026-10-24-ws12-coverage.sql): per-day ICU limit (R7).
+  icuLimitPaise: bigint('icu_limit_paise', { mode: 'number' }),
   priority: policyPriorityEnum('priority').default('primary').notNull(),
   status: policyStatusEnum('status').default('active').notNull(),
   cardFrontBlobUrl: text('card_front_blob_url'),
@@ -1544,6 +1546,7 @@ export const patientPolicies = pgTable('patient_policies', {
   check('patient_policies_dates', sql`${t.validTo} >= ${t.validFrom}`),
   check('patient_policies_amounts', sql`(${t.sumInsuredPaise} IS NULL OR ${t.sumInsuredPaise} BETWEEN 0 AND 1000000000000) AND (${t.roomRentLimitPaise} IS NULL OR ${t.roomRentLimitPaise} BETWEEN 0 AND 1000000000000) AND (${t.copayBp} IS NULL OR ${t.copayBp} BETWEEN 0 AND 10000)`),
   check('patient_policies_card_pairs', sql`(${t.cardFrontBlobUrl} IS NULL) = (${t.cardFrontSha256} IS NULL) AND (${t.cardBackBlobUrl} IS NULL) = (${t.cardBackSha256} IS NULL)`),
+  check('patient_policies_icu_limit_range', sql`${t.icuLimitPaise} IS NULL OR ${t.icuLimitPaise} BETWEEN 0 AND 1000000000000`), // WS12 T1
 ])
 
 export type PayerProfileRow = typeof payerProfiles.$inferSelect
@@ -1574,6 +1577,7 @@ export const preauthStatusEnum = pgEnum('preauth_status', [
 ])
 export const preauthActionEnum = pgEnum('preauth_action', [
   'request', 'record_query', 'respond_query', 'approve', 'reject', 'request_enhancement', 'approve_enhancement', 'reject_enhancement', 'cancel',
+  'refresh_snapshot', // WS12 T7
 ])
 export const claimStatusEnum = pgEnum('claim_status', [
   'draft', 'submitted', 'queried', 'approved', 'partially_approved', 'rejected', 'appealed', 'settled', 'closed', 'withdrawn',
@@ -2338,6 +2342,9 @@ export const labTests = pgTable('lab_tests', {
   sampleType: labSampleTypeEnum('sample_type'),
   container: labSampleContainerEnum('container'),
   serviceId: integer('service_id').references(() => serviceCatalog.id),
+  // Foundations T10: a test can be switched off; activating an unmapped test is refused.
+  isActive: boolean('is_active').default(true).notNull(),
+  // end Foundations T10
 })
 
 export const labOrders = pgTable('lab_orders', {
@@ -2703,3 +2710,204 @@ export const staffNotificationReads = pgTable('staff_notification_reads', {
   index('staff_notification_reads_read_at_idx').on(t.readAt),
 ])
 // end Wave G
+
+// Foundations T11: payment requests
+// (scripts/migrations/2026-10-23-payment-requests.sql). One row per UPI QR shown at the cash desk.
+// Confirming it with the payer's UTR posts the ordinary receipt (patient_payments, mode 'upi') in
+// the same transaction; the partial unique index on utr makes a second use of a UTR a 23505.
+export const paymentRequests = pgTable('payment_requests', {
+  id: serial('id').primaryKey(),
+  provider: text('provider').default('manual_upi_qr').notNull(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  kind: patientPaymentKindEnum('kind').default('receipt').notNull(),
+  admissionId: integer('admission_id').references(() => admissions.id),
+  invoiceId: integer('invoice_id').references(() => invoices.id),
+  amountPaise: bigint('amount_paise', { mode: 'number' }).notNull(),
+  vpa: text('vpa').notNull(),
+  note: text('note').notNull(),
+  status: text('status').default('pending').notNull(),
+  utr: text('utr'),                               // never written to the audit log
+  paymentId: integer('payment_id').references(() => patientPayments.id),
+  createdBy: text('created_by').notNull(),
+  createdByUserId: integer('created_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  confirmedAt: timestamp('confirmed_at'),
+}, (t) => [
+  check('payment_requests_amount_positive', sql`${t.amountPaise} > 0`),
+  check('payment_requests_status_valid', sql`${t.status} IN ('pending', 'confirmed', 'cancelled')`),
+  check('payment_requests_confirmed_has_utr', sql`${t.status} <> 'confirmed' OR (${t.utr} IS NOT NULL AND ${t.paymentId} IS NOT NULL)`),
+  uniqueIndex('payment_requests_utr_unique').on(t.utr).where(sql`${t.utr} IS NOT NULL`),
+  index('payment_requests_patient_idx').on(t.patientId),
+])
+export type PaymentRequestRow = typeof paymentRequests.$inferSelect
+// Migration-only (scripts/migrations/2026-10-24-payment-requests-utr-guard.sql), like the SP4
+// document triggers: UNIQUE INDEX patient_payments_upi_reference_unique ON patient_payments
+// ((upper(regexp_replace(reference, '[[:space:]-]', '', 'g')))) WHERE mode = 'upi' AND reference IS NOT NULL
+// -- one receipt per normalised UTR across patients (UPI_REFERENCE_UNIQUE in patient-ledger.ts).
+// end Foundations T11
+// Foundations T8: notification log
+// (scripts/migrations/2026-10-23-notification-log.sql). One row per channel attempt of a patient
+// notice: ids, a masked destination, a status and an error class. NEVER a message body.
+export const notificationLog = pgTable('notification_log', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  templateKey: text('template_key').notNull(),
+  channel: text('channel', { enum: ['sms', 'email', 'whatsapp', 'in_app', 'log'] }).notNull(),
+  destinationMasked: text('destination_masked'),
+  status: text('status', { enum: ['queued', 'sent', 'failed', 'skipped', 'log_only'] }).notNull(),
+  providerMessageId: text('provider_message_id'),
+  errorClass: text('error_class'),
+  // Foundations T9: caller-chosen stable key (e.g. form:<id>) so a retried request never double-sends.
+  dedupeKey: text('dedupe_key'),
+  // end Foundations T9
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  index('notification_log_patient_created_idx').on(t.patientId, t.createdAt),
+  // Foundations T9
+  index('notification_log_dedupe_idx').on(t.patientId, t.templateKey, t.dedupeKey),
+  // end Foundations T9
+  check('notification_log_channel_check', sql`${t.channel} IN ('sms', 'email', 'whatsapp', 'in_app', 'log')`),
+  check('notification_log_status_check', sql`${t.status} IN ('queued', 'sent', 'failed', 'skipped', 'log_only')`),
+])
+
+// Per-template channel choice plus the provider-side ids (DLT template id, WhatsApp template
+// name). A template with no row uses DEFAULT_TEMPLATE_CHANNELS (src/lib/queries/notification-log.ts).
+export const notificationTemplateConfig = pgTable('notification_template_config', {
+  templateKey: text('template_key').primaryKey(),
+  channels: text('channels').array().notNull().default(sql`'{}'::text[]`),
+  dltTemplateId: text('dlt_template_id'),
+  whatsappTemplateName: text('whatsapp_template_name'),
+  updatedByName: text('updated_by_name').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  check('notification_template_config_channels_check', sql`${t.channels} <@ ARRAY['sms', 'whatsapp', 'email', 'in_app']::text[]`),
+])
+
+// Per-patient channel preferences, extending the SP5 notices opt-out (patients.notification_opt_out
+// stays the master switch). No row = every channel on.
+export const patientNotificationPreferences = pgTable('patient_notification_preferences', {
+  patientId: text('patient_id').primaryKey().references(() => patients.id, { onDelete: 'cascade' }),
+  sms: boolean('sms').default(true).notNull(),
+  whatsapp: boolean('whatsapp').default(true).notNull(),
+  email: boolean('email').default(true).notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+export type NotificationLogRow = typeof notificationLog.$inferSelect
+export type NotificationTemplateConfigRow = typeof notificationTemplateConfig.$inferSelect
+export type PatientNotificationPreferencesRow = typeof patientNotificationPreferences.$inferSelect
+// end Foundations T8
+
+// WS12 T1: coverage verification (scripts/migrations/2026-10-24-ws12-coverage.sql; spec
+// docs/superpowers/specs/2026-10-23-insurance-verification-design.md §4). Also in this task:
+// patient_policies.icu_limit_paise (+ patient_policies_icu_limit_range) and 'checkin' in
+// nhcx_eligibility_checks_context_valid (ELIGIBILITY_CONTEXTS), edited in place above.
+// MIGRATION-ONLY (drizzle cannot express it): trigger ws12_coverage_verifications_append_only
+// refuses UPDATE/DELETE on coverage_verifications (55000) unless hims.allow_document_purge = 'on'.
+// The import sits inside this block because schema.ts is shared (append-only blocks); ES imports hoist.
+import { ADMISSION_COVERAGE_MODES, COVERAGE_STATES, VERIFICATION_CONTEXTS, VERIFICATION_METHODS, VERIFICATION_RESULTS, VERIFICATION_SOURCES } from '../lib/insurance/coverage'
+
+const WS12_MAX_AMOUNT = sql.raw('1000000000000')
+
+// Every verification result from any source (R1). Append-only; "current" = valid_until > now (R2).
+export const coverageVerifications = pgTable('coverage_verifications', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull(),
+  policyId: integer('policy_id').notNull(),
+  source: text('source', { enum: VERIFICATION_SOURCES }).notNull(),
+  result: text('result', { enum: VERIFICATION_RESULTS }).notNull(),
+  context: text('context', { enum: VERIFICATION_CONTEXTS }).notNull(),
+  nhcxCheckId: integer('nhcx_check_id'),
+  method: text('method', { enum: VERIFICATION_METHODS }),
+  insurerReference: text('insurer_reference'),
+  documentBlobUrl: text('document_blob_url'),
+  documentSha256: text('document_sha256'),
+  documentContentType: text('document_content_type'),
+  verifiedByName: text('verified_by_name').notNull(),
+  verifiedByUserId: integer('verified_by_user_id'),
+  verifiedAt: timestamp('verified_at').notNull(),
+  validUntil: timestamp('valid_until').notNull(),
+  sumInsuredPaise: bigint('sum_insured_paise', { mode: 'number' }),
+  balancePaise: bigint('balance_paise', { mode: 'number' }),
+  copayBp: integer('copay_bp'),
+  roomRentLimitPaise: bigint('room_rent_limit_paise', { mode: 'number' }),
+  icuLimitPaise: bigint('icu_limit_paise', { mode: 'number' }),
+  reportedValidTo: date('reported_valid_to'),
+  note: text('note'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => [
+  foreignKey({ name: 'coverage_verifications_patient_fk', columns: [t.patientId], foreignColumns: [patients.id] }),
+  foreignKey({ name: 'coverage_verifications_policy_fk', columns: [t.policyId], foreignColumns: [patientPolicies.id] }),
+  foreignKey({ name: 'coverage_verifications_check_fk', columns: [t.nhcxCheckId], foreignColumns: [nhcxEligibilityChecks.id] }),
+  foreignKey({ name: 'coverage_verifications_user_fk', columns: [t.verifiedByUserId], foreignColumns: [users.id] }),
+  unique('coverage_verifications_nhcx_check_unique').on(t.nhcxCheckId),
+  index('coverage_verifications_policy_idx').on(t.policyId, t.verifiedAt.desc()),
+  index('coverage_verifications_patient_idx').on(t.patientId),
+  check('coverage_verifications_source_valid', sql`${t.source} IN (${inList(VERIFICATION_SOURCES)})`),
+  check('coverage_verifications_result_valid', sql`${t.result} IN (${inList(VERIFICATION_RESULTS)})`),
+  check('coverage_verifications_context_valid', sql`${t.context} IN (${inList(VERIFICATION_CONTEXTS)})`),
+  check('coverage_verifications_method_valid', sql`${t.method} IS NULL OR ${t.method} IN (${inList(VERIFICATION_METHODS)})`),
+  check('coverage_verifications_manual_method', sql`${t.source} <> 'manual' OR ${t.method} IS NOT NULL`),
+  check('coverage_verifications_manual_no_check', sql`${t.source} <> 'manual' OR ${t.nhcxCheckId} IS NULL`),
+  check('coverage_verifications_reference_length', sql`${t.insurerReference} IS NULL OR char_length(${t.insurerReference}) <= 64`),
+  check('coverage_verifications_document_triple', sql`(${t.documentBlobUrl} IS NULL) = (${t.documentSha256} IS NULL) AND (${t.documentSha256} IS NULL) = (${t.documentContentType} IS NULL)`),
+  check('coverage_verifications_valid_window', sql`${t.validUntil} > ${t.verifiedAt}`),
+  check('coverage_verifications_amounts', sql`(${t.sumInsuredPaise} IS NULL OR ${t.sumInsuredPaise} BETWEEN 0 AND ${WS12_MAX_AMOUNT}) AND (${t.balancePaise} IS NULL OR ${t.balancePaise} BETWEEN 0 AND ${WS12_MAX_AMOUNT}) AND (${t.roomRentLimitPaise} IS NULL OR ${t.roomRentLimitPaise} BETWEEN 0 AND ${WS12_MAX_AMOUNT}) AND (${t.icuLimitPaise} IS NULL OR ${t.icuLimitPaise} BETWEEN 0 AND ${WS12_MAX_AMOUNT}) AND (${t.copayBp} IS NULL OR ${t.copayBp} BETWEEN 0 AND 10000)`),
+  check('coverage_verifications_note_length', sql`${t.note} IS NULL OR char_length(${t.note}) <= 500`),
+])
+
+// One row per admission (R12): how the stay is paid and the coverage verdict when recorded.
+// Written by check-in / PUT /api/admissions/[id]/coverage (WS12 T9); admissions is not changed.
+export const admissionCoverage = pgTable('admission_coverage', {
+  admissionId: integer('admission_id').primaryKey(),
+  mode: text('mode', { enum: ADMISSION_COVERAGE_MODES }).notNull(),
+  policyId: integer('policy_id'),
+  preauthId: integer('preauth_id'),
+  depositRequiredPaise: bigint('deposit_required_paise', { mode: 'number' }).default(0).notNull(),
+  coverageState: text('coverage_state', { enum: COVERAGE_STATES }).notNull(),
+  verificationId: integer('verification_id'),
+  overrideNote: text('override_note'),
+  recordedByName: text('recorded_by_name').notNull(),
+  recordedByUserId: integer('recorded_by_user_id'),
+  recordedAt: timestamp('recorded_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => [
+  foreignKey({ name: 'admission_coverage_admission_fk', columns: [t.admissionId], foreignColumns: [admissions.id] }),
+  foreignKey({ name: 'admission_coverage_policy_fk', columns: [t.policyId], foreignColumns: [patientPolicies.id] }),
+  foreignKey({ name: 'admission_coverage_preauth_fk', columns: [t.preauthId], foreignColumns: [preauths.id] }),
+  foreignKey({ name: 'admission_coverage_verification_fk', columns: [t.verificationId], foreignColumns: [coverageVerifications.id] }),
+  foreignKey({ name: 'admission_coverage_user_fk', columns: [t.recordedByUserId], foreignColumns: [users.id] }),
+  check('admission_coverage_mode_valid', sql`${t.mode} IN (${inList(ADMISSION_COVERAGE_MODES)})`),
+  check('admission_coverage_state_valid', sql`${t.coverageState} IN (${inList(COVERAGE_STATES)})`),
+  check('admission_coverage_mode_policy', sql`(${t.mode} = 'self_pay' AND ${t.policyId} IS NULL AND ${t.preauthId} IS NULL) OR (${t.mode} <> 'self_pay' AND ${t.policyId} IS NOT NULL)`),
+  check('admission_coverage_deposit_range', sql`${t.depositRequiredPaise} BETWEEN 0 AND 10000000000`),
+  check('admission_coverage_override_note_length', sql`${t.overrideNote} IS NULL OR char_length(${t.overrideNote}) <= 500`),
+])
+
+export type CoverageVerificationRow = typeof coverageVerifications.$inferSelect
+export type AdmissionCoverageRow = typeof admissionCoverage.$inferSelect
+// end WS12 T1
+// WS12 T5
+// A conscious ABHA link despite an identity mismatch (spec R9, §4): which fields differed and
+// the staff member's reason. Append-only (trigger ws12_abha_link_overrides_append_only, migration
+// 2026-10-24-ws12-abha-link-overrides.sql). The reason never reaches logs or audit details.
+export const abhaLinkOverrides = pgTable('abha_link_overrides', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  via: text('via', { enum: ['abha_flow', 'scan_and_share'] }).notNull(),
+  shareId: integer('share_id').references(() => abdmProfileShares.id),
+  fields: jsonb('fields').$type<('name' | 'dob' | 'gender')[]>().notNull(),
+  reason: text('reason').notNull(),
+  byName: text('by_name').notNull(),
+  byUserId: integer('by_user_id').references(() => users.id),
+  at: timestamp('at').defaultNow().notNull(),
+}, (t) => [
+  index('abha_link_overrides_patient_idx').on(t.patientId, t.at),
+  check('abha_link_overrides_via_valid', sql`${t.via} IN ('abha_flow', 'scan_and_share')`),
+  check('abha_link_overrides_share_via', sql`(${t.via} = 'scan_and_share') = (${t.shareId} IS NOT NULL)`),
+  check('abha_link_overrides_fields_valid', sql`jsonb_typeof(${t.fields}) = 'array' AND jsonb_array_length(${t.fields}) > 0 AND ${t.fields} <@ '["name", "dob", "gender"]'::jsonb`),
+  check('abha_link_overrides_reason_length', sql`char_length(${t.reason}) BETWEEN 10 AND 300`),
+])
+
+export type AbhaLinkOverrideRow = typeof abhaLinkOverrides.$inferSelect
+// end WS12 T5

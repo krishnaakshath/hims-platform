@@ -30,8 +30,13 @@ vi.mock('@/lib/abdm/flow-store', () => ({
 }))
 
 const recordConsent = vi.fn<(...args: unknown[]) => Promise<{ consentId: number }>>(async () => ({ consentId: 42 }))
-const applyVerifiedAbha = vi.fn<(...args: unknown[]) => Promise<{ ok: true } | { ok: false; error: 'not_found' | 'abha_conflict' | 'flow_not_verified' }>>(async () => ({ ok: true }))
-vi.mock('@/lib/queries/abha-link', () => ({ recordConsent: (...a: unknown[]) => recordConsent(...a), applyVerifiedAbha: (...a: unknown[]) => applyVerifiedAbha(...a) }))
+const applyVerifiedAbha = vi.fn<(...args: unknown[]) => Promise<{ ok: true } | { ok: false; error: 'not_found' | 'abha_conflict' | 'flow_not_verified' } | { ok: false; error: 'identity_mismatch'; fields: string[] }>>(async () => ({ ok: true }))
+// WS12 T5: the chart the ABDM profile is compared with (null = no such patient).
+let chartRow: { name: string; dob: string | null; gender: string | null } | null = { name: 'Asha Rao', dob: '1990-03-12', gender: 'female' }
+const readChartIdentity = vi.fn(async () => chartRow)
+vi.mock('@/lib/queries/abha-link', () => ({
+  recordConsent: (...a: unknown[]) => recordConsent(...a), applyVerifiedAbha: (...a: unknown[]) => applyVerifiedAbha(...a), readChartIdentity: () => readChartIdentity(),
+}))
 vi.mock('@/lib/cache', () => ({ invalidateCache: vi.fn(async () => undefined), patientDetailCacheKey: (id: string) => `p:${id}` }))
 
 const ok = <T,>(value: T) => ({ ok: true as const, value })
@@ -65,6 +70,7 @@ import { POST as loginVerify } from '@/app/api/abdm/abha/login/verify/route'
 import { POST as loginAccount } from '@/app/api/abdm/abha/login/account/route'
 import { POST as linkPost } from '@/app/api/patients/[anonId]/abha/link/route'
 import { MOCK_CONSENT_TEXT, sha256Hex, VERIFICATION_CONSENT_TEXT } from '@/lib/abdm/consent'
+import { IDENTITY_MISMATCH_MESSAGE } from '@/lib/abdm/identity-match'
 
 const F = '11111111-1111-4111-8111-111111111111'
 const req = (path: string, body: unknown) => new NextRequest(`http://localhost${path}`, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) })
@@ -80,7 +86,7 @@ function seedFlow(over: Partial<AbhaFlow> = {}) {
 
 let consoleSpies: ReturnType<typeof vi.spyOn>[] = []
 beforeEach(() => {
-  sessionRole = 'frontdesk'; rateAllowed = true; rateCalls.length = 0; gatewayOn = true; gw = makeGateway(); flows.clear()
+  sessionRole = 'frontdesk'; chartRow = { name: 'Asha Rao', dob: '1990-03-12', gender: 'female' }; rateAllowed = true; rateCalls.length = 0; gatewayOn = true; gw = makeGateway(); flows.clear()
   vi.clearAllMocks()
   consoleSpies = (['log', 'info', 'warn', 'error'] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}))
 })
@@ -239,16 +245,22 @@ describe('login', () => {
     seedFlow({ kind: 'abha_number_aadhaar_otp', txnId: 'L1', consentPurpose: 'abha_verification' })
     const r = await post('login/verify', { flowId: F, otp: '123456' })
     expect(await r.json()).toMatchObject({ step: 'verified', profile: { abhaNumber: '91-1234-5678-9012' } })
-    expect(flows.get(F)!.verified).toEqual({ abhaNumber: '91123456789012', abhaAddress: 'asha.rao@sbx', via: 'abha_number_aadhaar_otp', source: 'abdm' })
+    expect(flows.get(F)!.verified).toEqual({
+      abhaNumber: '91123456789012', abhaAddress: 'asha.rao@sbx', via: 'abha_number_aadhaar_otp', source: 'abdm',
+      profile: { name: 'Asha Rao', gender: 'F', yearOfBirth: 1990, monthOfBirth: null, dayOfBirth: null },
+    })
   })
 })
 
+const ASHA = { name: 'Asha Rao', gender: 'F', yearOfBirth: 1990, monthOfBirth: null, dayOfBirth: null }
+const MOCK_PROFILE = { name: 'Sandbox Mock Patient', gender: null, yearOfBirth: null, monthOfBirth: null, dayOfBirth: null }
+
 describe('link', () => {
   it('links a verified flow and clears it; conflicts and unknown patients are mapped', async () => {
-    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm' } })
+    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: ASHA } })
     expect(await (await link({ flowId: F })).json()).toEqual({ ok: true })
     expect(flows.has(F)).toBe(false)
-    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm' } })
+    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: ASHA } })
     applyVerifiedAbha.mockResolvedValueOnce({ ok: false, error: 'abha_conflict' })
     const c = await link({ flowId: F })
     expect(c.status).toBe(409); expect(await c.json()).toEqual({ error: 'This ABHA is already linked to another patient' })
@@ -261,5 +273,86 @@ describe('link', () => {
     seedFlow({ patientId: 'RD-2', verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm' } })
     expect((await link({ flowId: F }, 'RD-1')).status).toBe(400)
     expect(applyVerifiedAbha).not.toHaveBeenCalled()
+  })
+})
+
+describe('identity guard (WS12 T5)', () => {
+  const REASON = 'Checked Aadhaar'
+  it('the mock ABHA against a differently named chart is a 409 with the field names, and nothing is linked', async () => {
+    chartRow = { name: 'Fathima Beevi', dob: '1979-05-02', gender: 'female' }
+    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm_sandbox_mock', profile: MOCK_PROFILE } })
+    const r = await link({ flowId: F })
+    expect(r.status).toBe(409)
+    expect(await r.json()).toEqual({ error: IDENTITY_MISMATCH_MESSAGE, code: 'identity_mismatch', fields: ['name'] })
+    expect(applyVerifiedAbha).not.toHaveBeenCalled()
+    expect(flows.has(F)).toBe(true)
+  })
+  it('with a reason of at least 10 characters it links with the override', async () => {
+    expect(REASON).toHaveLength(15)
+    chartRow = { name: 'Fathima Beevi', dob: '1979-05-02', gender: 'female' }
+    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm_sandbox_mock', profile: MOCK_PROFILE } })
+    const r = await link({ flowId: F, mismatchReason: `  ${REASON} ` })
+    expect(r.status).toBe(200)
+    expect(applyVerifiedAbha).toHaveBeenCalledWith('RD-1', expect.objectContaining({ flowId: F }), expect.objectContaining({ name: 'Desk One' }), { override: { fields: ['name'], reason: REASON } })
+    expect(JSON.stringify([logAudit.mock.calls, consoleText()])).not.toMatch(/Fathima|Sandbox Mock|Checked Aadhaar/)
+  })
+  it('a reason shorter than 10 or longer than 300 characters is refused', async () => {
+    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: MOCK_PROFILE } })
+    expect((await link({ flowId: F, mismatchReason: 'too short' })).status).toBe(400)
+    expect((await link({ flowId: F, mismatchReason: 'x'.repeat(301) })).status).toBe(400)
+    expect(applyVerifiedAbha).not.toHaveBeenCalled()
+  })
+  it('a matching profile links without a reason or override', async () => {
+    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: ASHA } })
+    expect((await link({ flowId: F })).status).toBe(200)
+    expect(applyVerifiedAbha).toHaveBeenCalledWith('RD-1', expect.anything(), expect.anything(), {})
+  })
+  it('a flow without a stored profile is a name mismatch', async () => {
+    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm' } })
+    const r = await link({ flowId: F })
+    expect(r.status).toBe(409); expect((await r.json()).fields).toEqual(['name'])
+  })
+  it('an unknown patient is a 404 before any comparison', async () => {
+    chartRow = null
+    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: ASHA } })
+    expect((await link({ flowId: F })).status).toBe(404)
+  })
+  it('a mismatch found under the lock is a 409 too', async () => {
+    seedFlow({ verified: { abhaNumber: '91123456789012', abhaAddress: null, via: 'mobile_otp', source: 'abdm', profile: ASHA } })
+    applyVerifiedAbha.mockResolvedValueOnce({ ok: false, error: 'identity_mismatch', fields: ['dob'] })
+    const r = await link({ flowId: F })
+    expect(r.status).toBe(409); expect(await r.json()).toEqual({ error: IDENTITY_MISMATCH_MESSAGE, code: 'identity_mismatch', fields: ['dob'] })
+  })
+  it('a verify step for a chosen patient stores the profile and returns the comparison', async () => {
+    chartRow = { name: 'Fathima Beevi', dob: '1979-05-02', gender: 'male' }
+    seedFlow({ kind: 'abha_number_aadhaar_otp', txnId: 'L1', consentPurpose: 'abha_verification', patientId: 'RD-1' })
+    const r = await post('login/verify', { flowId: F, otp: '123456' })
+    const body = await r.json()
+    expect(body.comparison).toEqual({
+      mismatch: true, mismatchedFields: ['name', 'dob', 'gender'],
+      fields: [
+        { field: 'name', result: 'mismatch', chart: 'Fathima Beevi', abdm: 'Asha Rao' },
+        { field: 'dob', result: 'mismatch', chart: '1979-05-02', abdm: '1990' },
+        { field: 'gender', result: 'mismatch', chart: 'male', abdm: 'female' },
+      ],
+    })
+    expect(flows.get(F)!.verified!.profile).toEqual(ASHA)
+    expect(JSON.stringify([logAudit.mock.calls, consoleText()])).not.toMatch(/Fathima|Asha/)
+  })
+  it('enrolment and account choice for a chosen patient return the comparison; without a patient there is none', async () => {
+    seedFlow({ txnId: 'T1', patientId: 'RD-1' })
+    const e = await (await post('enrol/verify', { flowId: F, otp: '123456', mobile: '9876500903' })).json()
+    expect(e.comparison).toMatchObject({ mismatch: false, mismatchedFields: [] })
+    expect(flows.get(F)!.verified!.profile).toEqual(ASHA)
+
+    seedFlow({ kind: 'mobile_otp', txnId: 'L1', transientToken: 'T300', accounts: ['91111122223333'], patientId: 'RD-1' })
+    const a = await (await post('login/account', { flowId: F, accountIndex: 0 })).json()
+    expect(a.comparison).toMatchObject({ mismatch: false })
+    expect(flows.get(F)!.verified!.profile).toEqual(ASHA)
+
+    seedFlow({ kind: 'abha_number_aadhaar_otp', txnId: 'L1', consentPurpose: 'abha_verification' })
+    const n = await (await post('login/verify', { flowId: F, otp: '123456' })).json()
+    expect(n).not.toHaveProperty('comparison')
+    expect(readChartIdentity).toHaveBeenCalledTimes(2)
   })
 })

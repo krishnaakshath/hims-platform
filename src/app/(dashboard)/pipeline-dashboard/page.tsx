@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import type { ComponentType } from 'react'
 import { UserPlus, FileCheck2, ClipboardCheck, Hourglass } from 'lucide-react'
+import { redirectUnlessTrials } from '@/lib/features-gate'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getPipelinePerformance, getPipelineTrend } from '@/lib/queries/pipeline-dashboard'
@@ -58,6 +59,7 @@ function resolveRange(preset: string | undefined, from: string | undefined, to: 
 
 export default async function PipelineDashboardPage({ searchParams }: { searchParams: Promise<{ preset?: string; from?: string; to?: string }> }) {
   const session = await requireSessionOrRedirect()
+  redirectUnlessTrials() // ENABLE_TRIALS off: this area is hidden
   // LeftNav.tsx:64 — the Pipeline Dashboard entry is rendered for admin/crc
   // only. Same list, same redirect target as workbook/page.tsx:12.
   if (!['admin', 'crc'].includes(session.role)) redirect('/')

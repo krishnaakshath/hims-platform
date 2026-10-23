@@ -1,9 +1,11 @@
 import { Redis } from '@upstash/redis'
 import { ServiceNotConfiguredError } from '@/lib/service-config'
 
-// Vercel's Upstash Redis integration provisions KV_REST_API_URL / KV_REST_API_TOKEN
-// (not UPSTASH_REDIS_REST_URL/TOKEN, which is what Redis.fromEnv() looks for) —
-// construct the client explicitly with those names.
+// Redis over its Upstash-compatible REST API: in Docker, the compose `redis-rest`
+// service (scripts/dev/redis-rest-shim.mjs in front of serverless-redis-http and
+// the `redis` container). KV_REST_API_URL / KV_REST_API_TOKEN name it (not
+// UPSTASH_REDIS_REST_URL/TOKEN, which Redis.fromEnv() looks for), so the client
+// is constructed explicitly with those names.
 function createRedis() {
   return new Redis({
     url: process.env.KV_REST_API_URL!,

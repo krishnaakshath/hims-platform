@@ -88,7 +88,12 @@ import { INTEGRATION_SETTINGS_ROLES } from '@/lib/role-policy'
 import { GET as getNhcxPayload } from '@/app/api/rcm/nhcx/exchanges/[id]/payload/route'
 import { POST as postNhcxReview } from '@/app/api/rcm/nhcx/exchanges/[id]/review/route'
 import { POST as postIntegrationTest } from '@/app/api/settings/integrations/test/route'
+import { PUT as putNotificationTemplates } from '@/app/api/settings/notification-templates/route' // Foundations T8
+import { GET as getPatientNotices } from '@/app/api/patients/[anonId]/notices/route' // Foundations T9
 // end SP8
+// WS12 T6
+import { POST as postSimulateAbdmShare } from '@/app/api/abdm/shares/simulate/route'
+// end WS12 T6
 
 // Module-scope mutable role, reset in afterEach -- the vi.mock('@/lib/auth', ...)
 // + importActual pattern from tests/api/patients.test.ts:27-29, except the
@@ -130,7 +135,6 @@ afterEach(() => {
 import { PUT as putUhidPrefix } from '@/app/api/settings/uhid-prefix/route'
 import { GET as getWorkbookFull } from '@/app/api/workbook/full/route'
 import { GET as getWorkbookExport } from '@/app/api/workbook/export/route'
-import { POST as postMockPayment } from '@/app/api/mock-payments/route'
 import { GET as listBroadcasts, POST as postBroadcast } from '@/app/api/broadcasts/route'
 import { GET as getBroadcast } from '@/app/api/broadcasts/[id]/route'
 import { GET as listBroadcastRecipients } from '@/app/api/broadcasts/recipients/route'
@@ -197,35 +201,6 @@ describe('GET /api/workbook/export', () => {
     expect(res.status).toBe(403)
     expect(buildWorkbookSpy).not.toHaveBeenCalled()
     buildWorkbookSpy.mockRestore()
-  })
-})
-
-describe('POST /api/mock-payments', () => {
-  // /billing/pay's own page gate is admin/crc/billing, matching
-  // VirtualCardPaymentForm's only POST target -- every other role 403s.
-  it('403s every role outside admin, crc, billing', async () => {
-    for (const role of deniedFor(['admin', 'crc', 'billing'])) {
-      sessionRole = role
-      const res = await postMockPayment(
-        new NextRequest('http://localhost/api/mock-payments', { method: 'POST', body: JSON.stringify({}) })
-      )
-      expect(res.status, `role ${role}`).toBe(403)
-    }
-  })
-
-  // An intentionally invalid (empty) body so an allowed role's response
-  // proves it: the gate must let admin/crc/billing through to the route's
-  // own Zod validation, which then 400s on the missing fields -- never
-  // recording a payment. Anything other than 403 here shows the gate didn't
-  // block them; the 400 itself is the route's own concern, not this test's.
-  it('does not 403 admin, crc, or billing', async () => {
-    for (const role of ['admin', 'crc', 'billing'] as const) {
-      sessionRole = role
-      const res = await postMockPayment(
-        new NextRequest('http://localhost/api/mock-payments', { method: 'POST', body: JSON.stringify({}) })
-      )
-      expect(res.status, `role ${role}`).not.toBe(403)
-    }
   })
 })
 
@@ -493,6 +468,9 @@ import { POST as finaliseInvoiceRoute } from '@/app/api/billing/invoices/[id]/fi
 import { POST as discardInvoiceRoute } from '@/app/api/billing/invoices/[id]/discard/route'
 import { POST as cancelInvoiceRoute } from '@/app/api/billing/invoices/[id]/cancel/route'
 import { POST as postPaymentRoute } from '@/app/api/billing/payments/route'
+import { POST as postUpiRequestRoute } from '@/app/api/billing/payments/upi-request/route' // Foundations T11
+import { POST as postUpiConfirmRoute } from '@/app/api/billing/payments/upi-request/[id]/confirm/route' // Foundations T11
+import { POST as postUpiCancelRoute } from '@/app/api/billing/payments/upi-request/[id]/cancel/route' // Foundations T11
 import { POST as postRefundRoute } from '@/app/api/billing/refunds/route'
 // end SP4
 // SP5
@@ -622,6 +600,15 @@ import { ACCOUNT_ROLES, PAYER_LIST_ROLES, PHARMACY_STOCK_READ_ROLES } from '@/li
 import { GET as getReportCsv } from '@/app/api/reports/[report]/csv/route'
 import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
 // end Wave I
+// WS12 T2
+import { GET as getPatientCoverage } from '@/app/api/patients/[anonId]/coverage/route'
+import { COVERAGE_READ_ROLES } from '@/lib/role-policy'
+// end WS12 T2
+// WS12 T3
+import { POST as postPolicyVerification } from '@/app/api/rcm/policies/[id]/verifications/route'
+import { GET as getVerificationDocument } from '@/app/api/rcm/verification-documents/[id]/route'
+import { COVERAGE_VERIFY_ROLES } from '@/lib/role-policy'
+// end WS12 T3
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1070,6 +1057,24 @@ export const API_GATES: ApiGateCase[] = [
     ]
   })(),
   // end Wave I
+  // Foundations T11: UPI QR request and confirm -- CASH_DESK_ROLES, like POST /api/billing/payments.
+  { name: 'POST /api/billing/payments/upi-request', call: () => settle(() => postUpiRequestRoute(send('POST', '/api/billing/payments/upi-request'))), allowed: [...CASH_DESK_ROLES] },
+  { name: 'POST /api/billing/payments/upi-request/[id]/confirm', call: () => settle(() => postUpiConfirmRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/confirm`), ctx({ id: BOGUS_ID }))), allowed: [...CASH_DESK_ROLES] },
+  { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => settle(() => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`), ctx({ id: BOGUS_ID }))), allowed: [...CASH_DESK_ROLES] },
+  // end Foundations T11
+  { name: 'PUT /api/settings/notification-templates', call: () => settle(() => putNotificationTemplates(send('PUT', '/api/settings/notification-templates'))), allowed: ['admin'] }, // Foundations T8
+  { name: 'GET /api/patients/[anonId]/notices', call: () => getPatientNotices(get(`/api/patients/${BOGUS_PATIENT}/notices`), ctx({ anonId: BOGUS_PATIENT })), allowed: ['admin', 'crc', 'pi', 'frontdesk'] }, // Foundations T9
+  // WS12 T6
+  { name: 'POST /api/abdm/shares/simulate', call: () => settle(() => postSimulateAbdmShare(send('POST', '/api/abdm/shares/simulate'))), allowed: [...ABDM_SHARE_QUEUE_ROLES] },
+  // end WS12 T6
+  // WS12 T2: patient coverage summary (unknown patient: 404 after the gate).
+  { name: 'GET /api/patients/[anonId]/coverage', call: () => settle(() => getPatientCoverage(get(`/api/patients/${BOGUS_PATIENT}/coverage`), ctx({ anonId: BOGUS_PATIENT }))), allowed: [...COVERAGE_READ_ROLES] },
+  // end WS12 T2
+  // WS12 T3: manual verification (multipart: allowed roles get 400 for a JSON body, so no SP8_WRITE_GATES row;
+  // deny-before-readUpload is pinned in tests/api/coverage-manual-verification.test.ts) and its document stream.
+  { name: 'POST /api/rcm/policies/[id]/verifications', call: () => settle(() => postPolicyVerification(send('POST', `/api/rcm/policies/${BOGUS_ID}/verifications`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_VERIFY_ROLES] },
+  { name: 'GET /api/rcm/verification-documents/[id]', call: () => settle(() => getVerificationDocument(get(`/api/rcm/verification-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_READ_ROLES] },
+  // end WS12 T3
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1221,6 +1226,15 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   { name: 'POST /api/nhcx/eligibility', call: () => postNhcxEligibility(send('POST', '/api/nhcx/eligibility', NOT_JSON)), allowed: NHCX_ELIGIBILITY_ROLES },
   { name: 'POST /api/rcm/nhcx/exchanges/[id]/review', call: () => postNhcxReview(send('POST', `/api/rcm/nhcx/exchanges/${BOGUS_ID}/review`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: NHCX_EXCHANGE_ROLES },
   { name: 'POST /api/settings/integrations/test', call: () => postIntegrationTest(send('POST', '/api/settings/integrations/test', NOT_JSON)), allowed: INTEGRATION_SETTINGS_ROLES },
+  // Foundations T11
+  { name: 'POST /api/billing/payments/upi-request', call: () => postUpiRequestRoute(send('POST', '/api/billing/payments/upi-request', NOT_JSON)), allowed: CASH_DESK_ROLES },
+  { name: 'POST /api/billing/payments/upi-request/[id]/confirm', call: () => postUpiConfirmRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/confirm`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
+  { name: 'POST /api/billing/payments/upi-request/[id]/cancel', call: () => postUpiCancelRoute(send('POST', `/api/billing/payments/upi-request/${BOGUS_ID}/cancel`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CASH_DESK_ROLES },
+  // end Foundations T11
+  { name: 'PUT /api/settings/notification-templates', call: () => putNotificationTemplates(send('PUT', '/api/settings/notification-templates', NOT_JSON)), allowed: ['admin'] }, // Foundations T8
+  // WS12 T6
+  { name: 'POST /api/abdm/shares/simulate', call: () => postSimulateAbdmShare(send('POST', '/api/abdm/shares/simulate', NOT_JSON)), allowed: ABDM_SHARE_QUEUE_ROLES },
+  // end WS12 T6
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {
@@ -1267,6 +1281,21 @@ describe.each(API_GATES)('$name', (c) => {
   })
 })
 
+// ENABLE_TRIALS off: the trial and workbook routes answer 404 to every role.
+describe.each(API_GATES.filter((r) => /\/api\/(trials|workbook)\b/.test(r.name)))('$name (ENABLE_TRIALS off)', (c) => {
+  it('404s every role', async () => {
+    vi.stubEnv('ENABLE_TRIALS', '')
+    try {
+      for (const role of ALL_ROLES) {
+        sessionRole = role
+        const res = await c.call()
+        expect.soft(res.status, `${c.name} for ${role}`).toBe(404)
+        expect.soft(await res.json()).toEqual({ error: 'Not found' })
+      }
+    } finally { vi.unstubAllEnvs() }
+  })
+})
+
 // Wave I (P2-14): every exported handler of every src/app/api/**/route.ts is
 // pinned here -- an API_GATES row, a deny-before-parse row, one of the bespoke
 // describe blocks at the top of this file -- or carries a documented exemption
@@ -1275,7 +1304,7 @@ describe.each(API_GATES)('$name', (c) => {
 // without a row fails this test; so does an exemption left behind for a
 // handler that no longer exists.
 const BESPOKE_ROWS = [
-  'GET /api/workbook/full', 'GET /api/workbook/export', 'POST /api/mock-payments',
+  'GET /api/workbook/full', 'GET /api/workbook/export',
   'GET /api/broadcasts', 'POST /api/broadcasts', 'GET /api/broadcasts/[id]', 'GET /api/broadcasts/recipients',
   'GET /api/reviews', 'POST /api/reviews', 'GET /api/reviews/[id]', 'PUT /api/reviews/[id]',
 ]

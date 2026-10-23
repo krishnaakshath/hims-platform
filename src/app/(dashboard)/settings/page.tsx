@@ -1,10 +1,10 @@
-import { Building, Building2, SlidersHorizontal, UserCircle2, Users, IdCard, Monitor, FlaskConical } from 'lucide-react'
+import { Building, Building2, SlidersHorizontal, UserCircle2, Users, IdCard, Monitor, FlaskConical, BellRing } from 'lucide-react'
 import { redirect } from 'next/navigation'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { getSettingsSummary } from '@/lib/queries/settings'
 import { getOwnAccount } from '@/lib/queries/own-account'
 import { AccountPanel } from '@/components/account/AccountPanel'
-import { listAllProviders } from '@/lib/queries/providers'
+import { listAllProvidersWithTariffFee } from '@/lib/queries/providers'
 import { listAllUsers } from '@/lib/queries/users'
 import { listDepartments } from '@/lib/queries/departments'
 import { AutoClassifyToggle } from '@/components/AutoClassifyToggle'
@@ -23,6 +23,11 @@ import { LabServiceAreaPanel } from '@/components/settings/LabServiceAreaPanel'
 import { HomeCollectionWindowsPanel } from '@/components/settings/HomeCollectionWindowsPanel'
 import { LabTestSetupPanel } from '@/components/settings/LabTestSetupPanel'
 // end SP5
+// Foundations T8
+import { listNotificationTemplateConfigs } from '@/lib/queries/notification-log'
+import { getChannelRegistry } from '@/lib/notify/registry'
+import { NotificationTemplatesPanel } from '@/components/settings/NotificationTemplatesPanel'
+// end Foundations T8
 
 const SECTION = 'rounded-md border border-border bg-card p-5 shadow-none'
 
@@ -34,7 +39,7 @@ export default async function SettingsPage() {
   // role, per explicit product direction.
   if (!['admin', 'pi'].includes(session.role)) redirect('/')
   const settings = await getSettingsSummary()
-  const providers = await listAllProviders()
+  const providers = await listAllProvidersWithTariffFee()
   const staff = await listAllUsers()
   const departments = await listDepartments()
   const isAdmin = session.role === 'admin'
@@ -116,6 +121,20 @@ export default async function SettingsPage() {
   )
   // end SP5
 
+  // Foundations T8: admin only. Only whether each channel is set up is passed down, never a credential.
+  const registry = getChannelRegistry()
+  const notificationConfigs = isAdmin ? await listNotificationTemplateConfigs() : []
+  const notificationsTab = isAdmin ? (
+    <section className={SECTION}>
+      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Patient notice channels</h2>
+      <NotificationTemplatesPanel
+        configs={notificationConfigs}
+        configured={{ sms: registry.sms.configured(), whatsapp: registry.whatsapp.configured(), email: registry.email.configured(), in_app: registry.in_app.configured() }}
+      />
+    </section>
+  ) : null
+  // end Foundations T8
+
   const accountTab = <AccountPanel name={session.name} role={session.role} account={account} />
 
   return (
@@ -129,6 +148,7 @@ export default async function SettingsPage() {
         { id: 'departments', label: <><Building className="h-4 w-4" aria-hidden="true" />Departments</>, content: departmentsTab },
         { id: 'staff', label: <><IdCard className="h-4 w-4" aria-hidden="true" />Staff</>, content: staffTab },
         { id: 'lab-setup', label: <><FlaskConical className="h-4 w-4" aria-hidden="true" />Lab setup</>, content: labSetupTab }, // SP5
+        ...(notificationsTab ? [{ id: 'notifications', label: <><BellRing className="h-4 w-4" aria-hidden="true" />Notifications</>, content: notificationsTab }] : []), // Foundations T8
         { id: 'account', label: <><UserCircle2 className="h-4 w-4" aria-hidden="true" />Account</>, content: accountTab },
       ]} />
     </div>

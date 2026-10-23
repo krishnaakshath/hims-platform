@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { get } from '@vercel/blob'
 import { requireSession } from '@/lib/auth'
 import { INSURANCE_CARD_READ_ROLES } from '@/lib/role-policy'
 import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
 import { eq } from 'drizzle-orm'
-import { requireBlobStore, withServiceGuard } from '@/lib/service-config'
+import { withServiceGuard } from '@/lib/service-config'
+import { readPrivateBlob } from '@/lib/blob-store'
 
 // Serves the actual card image bytes. The blob store is private, so the
 // Medical Record page's <img>/<a> can no longer point at patients.primaryCard*Url
 // directly -- a browser has no way to authenticate to the blob store on its
 // own. This route is the only thing that can reach the bytes (server-side,
-// using our own token), gated to INSURANCE_CARD_READ_ROLES (admin, crc, pi,
+// from the server's file store), gated to INSURANCE_CARD_READ_ROLES (admin, crc, pi,
 // frontdesk, billing).
 export const GET = withServiceGuard('insurance card view', async function GET(request: NextRequest, { params }: { params: Promise<{ anonId: string; side: string }> }) {
   const session = await requireSession()
@@ -28,13 +28,12 @@ export const GET = withServiceGuard('insurance card view', async function GET(re
   const storedUrl = side === 'front' ? row?.front : row?.back
   if (!storedUrl) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  requireBlobStore()
-  const blob = await get(storedUrl, { access: 'private' })
-  if (!blob || blob.statusCode !== 200) return NextResponse.json({ error: 'Stored file is missing' }, { status: 404 })
+  const blob = await readPrivateBlob(storedUrl)
+  if (!blob) return NextResponse.json({ error: 'Stored file is missing' }, { status: 404 })
 
-  return new NextResponse(blob.stream, {
+  return new NextResponse(Buffer.from(blob.bytes), {
     headers: {
-      'Content-Type': blob.blob.contentType,
+      'Content-Type': blob.contentType,
       'Cache-Control': 'private, max-age=0, must-revalidate',
     },
   })

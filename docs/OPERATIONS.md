@@ -7,15 +7,15 @@ is in [DEPLOYING.md](DEPLOYING.md); this covers keeping it safe afterwards.
 
 | Store | Holds | Source of truth? | If lost |
 |---|---|---|---|
-| **Postgres** (Neon) | Every record: patients, encounters, notes, orders, results, prescriptions, MAR, bills, receipts, refunds, coding, audit log, staff accounts, settings. Aadhaar/ID numbers and MFA secrets are stored AES-256-GCM encrypted with `IDENTITY_ENCRYPTION_KEY` | **Yes** | Restore from Neon point-in-time restore or a `db:backup` dump |
-| **Vercel Blob** (private store) | Files: uploaded documents (`documents/...`), insurance card images, imaging attachments, released lab report PDFs (`lab-reports/...`). Postgres holds each file's address and metadata | **Yes, for the files** | Postgres rows survive but downloads fail. Blob is not covered by Neon backups: back it up separately (below) |
-| **Upstash Redis** | Read-through cache (patient lists, dashboards), rate-limit counters, one-time sign-in codes (hashed, minutes-long TTL), used-TOTP markers (replay protection) | **No**, never | Nothing permanent. The cache refills from Postgres; codes in flight must be re-sent; rate-limit windows restart. While Redis is *down or unset*, sign-in, MFA and the booking widget answer 503 (fail closed) |
-| **Vercel env vars** | Secrets and configuration (`DATABASE_URL`, `SESSION_SECRET`, `IDENTITY_ENCRYPTION_KEY`, `ADMIN_*`, `BRAND_*`, ...) | **Yes, for keys** | See "Encryption keys". Keep an escrowed copy of the two keys outside Vercel |
+| **Postgres** (`postgres` service, volume `hims_pg`) | Every record: patients, encounters, notes, orders, results, prescriptions, MAR, bills, receipts, refunds, coding, audit log, staff accounts, settings. Aadhaar/ID numbers and MFA secrets are stored AES-256-GCM encrypted with `IDENTITY_ENCRYPTION_KEY` | **Yes** | Restore a `pg_dump` backup (below) |
+| **Local file store** (volume `hims_blobs`, `/app/data/blobs` in the app) | Files: uploaded documents, insurance card images, imaging attachments, released lab report PDFs, RCM claim copies and attachments. Stored under hashed names with a sidecar holding the content type and a SHA-256; Postgres holds each file's opaque `local:` address and metadata | **Yes, for the files** | Postgres rows survive but downloads fail. Not in the database dump: back the volume up separately (below) |
+| **Redis** (`redis` service, volume `hims_redis`) | Read-through cache (patient lists, dashboards), rate-limit counters, one-time sign-in codes (hashed, minutes-long TTL), used-TOTP markers (replay protection) | **No**, never | Nothing permanent. The cache refills from Postgres; codes in flight must be re-sent; rate-limit windows restart. While Redis is *down*, sign-in, MFA and the booking widget answer 503 (fail closed) |
+| **`.env.docker`** on the host | Secrets and configuration (`SESSION_SECRET`, `IDENTITY_ENCRYPTION_KEY`, `INTEGRATION_PAYLOAD_KEY`, `ADMIN_*`, `BRAND_*`, ...) | **Yes, for keys** | See "Encryption keys". Keep an escrowed copy of the keys off the host |
 
 Redis must never become a source of truth: anything that has to survive goes
 in Postgres.
 
-## Migrations (`npm run db:migrate`)
+## Migrations (automatic: the `migrate` service and the app entrypoint)
 
 - `scripts/db/baseline.sql`: the full schema as of the day the ledger was
   introduced (exported from `src/db/schema.ts` with `drizzle-kit export`).
@@ -30,10 +30,10 @@ in Postgres.
 
 | Command | Does |
 |---|---|
-| `npm run db:migrate:status` | Lists every file as `applied`, `adopted`, `pending` or `CHANGED`; exit 2 if any applied file changed |
-| `npm run db:migrate -- --dry-run` | Shows what would run; writes nothing |
-| `npm run db:migrate` | Applies what is pending (see DEPLOYING.md section 4) |
-| `npm run db:schema-diff -- <db A> <db B>` | Compares two databases' columns, constraints, indexes, triggers, enums, functions and extensions |
+| `docker compose run --rm migrate migrate --status` | Lists every file as `applied`, `adopted`, `pending` or `CHANGED`; exit 2 if any applied file changed |
+| `docker compose run --rm migrate migrate --dry-run` | Shows what would run; writes nothing |
+| `docker compose run --rm migrate` | Applies what is pending (also runs on every `docker compose up` and app start) |
+| `docker compose run --rm migrate npm run db:schema-diff -- <db A> <db B>` | Compares two databases' columns, constraints, indexes, triggers, enums, functions and extensions |
 
 Behaviour worth knowing:
 
@@ -48,8 +48,8 @@ Behaviour worth knowing:
   attempted. Fix forward with a new file; re-running is safe.
 - **Drift**: if a recorded file's content changed, nothing runs and each
   changed file is printed with both checksums. Restore the original text.
-- **Neon**: use the direct endpoint (`DATABASE_URL_UNPOOLED`); the runner
-  refuses a `-pooler` host. TLS is on for every non-local host (`src/db/url.ts`).
+- **TLS**: off for the compose `postgres` service and loopback, on for any
+  other host (`src/db/url.ts`).
 
 Verified on 2026-10-08: a database built from empty by `db:migrate` and the
 long-running development database (built by `db:push` plus hand-applied SQL)
@@ -59,39 +59,48 @@ development database adopts cleanly with a no-op second run.
 
 ## Backups
 
-Two layers. Neon is the primary one; dumps are the independent copy.
+Everything to back up is on the host: the database (volume `hims_pg`), the
+file store (volume `hims_blobs`) and `.env.docker` (keys; escrow it, do not
+store it next to the dumps). Redis needs no backup. Commands below run from
+the repository directory on the host.
 
-### 1. Neon point-in-time restore (primary)
-
-Neon keeps a history of every write (the "restore window"; its length
-depends on the plan: set it to at least 7 days, 30 for production clinics).
-Within that window any moment can be restored:
-
-1. Neon console > the project > **Branches** > **Restore** (or create a branch
-   from a past timestamp to inspect first, without touching production).
-2. Prefer "restore to a new branch at time T", check it (below), then point
-   the Vercel project's `DATABASE_URL`/`DATABASE_URL_UNPOOLED` at that branch
-   and redeploy, or restore the main branch in place once you are sure.
-3. Restoring in place discards writes after T: export anything needed from
-   the old state first (Neon keeps a backup branch of the pre-restore state).
-
-### 2. Logical dumps (`npm run db:backup`)
+### 1. Database dump (`pg_dump` in the postgres container)
 
 ```bash
-DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:backup             # -> backups/hims-<db>-<UTC time>.dump
-DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:backup -- --out /secure/path
+mkdir -p backups
+docker compose exec -T postgres pg_dump -U postgres -d hims \
+  --format=custom --no-owner --no-privileges > backups/hims-$(date -u +%Y%m%dT%H%M%SZ).dump
+# same thing: npm run docker:backup
+sha256sum backups/hims-*.dump > backups/SHA256SUMS      # macOS: shasum -a 256
 ```
 
-`pg_dump --format=custom` (compressed), owner and grants stripped, a
-`.sha256` written next to it, then read back with `pg_restore --list`. It
-needs PostgreSQL client tools at least as new as the server (`brew install
-libpq`, or `postgresql-client-17`); without them it prints how to install
-them and exits 2. `PG_BIN_DIR` selects a specific installation. The password
-is passed in the environment, never on the command line.
+The dump streams out of the container to the host; the password never
+appears on a command line. To check it is readable:
+`docker compose exec -T postgres pg_restore --list < backups/<file>.dump | head`.
 
-A dump contains every patient record. Store it encrypted (an encrypted
-bucket or an encrypted volume), never on a shared drive, never in git
-(`backups/` is git-ignored), and never next to the encryption key.
+Alternative inside the app image (pg_dump 17 client, writes a `.sha256` and
+verifies the dump with `pg_restore --list`):
+
+```bash
+docker compose exec app npm run db:backup -- --out /tmp/backups
+docker compose cp app:/tmp/backups ./backups/
+```
+
+### 2. File store (`hims_blobs` volume)
+
+```bash
+docker compose exec -T app tar czf - -C /app/data blobs > backups/blobs-$(date -u +%Y%m%dT%H%M%SZ).tgz
+```
+
+A database dump and a file-store archive taken minutes apart are consistent
+enough: a row whose file is missing shows a failed download, never a wrong
+file (each file carries its own SHA-256 and is refused on mismatch).
+
+Automate both daily from host cron (as a user in the `docker` group), copy
+them to encrypted storage off the host (in India), and prune by the retention
+below. A dump contains every patient record: store it encrypted, never on a
+shared drive, never in git (`backups/` is git-ignored), and never next to the
+encryption keys.
 
 **Retention** (adjust to the client's legal advice; Indian clinical
 establishments commonly keep in-patient records for at least 3 years and
@@ -99,44 +108,54 @@ clinical-trial records for longer):
 
 | Copy | Frequency | Keep |
 |---|---|---|
-| Neon history | continuous | 7-30 days (plan setting) |
-| `db:backup` dump | daily (automate from a trusted runner) | 30 daily, 12 monthly |
-| Pre-change dump | before every `db:migrate` on production | until the next release is stable |
-| Blob store copy | weekly, and before bulk deletions | 12 monthly |
+| Database dump | daily | 30 daily, 12 monthly |
+| Pre-upgrade dump | before every `git pull` + `up -d` | until the next release is stable |
+| File store archive | daily (or weekly for small sites), and before bulk deletions | 30 daily, 12 monthly |
 
-**Blob files** are not in the dump. Copy the store with the Vercel Blob API
-or CLI (list and download every object under `documents/`, `lab-reports/`,
-insurance card and imaging paths) to the same encrypted storage. A dump and a
-Blob copy taken minutes apart are consistent enough: a row whose file is
-missing shows a failed download, never a wrong file.
+### Restore
+
+Into a fresh stack (or after `docker compose down` + removing the volumes,
+**only** when you mean to replace the data):
+
+```bash
+docker compose up -d postgres
+docker compose exec -T postgres pg_restore -U postgres -d hims --no-owner --no-privileges < backups/<file>.dump
+docker compose up -d                                   # migrate brings it up to this checkout
+docker compose exec -T app sh -c 'tar xzf - -C /app/data' < backups/blobs-<time>.tgz
+```
+
+Restore into an empty `hims` database: on a database that already has the
+schema, `pg_restore` reports conflicts. The app must run with the same
+`IDENTITY_ENCRYPTION_KEY` the data was written with.
 
 ### Restore drill (quarterly, and after any backup change)
 
-`npm run db:restore-check -- <dump>` restores a dump into an empty scratch
+`npm run db:restore-check -- <dump>` restores a dump into an EMPTY scratch
 database and checks it. It refuses the live database and any non-empty target.
+Inside the stack:
 
-1. Create an empty target: a new Neon branch with no data, or a local
-   database. Put its direct URL in `RESTORE_DATABASE_URL`.
-2. Run:
-   ```bash
-   RESTORE_DATABASE_URL='postgres://...' npm run db:restore-check -- backups/hims-neondb-20261008T050403Z.dump
-   ```
-3. Check the output:
-   - [ ] `checksum ok` (the dump matches its `.sha256`)
-   - [ ] `ledger: every migration in this checkout is recorded` (or a known
-         number of newer migrations if the code is ahead of the dump)
-   - [ ] `billing immutability triggers present`
-   - [ ] row counts of patients, users, encounters, invoices, payments,
-         audit log, lab reports and documents match production at dump time
-   - [ ] `restore drill passed`
-4. Point a local app at the restored copy (with the client's
-   `IDENTITY_ENCRYPTION_KEY` from escrow) and open one patient with an
-   Aadhaar/ID number: it must decrypt. This proves the key escrow too.
-5. Record date, dump name, duration and result in the client's operations log.
-6. Delete the scratch branch/database: it holds real patient data.
+```bash
+docker compose exec -T postgres psql -U postgres -c 'create database hims_restore_check'
+docker compose cp backups/<file>.dump app:/tmp/drill.dump
+docker compose exec -e RESTORE_DATABASE_URL='postgres://postgres:<HIMS_DB_PASSWORD>@postgres:5432/hims_restore_check' \
+  app npm run db:restore-check -- /tmp/drill.dump
+```
 
-Last drill run during development (2026-10-08, local): dump 0.4 MB, restore
-under one second, schema identical to the source under `db:schema-diff`.
+Check the output:
+
+- [ ] `checksum ok` (when a `.sha256` sits next to the dump)
+- [ ] `ledger: every migration in this checkout is recorded` (or a known
+      number of newer migrations if the code is ahead of the dump)
+- [ ] `billing immutability triggers present`
+- [ ] row counts of patients, users, encounters, invoices, payments, audit
+      log, lab reports and documents match production at dump time
+- [ ] `restore drill passed`
+
+Then extract a file-store archive into a scratch directory and confirm a few
+files are present, record date, dump name, duration and result in the
+client's operations log, and drop the scratch database
+(`docker compose exec -T postgres psql -U postgres -c 'drop database hims_restore_check'`):
+it holds real patient data.
 
 ## Encryption keys
 
@@ -212,12 +231,12 @@ also hard-deletes, without refusing:
   The RCM work (SP7) adds claim retention rules in its own branch; do not
   duplicate them here.
 
-It also deletes `documents` rows without deleting their Blob files, so a
-deleted patient's uploads stay in the Blob store (unreachable from the app,
-but present). Recommendation: replace hard delete with an archive flag for
+It also deletes `documents` rows without deleting their stored files, so a
+deleted patient's uploads stay in the `hims_blobs` volume (unreachable from the
+app, but present). Recommendation: replace hard delete with an archive flag for
 any patient who has clinical or trial data, keep hard delete only for
 registrations created in error with no clinical activity, and remove the
-Blob files in the same operation.
+files in the same operation.
 
 ## Health checks
 
@@ -225,15 +244,18 @@ Blob files in the same operation.
 (200 only when all pass, else 503) are public and answer only:
 
 ```json
-{"status":"ok|degraded|down","checks":{"database":"ok|fail","redis":"ok|fail|not_configured","migrations":"up_to_date|pending|unknown","secrets":"ok|missing","blob":"ok|not_configured"}}
+{"status":"ok|degraded|down","checks":{"database":"ok|fail","redis":"ok|fail|not_configured","migrations":"up_to_date|pending|unknown","secrets":"ok|missing","blob":"ok|fail"}}
 ```
 
 No variable names, values or error text. `down` = database unreachable or
-secrets missing; `degraded` = Redis or migrations not right, or no blob
-store (`blob` reports configuration only; there is no round trip to the store). Results are
-reused for 5 seconds. For detail, read the function logs: routes that need
-Redis, the database or the blob store log one line per refused request, for
+secrets missing; `degraded` = Redis or migrations not right, or the file store
+cannot be written (`blob` writes and removes a probe file in the store
+directory). Results are reused for 5 seconds. The app container's Docker
+health check uses the same endpoint (`docker compose ps` shows `healthy`).
+
+For detail, read the logs (`docker compose logs app`): routes that need
+Redis, the database or the file store log one line per refused request, for
 example `[config] REDIS not configured: login is unavailable`,
 `[config] database unreachable (28P01): login is unavailable` or
-`[config] BLOB_READ_WRITE_TOKEN not configured: lab report download is unavailable`,
+`[config] BLOB_DRIVER not configured: lab report download is unavailable`,
 while the client receives a generic 503 "Service temporarily unavailable".
