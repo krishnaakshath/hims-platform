@@ -3,7 +3,8 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, providers, labTests, labOrders, labResults } from '@/db/schema'
 import { listOrdersForPatient, type PatientLabOrderRow } from '@/lib/queries/lab-orders'
-import { observationToFhir, observationsToFhir } from '@/lib/fhir/observation'
+import { INTERPRETATION_CODE, observationToFhir, observationsForOrder, observationsToFhir } from '@/lib/fhir/observation'
+import { CBC_ANALYTES } from '../labs/report-fixtures'
 
 const createdPatientIds: string[] = []
 const createdTestIds: number[] = []
@@ -66,6 +67,9 @@ describe('observationsToFhir', () => {
     expect(udsFhir).not.toHaveProperty('valueQuantity')
     expect(JSON.stringify(udsFhir)).not.toContain('NaN')
     expect(udsFhir.code.coding).toEqual([{ code: 'UDS', display: 'Urine Drug Screen' }])
+    // WS4 T10: single-value tests carry no analytes and no panel members.
+    expect(orders.find((o) => o.id === tshOrder.id)!.result!.analytes).toEqual([])
+    expect(tshFhir).not.toHaveProperty('hasMember')
   })
 
   // SP5: the Observation status follows the order's verification state.
@@ -73,7 +77,7 @@ describe('observationsToFhir', () => {
     const row = (status: PatientLabOrderRow['status'], withResult = true): PatientLabOrderRow => ({
       id: 1, status, orderedAt: new Date('2099-01-01T00:00:00Z'), collectedAt: null,
       testId: 1, testName: 'Glucose', testCode: 'GLU', category: 'lab', defaultUnit: null, referenceRange: null, attachments: [],
-      result: withResult ? { value: '90', unit: 'mg/dL', referenceRange: null, flag: 'normal', resultedByName: 'X', resultedAt: new Date('2099-01-01T00:00:00Z'), notes: null } : null,
+      result: withResult ? { value: '90', unit: 'mg/dL', referenceRange: null, flag: 'normal', resultedByName: 'X', resultedAt: new Date('2099-01-01T00:00:00Z'), notes: null, analytes: [] } : null,
       sampleId: null, requisitionId: null, quotedPricePaise: null, quoteStatus: 'unmapped', verifiedByName: null, verifiedAt: null,
     })
     expect(observationToFhir('RD-X', row('resulted'))?.status).toBe('preliminary')
@@ -132,5 +136,65 @@ describe('observationsToFhir', () => {
     const out = observationsToFhir('RD-1', [order, other], new Map([['1558-6', { kind: 'loinc' as const, version: '2.78', isSample: false }]]))
     expect(out[0].code.coding).toEqual([{ system: 'http://loinc.org', version: '2.78', code: '1558-6', display: 'Glucose, fasting' }])
     expect(out[1].code.coding).toEqual([{ code: 'TSH', display: 'Glucose, fasting' }])
+  })
+
+  // WS4 T10 (spec 3.7 item 31): one Observation per analyte plus a panel with hasMember.
+  const cbc = {
+    id: 77, status: 'verified', testName: 'Complete blood count with differential', testCode: 'CBC-DIFF',
+    result: { value: '13 analytes', unit: null, referenceRange: null, flag: 'critical', resultedAt: new Date('2099-03-02T08:00:00Z'), analytes: CBC_ANALYTES },
+  } as unknown as PatientLabOrderRow
+  const INTERP = 'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation'
+
+  it('a CBC yields a panel with 13 members and no value, then one Observation per analyte', () => {
+    const out = observationsForOrder('RD-1', cbc, new Map())
+    expect(out).toHaveLength(14)
+    const [panel, ...members] = out
+    expect(panel.id).toBe('observation-77')
+    expect(panel.status).toBe('final')
+    expect(panel.code).toEqual({ text: 'Complete blood count with differential', coding: [{ code: 'CBC-DIFF', display: 'Complete blood count with differential' }] })
+    expect(panel).not.toHaveProperty('valueQuantity')
+    expect(panel).not.toHaveProperty('valueString')
+    expect(panel).not.toHaveProperty('referenceRange')
+    expect(panel.hasMember).toHaveLength(13)
+    expect(panel.hasMember).toEqual(CBC_ANALYTES.map((a) => ({ reference: `Observation/observation-77-${a.code}` })))
+    expect(members.map((m) => m.id)).toEqual(CBC_ANALYTES.map((a) => `observation-77-${a.code}`))
+
+    const hgb = members[0]
+    expect(hgb).toMatchObject({
+      resourceType: 'Observation', id: 'observation-77-HGB', status: 'final', subject: { reference: 'Patient/RD-1' },
+      valueQuantity: { value: 6.5, unit: 'g/dL' }, referenceRange: [{ text: '12.0-15.5 g/dL' }],
+      interpretation: [{ coding: [{ system: INTERP, code: 'LL' }] }], effectiveDateTime: '2099-03-02T08:00:00.000Z',
+    })
+    expect(hgb.code).toEqual({ text: 'Haemoglobin', coding: [{ code: '718-7', display: 'Haemoglobin' }] })
+    expect(hgb).not.toHaveProperty('hasMember')
+    expect(members[1].interpretation[0].coding![0].code).toBe('N')
+  })
+
+  it('an analyte LOINC code gains http://loinc.org only when it is in a loaded LOINC version', () => {
+    const bindings = new Map([['718-7', { kind: 'loinc' as const, version: '2.78', isSample: false }], ['6690-2', { kind: 'loinc' as const, version: 'SAMPLE-LOINC-0', isSample: true }]])
+    const out = observationsForOrder('RD-1', cbc, bindings)
+    expect(out.find((o) => o.id === 'observation-77-HGB')!.code.coding).toEqual([{ system: 'http://loinc.org', version: '2.78', code: '718-7', display: 'Haemoglobin' }])
+    expect(out.find((o) => o.id === 'observation-77-WBC')!.code.coding![0].system).toBeUndefined()
+    expect(out.find((o) => o.id === 'observation-77-PLT')!.code.coding![0].system).toBeUndefined()
+    // An analyte without a LOINC code is coded by its own code, never with a system.
+    const noLoinc = { ...cbc, result: { ...cbc.result!, analytes: [{ ...CBC_ANALYTES[0], loincCode: null }] } } as PatientLabOrderRow
+    expect(observationsForOrder('RD-1', noLoinc, bindings)[1].code.coding).toEqual([{ code: 'HGB', display: 'Haemoglobin' }])
+  })
+
+  it('interpretation codes cover N L H LL HH A AA; a non-numeric analyte is a valueString', () => {
+    expect(Object.keys(INTERPRETATION_CODE).sort()).toEqual(['A', 'AA', 'H', 'HH', 'L', 'LL', 'N'])
+    const textual = { ...cbc, result: { ...cbc.result!, analytes: [{ ...CBC_ANALYTES[0], code: 'SMEAR', value: 'Ring forms seen', unit: null, referenceRange: null, flag: 'critical', interpretation: 'AA', loincCode: null }] } } as PatientLabOrderRow
+    const [, smear] = observationsForOrder('RD-1', textual, new Map())
+    expect(smear.valueString).toBe('Ring forms seen')
+    expect(smear).not.toHaveProperty('valueQuantity')
+    expect(smear.interpretation[0].coding![0].code).toBe('AA')
+  })
+
+  it('observationsToFhir flattens panels and keeps single-value orders unchanged', () => {
+    const out = observationsToFhir('RD-1', [cbc, order])
+    expect(out).toHaveLength(15)
+    expect(out[14]).toEqual(observationToFhir('RD-1', order))
+    // A pre-result order yields nothing, with or without analytes.
+    expect(observationsForOrder('RD-1', { ...cbc, status: 'received' } as PatientLabOrderRow, new Map())).toEqual([])
   })
 })

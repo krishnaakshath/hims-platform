@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll, beforeAll } from 'vitest'
 import { createHash } from 'node:crypto'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { auditLog, followUpOrders, labOrders, labReports, labRequisitions, labResults, labTests, patients, providers, users } from '@/db/schema'
+import { auditLog, followUpOrders, labOrders, labReports, labRequisitions, labResultValues, labResults, labTestAnalytes, labTests, patients, providers, users } from '@/db/schema'
 import type { Session } from '@/lib/auth'
 import type { LabReportData } from '@/lib/labs/report-data'
 import { verifyLabResult } from '@/lib/queries/lab-lifecycle'
@@ -163,6 +163,34 @@ describe.skipIf(!process.env.DATABASE_URL)('lab report release (DB)', () => {
       id: r.report.id, patientId: req.patientId, reportNumber: r.report.reportNumber, blobUrl: r.report.blobUrl, supersededAt: null,
     })
     expect(await getLabReportForDownload(2_000_000_000)).toBeNull()
+  })
+
+  // WS4 T10 (spec 3.7 item 30): the loader reads each order's analyte values in definition order.
+  it('passes an analyte test\'s values to the renderer in definition order, with no co-signers yet', async () => {
+    const db = getDb()
+    const [hgb, plt] = await db.insert(labTestAnalytes).values([
+      { labTestId: testIds[2], code: 'HGB', name: 'Haemoglobin', unit: 'g/dL', valueType: 'numeric', decimals: 1, sortOrder: 1, loincCode: '718-7' },
+      { labTestId: testIds[2], code: 'PLT', name: 'Platelet count', unit: '10^3/µL', valueType: 'numeric', decimals: 0, sortOrder: 2, loincCode: '777-3' },
+    ]).returning()
+    const req = await makeRequisition()
+    const o = await makeOrder(req, 2, 'verified')
+    const [res] = await db.select().from(labResults).where(eq(labResults.labOrderId, o.id))
+    // Inserted out of order: the report follows the analytes' sort order, not insertion order.
+    await db.insert(labResultValues).values([
+      { labResultId: res.id, labOrderId: o.id, analyteId: plt.id, valueText: '250', valueNumeric: 250, unit: '10^3/µL', referenceRangeText: '150-450 10^3/µL', flag: 'normal', interpretation: 'N', flagSource: 'auto' },
+      { labResultId: res.id, labOrderId: o.id, analyteId: hgb.id, valueText: '6.5', valueNumeric: 6.5, unit: 'g/dL', referenceRangeText: '12.0-15.5 g/dL', flag: 'critical', interpretation: 'LL', flagSource: 'auto' },
+    ])
+    rendered.length = 0
+    const r = await releaseLabReport(req.id, S, deps)
+    expect(r.ok).toBe(true)
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0].rows).toHaveLength(1)
+    expect(rendered[0].rows[0].analytes).toEqual([
+      { name: 'Haemoglobin', value: '6.5', unit: 'g/dL', referenceRange: '12.0-15.5 g/dL', flagText: 'CRITICAL LOW' },
+      { name: 'Platelet count', value: '250', unit: '10^3/µL', referenceRange: '150-450 10^3/µL', flagText: '' },
+    ])
+    expect(rendered[0].rows[0].cosignedBy).toEqual([])
+    expect(rendered[0].cosigners).toEqual([])
   })
 
   it('a second release (after another order is verified) supersedes v1 with a cumulative v2', async () => {

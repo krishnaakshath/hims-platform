@@ -100,8 +100,8 @@ describe('EnterLabResultModal — per analyte', () => {
       <EnterLabResultModal orderId={7} testName="CBC" defaultUnit={null} defaultReferenceRange={null} category="lab" attachments={[]}
         analytes={[HGB, WBC]} patientSex="female" ageDays={30 * 365} onClose={vi.fn()}
         initial={{ value: '2 analytes', unit: null, flag: 'abnormal', analytes: [
-          { analyteId: 11, code: 'HGB', name: 'Haemoglobin', value: '13.0', unit: 'g/dL', referenceRange: '12.0-15.5 g/dL', flag: 'normal', interpretation: 'N', flagSource: 'auto', flagReason: null },
-          { analyteId: 12, code: 'WBC', name: 'Total leucocyte count', value: '7.0', unit: '10^3/µL', referenceRange: '4.0-11.0 10^3/µL', flag: 'abnormal', interpretation: 'A', flagSource: 'manual', flagReason: 'Atypical cells on smear' },
+          { analyteId: 11, code: 'HGB', name: 'Haemoglobin', value: '13.0', unit: 'g/dL', referenceRange: '12.0-15.5 g/dL', flag: 'normal', interpretation: 'N', flagSource: 'auto', flagReason: null, loincCode: '718-7' },
+          { analyteId: 12, code: 'WBC', name: 'Total leucocyte count', value: '7.0', unit: '10^3/µL', referenceRange: '4.0-11.0 10^3/µL', flag: 'abnormal', interpretation: 'A', flagSource: 'manual', flagReason: 'Atypical cells on smear', loincCode: '6690-2' },
         ] }} />,
     )
     expect(screen.getByText(/Amend result/)).toBeInTheDocument()

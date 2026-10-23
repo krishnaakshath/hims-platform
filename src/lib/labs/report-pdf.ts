@@ -37,6 +37,18 @@ const COLUMNS = [
   { title: 'Reference range', width: 105 },
   { title: 'Flag', width: CONTENT_WIDTH - 165 - 100 - 60 - 105 },
 ] as const
+/**
+ * WS4 T10: a report with analyte rows takes 10pt from Result for Flag so that "CRITICAL HIGH"
+ * fits on one line. A report of single-value tests keeps COLUMNS and renders exactly as before.
+ */
+const ANALYTE_COLUMNS = [
+  { title: 'Test', width: 165 },
+  { title: 'Result', width: 90 },
+  { title: 'Unit', width: 60 },
+  { title: 'Reference range', width: 105 },
+  { title: 'Flag', width: CONTENT_WIDTH - 165 - 90 - 60 - 105 },
+] as const
+type Columns = typeof COLUMNS | typeof ANALYTE_COLUMNS
 
 interface Fonts { regular: PDFFont; bold: PDFFont }
 
@@ -84,8 +96,11 @@ class Layout {
   pages: PDFPage[] = []
   page!: PDFPage
   y = 0
+  readonly columns: Columns
 
-  constructor(private doc: PDFDocument, private fonts: Fonts, private data: LabReportData) {}
+  constructor(private doc: PDFDocument, private fonts: Fonts, private data: LabReportData) {
+    this.columns = data.rows.some((r) => r.analytes.length > 0) ? ANALYTE_COLUMNS : COLUMNS
+  }
 
   /** The full header on page 1; a one-line header on continuation pages. */
   newPage(first: boolean) {
@@ -166,7 +181,7 @@ const SCRIPT_NOTE = 'The name is in a script this PDF cannot print; see the char
 
 function drawTableHeader(l: Layout, fonts: Fonts) {
   let x = MARGIN
-  for (const c of COLUMNS) {
+  for (const c of l.columns) {
     text(l.page, c.title, x + CELL_PAD, l.y - BODY, fonts.bold, BODY)
     x += c.width
   }
@@ -175,24 +190,22 @@ function drawTableHeader(l: Layout, fonts: Fonts) {
   l.y -= 6
 }
 
-function drawRow(l: Layout, row: LabReportData['rows'][number], fonts: Fonts) {
-  const { regular, bold } = fonts
-  const flag = flagLabel(row.flag)
-  const inner = (i: number) => COLUMNS[i].width - 2 * CELL_PAD
-  const testLines = wrap(row.testName, regular, BODY, inner(0))
-  const sampleLines = row.sampleId ? wrap(`Sample ${displaySampleId(row.sampleId)}`, regular, SMALL, inner(0)) : []
-  const cells: { lines: string[]; font: PDFFont }[] = [
-    { lines: testLines, font: regular },
-    { lines: wrap(row.value, flag ? bold : regular, BODY, inner(1)), font: flag ? bold : regular },
-    { lines: wrap(row.unit ?? '', regular, BODY, inner(2)), font: regular },
-    { lines: wrap(row.referenceRange ?? '', regular, BODY, inner(3)), font: regular },
-    { lines: wrap(flag, bold, BODY, inner(4)), font: bold },
-  ]
+type Cell = { lines: string[]; font: PDFFont; indent?: number }
+const inner = (l: Layout, i: number) => l.columns[i].width - 2 * CELL_PAD
+/** WS4 T10: analyte names sit indented under their test's heading row. */
+const ANALYTE_INDENT = 10
+
+/**
+ * Draws one table row: the cells side by side, then small grey lines under the first column.
+ * A row stays on one page unless it is taller than a page; then it continues line by line.
+ * `keepWithNext` reserves room for the following row too (a heading is never left alone).
+ */
+function drawCells(l: Layout, cells: Cell[], smallLines: string[], fonts: Fonts, keepWithNext = 0) {
+  const { regular } = fonts
   const maxLines = Math.max(...cells.map((c) => c.lines.length))
-  // A row stays on one page unless it is taller than a page; then it continues line by line.
-  const rowHeight = maxLines * LINE + sampleLines.length * SMALL_LINE + 4
+  const rowHeight = maxLines * LINE + smallLines.length * SMALL_LINE + 4
   const pageRoom = A4[1] - MARGIN - 30 - BOTTOM_LIMIT
-  l.ensure(Math.min(rowHeight, pageRoom), () => drawTableHeader(l, fonts))
+  l.ensure(Math.min(rowHeight + keepWithNext, pageRoom), () => drawTableHeader(l, fonts))
 
   let y = l.y
   for (let i = 0; i < maxLines; i++) {
@@ -204,12 +217,12 @@ function drawRow(l: Layout, row: LabReportData['rows'][number], fonts: Fonts) {
     let x = MARGIN
     cells.forEach((c, ci) => {
       const line = c.lines[i]
-      if (line !== undefined) text(l.page, line, x + CELL_PAD, y - BODY, c.font, BODY)
-      x += COLUMNS[ci].width
+      if (line !== undefined) text(l.page, line, x + CELL_PAD + (c.indent ?? 0), y - BODY, c.font, BODY)
+      x += l.columns[ci].width
     })
     y -= LINE
   }
-  for (const s of sampleLines) {
+  for (const s of smallLines) {
     if (y - SMALL_LINE < BOTTOM_LIMIT) {
       l.newPage(false)
       drawTableHeader(l, fonts)
@@ -222,13 +235,46 @@ function drawRow(l: Layout, row: LabReportData['rows'][number], fonts: Fonts) {
   rule(l.page, l.y + 2)
 }
 
+function valueCells(l: Layout, name: string, value: string, unit: string | null, range: string | null, flag: string, fonts: Fonts, indent = 0): Cell[] {
+  const { regular, bold } = fonts
+  return [
+    { lines: wrap(name, regular, BODY, inner(l, 0) - indent), font: regular, indent },
+    { lines: wrap(value, flag ? bold : regular, BODY, inner(l, 1)), font: flag ? bold : regular },
+    { lines: wrap(unit ?? '', regular, BODY, inner(l, 2)), font: regular },
+    { lines: wrap(range ?? '', regular, BODY, inner(l, 3)), font: regular },
+    { lines: wrap(flag, bold, BODY, inner(l, 4)), font: bold },
+  ]
+}
+
+function drawRow(l: Layout, row: LabReportData['rows'][number], fonts: Fonts) {
+  const { regular, bold } = fonts
+  const sampleLines = row.sampleId ? wrap(`Sample ${displaySampleId(row.sampleId)}`, regular, SMALL, inner(l, 0)) : []
+  if (row.analytes.length === 0) {
+    // A single-value test: one row, exactly as before analytes existed.
+    drawCells(l, valueCells(l, row.testName, row.value, row.unit, row.referenceRange, flagLabel(row.flag), fonts), sampleLines, fonts)
+    return
+  }
+  // WS4 T10 (spec 3.7 item 30): the test is a heading row, then one row per analyte.
+  const heading: Cell[] = [{ lines: wrap(row.testName, bold, BODY, inner(l, 0)), font: bold }, ...[1, 2, 3, 4].map(() => ({ lines: [], font: regular }))]
+  drawCells(l, heading, sampleLines, fonts, LINE + 4)
+  for (const a of row.analytes) drawCells(l, valueCells(l, a.name, a.value, a.unit, a.referenceRange, a.flagText, fonts, ANALYTE_INDENT), [], fonts)
+}
+
 function drawClosing(l: Layout, data: LabReportData, fonts: Fonts) {
   const { regular, bold } = fonts
   const verified = wrap(`Verified by: ${data.verifiers.length > 0 ? data.verifiers.join(', ') : '-'}`, regular, BODY, CONTENT_WIDTH)
   l.ensure(verified.length * LINE + 70)
   l.y -= 8
   verified.forEach((line, i) => text(l.page, line, MARGIN, l.y - BODY - i * LINE, regular, BODY))
-  l.y -= verified.length * LINE + 30
+  l.y -= verified.length * LINE
+  // WS4 T10 (spec 3.7 item 30): co-signers under the verifier, only when there are any.
+  if (data.cosigners.length > 0) {
+    const cosigned = wrap(`Co-signed by: ${data.cosigners.join(', ')}`, regular, BODY, CONTENT_WIDTH)
+    l.ensure(cosigned.length * LINE + 60)
+    cosigned.forEach((line, i) => text(l.page, line, MARGIN, l.y - BODY - i * LINE, regular, BODY))
+    l.y -= cosigned.length * LINE
+  }
+  l.y -= 30
   text(l.page, 'Authorised signatory: ______________________', MARGIN, l.y - BODY, bold, BODY)
   l.y -= LINE + 10
   text(l.page, 'This is a computer-generated report.', MARGIN, l.y - SMALL, regular, SMALL, GREY)

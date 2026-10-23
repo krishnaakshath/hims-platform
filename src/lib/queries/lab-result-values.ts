@@ -29,6 +29,8 @@ export interface AnalyteResultRow {
   flagSource: 'auto' | 'manual'
   /** The technician's reason for a manual flag (prefills an amendment). */
   flagReason: string | null
+  /** WS4 T10: the analyte's LOINC code (reference data; FHIR adds the system only when loaded). */
+  loincCode: string | null
 }
 
 const SEVERITY: Record<LabResultFlag, number> = { normal: 0, abnormal: 1, critical: 2 }
@@ -148,15 +150,15 @@ export async function listAnalyteResults(orderIds: number[]): Promise<Map<number
   const out = new Map<number, AnalyteResultRow[]>()
   if (orderIds.length === 0) return out
   const rows = await getDb()
-    .select({ v: labResultValues, code: labTestAnalytes.code, name: labTestAnalytes.name })
+    .select({ v: labResultValues, code: labTestAnalytes.code, name: labTestAnalytes.name, loincCode: labTestAnalytes.loincCode })
     .from(labResultValues)
     .innerJoin(labTestAnalytes, eq(labTestAnalytes.id, labResultValues.analyteId))
     .where(inArray(labResultValues.labOrderId, [...new Set(orderIds)]))
     .orderBy(asc(labResultValues.labOrderId), asc(labTestAnalytes.sortOrder), asc(labTestAnalytes.id))
-  for (const { v, code, name } of rows) {
+  for (const { v, code, name, loincCode } of rows) {
     const row: AnalyteResultRow = {
       analyteId: v.analyteId, code, name, value: v.valueText, unit: v.unit, referenceRange: v.referenceRangeText,
-      flag: v.flag, interpretation: v.interpretation, flagSource: v.flagSource, flagReason: v.flagReason,
+      flag: v.flag, interpretation: v.interpretation, flagSource: v.flagSource, flagReason: v.flagReason, loincCode,
     }
     out.set(v.labOrderId, [...(out.get(v.labOrderId) ?? []), row])
   }

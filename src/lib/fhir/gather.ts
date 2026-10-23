@@ -93,7 +93,11 @@ export async function gatherPatientFhirData(anonId: string): Promise<PatientFhir
     ranksByEncounter.set(d.encounterId!, list)
   }
   const encounterRows: EncounterFhirRow[] = encounterJoined.map((e) => ({ ...e, diagnosisRanks: ranksByEncounter.get(e.id) ?? [] }))
-  const loincBindings = await findLoadedCodes('loinc', labOrderRows.map((o) => o.testCode))
+  // WS4 T10: analyte LOINC codes are looked up alongside the test codes.
+  const loincBindings = await findLoadedCodes('loinc', labOrderRows.flatMap((o) => [
+    o.testCode,
+    ...(o.result?.analytes ?? []).flatMap((a) => (a.loincCode ? [a.loincCode] : [])),
+  ]))
   // end SP6
 
   // Map lookup instead of an N+1 query per dispense.

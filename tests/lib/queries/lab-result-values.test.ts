@@ -9,6 +9,7 @@ import type { AnalyteResultRequest } from '@/lib/labs/validation'
 import { collectLabOrder, receiveLabSample, recordLabResult } from '@/lib/queries/lab-lifecycle'
 import { replaceAnalytesForTest } from '@/lib/queries/lab-analytes'
 import { listAnalyteResults } from '@/lib/queries/lab-result-values'
+import { listOrdersForPatient } from '@/lib/queries/lab-orders'
 
 // WS4 T9 (spec 3.3 items 18-20): per-analyte result entry, automatic flags, raise-only overrides.
 const TAG = randomBytes(4).toString('hex').toUpperCase()
@@ -99,7 +100,10 @@ describe.skipIf(!process.env.DATABASE_URL)('per-analyte lab results (DB)', () =>
     expect(await summaryOf(id)).toMatchObject({ value: '13 analytes', unit: null, referenceRange: null, flag: 'critical', resultedByName: PROBE })
     const listed = (await listAnalyteResults([id])).get(id)!
     expect(listed.map((a) => a.code)).toEqual(LAB_ANALYTE_SEED['CBC-DIFF'].map((d) => d.code))
-    expect(listed[0]).toEqual({ analyteId: ids.get('HGB'), code: 'HGB', name: 'Haemoglobin', value: '6.5', unit: 'g/dL', referenceRange: '12.0-15.5 g/dL', flag: 'critical', interpretation: 'LL', flagSource: 'auto', flagReason: null })
+    expect(listed[0]).toEqual({ analyteId: ids.get('HGB'), code: 'HGB', name: 'Haemoglobin', value: '6.5', unit: 'g/dL', referenceRange: '12.0-15.5 g/dL', flag: 'critical', interpretation: 'LL', flagSource: 'auto', flagReason: null, loincCode: '718-7' })
+    // WS4 T10: the patient chart (and FHIR) carry the same analyte rows on the order's result.
+    const chart = (await listOrdersForPatient(PF)).find((o) => o.id === id)!
+    expect(chart.result!.analytes).toEqual(listed)
   })
 
   it('one analyte missing: 422 analyte_missing and nothing is written', async () => {

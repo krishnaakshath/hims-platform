@@ -6,7 +6,7 @@ import { PDFArray, PDFDocument, PDFName, PDFRawStream, type PDFPage } from 'pdf-
 import { buildLabReportData, type LabReportData } from '@/lib/labs/report-data'
 import { renderLabReportPdf } from '@/lib/labs/report-pdf'
 import { formatDateTimeIn } from '@/lib/india-time'
-import { SRC } from './report-fixtures'
+import { CBC_ANALYTES, CBC_SRC, SRC } from './report-fixtures'
 
 const NOW = new Date('2099-03-04T06:00:00Z')
 const DATA3: LabReportData = buildLabReportData(SRC, NOW)
@@ -127,5 +127,36 @@ describe('renderLabReportPdf', () => {
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true)
     expect(fetchSpy).not.toHaveBeenCalled()
     fetchSpy.mockRestore()
+  })
+
+  // WS4 T10 (spec 3.7 item 30): an analyte test is a heading row with one row per analyte.
+  it('prints a CBC as a heading row with each analyte, its value, snapshot range and flag', async () => {
+    const [text] = await pageTexts(await renderLabReportPdf(buildLabReportData(CBC_SRC, NOW)))
+    for (const s of ['Complete blood count', 'Haemoglobin', '6.5', '12.0-15.5 g/dL', 'CRITICAL LOW', 'Verified by: Dr Path One']) expect(text).toContain(s)
+    for (const a of CBC_ANALYTES) expect(text).toContain(a.name.length > 30 ? a.name.split(' ')[0] : a.name)
+    // The summary value of the order row is not printed as a result.
+    expect(text).not.toContain('13 analytes')
+    // Analyte rows follow definition order.
+    expect(text.indexOf('Haemoglobin')).toBeLessThan(text.indexOf('Total leucocyte count'))
+    expect(text.indexOf('Total leucocyte count')).toBeLessThan(text.indexOf('Platelet count'))
+    expect(text).not.toContain('Co-signed by')
+  })
+
+  it('lists co-signers under the verifier only when there are any', async () => {
+    const o = CBC_SRC.orders[0]
+    const [text] = await pageTexts(await renderLabReportPdf(buildLabReportData({ ...CBC_SRC, orders: [{ ...o, cosignedBy: ['Dr Senior Path'] }] }, NOW)))
+    expect(text).toContain('Co-signed by: Dr Senior Path')
+    expect(text.indexOf('Verified by: Dr Path One')).toBeLessThan(text.indexOf('Co-signed by: Dr Senior Path'))
+    const [single] = await pageTexts(await renderLabReportPdf(DATA3))
+    expect(single).not.toContain('Co-signed by')
+  })
+
+  it('breaks a long run of analyte reports across pages with the header row repeated', async () => {
+    const many = { ...CBC_SRC, orders: Array.from({ length: 6 }, () => CBC_SRC.orders[0]) }
+    const bytes = await renderLabReportPdf(buildLabReportData(many, NOW))
+    const texts = await pageTexts(bytes)
+    expect(texts.length).toBeGreaterThan(1)
+    texts.forEach((t) => { if (t.includes('Haemoglobin')) expect(t).toContain('Reference range') })
+    expect(texts.join('\n').match(/CRITICAL LOW/g)).toHaveLength(6)
   })
 })

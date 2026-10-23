@@ -37,6 +37,7 @@ export interface PatientLabOrderRow {
     resultedByName: string
     resultedAt: Date
     notes: string | null
+    analytes: AnalyteResultRow[] // WS4 T10: the per-analyte detail ([] for a single-value test)
   } | null
   // SP5
   sampleId: string | null
@@ -72,6 +73,7 @@ function mapPatientOrderRow(r: {
       resultedByName: r.result.resultedByName,
       resultedAt: r.result.resultedAt,
       notes: r.result.notes,
+      analytes: [], // WS4 T10: filled by listOrdersForPatient
     } : null,
     // SP5
     sampleId: r.order.sampleId,
@@ -95,8 +97,15 @@ export async function listOrdersForPatient(patientId: string): Promise<PatientLa
     .orderBy(desc(labOrders.orderedAt))
 
   const mapped = rows.map(mapPatientOrderRow)
-  const byOrder = await listImagingForOrders(mapped.map((r) => r.id))
-  return mapped.map((r) => ({ ...r, attachments: byOrder.get(r.id) ?? [] }))
+  const [byOrder, values] = await Promise.all([
+    listImagingForOrders(mapped.map((r) => r.id)),
+    listAnalyteResults(mapped.filter((r) => r.result !== null).map((r) => r.id)), // WS4 T10
+  ])
+  return mapped.map((r) => ({
+    ...r,
+    attachments: byOrder.get(r.id) ?? [],
+    result: r.result ? { ...r.result, analytes: values.get(r.id) ?? [] } : null,
+  }))
 }
 
 export interface WorklistRow {
