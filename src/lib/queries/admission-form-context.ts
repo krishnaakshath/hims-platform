@@ -6,9 +6,8 @@ import { getDb } from '@/db/client'
 import { admissions, encounters, patientPolicies, patients, payers, preauths, providers, roomCategories, rooms } from '@/db/schema'
 import { ageOnDate, istDateOf } from '@/lib/india-time'
 import { wardGenderConflict, type PatientGender, type WardGender, type WardGenderConflict } from '@/lib/inpatient/admission-rules'
-import { resolvePrice } from '@/lib/tariff/resolve'
 import { getBillingSettings } from './billing-settings'
-import { loadPricingContext } from './tariff'
+import { loadBedTariffResolver } from './bed-tariff'
 
 export interface AdmissionFormContext {
   patient: { id: string; name: string; uhid: string | null; gender: PatientGender; ageYears: number }
@@ -57,15 +56,8 @@ export async function loadAdmissionFormContext(patientRef: string, now: Date = n
     db.select({ id: admissions.id }).from(admissions).where(and(eq(admissions.patientId, patient.id), eq(admissions.status, 'admitted'))).limit(1),
   ])
 
-  // The room tariff: the ROOM_RENT service's base/department rate for the bed's category and ward
-  // (the payer is not chosen yet, so no payer-specific rate).
-  const serviceId = settings.roomRentServiceId
-  const pricing = serviceId === null ? null : await loadPricingContext(serviceId)
-  const tariffOf = (ward: string, categoryCode: string | null): number | null => {
-    if (serviceId === null || !pricing) return null
-    const r = resolvePrice({ serviceId, roomCategory: categoryCode ?? undefined, ward, onDate: today }, pricing)
-    return r.ok ? r.amountPaise : null
-  }
+  // The room tariff for the bed's category and ward (the payer is not chosen yet, so no payer rate).
+  const tariffOf = await loadBedTariffResolver(today)
 
   return {
     patient,
@@ -73,7 +65,7 @@ export async function loadAdmissionFormContext(patientRef: string, now: Date = n
       const genderRestriction = (b.genderRestriction ?? null) as WardGender
       return {
         id: b.id, label: `${b.ward} ${b.roomNumber}-${b.bedNumber}`, ward: b.ward, genderRestriction,
-        roomCategoryName: b.categoryName ?? null, tariffPaise: tariffOf(b.ward, b.categoryCode ?? null),
+        roomCategoryName: b.categoryName ?? null, tariffPaise: tariffOf({ ward: b.ward, roomCategoryCode: b.categoryCode ?? null }),
         conflict: wardGenderConflict({ patientGender: patient.gender, ageYears: patient.ageYears, ward: genderRestriction }),
       }
     }),

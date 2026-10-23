@@ -5,8 +5,18 @@ import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getAdmissionById, transferAdmission } from '@/lib/queries/admissions'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
+import { RETRY_MESSAGE, isRetryableConflict, pgErrorCode } from '@/lib/db-errors'
+import { OVERRIDE_REASON_MIN } from '@/lib/inpatient/admission-rules'
 
-const transferSchema = z.object({ toRoomId: z.number().int().positive(), reason: z.string().min(1) }).strict()
+// WS3 T4: `wardGenderOverrideReason` (10..300 chars) is required only when the destination bed's
+// ward-gender restriction conflicts with the patient (spec 3.1 item 10); it is never audited.
+const transferSchema = z.object({
+  toRoomId: z.number().int().positive(),
+  reason: z.string().min(1),
+  wardGenderOverrideReason: z.string().trim().min(OVERRIDE_REASON_MIN).max(300).optional(),
+}).strict()
+
+const WARD_GENDER_MESSAGE = 'This bed is in a ward for the other gender. Give a reason to override, or choose another bed.'
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession()
@@ -35,12 +45,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
 
-  const result = await transferAdmission(admissionId, parsed.data.toRoomId, parsed.data.reason, session.name)
+  let result: Awaited<ReturnType<typeof transferAdmission>>
+  try {
+    result = await transferAdmission(admissionId, parsed.data.toRoomId, parsed.data.reason, session.name, {
+      wardGenderOverrideReason: parsed.data.wardGenderOverrideReason ?? null,
+    })
+  } catch (err) {
+    if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
+    console.error(`[transfer] failed (${err instanceof Error ? err.constructor.name : 'unknown'}, code ${pgErrorCode(err) ?? 'unknown'})`)
+    return NextResponse.json({ error: 'Could not transfer the patient' }, { status: 500 })
+  }
   if (!result.ok) {
+    if (result.error === 'ward_gender_conflict') {
+      return NextResponse.json({ error: WARD_GENDER_MESSAGE, code: 'ward_gender_conflict', conflict: result.conflict }, { status: 422 })
+    }
     const status = result.error === 'Admission not found' ? 404 : 409
     return NextResponse.json({ error: result.error }, { status })
   }
 
   await logAudit(session, `transferred patient's admission ${admissionId} to room ${parsed.data.toRoomId}`, admission.patientId)
+  // Ids only: the override reason is stored on the transfer row, never in the audit log.
+  if (result.wardGenderOverride) {
+    await logAudit(session, 'ward gender override', admission.patientId, `admission=${admissionId} room=${parsed.data.toRoomId}`)
+  }
   return NextResponse.json({ ok: true })
 }

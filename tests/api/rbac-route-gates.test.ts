@@ -642,6 +642,10 @@ import { ADMISSION_ROLES } from '@/lib/role-policy'
 // WS3 T3
 import { GET as getAdmissionFormContext } from '@/app/api/inpatient/admissions/form-context/route'
 // end WS3 T3
+// WS3 T4
+import { PATCH as patchInpatientRoom } from '@/app/api/inpatient/rooms/[id]/route'
+import { MASTER_DATA_ADMIN_ROLES as WS3T4_MASTER_DATA_ADMIN_ROLES } from '@/lib/role-policy'
+// end WS3 T4
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -1143,6 +1147,9 @@ export const API_GATES: ApiGateCase[] = [
   // WS3 T3: the admission dialog's form context -- ADMISSION_ROLES; no patientId is the 400 an allowed role gets.
   { name: 'GET /api/inpatient/admissions/form-context', call: () => getAdmissionFormContext(get('/api/inpatient/admissions/form-context')), allowed: [...ADMISSION_ROLES] },
   // end WS3 T3
+  // WS3 T4: a bed's ward-gender restriction -- MASTER_DATA_ADMIN_ROLES; an empty body is the 400 an allowed role gets.
+  { name: 'PATCH /api/inpatient/rooms/[id]', call: () => patchInpatientRoom(send('PATCH', `/api/inpatient/rooms/${BOGUS_ID}`, {}), ctx({ id: BOGUS_ID })), allowed: [...WS3T4_MASTER_DATA_ADMIN_ROLES] },
+  // end WS3 T4
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
@@ -1321,6 +1328,9 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // WS3 T2
   { name: 'POST /api/inpatient/admissions', call: () => postInpatientAdmission(send('POST', '/api/inpatient/admissions', NOT_JSON)), allowed: ADMISSION_ROLES },
   // end WS3 T2
+  // WS3 T4
+  { name: 'PATCH /api/inpatient/rooms/[id]', call: () => patchInpatientRoom(send('PATCH', `/api/inpatient/rooms/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: WS3T4_MASTER_DATA_ADMIN_ROLES },
+  // end WS3 T4
 ]
 // end SP8
 describe.each([...SP1_WRITE_GATES, ...SP2_WRITE_GATES, ...SP3_WRITE_GATES, ...SP4_WRITE_GATES, ...SP5_WRITE_GATES, ...SP6_WRITE_GATES, ...WAVE_C_WRITE_GATES, ...WAVE_G_WRITE_GATES, ...SP7_WRITE_GATES, ...SP8_WRITE_GATES])('$name (deny before parse)', (c) => {

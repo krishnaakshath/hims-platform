@@ -7,6 +7,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
 import { AdmitPatientModal } from '@/components/inpatient/AdmitPatientModal'
+import { TransferAdmissionModal } from '@/components/TransferAdmissionModal'
+import { DischargeAdmissionModal } from '@/components/DischargeAdmissionModal'
+import { MedicationAdministrationPanel } from '@/components/MedicationAdministrationPanel'
+import { formatPaise, formatRupeesWhole } from '@/lib/money'
+import type { PatientGender, WardGender } from '@/lib/inpatient/admission-rules'
 
 export interface BoardRoom {
   id: number
@@ -19,7 +24,22 @@ export interface BoardRoom {
   occupantPatientId: string | null
   attendingProviderName: string | null
   admittedAt: Date | null
+  // WS3 T4 (spec 3.2 item 12). `occupantPatientId` is only used for the patient link, never shown.
+  admissionId: number | null
+  occupantUhid: string | null
+  occupantGender: PatientGender
+  genderRestriction: WardGender
+  roomCategoryName: string | null
+  bedTariffPaise: number | null
+  daysStayed: number | null
+  wardGenderOverride: boolean
 }
+
+interface RoomOption { id: number; ward: string; roomNumber: string; bedNumber: string }
+type BedAction = { kind: 'transfer' | 'discharge' | 'mar'; admissionId: number }
+
+const perDay = (paise: number) => `${paise % 100 === 0 ? formatRupeesWhole(paise / 100) : formatPaise(paise)}/day`
+const GENDER_LABELS: Record<'male' | 'female', string> = { male: 'Male ward', female: 'Female ward' }
 
 const STATUS_STYLES: Record<BoardRoom['status'], string> = {
   available: 'border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400',
@@ -42,8 +62,18 @@ const STATUS_LABELS: Record<BoardRoom['status'], string> = {
 // by color alone.
 // WS3 T3: `canAdmit` (ADMISSION_ROLES) adds "Admit here" on a free bed: pick the patient, then the
 // admission dialog opens with that bed preselected. `providers` are the attending choices.
-export function BedBoard({ rooms, providers = [], canManageFacilities, canBlock, canAdmit }: {
-  rooms: BoardRoom[]; providers?: { id: number; name: string }[]; canManageFacilities: boolean; canBlock: boolean; canAdmit: boolean
+// WS3 T4: an occupied bed's panel shows UHID, days stayed and the bed tariff, with Transfer
+// (`canTransfer`, the transfer route's roles), Discharge (`canDischarge`, DISCHARGE_ROLES), MAR
+// (`canManageMedications`, the medication routes' roles) and Charges (`canCaptureCharges`,
+// CHARGE_CAPTURE_ROLES), each reusing the existing modal. `canSetBedGender` (MASTER_DATA_ADMIN_ROLES)
+// edits a bed's ward-gender restriction.
+export function BedBoard({
+  rooms, availableRooms, providers = [], canManageFacilities, canBlock, canAdmit,
+  canTransfer, canDischarge, canManageMedications, canCaptureCharges, canSetBedGender = false,
+}: {
+  rooms: BoardRoom[]; availableRooms: RoomOption[]; providers?: { id: number; name: string }[]
+  canManageFacilities: boolean; canBlock: boolean; canAdmit: boolean
+  canTransfer: boolean; canDischarge: boolean; canManageMedications: boolean; canCaptureCharges: boolean; canSetBedGender?: boolean
 }) {
   const router = useRouter()
   const [selected, setSelected] = useState<BoardRoom | null>(null)
@@ -52,13 +82,20 @@ export function BedBoard({ rooms, providers = [], canManageFacilities, canBlock,
   const [error, setError] = useState<string | null>(null)
   const [admitPatient, setAdmitPatient] = useState<PickedPatient | null>(null)
   const [admitting, setAdmitting] = useState<{ patient: PickedPatient; roomId: number } | null>(null)
+  const [action, setAction] = useState<BedAction | null>(null)
+  const [bedGender, setBedGender] = useState<'male' | 'female' | 'mixed'>('mixed')
+
+  function openAction(kind: BedAction['kind'], admissionId: number) {
+    setSelected(null)
+    setAction({ kind, admissionId })
+  }
 
   const wards = Array.from(new Set(rooms.map((r) => r.ward))).sort()
 
-  async function callAction(path: string, body?: object) {
+  async function callAction(path: string, body?: object, method: 'POST' | 'PATCH' = 'POST') {
     setBusy(true)
     setError(null)
-    const res = await sendJson(path, 'POST', body)
+    const res = await sendJson(path, method, body)
     setBusy(false)
     if (!res.ok) {
       setError(res.error)
@@ -78,12 +115,17 @@ export function BedBoard({ rooms, providers = [], canManageFacilities, canBlock,
             {rooms.filter((r) => r.ward === ward).map((r) => (
               <button
                 key={r.id}
-                onClick={() => { setSelected(r); setBlockReason(''); setError(null); setAdmitPatient(null) }}
+                onClick={() => { setSelected(r); setBlockReason(''); setError(null); setAdmitPatient(null); setBedGender(r.genderRestriction ?? 'mixed') }}
                 className={`rounded-lg border p-3 text-left text-xs transition-colors hover:opacity-80 ${STATUS_STYLES[r.status]}`}
               >
                 <p className="font-semibold">Room {r.roomNumber} · Bed {r.bedNumber}</p>
                 <p className="mt-1">{STATUS_LABELS[r.status]}</p>
                 {r.occupantName && <p className="mt-1 truncate opacity-80">{r.occupantName}</p>}
+                {(r.daysStayed !== null || r.bedTariffPaise !== null) && (
+                  <p className="mt-1 opacity-80">{[r.daysStayed !== null ? `Day ${r.daysStayed}` : null, r.bedTariffPaise !== null ? perDay(r.bedTariffPaise) : null].filter(Boolean).join(' · ')}</p>
+                )}
+                {r.genderRestriction && <p className="mt-1 opacity-80">{GENDER_LABELS[r.genderRestriction]}</p>}
+                {r.wardGenderOverride && <p className="mt-1 font-medium text-warning">Gender override</p>}
               </button>
             ))}
           </div>
@@ -111,19 +153,40 @@ export function BedBoard({ rooms, providers = [], canManageFacilities, canBlock,
                 <div className="rounded-md border border-border bg-secondary/40 p-3">
                   <p className="text-foreground">
                     <span className="font-medium">{selected.occupantName}</span>
-                    {selected.occupantPatientId && <span className="font-mono text-xs text-muted-foreground"> ({selected.occupantPatientId})</span>}
+                    <span className="font-mono text-xs text-muted-foreground"> (UHID {selected.occupantUhid ?? 'not assigned'})</span>
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Attending: {selected.attendingProviderName ?? 'Unassigned'}
                   </p>
                   {selected.admittedAt && (
-                    <p className="mt-0.5 text-xs text-muted-foreground">Admitted {formatIstDateTime(selected.admittedAt)}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Admitted {formatIstDateTime(selected.admittedAt)}{selected.daysStayed !== null && ` · Day ${selected.daysStayed}`}
+                    </p>
                   )}
+                  {selected.wardGenderOverride && <p className="mt-0.5 text-xs font-medium text-warning">Placed here under a ward-gender override</p>}
                   {selected.occupantPatientId && (
                     <a href={`/patients/${selected.occupantPatientId}`} className="mt-1.5 inline-block text-xs font-medium text-primary hover:underline">View patient →</a>
                   )}
                 </div>
               )}
+              {(selected.roomCategoryName || selected.bedTariffPaise !== null || selected.genderRestriction) && (
+                <p className="text-xs text-muted-foreground">
+                  {[selected.roomCategoryName, selected.bedTariffPaise !== null ? perDay(selected.bedTariffPaise) : null, selected.genderRestriction ? GENDER_LABELS[selected.genderRestriction] : 'Mixed ward']
+                    .filter(Boolean).join(' · ')}
+                </p>
+              )}
+
+              {selected.status === 'occupied' && selected.admissionId !== null && (canTransfer || canDischarge || canManageMedications || canCaptureCharges) && (
+                <div className="flex flex-wrap gap-2">
+                  {canTransfer && <Button size="sm" variant="outline" onClick={() => openAction('transfer', selected.admissionId!)}>Transfer</Button>}
+                  {canManageMedications && <Button size="sm" variant="outline" onClick={() => openAction('mar', selected.admissionId!)}>MAR</Button>}
+                  {canCaptureCharges && (
+                    <a href={`/billing/capture?admissionId=${selected.admissionId}`} className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary">Charges</a>
+                  )}
+                  {canDischarge && <Button size="sm" onClick={() => openAction('discharge', selected.admissionId!)}>Discharge</Button>}
+                </div>
+              )}
+
               {selected.status === 'blocked' && selected.blockedReason && <p className="text-muted-foreground">Reason: {selected.blockedReason}</p>}
 
               {selected.status === 'dirty' && canManageFacilities && (
@@ -153,8 +216,18 @@ export function BedBoard({ rooms, providers = [], canManageFacilities, canBlock,
                 <Button variant="outline" onClick={() => callAction(`/api/inpatient/rooms/${selected.id}/unblock`)} disabled={busy}>Unblock room</Button>
               )}
 
-              {selected.status === 'occupied' && canAdmit && (
-                <p className="text-xs text-muted-foreground">Transfer and discharge actions for this patient&apos;s admission are on their Patient Detail page.</p>
+              {canSetBedGender && (
+                <div className="flex items-center gap-2">
+                  <select value={bedGender} onChange={(e) => setBedGender(e.target.value as typeof bedGender)} aria-label="Bed gender" className="rounded-md border border-border px-2 py-1.5 text-sm">
+                    <option value="mixed">Mixed (no restriction)</option>
+                    <option value="male">Male only</option>
+                    <option value="female">Female only</option>
+                  </select>
+                  <Button size="sm" variant="outline" disabled={busy || bedGender === (selected.genderRestriction ?? 'mixed')}
+                    onClick={() => callAction(`/api/inpatient/rooms/${selected.id}`, { genderRestriction: bedGender === 'mixed' ? null : bedGender }, 'PATCH')}>
+                    Save bed gender
+                  </Button>
+                </div>
               )}
 
               {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
@@ -165,6 +238,10 @@ export function BedBoard({ rooms, providers = [], canManageFacilities, canBlock,
           </DialogContent>
         )}
       </Dialog>
+
+      {action?.kind === 'transfer' && <TransferAdmissionModal admissionId={action.admissionId} availableRooms={availableRooms} onClose={() => setAction(null)} />}
+      {action?.kind === 'discharge' && <DischargeAdmissionModal admissionId={action.admissionId} onClose={() => setAction(null)} />}
+      {action?.kind === 'mar' && <MedicationAdministrationPanel admissionId={action.admissionId} onClose={() => setAction(null)} />}
 
       {admitting && (
         <AdmitPatientModal patient={admitting.patient} initialRoomId={admitting.roomId} providers={providers} onClose={() => setAdmitting(null)} />

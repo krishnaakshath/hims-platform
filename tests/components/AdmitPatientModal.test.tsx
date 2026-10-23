@@ -210,11 +210,13 @@ describe('BedBoard "Admit here"', () => {
   const FREE: BoardRoom = {
     id: 11, ward: 'Ward GEN', roomNumber: '2', bedNumber: 'A', status: 'available', blockedReason: null,
     occupantName: null, occupantPatientId: null, attendingProviderName: null, admittedAt: null,
+    admissionId: null, occupantUhid: null, occupantGender: null, genderRestriction: null, roomCategoryName: null, bedTariffPaise: null, daysStayed: null, wardGenderOverride: false,
   }
+  const NO_STAY_ACTIONS = { availableRooms: [], canTransfer: false, canDischarge: false, canManageMedications: false, canCaptureCharges: false }
 
   it('opens the admission dialog for the picked patient with the bed preselected', async () => {
     stubFetch([])
-    render(<BedBoard rooms={[FREE]} providers={PROVIDERS} canManageFacilities={false} canBlock={false} canAdmit />)
+    render(<BedBoard rooms={[FREE]} providers={PROVIDERS} canManageFacilities={false} canBlock={false} canAdmit {...NO_STAY_ACTIONS} />)
     fireEvent.click(screen.getByRole('button', { name: /Room 2 · Bed A/ }))
     expect(screen.getByRole('button', { name: 'Admit here' })).toBeDisabled()
     fireEvent.change(screen.getByRole('combobox', { name: /patient/i }), { target: { value: 'Asha' } })
@@ -224,7 +226,7 @@ describe('BedBoard "Admit here"', () => {
   })
 
   it('offers no "Admit here" without the admission role', () => {
-    render(<BedBoard rooms={[FREE]} providers={PROVIDERS} canManageFacilities={false} canBlock={false} canAdmit={false} />)
+    render(<BedBoard rooms={[FREE]} providers={PROVIDERS} canManageFacilities={false} canBlock={false} canAdmit={false} {...NO_STAY_ACTIONS} />)
     fireEvent.click(screen.getByRole('button', { name: /Room 2 · Bed A/ }))
     expect(screen.queryByRole('button', { name: 'Admit here' })).not.toBeInTheDocument()
   })

@@ -48,7 +48,9 @@ const CASES: Case[] = [
   { name: 'CheckInModal', ui: () => <CheckInModal providers={[{ id: 1, name: 'Dr A' }]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} />, submit: /^Check In$/ },
   { name: 'NoteForm', ui: () => <NoteForm patientId="RD-1" canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: /new note/i })) }, submit: /^(Save|Create)/ },
   { name: 'CarePlanSection', ui: () => <CarePlanSection patientId="RD-1" plans={[]} canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: 'New Care Plan' })) }, submit: /^Save$/ },
-  { name: 'BedBoard block', ui: () => <BedBoard rooms={[{ id: 5, ward: 'A', roomNumber: '1', bedNumber: 'B', status: 'available', blockedReason: null, occupantName: null, occupantPatientId: null, attendingProviderName: null, admittedAt: null }]} canManageFacilities canBlock canAdmit={false} />,
+  { name: 'BedBoard block', ui: () => <BedBoard rooms={[{ id: 5, ward: 'A', roomNumber: '1', bedNumber: 'B', status: 'available', blockedReason: null, occupantName: null, occupantPatientId: null, attendingProviderName: null, admittedAt: null,
+    admissionId: null, occupantUhid: null, occupantGender: null, genderRestriction: null, roomCategoryName: null, bedTariffPaise: null, daysStayed: null, wardGenderOverride: false }]}
+    availableRooms={[]} canManageFacilities canBlock canAdmit={false} canTransfer={false} canDischarge={false} canManageMedications={false} canCaptureCharges={false} />,
     before: () => { fireEvent.click(screen.getByRole('button', { name: /1/ })) }, submit: /^Block room$/ },
   { name: 'LabWorklist collect', ui: () => <LabWorklist role="labs" labTests={[]} orders={[{ id: 9, status: 'ordered', orderedAt: new Date(), collectedAt: null, patientId: 'RD-1', patientName: 'P', testId: 1, testName: 'CBC', testCode: 'CBC', category: 'lab', attachments: [], orderedByProviderId: 1, orderedByProviderName: 'Dr',
     sampleId: null, requisitionId: 1, homeCollectionVisitId: null, visitDate: null, receivedAt: null, verifiedAt: null, patientUhid: null, result: null }]} />, submit: /^Mark collected$/ },

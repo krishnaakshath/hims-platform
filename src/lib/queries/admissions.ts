@@ -1,9 +1,10 @@
 import { getDb } from '@/db/client'
-import { admissions, admissionTransfers, rooms, appointments, encounters } from '@/db/schema'
+import { admissions, admissionTransfers, rooms, appointments, encounters, patients } from '@/db/schema'
 import { and, desc, eq } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
-import { istDateOf } from '@/lib/india-time'
+import { ageOnDate, istDateOf } from '@/lib/india-time'
+import { wardGenderConflict, type WardGenderConflict } from '@/lib/inpatient/admission-rules'
 import type { FollowUpTiming } from '@/lib/follow-ups/rules'
 import { getLatestSignatureForSignable } from '@/lib/queries/signatures'
 import { hasSchedulingConflict, lockProviderSchedule } from '@/lib/queries/appointments'
@@ -118,35 +119,71 @@ export async function listAdmissionsForPatient(patientId: string): Promise<Admis
 
 export interface TransferResult {
   ok: boolean
+  /**
+   * 'Admission not found' | 'This admission has already been discharged' | the room-unavailable
+   * message (legacy display strings), or WS3 T4's 'ward_gender_conflict' (with `conflict`).
+   */
   error?: string
+  conflict?: WardGenderConflict
+  /** True when the move was made under a ward-gender override (the caller audits it, ids only). */
+  wardGenderOverride?: boolean
 }
 
-// Sequential, not transactional (the neon-http driver doesn't support
-// multi-statement transactions -- same accepted limitation as Front Desk).
-// Order matters for safety: claim the destination room FIRST (race-safe,
-// conditional on it still being available), and only free the old room and
-// update the admission after that succeeds. If the process died between
-// steps, the failure mode is "new room occupied, old room still occupied
-// too" -- an inconsistency a human can see and fix -- never "old room freed
-// but nobody actually holds the new one."
-export async function transferAdmission(admissionId: number, toRoomId: number, reason: string, transferredByName: string): Promise<TransferResult> {
-  const db = getDb()
-  const admission = await getAdmissionById(admissionId)
-  if (!admission) return { ok: false, error: 'Admission not found' }
-  if (admission.status !== 'admitted') return { ok: false, error: 'This admission has already been discharged' }
+export interface TransferOptions {
+  /** Required (10..300 chars, validated by the route) when the destination bed conflicts; ignored otherwise. */
+  wardGenderOverrideReason?: string | null
+  now?: Date
+}
 
-  const claimed = await db.update(rooms).set({ status: 'occupied', occupiedByPatientId: admission.patientId }).where(and(eq(rooms.id, toRoomId), eq(rooms.status, 'available'))).returning({ id: rooms.id })
-  if (claimed.length === 0) return { ok: false, error: 'That room is no longer available. Please choose another.' }
+class TransferRefusal extends Error {
+  constructor(readonly result: TransferResult) { super('transfer refused') }
+}
 
-  const fromRoomId = admission.currentRoomId
-  if (fromRoomId !== null) {
-    await db.update(rooms).set({ status: 'dirty', occupiedByPatientId: null }).where(eq(rooms.id, fromRoomId))
+const ROOM_UNAVAILABLE = 'That room is no longer available. Please choose another.'
+
+// ONE transaction (node-postgres): lock the admission row, then the destination room row; apply the
+// ward-gender rule (spec 3.1 item 10, the admission rule: children under 12 exempt, age on the IST
+// date of `now`); claim the destination (re-checked `status = 'available'` at write time), free the
+// old room to `dirty`, move the admission and record the transfer -- the override reason, when used,
+// on the transfer row (the overrider is `transferredByName`). Any refusal writes nothing.
+export async function transferAdmission(admissionId: number, toRoomId: number, reason: string, transferredByName: string, opts: TransferOptions = {}): Promise<TransferResult> {
+  const now = opts.now ?? new Date()
+  try {
+    return await getDb().transaction(async (tx): Promise<TransferResult> => {
+      const [admission] = await tx.select().from(admissions).where(eq(admissions.id, admissionId)).for('update')
+      if (!admission) return { ok: false, error: 'Admission not found' }
+      if (admission.status !== 'admitted') return { ok: false, error: 'This admission has already been discharged' }
+
+      const [room] = await tx.select({ id: rooms.id, status: rooms.status, genderRestriction: rooms.genderRestriction }).from(rooms).where(eq(rooms.id, toRoomId)).for('update')
+      if (!room || room.status !== 'available') return { ok: false, error: ROOM_UNAVAILABLE }
+
+      const [patient] = await tx.select({ gender: patients.gender, dob: patients.dob }).from(patients).where(eq(patients.id, admission.patientId))
+      const conflict = wardGenderConflict({
+        patientGender: patient?.gender ?? null, ageYears: patient ? ageOnDate(patient.dob, istDateOf(now)) : 0, ward: room.genderRestriction ?? null,
+      })
+      const overrideReason = opts.wardGenderOverrideReason ?? null
+      if (conflict && overrideReason === null) return { ok: false, error: 'ward_gender_conflict', conflict }
+
+      const claimed = await tx.update(rooms).set({ status: 'occupied', occupiedByPatientId: admission.patientId })
+        .where(and(eq(rooms.id, toRoomId), eq(rooms.status, 'available'))).returning({ id: rooms.id })
+      if (claimed.length === 0) throw new TransferRefusal({ ok: false, error: ROOM_UNAVAILABLE })
+
+      const fromRoomId = admission.currentRoomId
+      if (fromRoomId !== null) {
+        await tx.update(rooms).set({ status: 'dirty', occupiedByPatientId: null }).where(eq(rooms.id, fromRoomId))
+      }
+
+      await tx.update(admissions).set({ currentRoomId: toRoomId }).where(eq(admissions.id, admissionId))
+      await tx.insert(admissionTransfers).values({
+        admissionId, fromRoomId, toRoomId, reason, transferredByName, transferredAt: now,
+        wardGenderOverrideReason: conflict ? overrideReason : null,
+      })
+      return { ok: true, wardGenderOverride: conflict !== null }
+    })
+  } catch (err) {
+    if (err instanceof TransferRefusal) return err.result
+    throw err
   }
-
-  await db.update(admissions).set({ currentRoomId: toRoomId }).where(eq(admissions.id, admissionId))
-  await db.insert(admissionTransfers).values({ admissionId, fromRoomId, toRoomId, reason, transferredByName })
-
-  return { ok: true }
 }
 
 export interface DischargeFollowUpPlan {
