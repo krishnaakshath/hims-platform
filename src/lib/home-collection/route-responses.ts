@@ -1,7 +1,7 @@
 // SP5: fixed error bodies for the home-collection routes. Never echoes input; the role gate is
 // NOT here (every route checks its allowlist inline, right after requireSession()).
 import { NextResponse } from 'next/server'
-import { brand } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 import type { Session } from '@/lib/auth'
 import { errorResponse } from '@/lib/labs/route-responses'
 import { notifyPatientSafely, type NotifyOutcome } from '@/lib/queries/notifications'
@@ -43,11 +43,13 @@ type VisitNotice =
  */
 export async function notifyVisitChange(session: Session, n: VisitNotice): Promise<NotifyOutcome | 'error'> {
   const related = { type: 'home_collection_visit' as const, id: n.visit.id }
+  // Spec D14: the SMS hospitalName is the resolved brand's SMS name (getBrand never throws).
+  const { smsName } = await getBrand()
   if (n.kind === 'booked') {
     return notifyPatientSafely(session, {
       patientId: n.visit.patientId,
       templateKey: 'home_collection_booked',
-      vars: { hospitalName: brand.name, visitDate: n.visit.visitDate, windowLabel: n.visit.windowLabel },
+      vars: { hospitalName: smsName, visitDate: n.visit.visitDate, windowLabel: n.visit.windowLabel },
       related,
       dedupeKey: `home_collection_booked:visit=${n.visit.id}`,
     })
@@ -56,7 +58,7 @@ export async function notifyVisitChange(session: Session, n: VisitNotice): Promi
     return notifyPatientSafely(session, {
       patientId: n.visit.patientId,
       templateKey: 'home_collection_rescheduled',
-      vars: { hospitalName: brand.name, visitDate: n.visit.visitDate, windowLabel: n.visit.windowLabel },
+      vars: { hospitalName: smsName, visitDate: n.visit.visitDate, windowLabel: n.visit.windowLabel },
       related,
       dedupeKey: `home_collection_rescheduled:visit=${n.visit.id}:n=${n.visit.rescheduleCount}`,
     })
@@ -64,7 +66,7 @@ export async function notifyVisitChange(session: Session, n: VisitNotice): Promi
   return notifyPatientSafely(session, {
     patientId: n.visit.patientId,
     templateKey: 'home_collection_cancelled',
-    vars: { hospitalName: brand.name, visitDate: n.visit.visitDate },
+    vars: { hospitalName: smsName, visitDate: n.visit.visitDate },
     related,
     dedupeKey: `home_collection_cancelled:visit=${n.visit.id}`,
   })

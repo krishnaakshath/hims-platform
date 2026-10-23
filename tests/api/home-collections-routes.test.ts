@@ -19,6 +19,8 @@ vi.mock('@/lib/queries/home-collections', () => ({
   assignCollector: vi.fn(),
 }))
 vi.mock('@/lib/queries/notifications', () => ({ notifyPatientSafely: vi.fn(async () => 'logged') }))
+// WL T10 / spec D14: the SMS hospitalName is the resolved brand's smsName, read per request.
+vi.mock('@/lib/brand-server', async () => ({ getBrand: vi.fn(async () => ({ ...(await import('@/lib/brand')).envBrand, name: 'Probe Hospital', smsName: 'PROBE HSP' })) }))
 
 import { POST as BOOK } from '@/app/api/home-collections/route'
 import { GET as CONTEXT } from '@/app/api/home-collections/context/route'
@@ -31,7 +33,6 @@ import {
 } from '@/lib/queries/home-collections'
 import { notifyPatientSafely } from '@/lib/queries/notifications'
 import { logAudit } from '@/lib/audit'
-import { brand } from '@/lib/brand'
 
 const send = (method: string, body?: unknown, path = '/api/home-collections') =>
   new NextRequest(`http://localhost${path}`, { method, ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }) })
@@ -77,7 +78,7 @@ describe('POST /api/home-collections (book)', () => {
     expect(notifyPatientSafely).toHaveBeenCalledWith(expect.objectContaining({ role: 'frontdesk' }), {
       patientId: 'RD-0001',
       templateKey: 'home_collection_booked',
-      vars: { hospitalName: brand.name, visitDate: '2099-07-02', windowLabel: 'Morning 7-9' },
+      vars: { hospitalName: 'PROBE HSP', visitDate: '2099-07-02', windowLabel: 'Morning 7-9' },
       related: { type: 'home_collection_visit', id: 77 },
       dedupeKey: 'home_collection_booked:visit=77',
     })
@@ -178,7 +179,7 @@ describe('PATCH /api/home-collections/[id] (reschedule)', () => {
     expect(rescheduleHomeCollection).toHaveBeenCalledWith(77, BODY, expect.objectContaining({ role: 'frontdesk' }))
     expect(notifyPatientSafely).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       templateKey: 'home_collection_rescheduled',
-      vars: { hospitalName: brand.name, visitDate: '2099-07-03', windowLabel: 'Evening' },
+      vars: { hospitalName: 'PROBE HSP', visitDate: '2099-07-03', windowLabel: 'Evening' },
       dedupeKey: 'home_collection_rescheduled:visit=77:n=2',
     }))
   })
@@ -217,7 +218,7 @@ describe('POST /api/home-collections/[id]/cancel', () => {
     expect(notifyPatientSafely).toHaveBeenCalledWith(expect.anything(), {
       patientId: 'RD-0001',
       templateKey: 'home_collection_cancelled',
-      vars: { hospitalName: brand.name, visitDate: '2099-07-02' },
+      vars: { hospitalName: 'PROBE HSP', visitDate: '2099-07-02' },
       related: { type: 'home_collection_visit', id: 77 },
       dedupeKey: 'home_collection_cancelled:visit=77',
     })

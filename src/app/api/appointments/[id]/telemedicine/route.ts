@@ -3,7 +3,7 @@ import { parseId } from '@/lib/http'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
-import { brand } from '@/lib/brand' // Foundations T9
+import { getBrand } from '@/lib/brand-server'
 import { istDateOf, formatIstTime } from '@/lib/india-time' // Foundations T9
 import { sendPatientNotice } from '@/lib/queries/notifications' // Foundations T9
 import { getAppointment } from '@/lib/queries/appointments'
@@ -51,10 +51,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   await logAudit(session, 'started telemedicine session', appointment.patientId)
   // Foundations T9: only a freshly created session notifies (the 409 recovery above never does). The
   // text names the visit date and time only; the join token is never part of it. Never throws.
+  const { smsName } = await getBrand() // WL T10: read per request, never throws
   await sendPatientNotice(() => ({
     patientId: appointment.patientId,
     templateKey: 'video_visit_link' as const,
-    vars: { hospitalName: brand.name, visitDate: istDateOf(appointment.startsAt), timeLabel: formatIstTime(appointment.startsAt) },
+    vars: { hospitalName: smsName, visitDate: istDateOf(appointment.startsAt), timeLabel: formatIstTime(appointment.startsAt) },
     dedupeKey: `video:${result.session!.id}`,
   }))
   // end Foundations T9

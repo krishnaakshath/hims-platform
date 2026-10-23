@@ -1,4 +1,8 @@
 import nodemailer from 'nodemailer'
+import { appendEmailSignature } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
+
+/** Plain-text email (spec D13): the stored branding signature, if any, is appended to every body. */
 
 export async function sendEmail(toEmail: string, subject: string, body: string): Promise<void> {
   const host = process.env.SMTP_HOST
@@ -17,5 +21,6 @@ export async function sendEmail(toEmail: string, subject: string, body: string):
     auth: { user, pass: password },
   })
 
-  await transporter.sendMail({ from, to: toEmail, subject, text: body })
+  const { emailSignature } = await getBrand()
+  await transporter.sendMail({ from, to: toEmail, subject, text: appendEmailSignature(body, emailSignature) })
 }
