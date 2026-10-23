@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm'
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
 import type { FormQuestion } from '../lib/forms/question-model' // WS7 T1
+import type { HospitalAudienceFilters } from '../lib/broadcasts/audience' // WS7 T10
 // SP7
 import type { ClaimSnapshot, CodedEntry, EstimateLine, PreauthSnapshot } from '../lib/rcm/snapshot'
 // SP8
@@ -511,6 +512,11 @@ export const broadcasts = pgTable('broadcasts', {
   recipientCount: integer('recipient_count').notNull(),
   sentBy: text('sent_by').notNull(),
   sentAt: timestamp('sent_at').defaultNow().notNull(),
+  filters: jsonb('filters').$type<HospitalAudienceFilters>(), // WS7 T10: audience filters as sent (null on pre-T10 rows)
+  templateKey: text('template_key'), // WS7 T10: 'broadcast_notice' for real sends; null on simulated history
+  sentCount: integer('sent_count').default(0).notNull(), // WS7 T10
+  skippedCount: integer('skipped_count').default(0).notNull(), // WS7 T10: opted out, no usable phone, or no channel reached
+  failedCount: integer('failed_count').default(0).notNull(), // WS7 T10: a channel failed or no provider is configured
 })
 
 export const reviews = pgTable('reviews', {

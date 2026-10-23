@@ -14,6 +14,8 @@ export const NOTIFICATION_TEMPLATE_KEYS = [
   'video_visit_link',
   'booking_confirmed',
   'appointment_reminder',
+  // WS7 T10
+  'broadcast_notice',
 ] as const
 export type NotificationTemplateKey = (typeof NOTIFICATION_TEMPLATE_KEYS)[number]
 
@@ -28,7 +30,12 @@ export interface TemplateVars {
   video_visit_link: { hospitalName: string; visitDate: string; timeLabel: string }
   booking_confirmed: { hospitalName: string; visitDate: string; timeLabel: string }
   appointment_reminder: { hospitalName: string; visitDate: string; timeLabel: string }
+  // WS7 T10: a staff-written hospital broadcast, at most BROADCAST_NOTICE_MAX characters.
+  broadcast_notice: { hospitalName: string; message: string }
 }
+
+/** WS7 T10: longest broadcast message the template accepts (one SMS segment with the prefix kept short). */
+export const BROADCAST_NOTICE_MAX = 140
 
 const TEMPLATES: { [K in NotificationTemplateKey]: (v: TemplateVars[K]) => string } = {
   lab_tests_ordered: ({ hospitalName: h }) =>
@@ -49,6 +56,7 @@ const TEMPLATES: { [K in NotificationTemplateKey]: (v: TemplateVars[K]) => strin
     `${h}: Your appointment is confirmed for ${formatIsoDate(visitDate)}, ${timeLabel}. Sign in to the patient portal for details.`,
   appointment_reminder: ({ hospitalName: h, visitDate, timeLabel }) =>
     `${h}: Reminder: your appointment is on ${formatIsoDate(visitDate)}, ${timeLabel}. Sign in to the patient portal for details.`,
+  broadcast_notice: ({ hospitalName: h, message }) => `${h}: ${message}`,
 }
 
 export function renderNotification<K extends NotificationTemplateKey>(key: K, vars: TemplateVars[K]): string {
@@ -67,6 +75,7 @@ const PARAM_KEYS: { [K in NotificationTemplateKey]: readonly (keyof TemplateVars
   video_visit_link: ['hospitalName', 'visitDate', 'timeLabel'],
   booking_confirmed: ['hospitalName', 'visitDate', 'timeLabel'],
   appointment_reminder: ['hospitalName', 'visitDate', 'timeLabel'],
+  broadcast_notice: ['hospitalName', 'message'],
 }
 
 export function templateParams<K extends NotificationTemplateKey>(key: K, vars: TemplateVars[K]): string[] {
@@ -82,6 +91,7 @@ export function templateVarsValid(key: NotificationTemplateKey, vars: unknown): 
   return (PARAM_KEYS[key] as readonly string[]).every((k) => {
     const v = (vars as Record<string, unknown>)[k]
     if (typeof v !== 'string' || v.trim() === '') return false
+    if (k === 'message') return v.length <= BROADCAST_NOTICE_MAX // WS7 T10
     return k === 'visitDate' ? /^\d{4}-\d{2}-\d{2}$/.test(v) : true
   })
 }
@@ -96,6 +106,7 @@ const SUBJECTS: { [K in NotificationTemplateKey]: string } = {
   video_visit_link: 'Your video consultation',
   booking_confirmed: 'Appointment confirmed',
   appointment_reminder: 'Appointment reminder',
+  broadcast_notice: 'A message from the hospital',
 }
 
 /** Email subject: hospital name plus a fixed, PHI-free phrase. */

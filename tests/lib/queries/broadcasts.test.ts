@@ -2,24 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patientTrialScreenings } from '@/db/schema'
-import { listBroadcastRecipientCandidates, simulateBroadcastDelivery, listBroadcasts } from '@/lib/queries/broadcasts'
-
-describe('simulateBroadcastDelivery', () => {
-  it('delivers SMS only when a phone number is on file', () => {
-    expect(simulateBroadcastDelivery('sms', '909-555-0142', null)).toBe('delivered')
-    expect(simulateBroadcastDelivery('sms', null, 'a@example.com')).toBe('failed')
-  })
-
-  it('delivers email only when an email address is on file', () => {
-    expect(simulateBroadcastDelivery('email', null, 'a@example.com')).toBe('delivered')
-    expect(simulateBroadcastDelivery('email', '909-555-0142', null)).toBe('failed')
-  })
-
-  it('delivers "both" when at least one contact method is on file', () => {
-    expect(simulateBroadcastDelivery('both', null, 'a@example.com')).toBe('delivered')
-    expect(simulateBroadcastDelivery('both', null, null)).toBe('failed')
-  })
-})
+import { listBroadcastRecipientCandidates, listBroadcasts } from '@/lib/queries/broadcasts'
 
 describe('listBroadcastRecipientCandidates', () => {
   it('filters by trial', async () => {
@@ -46,7 +29,7 @@ describe('listBroadcastRecipientCandidates', () => {
     // this patient now has 2 screening rows -- the exact "multi-trial
     // patient" case the function's own comment flags as undefined-order
     // today. BroadcastRecipientCandidate does not expose overallStatus
-    // (public return shape is id/name/phone/email only, per this task's "no
+    // (public return shape carries no screening status, per this task's "no
     // interface change" constraint), so determinism is observed indirectly:
     // filtering by overallStatus: 'red' either includes RD-0001 (the newest
     // screening won) or excludes it (the older seeded screening won) --

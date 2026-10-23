@@ -6,7 +6,7 @@ import { parseId } from '@/lib/http'
 import { requireSessionOrRedirect } from '@/lib/auth'
 import { trialsEnabled } from '@/lib/features'
 import { logAudit } from '@/lib/audit'
-import { getBroadcast } from '@/lib/queries/broadcasts'
+import { describeBroadcastFilters, getBroadcast } from '@/lib/queries/broadcasts'
 
 export default async function BroadcastDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSessionOrRedirect()
@@ -21,16 +21,34 @@ export default async function BroadcastDetailPage({ params }: { params: Promise<
   const broadcast = await getBroadcast(numericId)
   if (!broadcast) notFound()
   await logAudit(session, `viewed broadcast ${id}`, null)
+  const trialsOn = trialsEnabled()
+  const filterSummary = await describeBroadcastFilters(broadcast.filters, { trialsEnabled: trialsOn })
 
   return (
     <div className="max-w-2xl">
       <h1 className="mb-1 text-2xl font-bold text-foreground">{broadcast.subject || 'Broadcast'}</h1>
-      <p className="mb-6 text-sm text-muted-foreground">{formatIstDateTime(broadcast.sentAt)} · {trialsEnabled() ? `${broadcast.trialCondition ?? 'All trials'} · ` : ''}Sent by {broadcast.sentBy}</p>
+      <p className="mb-6 text-sm text-muted-foreground">{formatIstDateTime(broadcast.sentAt)} · {trialsOn && !broadcast.templateKey ? `${broadcast.trialCondition ?? 'All trials'} · ` : ''}Sent by {broadcast.sentBy}</p>
       <div className="mb-6 rounded-lg border border-border bg-card p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message</p>
         <p className="mt-1 text-sm text-foreground">{broadcast.message}</p>
       </div>
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recipients ({broadcast.recipientCount})</h2>
+      {broadcast.templateKey && (
+        // WS7 T10: outcome counts and the audience filters as sent. Per-patient delivery is in notification_log.
+        <div className="mb-6 rounded-lg border border-border bg-card p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Audience</p>
+          <ul className="mt-1 text-sm text-foreground">
+            {filterSummary.map((f) => <li key={f}>{f}</li>)}
+          </ul>
+          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <div><dt className="text-xs text-muted-foreground">Matched</dt><dd className="font-semibold text-foreground">{broadcast.recipientCount}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Sent</dt><dd className="font-semibold text-success">{broadcast.sentCount}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Skipped</dt><dd className="font-semibold text-foreground">{broadcast.skippedCount}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Not delivered</dt><dd className="font-semibold text-destructive">{broadcast.failedCount}</dd></div>
+          </dl>
+          <p className="mt-2 text-xs text-muted-foreground">Skipped: opted out of notices or no usable mobile number. Not delivered: a channel failed or no SMS/WhatsApp provider is configured.</p>
+        </div>
+      )}
+      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{broadcast.templateKey ? `Patients contacted (${broadcast.recipients.length})` : `Recipients (${broadcast.recipientCount})`}</h2>
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-border text-left">
