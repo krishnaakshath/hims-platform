@@ -19,7 +19,7 @@ const POLICY = {
 }
 const v = (id: number, hoursAgo: number, over: Partial<CoverageVerificationFacts> = {}): CoverageVerificationFacts => ({
   id, source: 'manual', result: 'active', verifiedAt: new Date(NOW.getTime() - hoursAgo * H), validUntil: new Date(NOW.getTime() + (24 - hoursAgo) * H),
-  verifiedByName: `Desk ${id}`, method: 'phone', insurerReference: `REF-${id}`, limits: NO_LIMITS, ...over,
+  verifiedByName: `Desk ${id}`, method: 'phone', insurerReference: `REF-${id}`, hasDocument: false, limits: NO_LIMITS, ...over,
 })
 const current = v(12, 2, {
   source: 'nhcx_mock', method: null, verifiedByName: 'Meera Front Desk', insurerReference: 'CLM-REF-77',
@@ -51,6 +51,27 @@ describe('PatientPoliciesPanel coverage (WS12 T4)', () => {
     expect(cur).toHaveTextContent('Co-pay 10%')
     expect(cur).toHaveTextContent('Room rent ₹3,000.00/day')
     expect(cur).toHaveTextContent('ICU ₹6,000.00/day')
+  })
+
+  it('links a verification with a document to the authenticated document route, in a new tab, and never otherwise', () => {
+    const withDoc = v(13, 1, { hasDocument: true })
+    render(panel({ c: coverage({ current: withDoc, history: [withDoc, v(11, 40)] }) }))
+    const links = screen.getAllByRole('link', { name: 'View document' })
+    expect(links.length).toBeGreaterThanOrEqual(1)
+    for (const link of links) {
+      expect(link).toHaveAttribute('href', '/api/rcm/verification-documents/13')
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    }
+    expect(within(screen.getByTestId('current-verification-3')).getByRole('link', { name: 'View document' })).toBeInTheDocument()
+    const items = within(screen.getByTestId('verification-history-3')).getAllByRole('listitem')
+    expect(within(items[0]).getByRole('link', { name: 'View document' })).toBeInTheDocument()
+    expect(within(items[1]).queryByRole('link', { name: 'View document' })).toBeNull()
+  })
+
+  it('shows no document link when no verification has a document', () => {
+    render(panel())
+    expect(screen.queryByRole('link', { name: 'View document' })).toBeNull()
   })
 
   it('lists the history newest first with who, source and method', () => {

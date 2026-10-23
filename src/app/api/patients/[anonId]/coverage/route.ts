@@ -12,7 +12,7 @@ import { COVERAGE_READ_ROLES } from '@/lib/role-policy'
 
 // WS12 T2: what is known about a patient's insurance cover right now (verdict, current and
 // recent verifications, limits). Dates leave as ISO strings; the insurer reference never
-// leaves (R6), and verifications carry no document URL or NHCX check id here.
+// leaves (R6), and verifications carry no document URL (only hasDocument) or NHCX check id here.
 const querySchema = z.object({ context: z.enum(['view', 'opd_checkin', 'ipd_admission']).default('view') }).strict()
 
 type PublicVerification = Omit<CoverageVerificationFacts, 'insurerReference'>

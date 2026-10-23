@@ -109,6 +109,30 @@ describe('PreauthForm (WS12 T8)', () => {
     expect(screen.getByRole('button', { name: 'Open the pre-authorisation' })).toBeInTheDocument()
   })
 
+  it('clears the amount confirmation when the estimate total changes', async () => {
+    let total = 600_00
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/tariff/services')) return new Response(JSON.stringify({ services: [{ id: 7, code: 'SVC7', name: 'Bed day' }] }))
+      if (url === '/api/rcm/preauths/estimate') {
+        return new Response(JSON.stringify({ lines: [{ serviceId: 7, code: 'SVC7', name: 'Bed day', quantity: 1, unitPricePaise: total, amountPaise: total, priceSource: 'base' }], totalPaise: total, coverage: null }))
+      }
+      return new Response('{}', { status: 404 })
+    }))
+    render(<PreauthForm {...ADM_PROPS} defaults={DEFAULTS} />)
+    fireEvent.change(screen.getByLabelText('Provisional diagnosis (free text)'), { target: { value: 'Fever' } })
+    await addService()
+    expect(await screen.findByText('Estimate ₹600.00', {}, { timeout: 2000 })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/^Requested amount/), { target: { value: '90000' } })
+    fireEvent.click(screen.getByLabelText('I have checked the requested amount'))
+    const button = screen.getByRole('button', { name: 'Create draft pre-authorisation' })
+    expect(button).toBeEnabled()
+    total = 500_00
+    fireEvent.change(screen.getByLabelText('Expected stay (days)'), { target: { value: '2' } })
+    expect(await screen.findByText('Estimate ₹500.00', {}, { timeout: 2000 })).toBeInTheDocument()
+    expect(screen.getByLabelText('I have checked the requested amount')).not.toBeChecked()
+    expect(button).toBeDisabled()
+  })
+
   it('shows the indicative insurer/patient split and its warnings from the estimate route', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/tariff/services')) return new Response(JSON.stringify({ services: [{ id: 7, code: 'SVC7', name: 'Bed day' }] }))

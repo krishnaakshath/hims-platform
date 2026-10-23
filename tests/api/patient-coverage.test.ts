@@ -37,6 +37,8 @@ describe.skipIf(!process.env.DATABASE_URL)('GET /api/patients/[anonId]/coverage 
       patientId: b.patientId, policyId: b.policyId, source: 'nhcx_mock', result: 'active', context: 'checkin', nhcxCheckId: chk.id,
       insurerReference: `SECRETREF${RUN}`, verifiedByName: 'Desk', verifiedAt, validUntil: new Date(verifiedAt.getTime() + 24 * 3_600_000),
       sumInsuredPaise: 50_000_000, balancePaise: 45_000_000, copayBp: 1000, roomRentLimitPaise: 400_000, icuLimitPaise: 800_000, reportedValidTo: '2099-12-31',
+      // A stored document: only hasDocument may leave, never its URL.
+      documentBlobUrl: `https://store.example/blob/secret-${RUN}.pdf`, documentSha256: 'a'.repeat(64), documentContentType: 'application/pdf',
     })
   })
   afterAll(async () => {
@@ -56,8 +58,11 @@ describe.skipIf(!process.env.DATABASE_URL)('GET /api/patients/[anonId]/coverage 
     expect(body.primary.current).toMatchObject({ source: 'nhcx_mock', result: 'active', limits: { sumInsuredPaise: 50_000_000, balancePaise: 45_000_000, copayBp: 1000 } })
     expect(body.primary.current.verifiedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
     expect(body.primary.limits).toMatchObject({ roomRentLimitPaise: 400_000, icuLimitPaise: 800_000 })
+    expect(body.primary.current.hasDocument).toBe(true)
+    expect(body.primary.history[0].hasDocument).toBe(true)
     const text = JSON.stringify(body)
     expect(text).not.toMatch(/blob|http/i)
+    expect(text).not.toMatch(/documentBlobUrl|secret-/)
     expect(text).not.toContain(`SECRETREF${RUN}`)
     expect(text).not.toMatch(/nhcxCheckId|nhcx_check_id|insurerReference/)
     expect(body.primary.current.id).not.toBeUndefined()

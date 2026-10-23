@@ -16,7 +16,7 @@ const policy = (over: Partial<CoveragePolicyFacts> = {}): CoveragePolicyFacts =>
 })
 const verification = (over: Partial<CoverageVerificationFacts> = {}): CoverageVerificationFacts => ({
   id: 41, source: 'nhcx', result: 'active', verifiedAt: new Date(NOW.getTime() - 3 * H), validUntil: new Date(NOW.getTime() + 21 * H),
-  verifiedByName: 'Asha Front', method: null, insurerReference: null, limits: NO_LIMITS, ...over,
+  verifiedByName: 'Asha Front', method: null, insurerReference: null, hasDocument: false, limits: NO_LIMITS, ...over,
 })
 const run = (over: Partial<Parameters<typeof evaluateCoverage>[0]> & { context: CoverageContext }) =>
   evaluateCoverage({ policy: policy(), verification: null, pendingCheck: false, now: NOW, ...over })

@@ -39,7 +39,7 @@ export type CoverageState = 'no_policy' | 'policy_inactive' | 'policy_not_starte
 
 export interface CoverageLimits { sumInsuredPaise: number | null; balancePaise: number | null; copayBp: number | null; roomRentLimitPaise: number | null; icuLimitPaise: number | null }
 export interface CoveragePolicyFacts { id: number; status: 'active' | 'inactive'; validFrom: string; validTo: string; insurerName: string; onNhcx: boolean; limits: CoverageLimits }
-export interface CoverageVerificationFacts { id: number; source: (typeof VERIFICATION_SOURCES)[number]; result: (typeof VERIFICATION_RESULTS)[number]; verifiedAt: Date; validUntil: Date; verifiedByName: string; method: string | null; insurerReference: string | null; limits: CoverageLimits }
+export interface CoverageVerificationFacts { id: number; source: (typeof VERIFICATION_SOURCES)[number]; result: (typeof VERIFICATION_RESULTS)[number]; verifiedAt: Date; validUntil: Date; verifiedByName: string; method: string | null; insurerReference: string | null; /** A confirmation document is stored; only this flag leaves, never its URL. */ hasDocument: boolean; limits: CoverageLimits }
 export interface CoverageVerdict { state: CoverageState; severity: 'ok' | 'info' | 'warn' | 'block'; label: string; detail: string | null; verifiedHoursAgo: number | null; isMock: boolean; policyId: number | null; verificationId: number | null }
 
 export const MOCK_LABEL = 'Sandbox mock - not real'

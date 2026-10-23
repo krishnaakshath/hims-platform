@@ -18,6 +18,8 @@ export const PREAUTH_SNAPSHOT_ACTIONS = ['request', 'request_enhancement', 'refr
 /**
  * WS12 T7: outbound NHCX exchange states that mean the insurer never got the snapshot. Any other
  * state counts as sent: the same snapshot is not sent again and cannot be refreshed.
+ * `error` is the insurer's response.error: the request was not accepted, so it counts as
+ * undelivered and the snapshot may be resent or refreshed.
  */
 export const NHCX_UNDELIVERED_EXCHANGE_STATES = ['send_failed', 'error'] as const
 

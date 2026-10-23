@@ -31,6 +31,7 @@ function toFacts(r: CoverageVerificationRow): CoverageVerificationFacts {
   return {
     id: r.id, source: r.source, result: r.result, verifiedAt: r.verifiedAt, validUntil: r.validUntil,
     verifiedByName: r.verifiedByName, method: r.method, insurerReference: r.insurerReference,
+    hasDocument: r.documentBlobUrl !== null, // a boolean only: the URL stays on the server
     limits: { sumInsuredPaise: r.sumInsuredPaise, balancePaise: r.balancePaise, copayBp: r.copayBp, roomRentLimitPaise: r.roomRentLimitPaise, icuLimitPaise: r.icuLimitPaise },
   }
 }

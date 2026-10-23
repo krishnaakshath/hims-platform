@@ -48,13 +48,15 @@ export function PreauthForm({ policies, admissions, encounters, doctors, default
   const [items, setItems] = useState<EstimateItem[]>([])
   const [estimate, setEstimate] = useState<number | null>(null)
   const [requested, setRequested] = useState('')
-  const [confirmed, setConfirmed] = useState(false)
+  // The estimate total the requested amount was confirmed against: a new total needs a new confirmation.
+  const [confirmedFor, setConfirmedFor] = useState<number | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [created, setCreated] = useState<{ preauthId: number; preauthNumber: string; message: string | null } | null>(null)
 
   const requestedPaise = requested.trim() ? parseRupeesToPaise(requested) : null
   const amountCheck = requestedVsEstimate(requestedPaise, estimate)
+  const confirmed = confirmedFor !== undefined && confirmedFor === estimate
   const missing = missingPreauthFields({ policyId, plannedAdmissionDate: planned, treatingProviderId: doctorId, estimateItems: items.length, diagnosisCodes: dx.length, provisionalDiagnosisText: text })
   if (amountCheck.needsConfirm && !confirmed) missing.push('confirmation of the requested amount')
 
@@ -115,13 +117,13 @@ export function PreauthForm({ policies, admissions, encounters, doctors, default
       </div>
       <Field label="Provisional diagnosis (free text)"><textarea className={inputClass} rows={2} value={text} onChange={(e) => setText(e.target.value)} /></Field>
       <EstimateTable policyId={policyId} plannedAdmissionDate={planned} roomCategoryCode={room} lengthOfStayDays={Number(los)} items={items} onItems={setItems} onTotal={setEstimate} />
-      <Field label={`Requested amount (₹)${estimate !== null ? `, estimate ${formatPaise(estimate)}` : ''}`}><input className={inputClass} placeholder="Defaults to the estimate" value={requested} onChange={(e) => { setRequested(e.target.value); setConfirmed(false) }} /></Field>
+      <Field label={`Requested amount (₹)${estimate !== null ? `, estimate ${formatPaise(estimate)}` : ''}`}><input className={inputClass} placeholder="Defaults to the estimate" value={requested} onChange={(e) => { setRequested(e.target.value); setConfirmedFor(undefined) }} /></Field>
       {amountCheck.message && (
         <p className={`text-xs ${amountCheck.level === 'warn' ? 'font-medium text-amber-800' : 'text-muted-foreground'}`}>{amountCheck.message}</p>
       )}
       {amountCheck.needsConfirm && (
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+          <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmedFor(e.target.checked ? estimate : undefined)} />
           I have checked the requested amount
         </label>
       )}

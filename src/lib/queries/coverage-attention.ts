@@ -49,7 +49,9 @@ export async function getInsuranceAttention(now: Date = new Date()): Promise<Ins
       .where(and(
         eq(admissionCoverage.mode, 'cashless'),
         sql`${admissions.admittedAt} >= ${start} AND ${admissions.admittedAt} < ${end}`,
-        sql`NOT EXISTS (SELECT 1 FROM ${coverageVerifications} cv WHERE cv.policy_id = ${admissionCoverage.policyId} AND cv.valid_until > ${now} AND cv.result <> 'error')`,
+        // Verified means the current answer (newest unexpired non-error one, as currentVerification
+        // picks it) is active; a current inactive answer leaves the admission on the list.
+        sql`NOT COALESCE((SELECT cv.result = 'active' FROM ${coverageVerifications} cv WHERE cv.policy_id = ${admissionCoverage.policyId} AND cv.valid_until > ${now} AND cv.result <> 'error' ORDER BY cv.verified_at DESC, cv.id DESC LIMIT 1), false)`,
       ))
       .orderBy(asc(admissions.admittedAt), asc(admissions.id)),
     getHospitalIdentifiers(),

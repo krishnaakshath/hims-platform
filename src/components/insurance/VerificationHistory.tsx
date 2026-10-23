@@ -24,6 +24,13 @@ export function limitParts(l: CoverageLimits): string[] {
   return parts
 }
 
+/** The authenticated, audited document route (T3); the blob URL itself never reaches the browser. */
+function DocumentLink({ verificationId }: { verificationId: number }) {
+  return (
+    <a href={`/api/rcm/verification-documents/${verificationId}`} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">View document</a>
+  )
+}
+
 export function VerificationHistory({ policyId, current, history }: { policyId: number; current: CoverageVerificationFacts | null; history: CoverageVerificationFacts[] }) {
   if (!current && history.length === 0) return <p className="text-xs text-muted-foreground">No verification on record.</p>
   const limits = current ? limitParts(current.limits) : []
@@ -37,6 +44,7 @@ export function VerificationHistory({ policyId, current, history }: { policyId: 
           </p>
           <p className="text-muted-foreground">
             {current.insurerReference ? `Reference ${current.insurerReference} · ` : ''}Valid until {formatIstDate(current.validUntil)}
+            {current.hasDocument && <> · <DocumentLink verificationId={current.id} /></>}
           </p>
           {limits.length > 0 && <p className="text-muted-foreground">{limits.join(' · ')}</p>}
         </div>
@@ -49,6 +57,7 @@ export function VerificationHistory({ policyId, current, history }: { policyId: 
               <li key={h.id}>
                 {formatIstDateTime(h.verifiedAt)} · {RESULT_LABEL[h.result]} · {h.verifiedByName} via {verificationSource(h)}
                 {h.source === 'nhcx_mock' ? ` (${MOCK_LABEL})` : ''}{h.insurerReference ? ` · ref ${h.insurerReference}` : ''}
+                {h.hasDocument && <> · <DocumentLink verificationId={h.id} /></>}
               </li>
             ))}
           </ul>

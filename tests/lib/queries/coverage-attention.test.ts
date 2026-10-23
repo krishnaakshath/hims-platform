@@ -54,15 +54,23 @@ describe.skipIf(!process.env.DATABASE_URL)('insurance attention (DB)', () => {
     expect((await getInsuranceAttention(NOW)).policiesExpiringIn7Days).toBeGreaterThanOrEqual(1)
   })
 
-  it('lists a cashless admission admitted today without a verification, by UHID, and drops it once verified', async () => {
+  it('lists a cashless admission admitted today without a current active verification, by UHID, and drops it once verified active', async () => {
     const before = (await getInsuranceAttention(NOW)).admissionsTodayUnverified.filter((a) => a.admissionId === admissionId)
     expect(before).toHaveLength(1)
     expect(before[0]).toMatchObject({ patientId: b.patientId, uhid: `UHW12A${RUN}` })
     expect(before[0].payerName).toContain('Insurer')
-    await db().insert(coverageVerifications).values({
-      patientId: b.patientId, policyId: b.policyId, source: 'manual', result: 'active', context: 'manual', method: 'phone',
-      verifiedByName: 'Test Desk', verifiedAt: NOW, validUntil: new Date(NOW.getTime() + 24 * 3_600_000),
+    const verify = (result: 'active' | 'inactive', minutesAgo: number) => db().insert(coverageVerifications).values({
+      patientId: b.patientId, policyId: b.policyId, source: 'manual', result, context: 'manual', method: 'phone',
+      verifiedByName: 'Test Desk', verifiedAt: new Date(NOW.getTime() - minutesAgo * 60_000), validUntil: new Date(NOW.getTime() + 24 * 3_600_000),
     })
+    const listed = async () => (await getInsuranceAttention(NOW)).admissionsTodayUnverified.filter((a) => a.admissionId === admissionId)
+    // A current "not in force" answer is not a verification of cover: the admission stays listed.
+    await verify('inactive', 30)
+    expect(await listed()).toHaveLength(1)
+    // An older active answer is not current while a newer inactive one is (newest answer wins).
+    await verify('active', 120)
+    expect(await listed()).toHaveLength(1)
+    await verify('active', 0)
     const after = (await getInsuranceAttention(NOW)).admissionsTodayUnverified.filter((a) => a.admissionId === admissionId)
     expect(after).toHaveLength(0)
   })
