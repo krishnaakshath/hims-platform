@@ -58,9 +58,37 @@ describe('allergyConflicts', () => {
     expect(allergyConflicts(drug('Codeine', null, null), [allergy('Code')])).toEqual([])
   })
 
-  it('a multi-word allergen must appear as consecutive tokens', () => {
+  it('a multi-word allergen matches as consecutive tokens', () => {
     expect(allergyConflicts(drug('Clavulanic acid', null, null), [allergy('clavulanic acid')])).toHaveLength(1)
-    expect(allergyConflicts(drug('Acid clavulanic', null, null), [allergy('clavulanic acid')])).toEqual([])
+  })
+
+  // Fix round 1: an extra word in the allergen must not defeat the match.
+  it('"Diclofenac sodium" allergy vs a drug with generic "Diclofenac" is a conflict', () => {
+    expect(allergyConflicts(drug('Voveran 50', 'Diclofenac', 'NSAID'), [allergy('Diclofenac sodium')])).toEqual([
+      { allergen: 'Diclofenac sodium', severity: 'severe', matchedOn: 'generic' },
+    ])
+  })
+
+  it('"Penicillin allergy" vs Penicillin V is a conflict', () => {
+    expect(allergyConflicts(drug('Penicillin V 250 mg', null, null), [allergy('Penicillin allergy')])).toEqual([
+      { allergen: 'Penicillin allergy', severity: 'severe', matchedOn: 'name' },
+    ])
+  })
+
+  it('"Amoxicillin (rash)" and "Aspirin tablets" match their drugs', () => {
+    expect(allergyConflicts(drug('Mox 500', 'Amoxicillin', null), [allergy('Amoxicillin (rash)')])[0]?.matchedOn).toBe('generic')
+    expect(allergyConflicts(drug('Ecosprin 75', 'Aspirin', null), [allergy('Aspirin tablets')])[0]?.matchedOn).toBe('generic')
+  })
+
+  it('stopwords and short words alone never match (sodium, acid, tablets, allergy)', () => {
+    expect(allergyConflicts(drug('Valproate sodium', 'Sodium valproate', null), [allergy('Diclofenac sodium')])).toEqual([])
+    expect(allergyConflicts(drug('Folic acid 5 mg', 'Folic acid', null), [allergy('Clavulanic acid')])).toEqual([])
+    expect(allergyConflicts(drug('Dolo tablets', 'Paracetamol', null), [allergy('Aspirin tablets')])).toEqual([])
+    expect(allergyConflicts(drug('Drug allergy kit', null, null), [allergy('Sulfa allergy')])).toEqual([])
+  })
+
+  it.each(['Phenoxymethylpenicillin', 'Benzylpenicillin', 'Flucloxacillin'])('Penicillin allergy vs %s cross-reacts (*cillin)', (g) => {
+    expect(allergyConflicts(drug('Brand', g, null), [allergy('Penicillin')])[0]?.matchedOn).toBe('cross_reactivity')
   })
 
   it('reports one conflict per matching allergy and none for an empty allergen', () => {

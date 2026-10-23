@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
-import { createPrescription } from '@/lib/queries/prescriptions'
+import { activeAllergies, createPrescription, drugAllergyConflicts } from '@/lib/queries/prescriptions'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { resolveSessionProvider } from '@/lib/provider-identity'
 import { parseDosePattern, prescribedQuantity } from '@/lib/prescriptions/dose-pattern'
@@ -30,6 +30,8 @@ const createPrescriptionSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   instructions: z.string().trim().max(500).nullable().optional(),
   onBehalfOfProviderId: z.number().int().positive().optional(),
+  // WS1 T6 (spec ruling 9): needed to prescribe against a recorded allergy.
+  allergyOverrideReason: z.string().trim().min(5).max(300).optional(),
 }).strict().superRefine((b, ctx) => { // WS1 T6
   if (b.dosePattern !== undefined && b.dosePattern !== '') {
     if (!parseDosePattern(b.dosePattern)) ctx.addIssue({ code: 'custom', path: ['dosePattern'], message: 'Use a pattern like 1-0-1' })
@@ -87,7 +89,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const pattern = parsed.data.dosePattern ? parseDosePattern(parsed.data.dosePattern) : null
   const frequencyPerDay = pattern?.perDay ?? parsed.data.frequencyPerDay!
   const medicationId = parsed.data.medicationId ?? null
-  const [catalogRow] = medicationId === null ? [] : await getDb().select({ form: medications.form }).from(medications).where(eq(medications.id, medicationId))
+  const [catalogRow] = medicationId === null ? [] : await getDb()
+    .select({ form: medications.form, name: medications.name, genericName: medications.genericName, medicationClass: medications.medicationClass })
+    .from(medications).where(eq(medications.id, medicationId))
+
+  // WS1 T6 (spec ruling 9): the same allergy check as the encounter route; a conflict needs a reason.
+  const conflicts = drugAllergyConflicts(parsed.data, catalogRow ?? null, await activeAllergies(anonId))
+  if (conflicts.length > 0 && !parsed.data.allergyOverrideReason) {
+    return NextResponse.json({ error: 'This prescription conflicts with a recorded allergy.', code: 'allergy_conflict', conflicts }, { status: 422 })
+  }
 
   const created = await createPrescription({
     patientId: anonId,
@@ -98,6 +108,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     frequencyPerDay,
     dosePattern: pattern?.label ?? null,
     quantityPrescribed: prescribedQuantity({ pattern, frequencyPerDay, durationDays: parsed.data.durationDays, form: catalogRow?.form ?? 'other', isSos: false }),
+    // Stored only when the drug actually conflicted: the reason answers that conflict.
+    allergyOverrideReason: conflicts.length > 0 ? parsed.data.allergyOverrideReason ?? null : null,
     durationDays: parsed.data.durationDays,
     startDate: parsed.data.startDate,
     instructions: parsed.data.instructions ?? null,
@@ -109,6 +121,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // 30 seconds, and a freshly written prescription would otherwise be
   // invisible on the very page that wrote it.
   await invalidateCache(patientDetailCacheKey(anonId))
-  await logAudit(session, `prescribed ${parsed.data.name}`, anonId)
+  // Ids and counts only: no drug name in the audit row (WS1 T6, audit constraint).
+  await logAudit(session, 'wrote prescription', anonId, `episode=${created.id} overrides=${conflicts.length > 0 ? 1 : 0}`)
   return NextResponse.json(created, { status: 201 })
 }

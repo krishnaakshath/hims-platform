@@ -1,10 +1,10 @@
 import { todayIsoIn } from '@/lib/india-time'
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
 import { NextResponse } from 'next/server'
-import { and, eq, ne } from 'drizzle-orm'
+import { and, desc, eq, ne } from 'drizzle-orm'
 import * as auth from '@/lib/auth'
 import { getDb } from '@/db/client'
-import { patients, providers, staffMembers, medications, medicationEpisodes } from '@/db/schema'
+import { patients, providers, staffMembers, medications, medicationEpisodes, allergies, auditLog } from '@/db/schema'
 import { invalidateCache, providersListCacheKey } from '@/lib/cache'
 
 type Role = 'admin' | 'pi' | 'crc' | 'frontdesk'
@@ -62,6 +62,7 @@ beforeAll(async () => {
 })
 
 const trackedEpisodeIds: number[] = []
+const trackedAllergyIds: number[] = [] // WS1 T6 fix round 1
 let otherProviderActiveSnapshot: boolean | null = null
 
 afterEach(async () => {
@@ -70,6 +71,7 @@ afterEach(async () => {
   sessionUserId = null
 
   const db = getDb()
+  while (trackedAllergyIds.length > 0) await db.delete(allergies).where(eq(allergies.id, trackedAllergyIds.pop()!))
   while (trackedEpisodeIds.length > 0) {
     const id = trackedEpisodeIds.pop()!
     await db.delete(medicationEpisodes).where(eq(medicationEpisodes.id, id))
@@ -300,6 +302,70 @@ describe('POST /api/patients/[anonId]/prescriptions', () => {
     delete payload.frequencyPerDay
     const neither = await createPrescriptionRoute(postRequest(payload) as never, { params: Promise.resolve({ anonId: patientAId }) })
     expect(neither.status).toBe(400)
+  })
+
+  // WS1 T6 fix round 1: spec ruling 9 binds this route too.
+  describe('allergy check', () => {
+    async function addAllergy(allergen: string) {
+      const [a] = await getDb().insert(allergies).values({ patientId: patientAId, allergen, severity: 'severe' }).returning()
+      trackedAllergyIds.push(a.id)
+    }
+
+    it('a conflict without allergyOverrideReason is 422 allergy_conflict and writes nothing', async () => {
+      sessionRole = 'pi'
+      sessionUserId = kunamUserId
+      await addAllergy('Sertraline (rash)')
+      const before = await episodeCount(patientAId)
+      const res = await createPrescriptionRoute(postRequest(validPayload()) as never, { params: Promise.resolve({ anonId: patientAId }) })
+      expect(res.status).toBe(422)
+      const body = await res.json()
+      expect(body.code).toBe('allergy_conflict')
+      expect(body.error).toBeTruthy()
+      expect(body.conflicts).toEqual([{ allergen: 'Sertraline (rash)', severity: 'severe', matchedOn: 'name' }])
+      expect(await episodeCount(patientAId)).toBe(before)
+    })
+
+    it('an inactivated allergy does not block', async () => {
+      sessionRole = 'pi'
+      sessionUserId = kunamUserId
+      const [a] = await getDb().insert(allergies).values({ patientId: patientAId, allergen: 'Sertraline', severity: 'severe', inactivatedAt: new Date() }).returning()
+      trackedAllergyIds.push(a.id)
+      const res = await createPrescriptionRoute(postRequest(validPayload()) as never, { params: Promise.resolve({ anonId: patientAId }) })
+      expect(res.status).toBe(201)
+      trackedEpisodeIds.push((await res.json()).id)
+    })
+
+    it('with an override reason it is 201 and the reason is stored', async () => {
+      sessionRole = 'pi'
+      sessionUserId = kunamUserId
+      await addAllergy('SSRI')
+      const res = await createPrescriptionRoute(postRequest(validPayload({ allergyOverrideReason: 'Tolerated before, monitored' })) as never, { params: Promise.resolve({ anonId: patientAId }) })
+      expect(res.status).toBe(201)
+      const body = await res.json()
+      trackedEpisodeIds.push(body.id)
+      expect(body.allergyOverrideReason).toBe('Tolerated before, monitored')
+    })
+
+    it('rejects an override reason under 5 characters', async () => {
+      sessionRole = 'pi'
+      sessionUserId = kunamUserId
+      const res = await createPrescriptionRoute(postRequest(validPayload({ allergyOverrideReason: 'ok' })) as never, { params: Promise.resolve({ anonId: patientAId }) })
+      expect(res.status).toBe(400)
+    })
+
+    it('without a conflict any reason is not stored, and the audit row carries ids only', async () => {
+      sessionRole = 'pi'
+      sessionUserId = kunamUserId
+      const res = await createPrescriptionRoute(postRequest(validPayload({ allergyOverrideReason: 'Not needed here' })) as never, { params: Promise.resolve({ anonId: patientAId }) })
+      expect(res.status).toBe(201)
+      const body = await res.json()
+      trackedEpisodeIds.push(body.id)
+      expect(body.allergyOverrideReason).toBeNull()
+      const [audit] = await getDb().select().from(auditLog).where(eq(auditLog.patientId, patientAId)).orderBy(desc(auditLog.id)).limit(1)
+      expect(audit.action).toBe('wrote prescription')
+      expect(audit.details).toBe(`episode=${body.id} overrides=0`)
+      expect(`${audit.action} ${audit.details}`).not.toMatch(/sertraline/i)
+    })
   })
 
   it('the off-catalog path works: medicationId omitted, free-text name/medicationClass', async () => {

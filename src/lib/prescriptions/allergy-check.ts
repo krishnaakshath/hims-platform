@@ -11,9 +11,10 @@ export interface AllergyConflict {
   matchedOn: 'name' | 'generic' | 'class' | 'cross_reactivity'
 }
 
-// Allergen word (any alias) -> drugs that cross-react. A target ending in '*' is a prefix.
+// Allergen word (any alias) -> drugs that cross-react. A target ending in '*' is a prefix, one
+// starting with '*' a suffix ('*cillin' covers phenoxymethylpenicillin, benzylpenicillin, ...).
 const CROSS_REACTIVITY: { aliases: string[]; drugs: string[] }[] = [
-  { aliases: ['penicillin'], drugs: ['amoxicillin', 'ampicillin', 'cloxacillin', 'piperacillin'] },
+  { aliases: ['penicillin'], drugs: ['amoxicillin', 'ampicillin', 'cloxacillin', 'piperacillin', 'phenoxymethylpenicillin', 'benzylpenicillin', '*cillin'] },
   { aliases: ['sulfa', 'sulpha', 'sulfonamide', 'sulphonamide'], drugs: ['sulfamethoxazole', 'sulfasalazine'] },
   { aliases: ['nsaid'], drugs: ['ibuprofen', 'diclofenac', 'naproxen', 'aspirin', 'ketorolac'] },
   { aliases: ['cephalosporin'], drugs: ['cef*', 'ceph*'] },
@@ -37,7 +38,20 @@ function containsSequence(hay: string[], needle: string[]): boolean {
 }
 
 const matchesDrugToken = (target: string, token: string) =>
-  target.endsWith('*') ? token.startsWith(target.slice(0, -1)) : token === target
+  target.endsWith('*') ? token.startsWith(target.slice(0, -1))
+    : target.startsWith('*') ? token.endsWith(target.slice(1))
+      : token === target
+
+// Words in an allergy entry that do not identify the drug (compared after tokens()' plural
+// trimming, so "tablets" is "tablet"). Salts and forms would otherwise match unrelated drugs.
+const STOPWORDS = new Set([
+  'allergy', 'allergic', 'drug', 'medicine', 'tablet', 'capsule', 'injection', 'syrup',
+  'sodium', 'potassium', 'calcium', 'hydrochloride', 'acid', 'rash', 'reaction', 'intolerance',
+  'hive', 'itching', 'swelling', 'severe', 'mild', 'moderate', 'with',
+])
+/** Allergen tokens that name a drug on their own: at least 4 characters and not a stopword. */
+const significant = (allergen: string[]) => allergen.filter((t) => t.length >= 4 && !STOPWORDS.has(t))
+const sharesToken = (field: string[], words: string[]) => words.some((w) => field.includes(w))
 
 export function allergyConflicts(drug: DrugIdentity, allergies: AllergyInput[]): AllergyConflict[] {
   const name = tokens(drug.name)
@@ -49,9 +63,12 @@ export function allergyConflicts(drug: DrugIdentity, allergies: AllergyInput[]):
   for (const a of allergies) {
     const allergen = tokens(a.allergen)
     if (allergen.length === 0) continue
+    // The whole allergen as consecutive tokens, or (for name and generic) any significant allergen
+    // word, so "Diclofenac sodium" / "Penicillin allergy" / "Amoxicillin (rash)" still match.
+    const words = significant(allergen)
     let matchedOn: AllergyConflict['matchedOn'] | null = null
-    if (containsSequence(name, allergen)) matchedOn = 'name'
-    else if (containsSequence(generic, allergen)) matchedOn = 'generic'
+    if (containsSequence(name, allergen) || sharesToken(name, words)) matchedOn = 'name'
+    else if (containsSequence(generic, allergen) || sharesToken(generic, words)) matchedOn = 'generic'
     else if (containsSequence(cls, allergen)) matchedOn = 'class'
     else if (CROSS_REACTIVITY.some((row) =>
       row.aliases.some((alias) => allergen.includes(alias)) &&

@@ -187,6 +187,13 @@ describe('POST /api/encounters/[id]/prescriptions', () => {
     expect(res.status).toBe(422)
   })
 
+  it('always checks the catalogue identity: a client-sent class cannot dodge a class match (fix round 1)', async () => {
+    await getDb().insert(allergies).values({ patientId: PATIENT, allergen: 'Antibiotic', severity: 'moderate' })
+    const res = await post(encounterId, { items: [item({ medicationId: med.amox, name: `${TAG} Mox 500`, medicationClass: 'Other', dose: '500 mg' })] })
+    expect(res.status).toBe(422)
+    expect((await res.json()).conflicts).toEqual([{ index: 0, conflicts: [{ allergen: 'Antibiotic', severity: 'moderate', matchedOn: 'class' }] }])
+  })
+
   it('with an override reason the conflict is written (201) and the reason stored', async () => {
     await getDb().insert(allergies).values({ patientId: PATIENT, allergen: 'Penicillin', severity: 'mild' })
     const res = await post(encounterId, {

@@ -4,7 +4,8 @@ import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import type { Session } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { parseDosePattern, prescribedQuantity } from '@/lib/prescriptions/dose-pattern'
-import { allergyConflicts, type AllergyConflict } from '@/lib/prescriptions/allergy-check'
+import { allergyConflicts, type AllergyConflict, type AllergyInput } from '@/lib/prescriptions/allergy-check'
+import type { WriteExecutor } from './executor'
 import type { PrescriptionItem } from '@/lib/prescriptions/validation'
 import type { SessionProvider } from '@/lib/provider-identity'
 import { formatDoctorRegistration } from '@/lib/india/registration'
@@ -18,6 +19,7 @@ export interface CreatePrescriptionInput {
   frequencyPerDay: number
   dosePattern?: string | null // WS1 T6
   quantityPrescribed?: number | null // WS1 T6
+  allergyOverrideReason?: string | null // WS1 T6
   durationDays: number
   startDate: string // 'YYYY-MM-DD'
   instructions: string | null
@@ -34,6 +36,29 @@ export async function createPrescription(input: CreatePrescriptionInput) {
     .values({ ...input, status: 'active', prescribedAt: new Date() })
     .returning()
   return created
+}
+
+// WS1 T6: the allergy check shared by both prescribing routes. The client's text is checked, and
+// for a catalogue drug the catalogue identity (name, generic, class) is ALWAYS checked as well, so a
+// client cannot dodge a match by renaming the drug, omitting its generic or sending another class.
+export function drugAllergyConflicts(
+  item: { name: string; genericName?: string | null; medicationClass: string },
+  catalogRow: { name: string; genericName: string | null; medicationClass: string } | null,
+  active: AllergyInput[],
+): AllergyConflict[] {
+  const found = allergyConflicts({ name: item.name, genericName: catalogRow?.genericName ?? item.genericName ?? null, medicationClass: item.medicationClass }, active)
+  if (catalogRow) {
+    for (const c of allergyConflicts(catalogRow, active)) {
+      if (!found.some((f) => f.allergen === c.allergen)) found.push(c)
+    }
+  }
+  return found
+}
+
+/** The patient's active allergies (inactivated_at IS NULL), as the matcher's input. */
+export async function activeAllergies(patientId: string, executor: WriteExecutor = getDb()): Promise<AllergyInput[]> {
+  return executor.select({ allergen: allergies.allergen, severity: allergies.severity }).from(allergies)
+    .where(and(eq(allergies.patientId, patientId), isNull(allergies.inactivatedAt)))
 }
 
 // WS1 T6: a multi-drug prescription written on one visit -- one `prescriptions` header and one
@@ -64,20 +89,9 @@ export async function createPrescriptionSet(
     const missing = i.items.findIndex((it) => it.medicationId != null && !catalog.has(it.medicationId))
     if (missing >= 0) return { ok: false, error: 'medication_not_found', index: missing }
 
-    const active = await tx.select({ allergen: allergies.allergen, severity: allergies.severity }).from(allergies)
-      .where(and(eq(allergies.patientId, patientId), isNull(allergies.inactivatedAt)))
+    const active = await activeAllergies(patientId, tx)
 
-    const perItem = i.items.map((it) => {
-      const m = it.medicationId != null ? catalog.get(it.medicationId)! : null
-      // The catalogue's generic name is authoritative; a client cannot dodge the check by omitting it.
-      const found = allergyConflicts({ name: it.name, genericName: m?.genericName ?? it.genericName ?? null, medicationClass: it.medicationClass }, active)
-      if (m && m.name !== it.name) {
-        for (const c of allergyConflicts({ name: m.name, genericName: m.genericName, medicationClass: m.medicationClass }, active)) {
-          if (!found.some((f) => f.allergen === c.allergen)) found.push(c)
-        }
-      }
-      return found
-    })
+    const perItem = i.items.map((it) => drugAllergyConflicts(it, it.medicationId != null ? catalog.get(it.medicationId)! : null, active))
     const blocking = perItem
       .map((conflicts, index) => ({ index, conflicts }))
       .filter((r) => r.conflicts.length > 0 && !i.items[r.index].allergyOverrideReason)
