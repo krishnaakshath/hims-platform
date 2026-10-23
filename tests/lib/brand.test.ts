@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { loadBrand, cookieName, brandThemeCss, publicBrand, BRAND_LIMITS, DEFAULT_BRAND_NAME, DEFAULT_LOGIN_QUOTE, DEFAULT_COOKIE_PREFIX, DEFAULT_TAGLINE } from '@/lib/brand'
+import { loadBrand, cookieName, brandThemeCss, appendEmailSignature, BRAND_LIMITS, DEFAULT_BRAND_NAME, DEFAULT_LOGIN_QUOTE, DEFAULT_COOKIE_PREFIX, DEFAULT_TAGLINE } from '@/lib/brand'
+import { deriveAccentPalette } from '@/lib/brand-color'
+import { toPublicBrand } from '@/lib/brand-resolve'
 
 describe('loadBrand defaults', () => {
   it('uses the neutral HIMS defaults when no BRAND_* var is set', () => {
@@ -17,6 +19,14 @@ describe('loadBrand defaults', () => {
       mfaIssuer: 'HIMS',
       systemSenderName: 'HIMS (Automated)',
       loginQuote: DEFAULT_LOGIN_QUOTE,
+      supportPhone: null,
+      logoDarkUrl: null,
+      portalName: 'Patient portal',
+      login: { showDepartmentList: true },
+      print: { headerText: 'HIMS', subline: null, footerText: null, signatureLine: null, address: null, gstin: null, rohiniId: null, hfrId: null, logoUrl: null },
+      emailSignature: null,
+      smsName: 'HIMS',
+      accent: null,
     })
   })
 
@@ -57,6 +67,17 @@ describe('loadBrand overrides', () => {
       mfaIssuer: 'Acme Health',
       systemSenderName: 'Acme Health (Automated)',
       loginQuote: DEFAULT_LOGIN_QUOTE,
+      supportPhone: null,
+      logoDarkUrl: null,
+      portalName: 'Patient portal',
+      login: { showDepartmentList: true },
+      print: {
+        headerText: 'Acme Health Private Limited', subline: null, footerText: null, signatureLine: null, address: null, gstin: null,
+        rohiniId: null, hfrId: null, logoUrl: 'https://cdn.acme.example/logo.svg',
+      },
+      emailSignature: null,
+      smsName: 'Acme Health',
+      accent: deriveAccentPalette('#0a7d5a'),
     })
   })
 
@@ -144,25 +165,41 @@ describe('cookieName', () => {
   })
 })
 
-describe('brandThemeCss / publicBrand', () => {
-  it('is null without a colour', () => {
-    expect(brandThemeCss({ primaryColor: null })).toBeNull()
+describe('brandThemeCss / toPublicBrand', () => {
+  it('is null without an accent', () => {
+    expect(brandThemeCss(null)).toBeNull()
   })
 
-  it('overrides --primary for the light theme and picks a contrasting foreground', () => {
-    const dark = brandThemeCss({ primaryColor: '#0a2d5a' })!
-    expect(dark).toContain('--primary:#0a2d5a')
-    expect(dark).toContain('--primary-foreground:oklch(0.99 0 0)')
-    const light = brandThemeCss({ primaryColor: '#ffe680' })!
-    expect(light).toContain('--primary-foreground:oklch(0.18 0.01 60)')
+  it('emits exactly the --brand rule plus light and dark primary/foreground/ring (R5)', () => {
+    const a = deriveAccentPalette('#ffe680')
+    const css = brandThemeCss(a)!
+    expect(css).toBe(
+      `:root{--brand:${a.input};}` +
+      `:root:not(.dark){--primary:${a.light.primary};--primary-foreground:${a.light.foreground};--ring:${a.light.primary};}` +
+      `:root.dark,:root .dark{--primary:${a.dark.primary};--primary-foreground:${a.dark.foreground};--ring:${a.dark.primary};}`,
+    )
+    const values = css.match(/:[^;{}]+;/g)!.map((v) => v.slice(1, -1))
+    for (const v of values) expect(v).toMatch(/^#[0-9a-f]{6}$/)
+    expect(css).toContain(':root:not(.dark){')
+    expect(css).toContain(':root.dark,:root .dark{')
   })
 
-  it('refuses an unvalidated colour even if passed directly', () => {
-    expect(brandThemeCss({ primaryColor: 'red;}*{x:y' })).toBeNull()
+  it('refuses a palette carrying anything but #rrggbb, even if passed directly', () => {
+    const a = deriveAccentPalette('#0a2d5a')
+    expect(brandThemeCss({ ...a, input: 'red;}*{x:y' as `#${string}` })).toBeNull()
+    expect(brandThemeCss({ ...a, dark: { ...a.dark, primary: '#fff}</style>' as `#${string}` } })).toBeNull()
   })
 
-  it('exposes only name, logoUrl and the sign-in quote publicly', () => {
-    expect(publicBrand(loadBrand({ BRAND_NAME: 'Acme', BRAND_SUPPORT_EMAIL: 'a@b.example' }))).toEqual({ name: 'Acme', logoUrl: null, loginQuote: DEFAULT_LOGIN_QUOTE })
+  it('exposes only the public subset (no legal/print/cookie/MFA values)', () => {
+    expect(toPublicBrand(loadBrand({ BRAND_NAME: 'Acme', BRAND_SUPPORT_EMAIL: 'a@b.example' }))).toEqual({
+      name: 'Acme', tagline: DEFAULT_TAGLINE, logoUrl: null, logoDarkUrl: null, portalName: 'Patient portal',
+      supportEmail: 'a@b.example', supportPhone: null, loginQuote: DEFAULT_LOGIN_QUOTE, login: { showDepartmentList: true },
+    })
+  })
+
+  it('appends an email signature after a standard sig separator', () => {
+    expect(appendEmailSignature('Hello', null)).toBe('Hello')
+    expect(appendEmailSignature('Hello', 'Sunrise Hospital\nPune')).toBe('Hello\n\n-- \nSunrise Hospital\nPune')
   })
 
   it('takes a configured sign-in quote with only its own attribution', () => {
@@ -186,8 +223,9 @@ describe('module-level brand from process.env', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.resetModules()
     const mod = await import('@/lib/brand')
-    expect(mod.brand.name).toBe('Acme Health')
-    expect(mod.brand.primaryColor).toBeNull()
+    expect(mod.envBrand.name).toBe('Acme Health')
+    expect(mod.envBrand.primaryColor).toBeNull()
+    expect(mod.brand).toBe(mod.envBrand)
     expect(mod.cookieName('session')).toBe('acme_session')
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('BRAND_PRIMARY_COLOR'))
     expect(warn.mock.calls.flat().join(' ')).not.toContain('not-a-colour')
