@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { PatientPortalSideNav } from '@/components/PatientPortalSideNav'
+import { BrandProvider } from '@/components/BrandProvider'
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/patient-portal/messages' }))
 
@@ -35,5 +36,19 @@ describe('PatientPortalSideNav Wave J entries', () => {
     expect(screen.getByRole('link', { name: 'Discharge summaries' })).toHaveAttribute('href', '/patient-portal/discharge-summaries')
     expect(screen.getByRole('link', { name: 'Bills & receipts' })).toHaveAttribute('href', '/patient-portal/bills')
     expect(screen.getByRole('link', { name: 'Insurance & ABHA' })).toHaveAttribute('href', '/patient-portal/insurance')
+  })
+})
+
+// WL T9 (R6): the section label is the configured portal name (default "Patient portal").
+describe('PatientPortalSideNav portal name', () => {
+  it('labels the section with the default portal name', () => {
+    render(<PatientPortalSideNav />)
+    expect(screen.getByText('Patient portal')).toBeInTheDocument()
+  })
+
+  it('labels the section with the stored portal name from the brand', () => {
+    render(<BrandProvider brand={{ name: 'Sunrise Hospital', portalName: 'Sunrise MyCare' }}><PatientPortalSideNav /></BrandProvider>)
+    expect(screen.getByText('Sunrise MyCare')).toBeInTheDocument()
+    expect(screen.queryByText('Patient portal')).not.toBeInTheDocument()
   })
 })

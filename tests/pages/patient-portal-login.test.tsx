@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import PatientPortalLoginPage from '@/app/patient-portal/login/page'
+import { BrandProvider } from '@/components/BrandProvider'
 
 const push = vi.fn()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh: vi.fn() }) }))
@@ -83,5 +84,18 @@ describe('Patient portal login page: mobile code', () => {
     expect(push).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Use my password instead' }))
     expect(screen.getByLabelText('Email address or patient ID')).toBeInTheDocument()
+  })
+})
+
+// WL T9 (R6): the patient sign-in names the configured portal.
+describe('Patient portal login page: portal name', () => {
+  it('names the default portal', () => {
+    render(<PatientPortalLoginPage />)
+    expect(screen.getByText('Patient portal')).toBeInTheDocument()
+  })
+
+  it('names the portal the brand provides', () => {
+    render(<BrandProvider brand={{ name: 'Sunrise Hospital', portalName: 'Sunrise MyCare' }}><PatientPortalLoginPage /></BrandProvider>)
+    expect(screen.getByText('Sunrise MyCare')).toBeInTheDocument()
   })
 })
