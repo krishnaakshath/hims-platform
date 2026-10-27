@@ -12,6 +12,14 @@ import { LAB_WORKLIST_ROLES } from '@/lib/role-policy' // SP5
 import { LAB_STAGE_STATUSES, parseLabStage, type LabStage } from '@/lib/labs/worklist-stage'
 import { getLabKpis } from '@/lib/queries/hospital-kpis'
 import { KpiTile, formatMinutes } from '@/components/dashboards/KpiTile'
+import { listAnalytesForTests } from '@/lib/queries/lab-analytes' // WS4 T9
+import type { AnalyteDef } from '@/lib/labs/analytes' // WS4 T9
+import { resolveVerifierDepartmentId } from '@/lib/queries/lab-signoffs' // WS4 T11
+// WS4 T12: the critical banner and the live "Critical open" tile.
+import { acknowledgeableCriticalOrderIds, listOpenCriticalAlerts } from '@/lib/queries/lab-critical'
+import { CriticalResultBanner } from '@/components/labs/CriticalResultBanner'
+import { LAB_CRITICAL_ACK_ROLES, LAB_CRITICAL_NOTIFY_ROLES } from '@/lib/role-policy'
+// end WS4 T12
 
 export default async function LabsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   const session = await requireSessionOrRedirect()
@@ -20,8 +28,16 @@ export default async function LabsPage({ searchParams }: { searchParams?: Promis
   if (!LAB_WORKLIST_ROLES.includes(session.role)) redirect('/')
 
   const stageParam = parseLabStage((await searchParams)?.stage)
-  const [orders, labTests, patientRoster, kpis] = await Promise.all([listWorklist(), listLabTests(), listPatientsWithLabOrders(), getLabKpis()])
+  const [orders, labTests, patientRoster, kpis, verifierDepartmentId, criticalAlerts, ackOrderIds] = await Promise.all([
+    listWorklist(), listLabTests(), listPatientsWithLabOrders(), getLabKpis(), resolveVerifierDepartmentId(session), // WS4 T11
+    listOpenCriticalAlerts({}), LAB_CRITICAL_ACK_ROLES.includes(session.role) ? acknowledgeableCriticalOrderIds(session) : Promise.resolve([]), // WS4 T12
+  ])
+  // WS4 T12: a pi logs a call only for orders it may verify (its department); the route re-checks per order.
+  const canNotifyCritical = LAB_CRITICAL_NOTIFY_ROLES.includes(session.role) && (session.role !== 'pi' || verifierDepartmentId !== null)
   await logAudit(session, session.role === 'labs' ? 'viewed labs dashboard' : 'viewed lab worklist', null)
+  // WS4 T9: the analytes of every test on the worklist, for per-analyte result entry.
+  const analyteMap = await listAnalytesForTests(orders.map((o) => o.testId))
+  const analytesByTest: Record<number, AnalyteDef[]> = Object.fromEntries(analyteMap)
 
   // Same trimmed-nonempty rule as the FHIR webhook; only the boolean reaches
   // the markup, never the token.
@@ -56,12 +72,15 @@ export default async function LabsPage({ searchParams }: { searchParams?: Promis
         </div>
       </div>
 
+      <CriticalResultBanner alerts={criticalAlerts} canNotify={canNotifyCritical} canAcknowledge={(a) => ackOrderIds.includes(a.orderId)} /> {/* WS4 T12 */}
+
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiTile label="Awaiting collection" value={inStage('to-collect')} href="/labs?stage=to-collect" icon={ClipboardList} tone="warning" />
         <KpiTile label="In transit" value={inStage('in-transit')} href="/labs?stage=in-transit" icon={Truck} />
         <KpiTile label="At the bench" value={inStage('at-bench')} href="/labs?stage=at-bench" icon={Beaker} />
         <KpiTile label="To verify" value={inStage('to-verify')} href="/labs?stage=to-verify" icon={CheckCircle2} tone="success" />
-        <KpiTile label="Critical today" value={kpis.criticalToday} sub={`${kpis.criticalUnverified} critical awaiting verification`} href="/labs?stage=to-verify" icon={Siren} tone={kpis.criticalUnverified > 0 ? 'danger' : 'muted'} />
+        {/* WS4 T12 (spec 3.5 item 26): open + notified alerts; falls when the doctor acknowledges. */}
+        <KpiTile label="Critical open" value={kpis.criticalOpen} sub={`${kpis.criticalToday} today`} href="/labs?stage=to-verify" icon={Siren} tone={kpis.criticalOpen > 0 ? 'danger' : 'muted'} />
         <KpiTile label="Resulted today" value={kpis.resultedToday} href="/labs?stage=all" icon={FileCheck2} tone="muted" />
         <KpiTile label="Median TAT today" value={formatMinutes(kpis.medianTatMinutes)} sub="Sample collection to result" href="/labs?stage=all" icon={Timer} tone="muted" />
         <KpiTile label="To report" value={inStage('to-report')} href="/labs?stage=to-report" icon={ListChecks} tone="muted" />
@@ -73,7 +92,7 @@ export default async function LabsPage({ searchParams }: { searchParams?: Promis
           tab, not the default landing view. */}
       <Tabs initialId={stageParam ? 'worklist' : undefined} tabs={[
         { id: 'by-patient', label: <><Users className="h-4 w-4 text-primary" aria-hidden="true" />By Patient</>, content: <LabsPatientReports roster={patientRoster} /> },
-        { id: 'worklist', label: <><ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />Worklist</>, content: <LabWorklist orders={orders} labTests={labTests} role={session.role} stage={stage} /> },
+        { id: 'worklist', label: <><ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />Worklist</>, content: <LabWorklist orders={orders} labTests={labTests} role={session.role} stage={stage} analytesByTest={analytesByTest} verifierDepartmentId={verifierDepartmentId} userId={session.userId} /> },
       ]} />
     </div>
   )

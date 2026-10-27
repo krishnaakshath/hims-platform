@@ -53,7 +53,7 @@ export async function gatherPatientFhirData(anonId: string): Promise<PatientFhir
   if (!patient) return null
 
   const [allergyRows, diagnosisJoined, medicationEpisodeRows, dispenses, labOrderRows, procedureJoined, encounterJoined] = await Promise.all([
-    db.select().from(allergies).where(eq(allergies.patientId, anonId)),
+    db.select().from(allergies).where(and(eq(allergies.patientId, anonId), isNull(allergies.inactivatedAt))), // WS1 T4: active only
     // SP6: voided rows hidden; coded rows joined to the code system they were coded from.
     db.select({ ...getTableColumns(diagnoses), ...bindingColumns }).from(diagnoses)
       .leftJoin(codes, eq(codes.id, diagnoses.codeId))
@@ -93,7 +93,11 @@ export async function gatherPatientFhirData(anonId: string): Promise<PatientFhir
     ranksByEncounter.set(d.encounterId!, list)
   }
   const encounterRows: EncounterFhirRow[] = encounterJoined.map((e) => ({ ...e, diagnosisRanks: ranksByEncounter.get(e.id) ?? [] }))
-  const loincBindings = await findLoadedCodes('loinc', labOrderRows.map((o) => o.testCode))
+  // WS4 T10: analyte LOINC codes are looked up alongside the test codes.
+  const loincBindings = await findLoadedCodes('loinc', labOrderRows.flatMap((o) => [
+    o.testCode,
+    ...(o.result?.analytes ?? []).flatMap((a) => (a.loincCode ? [a.loincCode] : [])),
+  ]))
   // end SP6
 
   // Map lookup instead of an N+1 query per dispense.

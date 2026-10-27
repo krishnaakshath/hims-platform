@@ -2,10 +2,11 @@
 import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Pencil } from 'lucide-react'
+import { Clock, Pencil } from 'lucide-react'
 import type { Department } from '@/db/schema'
 import { INDIAN_STATES } from '@/lib/india/reference'
 import { formatPaise } from '@/lib/money'
+import { ProviderSchedulePanel } from '@/components/settings/ProviderSchedulePanel'
 
 const INPUT = 'w-full rounded-md border border-border px-2 py-1 text-sm'
 
@@ -33,6 +34,9 @@ export interface ProviderRow {
   consultationFeePaise: number | null
   /** Foundations T10: the department's current consultation rate from the tariff (read-only). */
   tariffFeePaise?: number | null
+  /** WS6 T6: OPD room and whether the doctor is offered on public/portal booking. */
+  opdRoom?: string | null
+  portalBookable?: boolean
 }
 
 function ProviderRowItem({ provider, departments, isAdmin }: { provider: ProviderRow; departments: Department[]; isAdmin: boolean }) {
@@ -43,6 +47,9 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
   const [council, setCouncil] = useState<string>(provider.registrationCouncil ?? '')
   const [stateCode, setStateCode] = useState(provider.registrationStateCode ?? '')
   const [regNumber, setRegNumber] = useState(provider.registrationNumber ?? '')
+  const [opdRoom, setOpdRoom] = useState(provider.opdRoom ?? '')
+  const [portalBookable, setPortalBookable] = useState(provider.portalBookable ?? true)
+  const [scheduleOpen, setScheduleOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -55,6 +62,8 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
       registrationCouncil: council === '' ? null : council,
       registrationStateCode: council === 'smc' ? stateCode || null : null,
       registrationNumber: regNumber.trim() === '' ? null : regNumber.trim(),
+      opdRoom: opdRoom.trim() === '' ? null : opdRoom.trim(),
+      portalBookable,
     })
     setSaving(false)
     if (res.status === 409) { setError('Conflicts with an existing provider.'); return }
@@ -114,6 +123,13 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
               <label className="text-xs text-muted-foreground">Registration number
                 <input value={regNumber} onChange={(e) => setRegNumber(e.target.value)} maxLength={20} autoComplete="off" className={INPUT} />
               </label>
+              <label className="text-xs text-muted-foreground">OPD room
+                <input value={opdRoom} onChange={(e) => setOpdRoom(e.target.value)} maxLength={40} autoComplete="off" className={INPUT} />
+              </label>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={portalBookable} onChange={(e) => setPortalBookable(e.target.checked)} />
+                Offered on online booking
+              </label>
               <p className="text-xs text-muted-foreground">Consultation fee: {provider.tariffFeePaise != null ? formatPaise(provider.tariffFeePaise) : 'not set'}. Set in Tariffs.</p>
             </div>
           )}
@@ -132,12 +148,21 @@ function ProviderRowItem({ provider, departments, isAdmin }: { provider: Provide
               </button>
             </>
           ) : (
-            <button onClick={() => setEditing(true)} aria-label={`Edit ${provider.name}`} className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
-              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-              Edit
-            </button>
+            <>
+              <button onClick={() => setScheduleOpen(true)} aria-label={`Working hours for ${provider.name}`} className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+                <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                Working hours
+              </button>
+              <button onClick={() => setEditing(true)} aria-label={`Edit ${provider.name}`} className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                Edit
+              </button>
+            </>
           )}
         </div>
+      )}
+      {isAdmin && scheduleOpen && (
+        <ProviderSchedulePanel provider={{ id: provider.id, name: provider.name }} onClose={() => setScheduleOpen(false)} />
       )}
     </div>
   )

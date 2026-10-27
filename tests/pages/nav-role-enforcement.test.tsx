@@ -185,3 +185,14 @@ describe('trial pages with ENABLE_TRIALS off', () => {
     })
   }
 })
+
+// WS3 T7: the nursing station is in the nav for exactly CLINICAL_ROLES (crc is the ward-staff
+// stand-in; there is no nurse role), and its page gate (PAGE_GATES) is the same set.
+it('lists "Nursing station" for exactly CLINICAL_ROLES', async () => {
+  const { CLINICAL_ROLES } = await import('@/lib/role-policy')
+  const entry = NAV_ITEMS.find((i) => i.href === '/inpatient/nursing')
+  expect(entry?.label).toBe('Nursing station')
+  expect(new Set(entry?.roles)).toEqual(new Set(CLINICAL_ROLES))
+  expect(new Set(PAGE_GATES.find((g) => g.route === '/inpatient/nursing')?.allowed)).toEqual(new Set(CLINICAL_ROLES))
+})
+// end WS3 T7

@@ -25,6 +25,22 @@ import { ENCOUNTER_STATUS_LABEL } from '@/lib/encounters/register'
 import type { EncounterStatus } from '@/lib/encounters/status'
 import { formatIsoDate } from '@/lib/india-time'
 // end Wave E
+// WS1 T3: hospital-first home (trials off) and Start Encounter through the visit's start route.
+import { todayIsoIn } from '@/lib/india-time'
+import { trialsEnabled } from '@/lib/features'
+import { addDaysIso } from '@/lib/follow-ups/rules'
+import { encountersForAppointments, listMyRecentPatients, providerDepartmentName, uhidsForPatients } from '@/lib/queries/encounter-workspace'
+import type { ScheduleRow } from '@/components/DoctorScheduleTimeline'
+// end WS1 T3
+// WS1 T4: open referrals addressed to this doctor or their department.
+import { Share2 } from 'lucide-react'
+import { listOpenReferralsToProvider, providerDepartmentId } from '@/lib/queries/referrals'
+// end WS1 T4
+import { AcknowledgeResultButton } from '@/components/labs/AcknowledgeResultButton' // WS4 T11
+// WS4 T12: open/notified critical alerts on this doctor's orders or admitted patients.
+import { acknowledgeableCriticalOrderIds, listOpenCriticalAlerts } from '@/lib/queries/lab-critical'
+import { CriticalResultBanner } from '@/components/labs/CriticalResultBanner'
+// end WS4 T12
 
 // Wave E: a compact titled list card for the doctor's own work queues.
 function DoctorList({ title, icon: Icon, count, empty, href, linkLabel, children }: {
@@ -59,7 +75,9 @@ export default async function DoctorPortalPage() {
   const session = await requireSessionOrRedirect()
   if (session.role !== 'pi') redirect('/')
 
-  const patients = await listPatientsWithStatus(null)
+  // WS1 T3: the trial panel (screening verdicts) only while trials are on.
+  const trialsOn = trialsEnabled()
+  const patients = trialsOn ? await listPatientsWithStatus(null) : []
   const lastName = session.name.trim().split(/\s+/).pop() ?? session.name
 
   const providerMatch = await resolveDoctorQueueProvider(session)
@@ -73,6 +91,8 @@ export default async function DoctorPortalPage() {
   const pendingAssignments = providerMatch ? await listPendingAssignmentsForProvider(providerMatch.id) : []
   // SP6: coding queries addressed to this doctor's own provider row (none without a match).
   const codingQueries = providerMatch ? await listOpenCodingQueriesForProvider(providerMatch.id) : []
+  // WS1 T4
+  const referredToMe = providerMatch ? await listOpenReferralsToProvider(providerMatch.id, await providerDepartmentId(providerMatch.id)) : []
 
   const now = new Date()
   // Today's IST business day, whatever zone the server runs in.
@@ -86,15 +106,39 @@ export default async function DoctorPortalPage() {
     return d >= todayStart && d < todayEnd
   })
 
+  // WS1 T3: each appointment's visit (if checked in) and the patient's UHID, never the chart id.
+  const [visitByAppointment, uhidByPatient] = await Promise.all([
+    encountersForAppointments(todaysCheckups.map((a) => a.id)),
+    uhidsForPatients(todaysCheckups.map((a) => a.patientId)),
+  ])
+  const scheduleRows: ScheduleRow[] = todaysCheckups.map((a) => {
+    const visit = visitByAppointment.get(a.id)
+    return {
+      id: a.id, patientId: a.patientId, patientName: a.patientName, startsAt: a.startsAt, visitReason: a.visitReason, status: a.status,
+      encounterId: visit?.encounterId ?? null, encounterStatus: visit?.status ?? null, uhid: uhidByPatient.get(a.patientId) ?? null,
+    }
+  })
+  // Trials off: the doctor's own patients from visits and admissions (last 90 days) and their department.
+  const [recentPatients, departmentName] = !trialsOn && providerMatch
+    ? await Promise.all([listMyRecentPatients(providerMatch.id, addDaysIso(todayIsoIn(), -90)), providerDepartmentName(providerMatch.id)])
+    : [[], null]
+  const panelCount = trialsOn ? myPatients.length : recentPatients.length
+
   // Wave E P1-02: lab work comes from the orders this doctor placed (orderedByProviderId),
   // never from the free-text panel match, and "pending" is no longer merely-ordered tests.
   const workload: DoctorWorkload | null = providerMatch ? await getDoctorWorkload(providerMatch.id, session.name) : null
-  const resultsToVerify = workload?.resultsToVerify ?? []
-  const criticalToVerify = resultsToVerify.filter((r) => r.flag === 'critical').length
+  // WS4 T11: verification is the reporting department's; the doctor reviews and acknowledges.
+  const resultsToReview = workload?.resultsToReview ?? []
+  const criticalToReview = resultsToReview.filter((r) => r.flag === 'critical').length
+  // WS4 T12: listed for the matched provider row; Acknowledge only where the staff link owns the order
+  // (the route checks the same under the order lock).
+  const [criticalAlerts, criticalAckIds] = providerMatch
+    ? await Promise.all([listOpenCriticalAlerts({ providerId: providerMatch.id }), acknowledgeableCriticalOrderIds(session)])
+    : [[], []]
 
   await logAudit(session, 'viewed My Patients (doctor portal)', null)
 
-  const highAcuityCount = criticalToVerify + pendingAssignments.filter(a => a.urgency === 'urgent' || a.urgency === 'emergency').length
+  const highAcuityCount = criticalToReview + pendingAssignments.filter(a => a.urgency === 'urgent' || a.urgency === 'emergency').length
   const initials = session.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
 
   return (
@@ -110,13 +154,13 @@ export default async function DoctorPortalPage() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-success"></span> On Shift</span>
               <span>•</span>
-              <span>Principal Investigator</span>
+              <span>{trialsOn ? 'Principal Investigator' : departmentName ? `Consultant · ${departmentName}` : 'Consultant'}</span>
             </div>
           </div>
         </div>
         <div className="flex gap-6">
           <div className="flex flex-col items-end border-r border-border pr-6">
-            <span className="text-2xl font-bold tabular-nums text-foreground">{myPatients.length}</span>
+            <span className="text-2xl font-bold tabular-nums text-foreground">{panelCount}</span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total Panel</span>
           </div>
           <div className="flex flex-col items-end border-r border-border pr-6">
@@ -129,6 +173,8 @@ export default async function DoctorPortalPage() {
           </div>
         </div>
       </div>
+
+      <CriticalResultBanner alerts={criticalAlerts} canNotify={false} canAcknowledge={(a) => criticalAckIds.includes(a.orderId)} /> {/* WS4 T12 */}
 
       {/* Main EMR Grid - 3 Columns for high density */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
@@ -181,20 +227,35 @@ export default async function DoctorPortalPage() {
           {/* SP6: coding queries for this doctor; hidden when none are open */}
           <DoctorCodingQueries queries={codingQueries} />
 
-          {/* SP5 + Wave E P1-02: results on my own orders waiting for verification, critical first. */}
+          {/* WS1 T4: referrals to me (or my department), most urgent first. */}
+          {providerMatch && (
+            <DoctorList title="Referred to me" icon={Share2} count={referredToMe.length} empty="No open referrals.">
+              {referredToMe.map((r) => (
+                <li key={r.id} className="flex items-center justify-between gap-2 px-4 py-3">
+                  <PatientCell patientId={r.patientId} name={r.patientName} uhid={r.uhid} href={`/patients/${r.patientId}`} />
+                  <span className="shrink-0 text-right text-xs text-muted-foreground">
+                    <span className={`block font-semibold capitalize ${r.urgency === 'routine' ? 'text-foreground' : 'text-destructive'}`}>{r.urgency}</span>
+                    from {r.fromProviderName} · {formatIstDate(r.createdAt)}
+                  </span>
+                </li>
+              ))}
+            </DoctorList>
+          )}
+
+          {/* WS4 T11: verified results on my own orders that I have not acknowledged, critical first. */}
           <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
             <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-3">
               <div className="flex items-center gap-2">
-                <Activity className={`h-4 w-4 ${criticalToVerify > 0 ? 'text-destructive' : 'text-warning'}`} />
-                <h3 className="text-sm font-semibold text-foreground">Results to verify</h3>
+                <Activity className={`h-4 w-4 ${criticalToReview > 0 ? 'text-destructive' : 'text-warning'}`} />
+                <h3 className="text-sm font-semibold text-foreground">Results to review</h3>
               </div>
-              <span className="rounded-full bg-warning/20 px-2 py-0.5 text-xs font-bold text-warning-foreground">{resultsToVerify.length}</span>
+              <span className="rounded-full bg-warning/20 px-2 py-0.5 text-xs font-bold text-warning-foreground">{resultsToReview.length}</span>
             </div>
-            {resultsToVerify.length === 0 ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">No results awaiting verification.</div>
+            {resultsToReview.length === 0 ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">No verified results awaiting your review.</div>
             ) : (
               <ul className="divide-y divide-border">
-                {resultsToVerify.slice(0, 8).map((l) => (
+                {resultsToReview.slice(0, 8).map((l) => (
                   <li key={l.orderId} className="flex items-center justify-between gap-2 p-4">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">
@@ -202,16 +263,16 @@ export default async function DoctorPortalPage() {
                         {l.flag === 'critical' && <span className="ml-2 rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-destructive">Critical</span>}
                         {l.flag === 'abnormal' && <span className="ml-2 rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-warning">Abnormal</span>}
                       </p>
-                      <p className="text-xs text-muted-foreground">{l.testName} · Resulted {formatIstDateTime(l.resultedAt)}</p>
+                      <p className="text-xs text-muted-foreground">{l.testName}{l.uhid ? ` · ${l.uhid}` : ''} · Resulted {formatIstDateTime(l.resultedAt)}</p>
                     </div>
-                    <Link href="/labs?stage=to-verify" className="rounded bg-primary/10 px-2 py-1 text-[10px] font-bold uppercase text-primary hover:bg-primary/20">Verify</Link>
+                    <AcknowledgeResultButton orderId={l.orderId} testName={l.testName} />
                   </li>
                 ))}
               </ul>
             )}
             <div className="border-t border-border px-4 py-2.5 text-center text-xs text-muted-foreground">
               {workload ? `${workload.labsAwaitingResult} orders awaiting results` : 'No provider record matched'}
-              {' · '}<Link href="/labs?stage=to-verify" className="font-medium text-primary hover:underline">Open lab worklist</Link>
+              {' · '}<Link href="/labs" className="font-medium text-primary hover:underline">Open lab worklist</Link>
             </div>
           </div>
 
@@ -239,7 +300,7 @@ export default async function DoctorPortalPage() {
               <DoctorList title="Today's OPD" icon={Stethoscope} count={workload.encountersToday.length} empty="No patients waiting." href={`/encounters?doctor=${providerMatch!.id}`} linkLabel="OPD register">
                 {workload.encountersToday.map((e) => (
                   <li key={e.encounterId} className="flex items-center justify-between gap-2 px-4 py-3">
-                    <PatientCell patientId={e.patientId} name={e.patientName} uhid={e.uhid} href={`/patients/${e.patientId}`} />
+                    <PatientCell patientId={e.patientId} name={e.patientName} uhid={e.uhid} href={`/encounters/${e.encounterId}`} />
                     <span className="shrink-0 text-right text-xs text-muted-foreground">
                       <span className="block font-semibold tabular-nums text-foreground">{e.opdToken !== null ? `#${e.opdToken}` : '—'}</span>
                       {ENCOUNTER_STATUS_LABEL[e.status as EncounterStatus] ?? e.status}
@@ -282,28 +343,39 @@ export default async function DoctorPortalPage() {
             </div>
 
             <div className="p-0">
-              <DoctorScheduleTimeline appointments={todaysCheckups} />
+              <DoctorScheduleTimeline appointments={scheduleRows} />
             </div>
           </div>
 
-          {/* Full Patient Panel */}
-          <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h3 className="text-base font-semibold text-foreground">Assigned Patient Panel</h3>
+          {/* Full Patient Panel: the trial panel while trials are on; otherwise (WS1 T3) the doctor's own recent patients. */}
+          {trialsOn ? (
+            <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+              <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                <h3 className="text-base font-semibold text-foreground">Assigned Patient Panel</h3>
+              </div>
+              <div className="p-0">
+                <PatientsTable patients={myPatients.map((p) => ({
+                  id: p.id,
+                  overallStatus: p.overallStatus,
+                  name: p.name,
+                  dob: p.dob,
+                  currentProvider: p.currentProvider,
+                  referralType: p.referralType,
+                  lastCommunication: p.lastCommunication,
+                  criteriaSummary: p.criteriaSummary,
+                }))} />
+              </div>
             </div>
-            <div className="p-0">
-              <PatientsTable patients={myPatients.map((p) => ({
-                id: p.id,
-                overallStatus: p.overallStatus,
-                name: p.name,
-                dob: p.dob,
-                currentProvider: p.currentProvider,
-                referralType: p.referralType,
-                lastCommunication: p.lastCommunication,
-                criteriaSummary: p.criteriaSummary,
-              }))} />
+          ) : (
+            <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+              <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                <h3 className="text-base font-semibold text-foreground">My patients (last 90 days)</h3>
+              </div>
+              <div className="p-4">
+                <PatientsTable patients={recentPatients} hospitalView showScreening={false} />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* My Appointments -- the telemedicine start entry point lives here,
               scoped to this pi's own matched provider row, not the

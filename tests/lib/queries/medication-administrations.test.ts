@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq, ne, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, providers, rooms, admissions, medicationAdministrations } from '@/db/schema'
 import { orderMedication, administerMedication, listMedicationsForAdmission } from '@/lib/queries/medication-administrations'
@@ -13,9 +13,9 @@ afterEach(async () => {
   while (createdRoomIds.length > 0) await getDb().delete(rooms).where(eq(rooms.id, createdRoomIds.pop()!))
 })
 
-async function makeAdmission() {
+async function makeAdmission(patientId?: string) {
   const db = getDb()
-  const [patientRow] = await db.select().from(patients).limit(1)
+  const [patientRow] = patientId ? [{ id: patientId }] : await db.select().from(patients).limit(1)
   const [room] = await db.insert(rooms).values({ ward: 'Test Ward', roomNumber: 'M1', bedNumber: 'A' }).returning()
   createdRoomIds.push(room.id)
   const [providerRow] = await db.select().from(providers).limit(1)
@@ -59,7 +59,10 @@ describe('medication administrations (MAR) queries', () => {
 
   it('rejects administering a medication row that belongs to a different admission', async () => {
     const admissionA = await makeAdmission()
-    const admissionB = await makeAdmission()
+    // WS3 T1: one active stay per patient, so the second admission is another patient's with no active stay.
+    const [other] = await getDb().select({ id: patients.id }).from(patients)
+      .where(and(ne(patients.id, admissionA.patientId), sql`NOT EXISTS (SELECT 1 FROM admissions a WHERE a.patient_id = ${patients.id} AND a.status = 'admitted')`)).limit(1)
+    const admissionB = await makeAdmission(other.id)
     const ordered = await orderMedication({ admissionId: admissionA.id, medicationEpisodeId: null, medicationName: 'Sertraline', dose: '100mg', scheduledFor: new Date() })
     createdMarIds.push(ordered.id)
 

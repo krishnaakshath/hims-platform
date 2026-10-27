@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, afterEach, afterAll } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { describe, it, expect, vi, afterEach, afterAll, beforeAll } from 'vitest'
+import { and, eq } from 'drizzle-orm'
 import { GET, POST } from '@/app/api/appointments/route'
 import { PUT } from '@/app/api/appointments/[id]/route'
 import { listActiveProviders } from '@/lib/queries/providers'
 import { getDb } from '@/db/client'
-import { appointments, auditLog } from '@/db/schema'
+import { appointments, auditLog, providerLeave, providerSchedules, providers } from '@/db/schema'
+import { todayIsoIn } from '@/lib/india-time'
 
 // Mutable so the role-gate tests below can act as a denied/allowed role.
 const sessionRef = vi.hoisted(() => ({ current: { role: 'crc', name: 'Jamie Ruiz' } as { role: string; name: string } }))
@@ -328,4 +329,71 @@ describe('appointments role gate', () => {
       expect(put.status).toBe(200)
     })
   }
+})
+
+// WS6 T7 (spec D5): a booking outside the doctor's working hours needs outsideHoursConfirmed.
+describe('POST /api/appointments working hours', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000
+  const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10)
+  const weekdayOf = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay()
+  const today = todayIsoIn()
+  const monday = addDays(today, 1 + ((1 - weekdayOf(addDays(today, 1)) + 7) % 7))
+  const leaveMonday = addDays(monday, 7)
+  let hoursProviderId = 0
+
+  beforeAll(async () => {
+    const [p] = await getDb().insert(providers).values({ name: 'Hours Probe', specialty: 'General Medicine', colorTag: 'chart-1' }).returning({ id: providers.id })
+    hoursProviderId = p.id
+    await getDb().insert(providerSchedules).values({ providerId: p.id, weekday: 1, startTime: '09:00', endTime: '13:00' })
+    await getDb().insert(providerLeave).values({ providerId: p.id, leaveDate: leaveMonday, reason: 'Conference' })
+  })
+
+  afterAll(async () => {
+    await getDb().delete(appointments).where(eq(appointments.providerId, hoursProviderId))
+    await getDb().delete(providerSchedules).where(eq(providerSchedules.providerId, hoursProviderId))
+    await getDb().delete(providerLeave).where(eq(providerLeave.providerId, hoursProviderId))
+    await getDb().delete(providers).where(eq(providers.id, hoursProviderId))
+  })
+
+  const book = (date: string, from: string, to: string, extra: Record<string, unknown> = {}) => POST(new Request('http://localhost/api/appointments', {
+    method: 'POST',
+    body: JSON.stringify({ patientId: 'RD-0001', providerId: hoursProviderId, startsAt: `${date}T${from}:00+05:30`, endsAt: `${date}T${to}:00+05:30`, visitReason: 'Hours check', ...extra }),
+  }) as never)
+
+  it('books a time inside a session', async () => {
+    const res = await book(monday, '09:00', '09:15')
+    expect(res.status).toBe(201)
+    createdIds.push((await res.json()).id)
+  })
+
+  it('refuses a time outside working hours without the confirmation, and books it with', async () => {
+    const refused = await book(monday, '14:00', '14:15')
+    expect(refused.status).toBe(422)
+    expect((await refused.json()).code).toBe('outside_working_hours')
+    const atTwo = () => getDb().select({ id: appointments.id }).from(appointments)
+      .where(and(eq(appointments.providerId, hoursProviderId), eq(appointments.startsAt, new Date(`${monday}T14:00:00+05:30`))))
+    expect(await atTwo()).toHaveLength(0)
+    const booked = await book(monday, '14:00', '14:15', { outsideHoursConfirmed: true })
+    expect(booked.status).toBe(201)
+    createdIds.push((await booked.json()).id)
+  })
+
+  it('refuses a time that runs past the end of a session', async () => {
+    expect((await book(monday, '12:50', '13:10')).status).toBe(422)
+  })
+
+  it('treats a leave day as outside working hours', async () => {
+    expect((await book(leaveMonday, '09:00', '09:15')).status).toBe(422)
+  })
+
+  it('keeps the overlap 409 for a confirmed outside-hours time', async () => {
+    const first = await book(monday, '15:00', '15:30', { outsideHoursConfirmed: true })
+    expect(first.status).toBe(201)
+    createdIds.push((await first.json()).id)
+    expect((await book(monday, '15:15', '15:45', { outsideHoursConfirmed: true })).status).toBe(409)
+  })
+
+  it('rejects a non-boolean outsideHoursConfirmed', async () => {
+    expect((await book(monday, '14:00', '14:15', { outsideHoursConfirmed: 'yes' })).status).toBe(400)
+  })
 })

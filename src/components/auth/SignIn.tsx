@@ -6,6 +6,7 @@ import { PatientSignInForm } from '@/components/auth/PatientSignInForm'
 import { StaffSignInForm } from '@/components/auth/StaffSignInForm'
 import { ShellChart } from '@/components/auth/ShellChart'
 import { rise } from '@/components/auth/auth-styles'
+import { useBrand } from '@/components/BrandProvider'
 import type { StaffPortal } from '@/components/StaffLoginForm'
 
 export const PATIENT_SIGN_IN_PATH = '/patient-portal/login'
@@ -19,6 +20,8 @@ export const PATIENT_SIGN_IN_PATH = '/patient-portal/login'
 // re-mounts or moves.
 export function SignIn({ audience: initial, portal }: { audience: Audience; portal?: StaffPortal }) {
   const [audience, setAudience] = useState<Audience>(initial)
+  // Settings > Branding can hide the department list; the /login/<key> URLs keep working.
+  const { showDepartmentList } = useBrand().login
 
   function switchTo(next: Audience) {
     if (next === audience) return
@@ -33,7 +36,7 @@ export function SignIn({ audience: initial, portal }: { audience: Audience; port
         <AudienceSwitch value={audience} onChange={switchTo} />
       </div>
       {audience === 'staff' ? (
-        <StaffSignInForm key="staff" portal={portal} below={<DepartmentMenu currentKey={portal?.key} />} />
+        <StaffSignInForm key="staff" portal={portal} below={showDepartmentList ? <DepartmentMenu currentKey={portal?.key} /> : undefined} />
       ) : (
         <PatientSignInForm key="patient" />
       )}

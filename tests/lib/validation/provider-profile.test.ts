@@ -36,4 +36,12 @@ describe('providerProfileSchema', () => {
     expect(ok({ departmentId: null })).toBe(true)
     expect(ok({ departmentId: 1.5 })).toBe(false)
   })
+  it('accepts an OPD room (blank clears it) and the portal-booking flag (WS6 T6)', () => {
+    expect(providerProfileSchema.parse({ opdRoom: ' OPD 3 ' }).opdRoom).toBe('OPD 3')
+    expect(providerProfileSchema.parse({ opdRoom: '  ' }).opdRoom).toBeNull()
+    expect(ok({ opdRoom: null })).toBe(true)
+    expect(ok({ opdRoom: 'x'.repeat(41) })).toBe(false)
+    expect(ok({ portalBookable: false })).toBe(true)
+    expect(ok({ portalBookable: 'no' })).toBe(false)
+  })
 })

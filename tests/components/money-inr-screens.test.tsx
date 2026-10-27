@@ -3,7 +3,6 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { NewChargeModal } from '@/components/NewChargeModal'
-import { LogDispenseBillModal } from '@/components/LogDispenseBillModal'
 import { PharmacyBillingTable } from '@/components/PharmacyBillingTable'
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }))
@@ -21,19 +20,25 @@ describe('billing/pharmacy screens render ₹, never $', () => {
     expect(dialog.innerHTML).not.toContain('$')
   })
 
-  it('LogDispenseBillModal labels the unit charge in rupees and totals in ₹', () => {
-    render(<LogDispenseBillModal dispense={{ id: 1, medicationName: 'Paracetamol', quantity: 3 }} diagnoses={[{ id: 1, code: 'R50.9', description: 'Fever' }]} onClose={() => {}} />)
-    const input = screen.getByLabelText('Unit charge in rupees')
-    fireEvent.change(input, { target: { value: '12.5' } })
-    const dialog = screen.getByRole('dialog')
-    expect(dialog.textContent).toContain('₹37.50')
-    expect(dialog.innerHTML).not.toContain('$')
-  })
-
   it('PharmacyBillingTable shows a billed amount in ₹', () => {
-    const { container } = render(<PharmacyBillingTable rows={[{ dispenseId: 1, patientId: 'RD-0001', patientName: 'Asha', medicationName: 'Paracetamol', quantity: 2, dispensedByName: 'Ph. Ravi', dispensedAt: '2026-10-08T04:30:00.000Z', charge: { id: 9, status: 'draft', amountCents: 123456 } }]} />)
+    const { container } = render(<PharmacyBillingTable rows={[{ dispenseId: 1, patientId: 'RD-0001', patientName: 'Asha', uhid: 'UH00000042', medicationName: 'Paracetamol', quantity: 2, dispensedByName: 'Ph. Ravi', dispensedAt: '2026-10-08T04:30:00.000Z', billing: { status: 'billed', lineId: 9, lineStatus: 'captured', totalPaise: 123456 } }]} />)
     expect(container.textContent).toContain('₹1,234.56')
     expect(container.textContent).not.toContain('$')
+  })
+
+  // WS2 T8: status from charge lines; only a legacy unbilled dispense offers "Bill at current price"; the UHID, never the chart id.
+  it('PharmacyBillingTable offers billing only for an unbilled legacy dispense', () => {
+    const row = { patientId: 'RD-0001', patientName: 'Asha', uhid: 'UH00000042', medicationName: 'Paracetamol', quantity: 2, dispensedByName: 'Ph. Ravi', dispensedAt: '2026-10-08T04:30:00.000Z' }
+    const { container } = render(<PharmacyBillingTable rows={[
+      { ...row, dispenseId: 1, billing: { status: 'unbilled' } },
+      { ...row, dispenseId: 2, billing: { status: 'no_charge' } },
+      { ...row, dispenseId: 3, billing: { status: 'legacy_charge', chargeId: 4, amountPaise: 500 } },
+    ]} />)
+    expect(screen.getAllByRole('button', { name: 'Bill at current price' })).toHaveLength(1)
+    expect(container.textContent).toContain('No charge')
+    expect(container.textContent).toContain('Billed (old charge) · ₹5.00')
+    expect(container.textContent).toContain('UH00000042')
+    expect(container.textContent).not.toContain('RD-0001')
   })
 })
 

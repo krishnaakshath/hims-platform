@@ -76,7 +76,8 @@ describe.skipIf(!process.env.DATABASE_URL)('insurance attention (DB)', () => {
   })
 
   it('ignores an admission admitted yesterday (IST)', async () => {
-    const [old] = await db().insert(admissions).values({ patientId: b.patientId, attendingProviderId: b.providerId, admittedAt: new Date('2026-10-22T10:00:00Z') }).returning()
+    // WS3 T1: one active stay per patient, so yesterday's stay is a discharged one.
+    const [old] = await db().insert(admissions).values({ patientId: b.patientId, attendingProviderId: b.providerId, admittedAt: new Date('2026-10-22T10:00:00Z'), status: 'discharged', dischargedAt: new Date('2026-10-22T12:00:00Z') }).returning()
     await db().insert(admissionCoverage).values({ admissionId: old.id, mode: 'cashless', policyId: p3, coverageState: 'unverified', recordedByName: 'Test' })
     const rows = (await getInsuranceAttention(NOW)).admissionsTodayUnverified
     expect(rows.find((a) => a.admissionId === old.id)).toBeUndefined()

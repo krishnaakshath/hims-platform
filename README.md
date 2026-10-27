@@ -136,6 +136,85 @@ role-capability summary on each user's own account).
 surface with its own sidebar: overview, forms to complete, medications,
 appointments, and messages with the care team.
 
+## Consultation workspace and automatic billing
+
+**The workspace** (`/encounters/<id>`) is the visit. Opening it never changes
+anything. A checked-in visit shows **Start consultation**, which is a POST.
+The patient strip shows the UHID (never the chart id), the allergy status and
+a **Visit charges ₹… (n lines)** chip. The chip counts the visit's live charge
+lines and shows their GST-inclusive total, estimated per line as intra-state.
+
+The tabs are:
+- **Vitals**
+- **History**: the consult and earlier visits.
+- **Diagnosis**: ICD-10 diagnoses, the problem list, advice and follow-up,
+  and referrals.
+- **Rx**: the multi-drug prescription builder. Doses use the Indian `1-0-1`
+  pattern, and the builder checks the patient's allergies.
+- **Orders**: lab orders and procedures, both raised from the visit.
+- **Notes**: visit notes, signed with a typed name.
+
+**Complete visit** needs a diagnosis on an OPD visit, or a stated reason for
+having none. After completion, the bar shows what the consultation did:
+**Consultation ₹… on the bill**, or why it was not billed. A visit whose
+charges sit on a finalised invoice cannot be cancelled. The refusal names the
+invoice ("This visit is on invoice INV-…. Cancel that invoice first."). A visit
+whose tests or procedures were already performed cannot be cancelled either.
+
+**Automatic charges.** Every automatic charge is written in the same
+transaction as the clinical act that causes it:
+
+| Charge | When it is written | Price |
+|---|---|---|
+| Registration | At the patient's first ever visit that is not cancelled | `billing_settings.registration_service_id` (no fee when unset) |
+| OPD consultation | At check-in, and checked again at completion | The department's consultation service (its lowest-id `consultation` service) at the tariff |
+| Lab test | When the test is ordered | The test's mapped tariff service. A test that is unmapped or has no price cannot be ordered. |
+| Procedure | When the procedure is ordered | The procedure's tariff service |
+| Pharmacy | One line per dispense, written in the dispense | The medicine's MRP (see below) |
+
+Where each line is billed:
+- OPD and walk-in lines are self-pay.
+- A line in an admission bills the patient's primary payer when one is set.
+  This includes pharmacy lines.
+- When a payer line is blocked only by the pre-authorisation rule, the line
+  falls back to self-pay, and an audit row records the fallback.
+
+An automatic charge never blocks the clinical act. When a rule blocks the line
+or no price resolves:
+- The order or dispense is still saved, without a line.
+- The response says why no line was written.
+- Charge Capture lists the order under **Orders not billed**. That list covers
+  lab orders, procedures and dispenses that have no live line and no
+  no-charge reason. A dispense billed before SP4, on the old charges table,
+  counts as billed.
+
+**Invoice all ready lines** creates draft invoices for every ready line:
+- a completed OPD visit
+- a lab visit
+- a discharged stay
+- a line with no visit or stay
+
+Finalising, which numbers the invoice, stays a deliberate step at the Cash
+Desk or on the invoice.
+
+**Free review period.** `billing_settings.free_review_days` (0 to 30, under
+**Billing → Rules**) waives the consultation on a follow-up or review visit
+when it falls within that many days of the last charged consultation in the
+same department. The default is 0, which charges every visit.
+
+**Medicine prices (MRP).** Pharmacy sets each medicine's MRP per dispensing
+unit (GST-inclusive). It can also set a GST rate and an HSN code. Without
+them, the medicine uses `pharmacy_gst_rate_bp` and `pharmacy_hsn` from the
+billing settings. Pharmacy sets prices from the pharmacy dashboard, through
+`PATCH /api/pharmacy/medications/<id>/price`. The tariff is never used for
+drugs.
+
+A dispense line's taxable value is backed out of the MRP, so that the taxable
+value plus GST never exceeds MRP × quantity. Other rules for dispensing:
+- A charged dispense needs a batch number and an expiry month. Both are
+  printed on the line, and an expired batch is refused.
+- An unpriced medicine can be dispensed only free of charge, with a reason.
+
 ## Compliance posture (India)
 
 HIMS is built to be deployed for Indian clients, but **it is not certified
@@ -292,11 +371,13 @@ it red), and a guard test fails while any tag remains.
 
 ## White-label a client
 
-Every client-visible name, logo, colour, contact address and cookie or
-authenticator-issuer string comes from environment variables, never from
-source. With nothing set the product is the neutral "HIMS". The values are
-validated (invalid ones fall back to the default and log a warning naming the
-variable, never the value) and rendered as text, never as HTML.
+Every client-visible name, logo, colour and contact address comes from
+configuration, never from source. With nothing set the product is the neutral
+"HIMS". The `BRAND_*` variables below are first-run defaults: they apply until
+the hospital's admin saves something in Settings > Branding, which then wins
+(see "Hospital self-service branding"). Values are validated (invalid ones
+fall back to the default and log a warning naming the variable, never the
+value) and rendered as text, never as HTML.
 
 | Variable | Purpose | Rules | Default |
 |---|---|---|---|
@@ -308,13 +389,43 @@ variable, never the value) and rendered as text, never as HTML.
 | `BRAND_PRIMARY_COLOR` | Accent colour | `#rgb` or `#rrggbb` | built-in blue |
 | `BRAND_COOKIE_PREFIX` | Prefix of every session cookie (`<prefix>_session`, `_patient_session`, ...) | `[a-z0-9_]{1,24}` | `hims` |
 
-> **Brand changes require an image rebuild.** `BRAND_*` lives in
-> `.env.docker`; pages prerendered at build time keep the values the image was
-> built with, so after editing run `docker compose build app && docker compose up -d`.
->
 > **Changing `BRAND_COOKIE_PREFIX` logs everyone out** (staff and patients),
-> and abandons any in-progress MFA or Google sign-in. Pick it once per client
-> and leave it.
+> and abandons any in-progress MFA or Google sign-in. It is env-only (it cannot
+> be edited in the app). Pick it once per client, before go-live, and leave it.
+> Other brand changes need no rebuild or restart.
+
+### Hospital self-service branding
+
+The hospital's admin (role `admin` only) edits branding at **Settings >
+Branding** (`/settings/branding`). Changes apply on the next request, with no
+rebuild. With several self-hosted replicas they appear within 5 minutes.
+
+- **Text**: display name, tagline, patient portal name, support email and phone.
+- **Logos**: light, dark and square icon uploads (PNG, JPEG, WebP or SVG; 1 MB
+  max, SVG 256 KB). SVGs are checked, then converted to PNG. Alternatively a
+  logo web address (https, or a path on this site); an upload wins.
+- **Accent colour**: adjusted automatically so it stays readable in light and
+  dark mode.
+- **Sign-in page**: quote and attribution, and a "show department sign-in
+  links" toggle.
+- **Printing and messages**: print header, footer and signature line; email
+  signature (up to 4 lines); SMS name.
+- **Browser tab and app icons** (`/icon/*`, `/apple-icon`, the manifest) use the
+  uploaded icon, else the light logo, else the built-in mark tinted with the
+  accent colour.
+- **Legal name, address, GSTIN, ROHINI and HFR** stay in Billing settings
+  (`/billing/rules`) and show read-only on the branding screen.
+- The MFA issuer (the label in the authenticator app) follows the display name
+  for new enrolments only; existing entries keep the old label.
+- Logo files are served from `/branding/<kind>-<hash>.png` (public,
+  content-addressed, cached for a year).
+- Uploads need the file store: `BLOB_DRIVER=local` with the `hims_blobs`
+  volume (the default in `docker-compose.yml`).
+- Admins see an onboarding card on the dashboard (name, logo, colour, support
+  contact, test sign-in) until it is done or dismissed.
+- The settings live in the `brand_settings` and `brand_assets` tables, created
+  by `scripts/migrations/2026-10-27-wl-brand-settings.sql` (applied by the
+  normal migrate step).
 
 ### Per-client checklist
 
@@ -334,7 +445,7 @@ Every client gets its own of each of these. Never share one across clients.
    (Caddy or nginx; examples in `docs/DEPLOYING.md`), mirrored in
    `NEXT_PUBLIC_APP_URL`.
 7. **Admin account**: `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD_HASH`.
-8. **Branding**: the `BRAND_*` values above.
+8. **Branding**: set `BRAND_COOKIE_PREFIX` once (and optionally `BRAND_NAME` and `BRAND_PRIMARY_COLOR` so the first sign-in already looks right). The hospital admin does the rest in Settings > Branding.
 9. **Optional integrations** (off until set): SMTP sender, Twilio SMS,
    WhatsApp, Google SSO, ABDM/NHCX.
 10. **Backups**: daily database dump and file-store archive to encrypted
@@ -452,7 +563,9 @@ Testing Library. All of it runs from `docker-compose.yml`.
 
 ## Where things live
 
-- `src/lib/brand.ts`: validated brand config (`BRAND_*`); `src/components/BrandLogo.tsx`
+- `src/lib/brand.ts`: validated brand config and `BRAND_*` defaults; `src/components/BrandLogo.tsx`
+- `src/lib/brand-resolve.ts`, `brand-server.ts`, `brand-color.ts`, `brand-image.ts`: merging stored settings over the defaults, the cached server read, accent contrast, logo processing
+- `src/lib/queries/brand-settings.ts`: branding data access; `src/app/branding/[file]/route.ts`: logo files; `src/app/(dashboard)/settings/branding/`: the admin screen
 - `src/db/schema.ts`: source of truth for the DB schema, including the
   per-trial criteria configuration (JSONB, not code)
 - `src/lib/eligibility.ts` / `src/lib/rule-engine.ts`: the verdict logic

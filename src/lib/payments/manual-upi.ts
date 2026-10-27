@@ -14,6 +14,7 @@ import { isUniqueViolation } from '@/lib/db-errors'
 import { lockPatientBilling } from '@/lib/queries/charge-capture'
 import { UPI_REFERENCE_UNIQUE, admissionIsPatients, insertPaymentInTx, patientExists, upiReferenceTaken, withSeriesGuard } from '@/lib/queries/patient-ledger'
 import { invoicePaidPaise } from '@/lib/queries/invoices'
+import type { WriteExecutor } from '@/lib/queries/executor'
 import { NOTE_MAX, upiConfig, upiUri } from './upi'
 import { PaymentProviderError, UTR_PATTERN, normaliseUtr, type PaymentProvider, type PaymentProviderErrorCode } from './provider'
 
@@ -73,10 +74,19 @@ class ConfirmAbort extends Error {
   constructor(readonly code: ConfirmUpiError) { super(code) }
 }
 
+/**
+ * A caller's own "already paid" rule, run inside the confirm transaction AFTER the patient billing
+ * lock (pg_advisory_xact_lock keyed by the patient): two confirms for the same patient serialise
+ * there, so the second sees the first's committed receipt and refuses. WS6 T12 door payments use
+ * it so two QRs for one visit, confirmed at the same moment with different UTRs, post one receipt.
+ */
+export type ConfirmUnderLockCheck = (tx: WriteExecutor) => Promise<'already_paid' | null>
+
 /** Posts exactly one receipt for a pending request, or refuses with nothing written. */
 export async function confirmUpiRequest(
   input: { requestId: number; utr: string }, session: Session, now: Date = new Date(),
-): Promise<{ ok: true; receiptNumber: string; paymentId: number } | { ok: false; error: ConfirmUpiError }> {
+  opts: { refuseUnderLock?: ConfirmUnderLockCheck } = {},
+): Promise<{ ok: true; receiptNumber: string; paymentId: number } | { ok: false; error: ConfirmUpiError | 'already_paid' }> {
   const utr = normaliseUtr(input.utr)
   if (!UTR_PATTERN.test(utr)) throw new Error('Invalid UTR')
   try {
@@ -89,6 +99,10 @@ export async function confirmUpiRequest(
         return { ok: false as const, error: 'request_expired' as const }
       }
       await lockPatientBilling(tx, req.patientId)
+      if (opts.refuseUnderLock) {
+        const refusal = await opts.refuseUnderLock(tx)
+        if (refusal) return { ok: false as const, error: refusal }
+      }
       if (req.invoiceId !== null) {
         // Under the patient lock: another receipt may have settled the invoice since the QR was shown.
         const [inv] = await tx.select({ totalPaise: invoices.totalPaise }).from(invoices).where(eq(invoices.id, req.invoiceId)).limit(1)
@@ -142,7 +156,11 @@ export function manualUpiProvider(session: Session, clock: () => Date = () => ne
     },
     async recordConfirmation(i) {
       const r = await confirmUpiRequest(i, session, clock())
-      if (!r.ok) throw new PaymentProviderError(r.error satisfies PaymentProviderErrorCode)
+      if (!r.ok) {
+        // No under-lock check is passed here, so already_paid cannot come back.
+        if (r.error === 'already_paid') throw new Error('confirmUpiRequest: unexpected already_paid without a check')
+        throw new PaymentProviderError(r.error satisfies PaymentProviderErrorCode)
+      }
       return { receiptNo: r.receiptNumber }
     },
   }

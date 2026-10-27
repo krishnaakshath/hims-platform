@@ -1,9 +1,15 @@
 'use client'
 import { useState } from 'react'
-import { sendJson } from '@/lib/client-fetch'
+import { fetchJson, sendJson } from '@/lib/client-fetch'
 import { useRouter } from 'next/navigation'
 import { SAMPLE_CONTAINERS, SAMPLE_CONTAINER_LABEL, SAMPLE_TYPES, SAMPLE_TYPE_LABEL } from '@/lib/labs/catalog'
 import type { LabTestSetupRow } from '@/lib/queries/lab-setup'
+import { LabAnalytesEditor } from '@/components/settings/LabAnalytesEditor' // WS4 T8
+// WS4 T13
+import type { TariffTestCandidate } from '@/lib/queries/lab-catalogue'
+import { formatPaise } from '@/lib/money'
+import { LAB_TESTS_FROM_TARIFF_MAX } from '@/lib/labs/validation'
+// end WS4 T13
 
 const SELECT = 'rounded-md border border-border px-2 py-1 text-xs'
 
@@ -17,6 +23,7 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<number | null>(null)
+  const [analytesFor, setAnalytesFor] = useState<LabTestSetupRow | null>(null) // WS4 T8
 
   async function save(t: LabTestSetupRow, field: Field, raw: string) {
     setError(null)
@@ -30,11 +37,20 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
 
   // Unmapped first (stable within each group: the list arrives sorted by name).
   const ordered = [...tests.filter((t) => t.serviceId === null), ...tests.filter((t) => t.serviceId !== null)]
-  if (tests.length === 0) return <p className="text-sm text-muted-foreground">No lab tests in the catalogue.</p>
+  if (tests.length === 0) {
+    return (
+      <div className="space-y-3">
+        {isAdmin && <AddFromTariff />}
+        <p className="text-sm text-muted-foreground">No lab tests in the catalogue.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3">
+      {isAdmin && <AddFromTariff />}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+      {analytesFor && <LabAnalytesEditor labTestId={analytesFor.id} testName={analytesFor.name} onClose={() => setAnalytesFor(null)} />}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -52,6 +68,10 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
                   <span className="font-medium text-foreground">{t.name}</span>
                   <span className="ml-2 font-mono text-xs text-muted-foreground">{t.code}</span>
                   {t.category === 'imaging' && <span className="ml-2 text-xs text-muted-foreground">Imaging</span>}
+                  {/* WS4 T8: analytes and reference ranges (setup roles only). */}
+                  {isAdmin && t.category === 'lab' && (
+                    <button type="button" className="ml-2 text-xs text-primary hover:underline" aria-label={`Analytes for ${t.name}`} onClick={() => setAnalytesFor(t)}>Analytes</button>
+                  )}
                 </td>
                 {isAdmin ? (
                   <>
@@ -91,5 +111,105 @@ export function LabTestSetupPanel({ tests, services, isAdmin }: { tests: LabTest
         </table>
       </div>
     </div>
+  )
+}
+
+const CATEGORY_LABEL: Record<TariffTestCandidate['category'], string> = {
+  investigation_lab: 'Lab',
+  investigation_imaging: 'Imaging',
+  procedure: 'Procedure',
+}
+
+// WS4 T13 (spec 3.6 item 27): every lab test comes from a tariff service. Lists the active lab,
+// imaging and procedure services that have no test yet; the picked ones become tests (code, name and
+// price from the tariff). A procedure such as ECG becomes an imaging / diagnostics test.
+export function AddFromTariff() {
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [candidates, setCandidates] = useState<TariffTestCandidate[]>([])
+  const [picked, setPicked] = useState<number[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  async function load() {
+    setError(null)
+    setLoading(true)
+    const res = await fetchJson<{ candidates: TariffTestCandidate[] }>('/api/lab-tests/from-tariff')
+    setLoading(false)
+    if (!res.ok) { setError(res.error); return }
+    setCandidates(res.data?.candidates ?? [])
+    setPicked([])
+  }
+
+  async function show() {
+    setNotice(null)
+    setOpen(true)
+    await load()
+  }
+
+  function toggle(id: number) {
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
+  }
+
+  async function create() {
+    setError(null)
+    setSaving(true)
+    const res = await sendJson<{ created: { id: number }[] }>('/api/lab-tests/from-tariff', 'POST', { serviceIds: picked })
+    setSaving(false)
+    if (!res.ok) { setError(res.error); return }
+    const n = res.data?.created.length ?? 0
+    setNotice(`${n} test${n === 1 ? '' : 's'} added to the catalogue.`)
+    router.refresh()
+    await load()
+  }
+
+  if (!open) {
+    return (
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={show} className="rounded-md border border-border px-3 py-1 text-sm hover:bg-secondary">Add from tariff</button>
+        {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
+      </div>
+    )
+  }
+
+  const tooMany = picked.length > LAB_TESTS_FROM_TARIFF_MAX
+  return (
+    <section aria-label="Add from tariff" className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Add from tariff</h3>
+        <button type="button" onClick={() => setOpen(false)} className="text-xs text-muted-foreground hover:underline">Close</button>
+      </div>
+      <p className="text-xs text-muted-foreground">Active lab, imaging and procedure services that have no lab test yet. Each picked service becomes one orderable test priced by its tariff.</p>
+      {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading services…</p>
+      ) : candidates.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Every active lab, imaging and procedure service already has a test.</p>
+      ) : (
+        <ul className="max-h-72 space-y-1 overflow-y-auto">
+          {candidates.map((c) => (
+            <li key={c.serviceId}>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={picked.includes(c.serviceId)} onChange={() => toggle(c.serviceId)} />
+                <span className="font-mono text-xs text-muted-foreground">{c.code}</span>
+                <span>{c.name}</span>
+                <span className="text-xs text-muted-foreground">{`${CATEGORY_LABEL[c.category]} · ${c.departmentName}`}</span>
+                <span className="ml-auto text-xs tabular-nums text-muted-foreground">{c.basePaise === null ? 'No current rate' : formatPaise(c.basePaise)}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+      {tooMany && <p className="text-xs text-warning">{`Pick at most ${LAB_TESTS_FROM_TARIFF_MAX} services at a time.`}</p>}
+      <div className="flex justify-end">
+        <button type="button" disabled={picked.length === 0 || tooMany || saving} onClick={create}
+          className="rounded-md bg-primary px-3 py-1 text-sm text-primary-foreground disabled:opacity-50">
+          {picked.length === 0 ? 'Create tests' : `Create ${picked.length} test${picked.length === 1 ? '' : 's'}`}
+        </button>
+      </div>
+    </section>
   )
 }

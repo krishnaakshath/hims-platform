@@ -7,7 +7,6 @@
 // with a real account's used-code markers.
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import * as OTPAuth from 'otpauth'
-import { brand } from '@/lib/brand'
 import { generateMfaEnrollment, verifyMfaCode } from '@/lib/mfa'
 
 function uniqueIdentity(label: string) {
@@ -16,7 +15,7 @@ function uniqueIdentity(label: string) {
 
 function newTotp() {
   const secret = new OTPAuth.Secret({ size: 20 })
-  const totp = new OTPAuth.TOTP({ issuer: brand.mfaIssuer, label: 'test', algorithm: 'SHA1', digits: 6, period: 30, secret })
+  const totp = new OTPAuth.TOTP({ issuer: 'Some Authenticator Label', label: 'test', algorithm: 'SHA1', digits: 6, period: 30, secret })
   return { secretBase32: secret.base32, totp }
 }
 
@@ -26,9 +25,25 @@ afterEach(() => {
 
 describe('generateMfaEnrollment', () => {
   it('returns a base32 secret and a scannable QR data URL', async () => {
-    const enrollment = await generateMfaEnrollment('test@example.com')
+    const enrollment = await generateMfaEnrollment('test@example.com', 'Sunrise Hospital')
     expect(enrollment.secretBase32).toMatch(/^[A-Z2-7]+=*$/)
     expect(enrollment.qrDataUrl).toMatch(/^data:image\/png;base64,/)
+  })
+
+  // WL T10 / spec D15: the issuer is resolved by the caller at enrolment (from getBrand()).
+  it('puts the issuer it is given into the otpauth URI', async () => {
+    const QRCode = (await import('qrcode')).default
+    const spy = vi.spyOn(QRCode, 'toDataURL').mockImplementation((async (uri: string) => `qr:${uri}`) as never)
+    await generateMfaEnrollment('test@example.com', 'Sunrise Hospital')
+    const uri = new URL(String(spy.mock.calls[0][0]))
+    expect(uri.searchParams.get('issuer')).toBe('Sunrise Hospital')
+  })
+
+  // Verification never depends on the issuer: an enrolment under an earlier name keeps working.
+  it('a code from an authenticator enrolled under a different issuer still verifies', async () => {
+    const secret = new OTPAuth.Secret({ size: 20 })
+    const old = new OTPAuth.TOTP({ issuer: 'Old Hospital Name', label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret })
+    expect(await verifyMfaCode(secret.base32, old.generate(), uniqueIdentity('issuer-free'))).toBe(true)
   })
 })
 

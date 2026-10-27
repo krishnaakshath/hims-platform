@@ -13,7 +13,7 @@ function legacy(o: Partial<DiagnosisFhirRow> = {}): DiagnosisFhirRow {
   return {
     id: 7, patientId: 'RD-1', code: 'F32.1', description: o.code === '' ? 'Chest pain' : 'Depression', date: '2026-01-15',
     encounterId: null, codeId: null, codeSystemKind: null, codeDisplay: null, diagnosisType: null, codingStatus: 'uncoded', sequence: null,
-    proposedByName: null, proposedAt: null, codedByName: null, codedAt: null, voidedAt: null, voidedByName: null, createdByName: null, createdAt: null,
+    proposedByName: null, proposedAt: null, codedByName: null, codedAt: null, voidedAt: null, voidedByName: null, createdByName: null, createdAt: null, onProblemList: false, // WS1 T4
     binding: null,
     ...o,
   }

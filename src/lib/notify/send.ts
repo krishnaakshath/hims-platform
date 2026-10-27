@@ -9,6 +9,8 @@
 // Every attempt becomes one notification_log row: masked destination, ids and classes, never the
 // message body. Throws only if reading the template config or preferences fails (nothing sent);
 // a failed log write is reported by error name and does not lose the result.
+import { appendEmailSignature } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 import { normalizePhone } from '@/lib/india/phone'
 import { maskDestination } from '@/lib/notify/notifier'
 import { getChannelRegistry, type Channel, type ChannelRegistry, type DeliveryChannel } from '@/lib/notify/registry'
@@ -87,6 +89,13 @@ function destinationFor(channel: DeliveryChannel, patientId: string, d: SendNoti
   return d.phone ? normalizePhone(d.phone) : null
 }
 
+function withDefaultHospitalName(vars: unknown, smsName: string): unknown {
+  if (vars === null || typeof vars !== 'object' || Array.isArray(vars)) return vars
+  const h = (vars as { hospitalName?: unknown }).hospitalName
+  // Missing, blank or whitespace-only (or not a string at all) all mean "use the brand's SMS name".
+  return typeof h !== 'string' || h.trim() === '' ? { ...vars, hospitalName: smsName } : vars
+}
+
 function optedOut(channel: DeliveryChannel, p: PatientChannelPreferences): boolean {
   if (p.optOut) return true
   return channel === 'in_app' ? false : !p[channel]
@@ -106,7 +115,11 @@ export async function sendNotification(input: SendNotificationInput, deps: SendN
     if (prior.length > 0) return { attempts: prior.map((a) => ({ channel: a.channel, status: 'skipped' as const })), deduped: true }
   }
   const dedupeKey = input.dedupeKey ?? null
-  if (!templateVarsValid(templateKey, input.vars)) {
+  // WL T10 (spec D13/D14): the brand is read per request. A notice without a hospitalName var gets
+  // the SMS name; the email subject uses the display name and the email text gets the signature.
+  const brand = await getBrand()
+  const inputVars = withDefaultHospitalName(input.vars, brand.smsName)
+  if (!templateVarsValid(templateKey, inputVars)) {
     console.error(`[notify] invalid vars for template ${templateKey}`)
     try {
       await store.record([{ patientId, templateKey, channel: 'log', destinationMasked: null, status: 'failed', providerMessageId: null, errorClass: 'invalid_vars', ...(dedupeKey ? { dedupeKey } : {}) }])
@@ -115,11 +128,11 @@ export async function sendNotification(input: SendNotificationInput, deps: SendN
     }
     return { attempts: [{ channel: 'log', status: 'failed' }] }
   }
-  const vars = input.vars as TemplateVars[typeof templateKey]
+  const vars = inputVars as TemplateVars[typeof templateKey]
   const text = renderNotification(templateKey, vars)
   const params = templateParams(templateKey, vars)
-  const hospitalName = String((input.vars as { hospitalName?: unknown } | null)?.hospitalName ?? '')
-  const subject = notificationSubject(templateKey, hospitalName)
+  const subject = notificationSubject(templateKey, brand.name)
+  const emailText = appendEmailSignature(text, brand.emailSignature)
 
   const rows: NotificationLogEntry[] = []
   const attempts: NotificationAttempt[] = []
@@ -139,7 +152,7 @@ export async function sendNotification(input: SendNotificationInput, deps: SendN
     if (!adapter.configured()) { push(channel, 'log_only', masked, 'not_configured'); continue }
     try {
       const r = await adapter.send({
-        patientId, templateKey, text, params, subject, to,
+        patientId, templateKey, text: channel === 'email' ? emailText : text, params, subject, to,
         dltTemplateId: config.dltTemplateId, whatsappTemplateName: config.whatsappTemplateName,
       })
       if (r.ok) push(channel, 'sent', masked, null, r.providerMessageId)

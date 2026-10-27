@@ -5,12 +5,15 @@ import { logAudit } from '@/lib/audit'
 import { getTokenSlip } from '@/lib/queries/print-slips'
 import { formatDateTimeIn } from '@/lib/india-time'
 import { PrintSlip, SlipRow } from '@/components/print/PrintSlip'
+import { getBrand } from '@/lib/brand-server'
+import { printIdentity } from '@/lib/brand'
 
 // Wave C P1-14: the OPD token slip printed after check-in -- replaces the
 // old window.print() of the whole dashboard. Same gate as check-in
 // (CHECK_IN_ROLES), right after the session check and before any query.
 // Shows the patient's name and UHID (the anonymous chart id only as a
-// fallback line), token, doctor, department and the IST check-in time.
+// fallback line), token, doctor, department and the IST check-in time; WS6 T9 adds the
+// doctor's OPD room, the patients waiting ahead and the estimated wait.
 export default async function TokenSlipPage({ params }: { params: Promise<{ encounterId: string }> }) {
   const session = await requireSessionOrRedirect()
   if (!CHECK_IN_ROLES.includes(session.role)) redirect('/')
@@ -20,12 +23,14 @@ export default async function TokenSlipPage({ params }: { params: Promise<{ enco
   const encounterId = Number(raw)
 
   const slip = await getTokenSlip(encounterId)
-  if (!slip) notFound()
+  // WS3 T2 (spec 3.1 item 6): an IPD stay has no OPD token, so it has no token slip.
+  if (!slip || slip.encounterType === 'ipd') notFound()
+  const identity = printIdentity(await getBrand())
   await logAudit(session, 'printed OPD token slip', slip.patient.id, `encounter=${slip.encounterId}`)
 
   const isOpd = slip.encounterType === 'opd'
   return (
-    <PrintSlip title={isOpd ? 'OPD token' : 'Admission check-in'} backHref="/front-desk/check-in" backLabel="Back to Check-In">
+    <PrintSlip title={isOpd ? 'OPD token' : 'Admission check-in'} backHref="/front-desk/check-in" backLabel="Back to Check-In" identity={identity}>
       <section className="py-3">
         <p className="text-[11px] uppercase tracking-wide text-black/70">Token</p>
         <p className="text-5xl font-bold leading-none tabular-nums">{slip.opdToken ?? '—'}</p>
@@ -38,8 +43,16 @@ export default async function TokenSlipPage({ params }: { params: Promise<{ enco
       <section className="mt-2 space-y-1 border-t border-dashed border-black/40 pt-2">
         <SlipRow label="Doctor">{slip.doctorName}</SlipRow>
         {slip.departmentName && <SlipRow label="Department">{slip.departmentName}</SlipRow>}
+        {isOpd && slip.roomLabel && <SlipRow label="Room">{`Room ${slip.roomLabel}`}</SlipRow>}
         {slip.room && <SlipRow label="Bed">{`${slip.room.ward} — Room ${slip.room.roomNumber}, Bed ${slip.room.bedNumber}`}</SlipRow>}
         <SlipRow label="Checked in">{formatDateTimeIn(slip.checkedInAt)}</SlipRow>
+        {/* WS6 T9: the queue ahead of this token and the estimated wait (OPD only). */}
+        {slip.estimatedWaitMinutes !== null && (
+          <>
+            <SlipRow label="Waiting ahead">{String(slip.waitingAhead)}</SlipRow>
+            <SlipRow label="Estimated wait">{slip.estimatedWaitMinutes === 0 ? 'You are next' : `About ${slip.estimatedWaitMinutes} minutes`}</SlipRow>
+          </>
+        )}
       </section>
       <p className="mt-3 border-t border-dashed border-black/40 pt-2 text-[10px] text-black/70">Please wait to be called by your token number.</p>
     </PrintSlip>

@@ -27,12 +27,14 @@ describe('appointment-creating UIs send +05:30', () => {
     // Wave C: the patient comes from the PatientPicker; preselect it here.
     render(<NewEventModal initialPatient={{ id: 'RD-0001', name: 'Asha', uhid: null }} providers={[{ id: 7, name: 'Dr. Rao' }]} defaultDate="2026-11-03" onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Doctor'), { target: { value: '7' } })
-    fireEvent.change(screen.getByLabelText('Start time (IST)'), { target: { value: '09:00' } })
+    // WS6 T7: the doctor's slots load first; with no hours set up the typed time is used.
+    fireEvent.change(await screen.findByLabelText('Start time (IST)'), { target: { value: '09:00' } })
     fireEvent.change(screen.getByLabelText('End time (IST)'), { target: { value: '09:30' } })
     fireEvent.change(screen.getByPlaceholderText('Visit reason'), { target: { value: 'Fever' } })
     fireEvent.click(screen.getByText('Save'))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    expect(sentBody(fetchMock)).toMatchObject({ startsAt: '2026-11-03T09:00:00+05:30', endsAt: '2026-11-03T09:30:00+05:30' })
+    const postIdx = () => fetchMock.mock.calls.findIndex(([u]) => u === '/api/appointments')
+    await waitFor(() => expect(postIdx()).toBeGreaterThanOrEqual(0))
+    expect(sentBody(fetchMock, postIdx())).toMatchObject({ startsAt: '2026-11-03T09:00:00+05:30', endsAt: '2026-11-03T09:30:00+05:30' })
   })
 
   it('ConfirmBookingRequestModal', async () => {
@@ -45,8 +47,8 @@ describe('appointment-creating UIs send +05:30', () => {
       : new Response('[]', { status: 200 })))
     fireEvent.change(screen.getByRole('combobox', { name: /patient/i }), { target: { value: 'asha' } })
     fireEvent.click(await screen.findByRole('option', { name: /asha/i }))
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '14:15' } })
-    fireEvent.change(screen.getByLabelText('End time'), { target: { value: '14:45' } })
+    fireEvent.change(await screen.findByLabelText('Start time (IST)'), { target: { value: '14:15' } }) // WS6 T7
+    fireEvent.change(screen.getByLabelText('End time (IST)'), { target: { value: '14:45' } })
     fireEvent.click(screen.getByText('Confirm'))
     const confirmIdx = () => fetchMock.mock.calls.findIndex(([u]) => u === '/api/booking-requests/5/confirm')
     await waitFor(() => expect(confirmIdx()).toBeGreaterThanOrEqual(0))

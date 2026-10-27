@@ -5,6 +5,7 @@ import { GST_STATE_CODES } from '@/lib/billing/gst'
 import { sumPaise } from '@/lib/billing/amounts'
 import { rupeesInWords } from '@/lib/billing/amount-words'
 import type { InvoiceDetail } from '@/lib/queries/invoices'
+import type { BillingDocumentMarks } from '@/lib/brand'
 import { bpToPercent } from './labels'
 
 function placeLabel(stateCode: string | null): string {
@@ -23,8 +24,11 @@ function addressLines(p: InvoiceDetail['parties']['patient']): string[] {
  * Server-renderable (no hooks). Drafts read as a provisional bill with an estimated tax split;
  * a cancelled invoice carries its credit-note banner. Bill-to shows name, UHID and postal address
  * only, from the frozen snapshot once issued.
+ *
+ * WL T10 (spec D3): `marks` adds the brand logo, print footer and signature line; the legal name
+ * stays the billing one. Without `marks` the document is unchanged.
  */
-export function InvoiceDocument({ invoice }: { invoice: InvoiceDetail }) {
+export function InvoiceDocument({ invoice, marks }: { invoice: InvoiceDetail; marks?: BillingDocumentMarks }) {
   const { parties, place, lines } = invoice
   const draft = invoice.estimated
   const inter = place.supplyType === 'inter'
@@ -55,6 +59,11 @@ export function InvoiceDocument({ invoice }: { invoice: InvoiceDetail }) {
 
       <header className="flex items-start justify-between gap-6 border-b-2 border-neutral-800 pb-4">
         <div>
+          {marks?.logoUrl && (
+            // A validated https:// or /branding/ path; a plain img prints reliably.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={marks.logoUrl} alt="" className="mb-2 h-12 w-auto" />
+          )}
           <p className="text-xl font-bold">{hospital.legalName || 'Hospital legal name not set'}</p>
           {hospital.address && <p className="whitespace-pre-line text-neutral-600 print:text-black">{hospital.address}</p>}
           <p className="text-neutral-600 print:text-black">{hospital.gstin ? `GSTIN ${hospital.gstin}` : 'Not registered for GST'}</p>
@@ -174,9 +183,10 @@ export function InvoiceDocument({ invoice }: { invoice: InvoiceDetail }) {
         </p>
         <div className="text-right">
           <p>For {hospital.legalName || 'the hospital'}</p>
-          <p className="mt-8 border-t border-neutral-400 pt-1">Authorised signatory</p>
+          <p className="mt-8 border-t border-neutral-400 pt-1">{marks?.signatureLine ?? 'Authorised signatory'}</p>
         </div>
       </footer>
+      {marks?.footerText && <p className="mt-4 whitespace-pre-line text-center text-[11px] text-neutral-500 print:text-black">{marks.footerText}</p>}
     </article>
   )
 }

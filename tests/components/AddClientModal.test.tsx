@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { verhoeffCheckDigit } from '@/lib/india/verhoeff'
-import { AddClientModal } from '@/components/AddClientModal'
+import { AddClientModal as Modal } from '@/components/AddClientModal'
+import { ToastProvider } from '@/components/ui/toast'
+
+// WS6 T8: the dialog needs the dashboard's ToastProvider (success / photo toasts).
+const AddClientModal = (props: Parameters<typeof Modal>[0]) => <ToastProvider><Modal {...props} /></ToastProvider>
 
 const push = vi.fn()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }))
@@ -9,6 +13,8 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }))
 const VALID_AADHAAR = '23456789012' + verhoeffCheckDigit('23456789012')
 
 describe('AddClientModal', () => {
+  // WS6 T8: an unsaved draft lives in sessionStorage; each test starts without one.
+  beforeEach(() => window.sessionStorage.clear())
   it('renders as an accessible dialog that closes on Escape', () => {
     const onClose = vi.fn()
     render(<AddClientModal onClose={onClose} />)
@@ -17,9 +23,10 @@ describe('AddClientModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('still requires a name and DOB before Save is enabled', () => {
+  // WS6 T8: step 1 (Identity) blocks Next until name, DOB and gender are valid.
+  it('still requires a name and DOB before moving on', () => {
     render(<AddClientModal onClose={vi.fn()} />)
-    expect(screen.getByText('Save')).toBeDisabled()
+    expect(screen.getByText('Next')).toBeDisabled()
   })
 
   describe('registration flow', () => {
@@ -37,37 +44,50 @@ describe('AddClientModal', () => {
     afterEach(() => vi.unstubAllGlobals())
 
     const patientCalls = () => fetchMock.mock.calls.filter((c) => c[0] === '/api/patients')
+    // WS6 T8: Identity -> Contact & address -> IDs & insurance (Aadhaar is filled by each test).
     function fillBase(dob = '1990-05-01') {
       fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Asha Rao' } })
       fireEvent.change(screen.getByLabelText('Date of birth'), { target: { value: dob } })
       fireEvent.change(screen.getByLabelText('Gender'), { target: { value: 'female' } })
+      fireEvent.click(screen.getByText('Next'))
       fireEvent.change(screen.getByLabelText('Address line 1'), { target: { value: '12 MG Road' } })
       fireEvent.change(screen.getByLabelText('City'), { target: { value: 'Bengaluru' } })
       fireEvent.change(screen.getByLabelText('District'), { target: { value: 'Bengaluru Urban' } })
       fireEvent.change(screen.getByLabelText('State / UT'), { target: { value: 'IN-KA' } })
       fireEvent.change(screen.getByLabelText('PIN code'), { target: { value: '560001' } })
+    }
+    function toIds() {
+      fireEvent.click(screen.getByText('Next'))
       // ABHA: patient has none
       fireEvent.click(screen.getByLabelText('ABHA not available'))
       fireEvent.change(screen.getByLabelText('Reason ABHA is not available'), { target: { value: 'not_created' } })
+    }
+    function save() {
+      fireEvent.click(screen.getByText('Next'))
+      fireEvent.click(screen.getByText('Save'))
+    }
+    const giveAadhaar = () => {
+      fireEvent.change(screen.getByLabelText('Aadhaar number'), { target: { value: VALID_AADHAAR } })
+      fireEvent.click(screen.getByLabelText('Patient consents to recording their Aadhaar number'))
     }
 
     it('shows a checksum error and does not POST for a bad Aadhaar', async () => {
       render(<AddClientModal onClose={vi.fn()} />)
       fillBase()
+      toIds()
       fireEvent.change(screen.getByLabelText('Aadhaar number'), { target: { value: '234567890125' } })
       fireEvent.click(screen.getByLabelText('Patient consents to recording their Aadhaar number'))
-      fireEvent.click(screen.getByText('Save'))
       expect(await screen.findByText('Enter a valid 12-digit Aadhaar number')).toBeInTheDocument()
+      expect(screen.getByText('Next')).toBeDisabled()
       expect(patientCalls()).toHaveLength(0)
     })
 
     it('shows the guardian error for a minor', async () => {
       render(<AddClientModal onClose={vi.fn()} />)
       fillBase('2024-01-01')
-      fireEvent.click(screen.getByLabelText('Patient does not provide Aadhaar'))
-      fireEvent.change(screen.getByLabelText('Reason for no Aadhaar'), { target: { value: 'minor_no_aadhaar' } })
-      fireEvent.click(screen.getByText('Save'))
+      // WS6 T8: the guardian rule is checked on the Contact & address step.
       expect(await screen.findByText(/guardian contact is required/i)).toBeInTheDocument()
+      expect(screen.getByText('Next')).toBeDisabled()
       expect(patientCalls()).toHaveLength(0)
     })
 
@@ -75,9 +95,9 @@ describe('AddClientModal', () => {
       const onClose = vi.fn()
       render(<AddClientModal onClose={onClose} />)
       fillBase()
-      fireEvent.change(screen.getByLabelText('Aadhaar number'), { target: { value: VALID_AADHAAR } })
-      fireEvent.click(screen.getByLabelText('Patient consents to recording their Aadhaar number'))
-      fireEvent.click(screen.getByText('Save'))
+      toIds()
+      giveAadhaar()
+      save()
       // Wave C: lands on the patient page with the registration-slip banner.
       await waitFor(() => expect(push).toHaveBeenCalledWith('/patients/7?registered=1'))
       const [url, init] = patientCalls()[0]
@@ -88,15 +108,32 @@ describe('AddClientModal', () => {
       expect(onClose).toHaveBeenCalled()
     })
 
+    // WS6 T7: registering from a booking request stays on the queue to confirm the booking.
+    it('stays on the page when navigateToPatient is false', async () => {
+      const onRegistered = vi.fn(async () => undefined)
+      const onClose = vi.fn()
+      render(<AddClientModal onClose={onClose} onRegistered={onRegistered} navigateToPatient={false} />)
+      fillBase()
+      toIds()
+      giveAadhaar()
+      save()
+      await waitFor(() => expect(onClose).toHaveBeenCalled())
+      expect(onRegistered).toHaveBeenCalledWith(7)
+      expect(push).not.toHaveBeenCalled()
+    })
+
     it('clears the Aadhaar field after a failed submit and maps server field errors', async () => {
       patientsResponse = () => new Response(JSON.stringify({ error: 'Invalid registration', details: { formErrors: [], fieldErrors: { pinCode: ['Enter a valid 6-digit PIN code'] } } }), { status: 400 })
       render(<AddClientModal onClose={vi.fn()} />)
       fillBase()
-      fireEvent.change(screen.getByLabelText('Aadhaar number'), { target: { value: VALID_AADHAAR } })
-      fireEvent.click(screen.getByLabelText('Patient consents to recording their Aadhaar number'))
-      fireEvent.click(screen.getByText('Save'))
+      toIds()
+      giveAadhaar()
+      save()
       await waitFor(() => expect(patientCalls()).toHaveLength(1))
+      // WS6 T8: the dialog returns to the step that holds the server's field error.
       expect(await screen.findByText('Enter a valid 6-digit PIN code')).toBeInTheDocument()
+      expect(screen.getByText('Step 2 of 4')).toBeInTheDocument()
+      fireEvent.click(screen.getByText('Next'))
       expect((screen.getByLabelText('Aadhaar number') as HTMLInputElement).value).toBe('')
     })
 
@@ -104,9 +141,10 @@ describe('AddClientModal', () => {
       patientsResponse = () => new Response(JSON.stringify({ error: 'This ABHA number is already registered to another patient' }), { status: 409 })
       render(<AddClientModal onClose={vi.fn()} />)
       fillBase()
+      toIds()
       fireEvent.click(screen.getByLabelText('Patient does not provide Aadhaar'))
       fireEvent.change(screen.getByLabelText('Reason for no Aadhaar'), { target: { value: 'patient_declined' } })
-      fireEvent.click(screen.getByText('Save'))
+      save()
       expect(await screen.findByText(/already registered/i)).toBeInTheDocument()
     })
   })

@@ -3,13 +3,15 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 vi.mock('geist/font/sans', () => ({ GeistSans: { variable: 'font-geist-sans' } }))
 vi.mock('geist/font/mono', () => ({ GeistMono: { variable: 'font-geist-mono' } }))
+// The env layer only: no stored brand (tests/pages/root-layout-brand.test.tsx covers the DB layer).
+vi.mock('@/lib/queries/brand-settings', () => ({ loadBrandSnapshot: async () => null }))
 
 async function loadLayout() {
   vi.resetModules()
   const layoutMod = await import('@/app/layout')
   const { BrandLogo } = await import('@/components/BrandLogo')
-  const html = renderToStaticMarkup(<layoutMod.default><BrandLogo /></layoutMod.default>)
-  return { metadata: layoutMod.metadata, html }
+  const html = renderToStaticMarkup(await layoutMod.default({ children: <BrandLogo /> }))
+  return { metadata: await layoutMod.generateMetadata(), html }
 }
 
 afterEach(() => {
@@ -39,7 +41,7 @@ describe('RootLayout branding', () => {
   it('injects --primary from a valid BRAND_PRIMARY_COLOR', async () => {
     vi.stubEnv('BRAND_PRIMARY_COLOR', '#0a7d5a')
     const { html } = await loadLayout()
-    expect(html).toMatch(/<style id="brand-theme">:root:not\(\.dark\)\{--primary:#0a7d5a;/)
+    expect(html).toMatch(/<style id="brand-theme">:root\{--brand:#0a7d5a;\}:root:not\(\.dark\)\{--primary:#[0-9a-f]{6};/)
   })
 
   it('ignores an invalid colour instead of injecting it', async () => {

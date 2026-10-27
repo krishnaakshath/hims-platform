@@ -1,9 +1,10 @@
 // SP5: fixed error bodies for the home-collection routes. Never echoes input; the role gate is
 // NOT here (every route checks its allowlist inline, right after requireSession()).
 import { NextResponse } from 'next/server'
-import { brand } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 import type { Session } from '@/lib/auth'
 import { errorResponse } from '@/lib/labs/route-responses'
+import { visitNotDueMessage } from '@/lib/home-collection/rules'
 import { notifyPatientSafely, type NotifyOutcome } from '@/lib/queries/notifications'
 
 export const VISIT_NOT_FOUND = 'Home collection visit not found'
@@ -31,6 +32,44 @@ export function bookingError(result: { error: string; message?: string }) {
 
 export const forbidden = () => NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+// WS6 T11: the collector's door refusals.
+export const NOT_COLLECTABLE_MESSAGE = 'This visit has already been collected or cancelled.'
+
+/** 409 before the visit's day: "This visit is on 24 Oct 2026. It can be collected on that day." */
+export function notDueResponse(visitDate: string | undefined) {
+  return errorResponse(409, visitDate ? visitNotDueMessage(visitDate) : 'This visit is not due yet.', 'not_due')
+}
+
+const HANDOVER_OTP_MESSAGE = {
+  otp_required: 'Enter the handover code the patient received, or choose why it could not be used.',
+  otp_invalid: 'That handover code is not right. Check it with the patient.',
+  otp_expired: 'That handover code has expired. Send a new code.',
+  otp_locked: 'Too many wrong codes. Send a new code.',
+} as const
+
+/** 409 with a `code` for an OTP refusal; null for any other error. Never echoes the code typed. */
+export function handoverOtpError(error: string) {
+  if (!(error in HANDOVER_OTP_MESSAGE)) return null
+  return errorResponse(409, HANDOVER_OTP_MESSAGE[error as keyof typeof HANDOVER_OTP_MESSAGE], error)
+}
+// end WS6 T11
+
+// WS6 T12: the door guard's refusals (assertCollectorVisit), shared by the payment routes.
+export function collectorVisitError(error: 'not_found' | 'not_assigned' | 'not_due' | 'not_collectable', visitDate?: string) {
+  if (error === 'not_assigned') return forbidden()
+  if (error === 'not_found') return errorResponse(404, VISIT_NOT_FOUND)
+  if (error === 'not_due') return notDueResponse(visitDate)
+  return errorResponse(409, NOT_COLLECTABLE_MESSAGE)
+}
+
+/** Ruling R24: one door receipt per visit, within the amount due. */
+export function doorPaymentRefusalResponse(error: 'already_paid' | 'amount_exceeds_due') {
+  return error === 'already_paid'
+    ? errorResponse(409, 'A payment for this visit has already been recorded.', 'already_paid')
+    : errorResponse(422, 'The amount is more than is due for this visit.', 'amount_exceeds_due')
+}
+// end WS6 T12
+
 type VisitNotice =
   | { kind: 'booked'; visit: { id: number; patientId: string; visitDate: string; windowLabel: string } }
   | { kind: 'rescheduled'; visit: { id: number; patientId: string; visitDate: string; windowLabel: string; rescheduleCount: number } }
@@ -43,11 +82,13 @@ type VisitNotice =
  */
 export async function notifyVisitChange(session: Session, n: VisitNotice): Promise<NotifyOutcome | 'error'> {
   const related = { type: 'home_collection_visit' as const, id: n.visit.id }
+  // Spec D14: the SMS hospitalName is the resolved brand's SMS name (getBrand never throws).
+  const { smsName } = await getBrand()
   if (n.kind === 'booked') {
     return notifyPatientSafely(session, {
       patientId: n.visit.patientId,
       templateKey: 'home_collection_booked',
-      vars: { hospitalName: brand.name, visitDate: n.visit.visitDate, windowLabel: n.visit.windowLabel },
+      vars: { hospitalName: smsName, visitDate: n.visit.visitDate, windowLabel: n.visit.windowLabel },
       related,
       dedupeKey: `home_collection_booked:visit=${n.visit.id}`,
     })
@@ -56,7 +97,7 @@ export async function notifyVisitChange(session: Session, n: VisitNotice): Promi
     return notifyPatientSafely(session, {
       patientId: n.visit.patientId,
       templateKey: 'home_collection_rescheduled',
-      vars: { hospitalName: brand.name, visitDate: n.visit.visitDate, windowLabel: n.visit.windowLabel },
+      vars: { hospitalName: smsName, visitDate: n.visit.visitDate, windowLabel: n.visit.windowLabel },
       related,
       dedupeKey: `home_collection_rescheduled:visit=${n.visit.id}:n=${n.visit.rescheduleCount}`,
     })
@@ -64,7 +105,7 @@ export async function notifyVisitChange(session: Session, n: VisitNotice): Promi
   return notifyPatientSafely(session, {
     patientId: n.visit.patientId,
     templateKey: 'home_collection_cancelled',
-    vars: { hospitalName: brand.name, visitDate: n.visit.visitDate },
+    vars: { hospitalName: smsName, visitDate: n.visit.visitDate },
     related,
     dedupeKey: `home_collection_cancelled:visit=${n.visit.id}`,
   })

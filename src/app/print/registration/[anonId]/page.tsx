@@ -5,6 +5,8 @@ import { logAudit } from '@/lib/audit'
 import { getRegistrationSlip } from '@/lib/queries/print-slips'
 import { formatIsoDate, istDateOf } from '@/lib/india-time'
 import { PrintSlip } from '@/components/print/PrintSlip'
+import { getBrand } from '@/lib/brand-server'
+import { printIdentity } from '@/lib/brand'
 
 // Wave C: registration slip / UHID card, printed after registration (and
 // reprintable from the patient page). Registration roles only, gated right
@@ -19,10 +21,11 @@ export default async function RegistrationSlipPage({ params }: { params: Promise
 
   const slip = await getRegistrationSlip(anonId)
   if (!slip) notFound()
+  const identity = printIdentity(await getBrand())
   await logAudit(session, 'printed registration slip', slip.id)
 
   return (
-    <PrintSlip title="Patient registration" backHref={`/patients/${slip.id}`} backLabel="Back to patient">
+    <PrintSlip title="Patient registration" backHref={`/patients/${slip.id}`} backLabel="Back to patient" identity={identity}>
       <section className="space-y-1 py-3">
         <p className="text-base font-semibold leading-tight">{slip.name}</p>
         <p className="text-[11px] uppercase tracking-wide text-black/70">UHID</p>

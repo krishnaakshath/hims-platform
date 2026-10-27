@@ -1,5 +1,6 @@
 // Pure, client-safe lab catalog constants and tariff → quote mapping.
 import type { PriceResolution } from '@/lib/tariff/resolve'
+import type { ServiceCategory } from '@/lib/tariff/validation' // WS4 T13
 
 export const SAMPLE_TYPES = ['blood', 'serum', 'plasma', 'urine', 'stool', 'sputum', 'swab', 'csf', 'other'] as const
 export type SampleType = (typeof SAMPLE_TYPES)[number]
@@ -60,3 +61,14 @@ export function quoteFromResolution(res: PriceResolution | null): LabQuote {
   const quoteStatus: LabQuoteStatus = res.reason === 'invalid_date' ? 'no_rate' : res.reason
   return { quotedPricePaise: null, quotedTariffRateId: null, quoteStatus }
 }
+
+// WS4 T13 (spec 3.6 item 27): every lab test is created from a tariff service. A lab service makes
+// a lab test, an imaging service an imaging test; a procedure (e.g. ECG) becomes an imaging /
+// diagnostics test only when an admin explicitly picks it. Any other category is not orderable.
+export function labCategoryForService(category: ServiceCategory, opts?: { allowProcedure?: boolean }): 'lab' | 'imaging' | null {
+  if (category === 'investigation_lab') return 'lab'
+  if (category === 'investigation_imaging') return 'imaging'
+  if (category === 'procedure' && opts?.allowProcedure === true) return 'imaging'
+  return null
+}
+// end WS4 T13

@@ -4,40 +4,58 @@ import { formatPaise } from '@/lib/format'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { fetchJson } from '@/lib/client-fetch'
-import { LogDispenseBillModal } from '@/components/LogDispenseBillModal'
-import { CHARGE_STATUS_LABELS, type ChargeStatus } from '@/lib/charge-status'
+import { sendJson } from '@/lib/client-fetch'
+import type { DispenseBilling } from '@/lib/queries/medication-dispenses'
 
 export interface PharmacyBillingRowView {
   dispenseId: number
   patientId: string
   patientName: string
+  uhid: string | null
   medicationName: string
   quantity: number
   dispensedByName: string
   dispensedAt: string
-  charge: { id: number; status: ChargeStatus; amountCents: number } | null
+  billing: DispenseBilling
+}
+
+// WS2 T8: a dispense bills itself; the status comes from its charge line. Only a legacy dispense
+// (made before that, never billed) offers "Bill at current price".
+export function DispenseBillingStatus({ billing }: { billing: DispenseBilling }) {
+  switch (billing.status) {
+    case 'billed': return <span className="text-foreground">{billing.lineStatus === 'invoiced' ? 'Invoiced' : 'On the bill'} · {formatPaise(billing.totalPaise)}</span>
+    case 'legacy_charge': return <span className="text-foreground">Billed (old charge) · {formatPaise(billing.amountPaise)}</span>
+    case 'no_charge': return <span className="text-muted-foreground">No charge</span>
+    case 'voided': return <span className="text-warning">Charge voided</span>
+    case 'unbilled': return <span className="text-warning">Not billed</span>
+  }
+}
+
+export function BillLegacyDispenseButton({ dispenseId, onBilled }: { dispenseId: number; onBilled: () => void }) {
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function bill() {
+    setSubmitting(true)
+    setError(null)
+    const res = await sendJson(`/api/pharmacy/dispenses/${dispenseId}/charge`, 'POST', {})
+    setSubmitting(false)
+    if (res.ok) { onBilled(); return }
+    setError(res.error)
+  }
+
+  return (
+    <div>
+      <Button size="sm" variant="outline" disabled={submitting} onClick={bill}>{submitting ? 'Billing…' : 'Bill at current price'}</Button>
+      {error && <p role="alert" className="mt-1 text-xs text-destructive">{error}</p>}
+    </div>
+  )
 }
 
 export function PharmacyBillingTable({ rows }: { rows: PharmacyBillingRowView[] }) {
   const router = useRouter()
-  const [billing, setBilling] = useState<{ dispenseId: number; medicationName: string; quantity: number; diagnoses: { id: number; code: string; description: string }[] } | null>(null)
-  const [loadingId, setLoadingId] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  async function openBilling(row: PharmacyBillingRowView) {
-    setLoadingId(row.dispenseId)
-    setError(null)
-    const res = await fetchJson<{ diagnoses?: { id: number; code: string; description: string }[] }>(`/api/pharmacy/patients/${encodeURIComponent(row.patientId)}`)
-    setLoadingId(null)
-    if (!res.ok) { setError(res.error); return }
-    const view = res.data ?? {}
-    setBilling({ dispenseId: row.dispenseId, medicationName: row.medicationName, quantity: row.quantity, diagnoses: view.diagnoses ?? [] })
-  }
 
   return (
-    <>
-    {error && <p role="alert" className="mb-2 text-sm text-destructive">{error}</p>}
     <div className="overflow-hidden rounded-lg border border-border">
       <table className="w-full border-collapse text-sm">
         <thead>
@@ -53,33 +71,20 @@ export function PharmacyBillingTable({ rows }: { rows: PharmacyBillingRowView[] 
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.dispenseId} className={`border-b border-border last:border-b-0 ${i % 2 === 1 ? 'bg-muted/40' : ''}`}>
-              <td className="p-3 font-medium text-foreground">{r.patientName} <span className="font-mono text-xs text-muted-foreground">({r.patientId})</span></td>
+              <td className="p-3 font-medium text-foreground">{r.patientName}{r.uhid && <span className="font-mono text-xs text-muted-foreground"> ({r.uhid})</span>}</td>
               <td className="p-3 text-foreground">{r.medicationName}</td>
               <td className="p-3 text-foreground">{r.quantity}</td>
               <td className="p-3 text-foreground">{r.dispensedByName}</td>
               <td className="p-3 text-foreground">{formatIstDateTime(r.dispensedAt)}</td>
               <td className="p-3">
-                {r.charge === null ? (
-                  <Button size="sm" variant="outline" disabled={loadingId === r.dispenseId} onClick={() => openBilling(r)}>
-                    {loadingId === r.dispenseId ? 'Loading…' : 'Log bill'}
-                  </Button>
-                ) : (
-                  <span className="text-foreground">{CHARGE_STATUS_LABELS[r.charge.status]} · {formatPaise(r.charge.amountCents)}</span>
-                )}
+                {r.billing.status === 'unbilled'
+                  ? <BillLegacyDispenseButton dispenseId={r.dispenseId} onBilled={() => router.refresh()} />
+                  : <DispenseBillingStatus billing={r.billing} />}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      {billing && (
-        <LogDispenseBillModal
-          dispense={{ id: billing.dispenseId, medicationName: billing.medicationName, quantity: billing.quantity }}
-          diagnoses={billing.diagnoses}
-          onClose={() => setBilling(null)}
-          onLogged={() => router.refresh()}
-        />
-      )}
     </div>
-    </>
   )
 }

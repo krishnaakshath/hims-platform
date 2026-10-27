@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import type { Role } from '@/lib/auth'
-import { brand } from '@/lib/brand'
+import { envBrand } from '@/lib/brand'
 
 class NotFound extends Error {}
 class Redirect extends Error {}
@@ -13,6 +13,8 @@ const state = vi.hoisted(() => ({ role: 'frontdesk' as string, logAudit: vi.fn(a
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: state.role, name: 'Test WC', userId: null })) }))
 vi.mock('@/lib/audit', () => ({ logAudit: state.logAudit }))
 vi.mock('@/lib/queries/print-slips', () => ({ getRegistrationSlip: state.getRegistrationSlip }))
+// WL T10: the slip reads the brand at request time; with no stored brand getBrand() is the env brand.
+vi.mock('@/lib/brand-server', async () => ({ getBrand: vi.fn(async () => (await import('@/lib/brand')).envBrand) }))
 
 import RegistrationSlipPage from '@/app/print/registration/[anonId]/page'
 
@@ -30,7 +32,7 @@ describe('/print/registration/[anonId]', () => {
     expect(screen.getByText('Asha Rao')).toBeInTheDocument()
     expect(screen.getByText('UH00000042')).toBeInTheDocument()
     expect(screen.getByText('8 Oct 2026')).toBeInTheDocument()
-    expect(screen.getByText(brand.legalName)).toBeInTheDocument()
+    expect(screen.getByText(envBrand.legalName)).toBeInTheDocument()
     expect(container.textContent).not.toMatch(/aadhaar|abha|date of birth|dob/i)
     expect(state.logAudit).toHaveBeenCalledWith(expect.objectContaining({ role: 'frontdesk' }), 'printed registration slip', 'RD-0042')
   })

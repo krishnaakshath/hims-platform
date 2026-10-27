@@ -13,6 +13,7 @@
 import { verhoeffCheckDigit } from '../lib/india/verhoeff'
 import { isValidGstin } from '../lib/billing/gst'
 import type { PayerProfileInput } from '../lib/rcm/validation'
+import type { AnalyteDefinitionInput } from '../lib/labs/validation' // WS4 T8
 
 // ---------------------------------------------------------------------------
 // Synthetic identifiers
@@ -106,6 +107,10 @@ export const DOCTOR_ROSTER: DoctorSeed[] = [
   { name: 'Dr. Arjun Reddy', credentials: 'MS', specialty: 'Orthopaedics', colorTag: 'chart-2', departmentCode: 'ORTHO', registrationCouncil: 'smc', registrationStateCode: 'IN-TS', registrationNumber: 'DEMO/2013/68022', consultationFeePaise: 700_00 },
   { name: 'Dr. Kavya Hegde', credentials: 'MD', specialty: 'Emergency Medicine', colorTag: 'chart-3', departmentCode: 'EMERG', registrationCouncil: 'smc', registrationStateCode: 'IN-KA', registrationNumber: 'DEMO/2016/90155', consultationFeePaise: 500_00 },
   { name: 'Dr. Suresh Babu', credentials: 'MD', specialty: 'Pathology', colorTag: 'chart-4', departmentCode: 'LAB', registrationCouncil: 'smc', registrationStateCode: 'IN-KA', registrationNumber: 'DEMO/2005/22874', consultationFeePaise: 0 },
+  // WS4 T11: the reporting radiologist (spec 3.4: imaging is verified by Radiology). The demo
+  // `radiologist` login is linked to this provider by the staff seed (src/db/seed.ts STAFF_SEED).
+  { name: 'Dr. Nandini Kulkarni', credentials: 'MD (Radiodiagnosis)', specialty: 'Radiology', colorTag: 'chart-5', departmentCode: 'RADIO', registrationCouncil: 'smc', registrationStateCode: 'IN-KA', registrationNumber: 'DEMO/2011/45126', consultationFeePaise: 0 },
+  // end WS4 T11
 ]
 
 // ---------------------------------------------------------------------------
@@ -192,12 +197,12 @@ export const ROOM_CATEGORY_SEED = [
 
 export type RoomCategoryCode = (typeof ROOM_CATEGORY_SEED)[number]['code']
 
-export const ROOM_SEED: { ward: string; roomNumber: string; bedNumber: string; category: RoomCategoryCode }[] = [
-  ...['A', 'B', 'C', 'D'].map((bed) => ({ ward: 'General Ward (Male)', roomNumber: '101', bedNumber: bed, category: 'GEN_WARD' as const })),
-  ...['A', 'B', 'C', 'D'].map((bed) => ({ ward: 'General Ward (Female)', roomNumber: '102', bedNumber: bed, category: 'GEN_WARD' as const })),
-  ...['201', '202'].flatMap((room) => ['A', 'B'].map((bed) => ({ ward: 'Semi-Private', roomNumber: room, bedNumber: bed, category: 'SEMI_PVT' as const }))),
-  ...['301', '302', '303'].map((room) => ({ ward: 'Private', roomNumber: room, bedNumber: 'A', category: 'PRIVATE' as const })),
-  ...['1', '2', '3', '4'].map((bed) => ({ ward: 'ICU', roomNumber: 'ICU-1', bedNumber: bed, category: 'ICU' as const })),
+export const ROOM_SEED: { ward: string; roomNumber: string; bedNumber: string; category: RoomCategoryCode; genderRestriction: 'male' | 'female' | null }[] = [
+  ...['A', 'B', 'C', 'D'].map((bed) => ({ ward: 'General Ward (Male)', roomNumber: '101', bedNumber: bed, category: 'GEN_WARD' as const, genderRestriction: 'male' as const })),
+  ...['A', 'B', 'C', 'D'].map((bed) => ({ ward: 'General Ward (Female)', roomNumber: '102', bedNumber: bed, category: 'GEN_WARD' as const, genderRestriction: 'female' as const })),
+  ...['201', '202'].flatMap((room) => ['A', 'B'].map((bed) => ({ ward: 'Semi-Private', roomNumber: room, bedNumber: bed, category: 'SEMI_PVT' as const, genderRestriction: null }))),
+  ...['301', '302', '303'].map((room) => ({ ward: 'Private', roomNumber: room, bedNumber: 'A', category: 'PRIVATE' as const, genderRestriction: null })),
+  ...['1', '2', '3', '4'].map((bed) => ({ ward: 'ICU', roomNumber: 'ICU-1', bedNumber: bed, category: 'ICU' as const, genderRestriction: null })),
 ]
 
 // ---------------------------------------------------------------------------
@@ -309,7 +314,7 @@ export type LabTestSeed = {
   defaultUnit: string | null
   referenceRange: string | null
   sampleType: 'blood' | 'serum' | 'plasma' | 'urine' | null
-  container: 'edta_lavender' | 'plain_red' | 'sst_gold' | 'fluoride_grey' | 'urine_container' | null
+  container: 'edta_lavender' | 'plain_red' | 'sst_gold' | 'fluoride_grey' | 'urine_container' | 'citrate_blue' | null // WS4 T13: citrate (PT/INR)
   serviceCode: string | null
 }
 
@@ -470,7 +475,151 @@ export const DEMO_USERS: { local: string; name: string; role: 'admin' | 'crc' | 
   { local: 'billing', name: 'Alok Bansal', role: 'billing' },
   { local: 'labs', name: 'Meenakshi Sundar', role: 'labs' },
   { local: 'pathologist', name: 'Dr. Suresh Babu', role: 'labs' },
+  { local: 'radiologist', name: 'Dr. Nandini Kulkarni', role: 'labs' }, // WS4 T11: verifies imaging (Radiology)
   { local: 'collector', name: 'Ravi Kumar', role: 'collector' },
   { local: 'coder', name: 'Asha Menon', role: 'coder' },
   { local: 'rcm', name: 'Farah Siddiqui', role: 'rcm' }, // SP7
 ]
+
+// WS4 T8 (spec 3.3 item 21): analytes and DEMO adult reference ranges for the seeded tests, keyed
+// by lab test code. The Lab setup editor shows DEMO_REFERENCE_RANGE_NOTE with them: the laboratory
+// director must review them before clinical use. LOINC codes are reference data only, not verified
+// against the real LOINC database. The fever panel is seeded by Task 13 (lane ruling R7).
+export type AnalyteSeed = AnalyteDefinitionInput
+const ADULT_DAYS = 18 * 365
+type Limits = { lo?: number; hi?: number; critLo?: number; critHi?: number }
+const band = (sex: 'any' | 'male' | 'female', l: Limits): AnalyteSeed['ranges'][number] => ({
+  sex, ageMinDays: ADULT_DAYS, ageMaxDays: null, normalLow: l.lo ?? null, normalHigh: l.hi ?? null,
+  criticalLow: l.critLo ?? null, criticalHigh: l.critHi ?? null, displayText: null,
+})
+const num = (code: string, name: string, unit: string, decimals: number, loincCode: string | null, ranges: AnalyteSeed['ranges']): AnalyteSeed => ({
+  code, name, unit, valueType: 'numeric', decimals, loincCode, options: null, abnormalOptions: null, criticalOptions: null, ranges,
+})
+const anyAdult = (l: Limits) => [band('any', l)]
+const bySex = (male: Limits, female: Limits) => [band('male', male), band('female', female)]
+
+export const LAB_ANALYTE_SEED: Record<string, AnalyteSeed[]> = {
+  'CBC-DIFF': [
+    num('HGB', 'Haemoglobin', 'g/dL', 1, '718-7', bySex({ lo: 13.5, hi: 17.5, critLo: 7, critHi: 20 }, { lo: 12.0, hi: 15.5, critLo: 7, critHi: 20 })),
+    num('WBC', 'Total leucocyte count', '10^3/µL', 1, '6690-2', anyAdult({ lo: 4.0, hi: 11.0, critLo: 2, critHi: 30 })),
+    num('NEUT', 'Neutrophils', '%', 0, '770-8', anyAdult({ lo: 40, hi: 75 })),
+    num('LYMPH', 'Lymphocytes', '%', 0, '736-9', anyAdult({ lo: 20, hi: 45 })),
+    num('MONO', 'Monocytes', '%', 0, '5905-5', anyAdult({ lo: 2, hi: 10 })),
+    num('EOS', 'Eosinophils', '%', 0, '713-8', anyAdult({ lo: 1, hi: 6 })),
+    num('BASO', 'Basophils', '%', 0, '706-2', anyAdult({ lo: 0, hi: 2 })),
+    num('PLT', 'Platelet count', '10^3/µL', 0, '777-3', anyAdult({ lo: 150, hi: 450, critLo: 50, critHi: 1000 })),
+    num('RBC', 'Red cell count', '10^6/µL', 2, '789-8', bySex({ lo: 4.5, hi: 5.9 }, { lo: 4.0, hi: 5.2 })),
+    num('HCT', 'Haematocrit (PCV)', '%', 1, '4544-3', bySex({ lo: 41, hi: 53 }, { lo: 36, hi: 46 })),
+    num('MCV', 'Mean corpuscular volume', 'fL', 1, '787-2', anyAdult({ lo: 80, hi: 100 })),
+    num('MCH', 'Mean corpuscular haemoglobin', 'pg', 1, '785-6', anyAdult({ lo: 27, hi: 33 })),
+    num('MCHC', 'Mean corpuscular haemoglobin concentration', 'g/dL', 1, '786-4', anyAdult({ lo: 32, hi: 36 })),
+  ],
+  LFT: [
+    num('TBIL', 'Bilirubin, total', 'mg/dL', 1, '1975-2', anyAdult({ lo: 0.2, hi: 1.2 })),
+    num('DBIL', 'Bilirubin, direct', 'mg/dL', 1, '1968-7', anyAdult({ lo: 0.0, hi: 0.3 })),
+    num('AST', 'AST (SGOT)', 'U/L', 0, '1920-8', anyAdult({ lo: 0, hi: 40 })),
+    num('ALT', 'ALT (SGPT)', 'U/L', 0, '1742-6', anyAdult({ lo: 0, hi: 41 })),
+    num('ALP', 'Alkaline phosphatase', 'U/L', 0, '6768-6', anyAdult({ lo: 44, hi: 147 })),
+    num('TP', 'Total protein', 'g/dL', 1, '2885-2', anyAdult({ lo: 6.0, hi: 8.3 })),
+    num('ALB', 'Albumin', 'g/dL', 1, '1751-7', anyAdult({ lo: 3.5, hi: 5.0 })),
+  ],
+  KFT: [
+    num('UREA', 'Blood urea', 'mg/dL', 0, '3091-6', anyAdult({ lo: 15, hi: 45 })),
+    num('CREAT', 'Creatinine', 'mg/dL', 2, '2160-0', anyAdult({ lo: 0.6, hi: 1.2 })),
+    num('NA', 'Sodium', 'mmol/L', 0, '2951-2', anyAdult({ lo: 135, hi: 145, critLo: 120, critHi: 160 })),
+    num('K', 'Potassium', 'mmol/L', 1, '2823-3', anyAdult({ lo: 3.5, hi: 5.1, critLo: 2.8, critHi: 6.2 })),
+    num('CL', 'Chloride', 'mmol/L', 0, '2075-0', anyAdult({ lo: 98, hi: 107 })),
+    num('UA', 'Uric acid', 'mg/dL', 1, '3084-1', anyAdult({ lo: 3.5, hi: 7.2 })),
+  ],
+  LIPID: [
+    num('CHOL', 'Total cholesterol', 'mg/dL', 0, '2093-3', anyAdult({ hi: 200 })),
+    num('TG', 'Triglycerides', 'mg/dL', 0, '2571-8', anyAdult({ hi: 150 })),
+    num('HDL', 'HDL cholesterol', 'mg/dL', 0, '2085-9', anyAdult({ lo: 40 })),
+    num('LDL', 'LDL cholesterol (calculated)', 'mg/dL', 0, '13457-7', anyAdult({ hi: 100 })),
+    num('VLDL', 'VLDL cholesterol', 'mg/dL', 0, '13458-5', anyAdult({ lo: 5, hi: 40 })),
+  ],
+  FBS: [num('GLU', 'Glucose, fasting', 'mg/dL', 0, '1558-6', anyAdult({ lo: 70, hi: 100, critLo: 50, critHi: 400 }))],
+  CRP: [num('CRP', 'C-reactive protein', 'mg/L', 1, '1988-5', anyAdult({ hi: 6 }))],
+  TSH: [num('TSH', 'Thyroid stimulating hormone', 'mIU/L', 2, '3016-3', anyAdult({ lo: 0.4, hi: 4.0 }))],
+  HBA1C: [num('HBA1C', 'Glycated haemoglobin (HbA1c)', '%', 1, '4548-4', anyAdult({ lo: 4.0, hi: 5.6 }))],
+  'DENGUE-NS1': [{
+    code: 'NS1', name: 'Dengue NS1 antigen', unit: null, valueType: 'option', decimals: null, loincCode: null,
+    options: ['Negative', 'Positive'], abnormalOptions: ['Positive'], criticalOptions: null,
+    ranges: [{ sex: 'any', ageMinDays: 0, ageMaxDays: null, normalLow: null, normalHigh: null, criticalLow: null, criticalHigh: null, displayText: 'Negative' }],
+  }],
+}
+// end WS4 T8
+
+// WS4 T13 (spec 3.6 item 27): the catalogue grows from the tariff master. Services for panels,
+// common chemistry and coagulation, ultrasound variants, Doppler, CT chest, MRI and TMT, and one lab
+// test per service (plus tests for the existing 2D echo and ECG services; the ECG procedure is an
+// imaging / diagnostics test). Prices are demo values. A panel (the fever panel) is one orderable
+// test with its own service and its own analytes; panels do not nest tests.
+const ws4Lab = (code: string, name: string, basePaise: number): ServiceSeed =>
+  ({ code, name, departmentCode: 'LAB', category: 'investigation_lab', hsnSac: '999316', gstRateBp: 0, basePaise })
+const ws4Img = (code: string, name: string, basePaise: number, departmentCode = 'RADIO', requiresPreauth = false): ServiceSeed =>
+  ({ code, name, departmentCode, category: 'investigation_imaging', hsnSac: '999316', gstRateBp: 0, basePaise, ...(requiresPreauth ? { requiresPreauth } : {}) })
+
+export const WS4_SERVICE_SEED: ServiceSeed[] = [
+  ws4Lab('LAB_FEVER_PANEL', 'Fever panel (CBC, malaria antigen, dengue NS1, Widal)', 1_200_00),
+  ws4Lab('LAB_WIDAL', 'Widal test (slide)', 250_00),
+  ws4Lab('LAB_ESR', 'Erythrocyte sedimentation rate (ESR)', 120_00),
+  ws4Lab('LAB_ELECTROLYTES', 'Serum electrolytes (Na, K, Cl)', 500_00),
+  ws4Lab('LAB_PT_INR', 'Prothrombin time with INR', 450_00),
+  ws4Lab('LAB_BLOOD_GROUP', 'Blood group and Rh typing', 150_00),
+  ws4Lab('LAB_URINE_CULTURE', 'Urine culture and sensitivity', 750_00),
+  ws4Img('IMG_USG_PELVIS', 'Ultrasound pelvis', 1_000_00),
+  ws4Img('IMG_USG_KUB', 'Ultrasound KUB (kidney, ureter, bladder)', 1_000_00),
+  ws4Img('IMG_USG_OBS', 'Ultrasound obstetric', 1_500_00),
+  ws4Img('IMG_DOPPLER_LL', 'Colour Doppler lower limb (venous)', 2_800_00),
+  ws4Img('IMG_CT_CHEST', 'CT chest (plain)', 4_500_00),
+  ws4Img('IMG_MRI_BRAIN', 'MRI brain (plain)', 7_500_00, 'RADIO', true),
+  ws4Img('IMG_MRI_LSPINE', 'MRI lumbosacral spine (plain)', 7_500_00, 'RADIO', true),
+  ws4Img('IMG_TMT', 'Treadmill test (TMT)', 1_800_00, 'CARDIO'),
+]
+
+const ws4Test = (code: string, name: string, serviceCode: string, sample: Pick<LabTestSeed, 'sampleType' | 'container'> | null, referenceRange: string | null = null): LabTestSeed => ({
+  name, code, category: sample ? 'lab' : 'imaging', defaultUnit: null, referenceRange,
+  sampleType: sample?.sampleType ?? null, container: sample?.container ?? null, serviceCode,
+})
+
+export const WS4_LAB_TESTS: LabTestSeed[] = [
+  ws4Test('FEVER-PANEL', 'Fever panel', 'LAB_FEVER_PANEL', { sampleType: 'blood', container: 'edta_lavender' }, 'See individual analytes'),
+  ws4Test('WIDAL', 'Widal test', 'LAB_WIDAL', { sampleType: 'serum', container: 'plain_red' }, 'Non-reactive'),
+  ws4Test('ESR', 'Erythrocyte sedimentation rate', 'LAB_ESR', { sampleType: 'blood', container: 'edta_lavender' }, '0-20 mm/hr'),
+  ws4Test('ELECTROLYTES', 'Serum electrolytes', 'LAB_ELECTROLYTES', { sampleType: 'serum', container: 'sst_gold' }, 'See individual analytes'),
+  ws4Test('PT-INR', 'Prothrombin time with INR', 'LAB_PT_INR', { sampleType: 'plasma', container: 'citrate_blue' }, 'INR 0.8-1.2'),
+  ws4Test('BLOOD-GROUP', 'Blood group and Rh typing', 'LAB_BLOOD_GROUP', { sampleType: 'blood', container: 'edta_lavender' }),
+  ws4Test('URINE-CS', 'Urine culture and sensitivity', 'LAB_URINE_CULTURE', { sampleType: 'urine', container: 'urine_container' }, 'No growth'),
+  ws4Test('US-PELVIS', 'Ultrasound, pelvis', 'IMG_USG_PELVIS', null),
+  ws4Test('US-KUB', 'Ultrasound, KUB', 'IMG_USG_KUB', null),
+  ws4Test('US-OBS', 'Ultrasound, obstetric', 'IMG_USG_OBS', null),
+  ws4Test('DOPPLER-LL', 'Colour Doppler, lower limb', 'IMG_DOPPLER_LL', null),
+  ws4Test('CT-CHEST', 'CT, chest, plain', 'IMG_CT_CHEST', null),
+  ws4Test('MRI-BRAIN', 'MRI, brain, plain', 'IMG_MRI_BRAIN', null),
+  ws4Test('MRI-LSPINE', 'MRI, lumbosacral spine, plain', 'IMG_MRI_LSPINE', null),
+  ws4Test('TMT', 'Treadmill test (TMT)', 'IMG_TMT', null),
+  ws4Test('ECHO-2D', '2D echocardiography', 'IMG_ECHO', null),
+  ws4Test('ECG-12', 'ECG, 12-lead', 'PROC_ECG', null),
+]
+
+// Lane ruling R7: the fever panel's analytes. Hb, WBC and platelets reuse the CBC definitions
+// (ranges and critical limits included); the rapid tests are choice analytes.
+const optionAnalyte = (code: string, name: string, options: [string, string], abnormal: string): AnalyteSeed => ({
+  code, name, unit: null, valueType: 'option', decimals: null, loincCode: null,
+  options: [...options], abnormalOptions: [abnormal], criticalOptions: null,
+  ranges: [{ sex: 'any', ageMinDays: 0, ageMaxDays: null, normalLow: null, normalHigh: null, criticalLow: null, criticalHigh: null, displayText: options[0] }],
+})
+const cbcAnalyte = (code: string): AnalyteSeed => {
+  const a = LAB_ANALYTE_SEED['CBC-DIFF'].find((x) => x.code === code)!
+  return { ...a, ranges: a.ranges.map((r) => ({ ...r })) }
+}
+LAB_ANALYTE_SEED['FEVER-PANEL'] = [
+  cbcAnalyte('HGB'),
+  cbcAnalyte('WBC'),
+  cbcAnalyte('PLT'),
+  optionAnalyte('MAL', 'Malaria antigen (Pf/Pv)', ['Negative', 'Positive'], 'Positive'),
+  optionAnalyte('NS1', 'Dengue NS1 antigen', ['Negative', 'Positive'], 'Positive'),
+  optionAnalyte('WIDAL', 'Widal (S. Typhi O and H)', ['Non-reactive', 'Reactive'], 'Reactive'),
+]
+// end WS4 T13

@@ -1,6 +1,10 @@
 import { getDb } from '@/db/client'
-import { medications, medicationInventory, medicationEpisodes } from '@/db/schema'
-import { asc, desc, eq, sql } from 'drizzle-orm'
+import { medications, medicationInventory, medicationEpisodes, billingSettings, medicationBatches } from '@/db/schema'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { expiresWithinDays, isExpired, type BatchStock } from '@/lib/pharmacy/fefo'
+import { todayIsoIn } from '@/lib/india-time'
+import { logAudit } from '@/lib/audit'
+import type { Session } from '@/lib/auth'
 
 export interface MedicationWithInventory {
   id: number
@@ -12,19 +16,66 @@ export interface MedicationWithInventory {
   quantityOnHand: number
   reorderThreshold: number
   unit: string
+  // WS2 T8: GST-inclusive MRP per unit (null = unpriced), own GST slab/HSN (null = the billing
+  // settings default) and the slab that applies.
+  mrpPerUnitPaise: number | null
+  gstRateBp: number | null
+  hsn: string | null
+  effectiveGstRateBp: number
+  // WS5 T4: every batch (written-off included, FEFO order); the rest count live stock only
+  // (not written off, quantity > 0), against the IST business date.
+  batches: BatchStock[]
+  nearestExpiry: string | null
+  expiringSoonQty: number
+  expiredQty: number
 }
 
-export async function listMedicationsWithInventory(): Promise<MedicationWithInventory[]> {
+/** WS5 T4: live stock expiring within this many days (not yet expired) is "expiring soon". */
+export const EXPIRING_SOON_DAYS = 90
+
+export async function listMedicationsWithInventory(today: string = todayIsoIn()): Promise<MedicationWithInventory[]> {
   const rows = await getDb()
     .select({
       id: medications.id, name: medications.name, genericName: medications.genericName,
       medicationClass: medications.medicationClass, commonDose: medications.commonDose, form: medications.form,
       quantityOnHand: medicationInventory.quantityOnHand, reorderThreshold: medicationInventory.reorderThreshold, unit: medicationInventory.unit,
+      mrpPerUnitPaise: medications.mrpPerUnitPaise, gstRateBp: medications.gstRateBp, hsn: medications.hsn, // WS2 T8
+      effectiveGstRateBp: sql<number>`coalesce(${medications.gstRateBp}, ${billingSettings.pharmacyGstRateBp}, 500)::int`, // WS2 T8
     })
     .from(medications)
     .innerJoin(medicationInventory, eq(medicationInventory.medicationId, medications.id))
+    .leftJoin(billingSettings, eq(billingSettings.id, 1)) // WS2 T8
     .orderBy(asc(medications.name))
-  return rows
+
+  // WS5 T4: one read of every batch, grouped by drug (no per-drug query).
+  const batchRows = await getDb()
+    .select({
+      medicationId: medicationBatches.medicationId, id: medicationBatches.id, batchNo: medicationBatches.batchNo,
+      expiryDate: medicationBatches.expiryDate, quantityOnHand: medicationBatches.quantityOnHand,
+      mrpPerUnitPaise: medicationBatches.mrpPerUnitPaise, writtenOffAt: medicationBatches.writtenOffAt,
+    })
+    .from(medicationBatches)
+    .orderBy(sql`${medicationBatches.expiryDate} ASC NULLS LAST`, asc(medicationBatches.id))
+  const byMedication = new Map<number, BatchStock[]>()
+  for (const { medicationId, writtenOffAt, ...b } of batchRows) {
+    const list = byMedication.get(medicationId) ?? []
+    list.push({ ...b, writtenOff: writtenOffAt !== null })
+    byMedication.set(medicationId, list)
+  }
+
+  return rows.map((row) => {
+    const batches = byMedication.get(row.id) ?? []
+    const live = batches.filter((b) => !b.writtenOff && b.quantityOnHand > 0)
+    const sumOf = (bs: BatchStock[]) => bs.reduce((s, b) => s + b.quantityOnHand, 0)
+    return {
+      ...row,
+      batches,
+      // `batches` is in expiry order, so the first dated live batch is the nearest expiry.
+      nearestExpiry: live.find((b) => b.expiryDate !== null)?.expiryDate ?? null,
+      expiringSoonQty: sumOf(live.filter((b) => expiresWithinDays(b, today, EXPIRING_SOON_DAYS))),
+      expiredQty: sumOf(live.filter((b) => isExpired(b, today))),
+    }
+  })
 }
 
 export async function getMedicationById(id: number) {
@@ -94,6 +145,12 @@ export async function createMedicationWithInventory(input: CreateMedicationInput
         reorderThreshold: input.reorderThreshold,
         unit: input.unit,
       })
+      // WS5 T3: initial stock sits in an OPENING batch, so on-hand always equals its live batches.
+      if (input.quantityOnHand > 0) {
+        await tx.insert(medicationBatches).values({
+          medicationId: created.id, batchNo: 'OPENING', expiryDate: null, mrpPerUnitPaise: 0, purchaseRatePaise: 0, quantityOnHand: input.quantityOnHand,
+        })
+      }
 
       return { ok: true, medicationId: created.id }
     })
@@ -118,8 +175,9 @@ export interface ActiveMedicationSummaryRow {
 // per-patient reads elsewhere in this codebase, this aggregate needs no
 // audit-log entry.
 //
-// `inCatalog` is resolved by fetching every catalog name once and comparing
-// case-insensitively in application code rather than a per-row correlated
+// `inCatalog` is true when the name matches a catalogue drug or every active
+// episode of that name is linked to one (WS5 T4). The name match is resolved
+// by fetching every catalog name once and comparing case-insensitively in application code rather than a per-row correlated
 // subquery: the catalog is ~15 rows, so a second full scan buys nothing a
 // single extra query doesn't already give for free.
 export async function listActiveMedicationEpisodeSummary(): Promise<ActiveMedicationSummaryRow[]> {
@@ -130,6 +188,8 @@ export async function listActiveMedicationEpisodeSummary(): Promise<ActiveMedica
       name: medicationEpisodes.name,
       medicationClass: medicationEpisodes.medicationClass,
       activeEpisodeCount: sql<number>`count(*)`.mapWith(Number),
+      // WS5 T4: episodes linked to a catalogue drug (POST /api/pharmacy/uncatalogued/link) are resolved.
+      unlinkedCount: sql<number>`count(*) filter (where ${medicationEpisodes.medicationId} is null)`.mapWith(Number),
     })
     .from(medicationEpisodes)
     .where(eq(medicationEpisodes.status, 'active'))
@@ -139,8 +199,24 @@ export async function listActiveMedicationEpisodeSummary(): Promise<ActiveMedica
   const catalogRows = await db.select({ name: medications.name }).from(medications)
   const catalogNames = new Set(catalogRows.map((m) => m.name.toLowerCase()))
 
-  return rows.map((row) => ({
+  return rows.map(({ unlinkedCount, ...row }) => ({
     ...row,
-    inCatalog: catalogNames.has(row.name.toLowerCase()),
+    inCatalog: catalogNames.has(row.name.toLowerCase()) || unlinkedCount === 0,
   }))
+}
+
+/**
+ * WS5 T4: links the active episodes named exactly `episodeName` that have no catalogue drug yet
+ * (the rows behind a "Not in catalog" entry) to `medicationId`. Audited with ids and counts only.
+ */
+export async function linkUncataloguedEpisodes(episodeName: string, medicationId: number, session: Session): Promise<{ ok: true; linked: number } | { ok: false }> {
+  return getDb().transaction(async (tx) => {
+    const [drug] = await tx.select({ id: medications.id }).from(medications).where(eq(medications.id, medicationId))
+    if (!drug) return { ok: false as const }
+    const linked = await tx.update(medicationEpisodes).set({ medicationId })
+      .where(and(eq(medicationEpisodes.name, episodeName), eq(medicationEpisodes.status, 'active'), isNull(medicationEpisodes.medicationId)))
+      .returning({ id: medicationEpisodes.id })
+    await logAudit(session, 'pharmacy: linked uncatalogued prescriptions', null, `medication=${medicationId} linked=${linked.length}`, tx)
+    return { ok: true as const, linked: linked.length }
+  })
 }

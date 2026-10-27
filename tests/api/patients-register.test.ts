@@ -156,6 +156,21 @@ describe('POST /api/patients -- success', () => {
     expect(logged).not.toContain('secret-host')
   })
 
+  // WS6 T8
+  it('hands registerPatient the referral source and note', async () => {
+    vi.mocked(registerPatient).mockResolvedValue({ id: 'RD-0105', uhid: 'UH000000475', auditEntries: [] })
+    const res = await POST(req(valid({ referralSource: 'doctor', referralNote: 'Dr Kulkarni, Jayanagar' })))
+    expect(res.status).toBe(201)
+    expect(vi.mocked(registerPatient).mock.calls[0][0]).toMatchObject({ referralSource: 'doctor', referralNote: 'Dr Kulkarni, Jayanagar' })
+  })
+
+  it('400s an unknown referral source and a doctor referral without a note', async () => {
+    expect((await POST(req(valid({ referralSource: 'newspaper' })))).status).toBe(400)
+    const res = await POST(req(valid({ referralSource: 'doctor' })))
+    expect(res.status).toBe(400)
+    expect(registerPatient).not.toHaveBeenCalled()
+  })
+
   it('checks a real payer and lets the registration through', async () => {
     vi.mocked(getPayerById).mockResolvedValue({ id: 3 } as never)
     vi.mocked(registerPatient).mockResolvedValue({ id: 'RD-0103', uhid: 'UH000000450', auditEntries: [] })

@@ -4,6 +4,7 @@ import { normalizeAbhaNumber, isValidAbhaNumber, normalizeAbhaAddress, isValidAb
 import {
   isIndianStateCode, isValidPinCode, KYC_DOC_TYPES, AADHAAR_DECLINE_REASONS, ABHA_UNAVAILABLE_REASONS,
   CONTACT_RELATIONSHIPS, LANGUAGES, GENDERS, MARITAL_STATUSES, BLOOD_GROUPS,
+  REFERRAL_SOURCE_CODES, // WS6 T8
 } from '@/lib/india/reference'
 import { normalizePhone } from '@/lib/india/phone'
 import { todayIsoIn, ageOnDate } from '@/lib/india-time'
@@ -125,11 +126,24 @@ export const patientRegistrationSchema = z.object({
   primaryPlanType: z.enum(['ppo', 'hmo', 'epo', 'pos', 'medicare', 'medicaid']).optional(),
   primarySubscriberName: z.string().optional(),
   primarySubscriberRelationship: z.enum(['self', 'spouse', 'child', 'other']).optional(),
+  // WS6 T8: how the patient came to the hospital; a doctor referral names the doctor in the note.
+  referralSource: z.enum(REFERRAL_SOURCE_CODES).optional(),
+  referralNote: safeText(z.string().trim().min(1).max(200)).optional(),
 }).strict().superRefine((v, ctx) => {
   const g = guardianProblem(v.contacts, v.dob, todayIsoIn())
   if (g) ctx.addIssue({ code: 'custom', path: ['contacts'], message: g })
   if (!v.isMlc && v.mlcNumber) ctx.addIssue({ code: 'custom', path: ['mlcNumber'], message: 'MLC number requires the MLC flag' })
+  const r = referralProblem(v.referralSource, v.referralNote) // WS6 T8
+  if (r) ctx.addIssue({ code: 'custom', path: ['referralNote'], message: r })
 })
+
+// WS6 T8: a doctor referral names the doctor; a note needs a source. Exported so the stepped
+// form can check it per step (zod skips the object-level refinement while other fields fail).
+export function referralProblem(source: string | undefined, note: string | undefined): string | null {
+  if (source === 'doctor' && !note?.trim()) return 'Name the referring doctor'
+  if (!source && note?.trim()) return 'Choose a referral source for this note'
+  return null
+}
 
 // Name and date of birth are fixed at registration; everything else is
 // optional here, and the optional-at-registration fields may be sent as null

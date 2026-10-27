@@ -14,6 +14,8 @@ export const NOTIFICATION_TEMPLATE_KEYS = [
   'video_visit_link',
   'booking_confirmed',
   'appointment_reminder',
+  // WS6 T11
+  'home_collection_handover_otp',
 ] as const
 export type NotificationTemplateKey = (typeof NOTIFICATION_TEMPLATE_KEYS)[number]
 
@@ -28,6 +30,9 @@ export interface TemplateVars {
   video_visit_link: { hospitalName: string; visitDate: string; timeLabel: string }
   booking_confirmed: { hospitalName: string; visitDate: string; timeLabel: string }
   appointment_reminder: { hospitalName: string; visitDate: string; timeLabel: string }
+  // WS6 T11: the one-time handover code. It is a var (the patient must receive it) but never logged:
+  // notification_log stores no body and no params.
+  home_collection_handover_otp: { hospitalName: string; otp: string }
 }
 
 const TEMPLATES: { [K in NotificationTemplateKey]: (v: TemplateVars[K]) => string } = {
@@ -49,6 +54,8 @@ const TEMPLATES: { [K in NotificationTemplateKey]: (v: TemplateVars[K]) => strin
     `${h}: Your appointment is confirmed for ${formatIsoDate(visitDate)}, ${timeLabel}. Sign in to the patient portal for details.`,
   appointment_reminder: ({ hospitalName: h, visitDate, timeLabel }) =>
     `${h}: Reminder: your appointment is on ${formatIsoDate(visitDate)}, ${timeLabel}. Sign in to the patient portal for details.`,
+  home_collection_handover_otp: ({ hospitalName: h, otp }) =>
+    `${h}: Your sample handover code is ${otp}. Share it with our collector only after your samples are taken. Valid for 15 minutes.`,
 }
 
 export function renderNotification<K extends NotificationTemplateKey>(key: K, vars: TemplateVars[K]): string {
@@ -67,6 +74,7 @@ const PARAM_KEYS: { [K in NotificationTemplateKey]: readonly (keyof TemplateVars
   video_visit_link: ['hospitalName', 'visitDate', 'timeLabel'],
   booking_confirmed: ['hospitalName', 'visitDate', 'timeLabel'],
   appointment_reminder: ['hospitalName', 'visitDate', 'timeLabel'],
+  home_collection_handover_otp: ['hospitalName', 'otp'], // WS6 T11
 }
 
 export function templateParams<K extends NotificationTemplateKey>(key: K, vars: TemplateVars[K]): string[] {
@@ -96,6 +104,7 @@ const SUBJECTS: { [K in NotificationTemplateKey]: string } = {
   video_visit_link: 'Your video consultation',
   booking_confirmed: 'Appointment confirmed',
   appointment_reminder: 'Appointment reminder',
+  home_collection_handover_otp: 'Sample handover code', // WS6 T11
 }
 
 /** Email subject: hospital name plus a fixed, PHI-free phrase. */

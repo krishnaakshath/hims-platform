@@ -46,6 +46,7 @@ function order(overrides: Partial<WorklistOrder> = {}): WorklistOrder {
 const RESULTED = () => order({
   status: 'resulted', sampleId: 'L26100800429', collectedAt: new Date('2099-05-01T05:00:00Z'), receivedAt: new Date('2099-05-01T06:00:00Z'),
   result: { value: '182', unit: 'mg/dL', referenceRange: '70-99', notes: 'Fasting 10 h', flag: 'abnormal', resultedByName: 'Lab Tech', amendedAt: null },
+  testDepartmentId: LAB_DEPT, // WS4 T11
 })
 const ALL = () => [
   order({ status: 'ordered' }),
@@ -55,7 +56,10 @@ const ALL = () => [
   order({ status: 'verified', testName: 'Verified test', verifiedAt: new Date('2099-05-01T08:00:00Z') }),
   order({ status: 'reported', testName: 'Reported test' }),
 ]
-const renderAs = (role: Role, orders = ALL()) => render(<LabWorklist orders={orders} labTests={[]} role={role} />)
+// WS4 T11: `verifierDepartmentId` is the viewer's staff-linked department (none by default).
+const LAB_DEPT = 5
+const renderAs = (role: Role, orders = ALL(), verifierDepartmentId: number | null = null) =>
+  render(<LabWorklist orders={orders} labTests={[]} role={role} verifierDepartmentId={verifierDepartmentId} />)
 
 describe('LabWorklist stages', () => {
   it('renders every stage section in order, and verified/reported orders stay visible', () => {
@@ -85,18 +89,18 @@ describe('LabWorklist stages', () => {
     expect(screen.getByLabelText('Flag')).toHaveValue('normal')
   })
 
-  it('labs sees Receive and Enter result but not Verify', () => {
+  it('labs (not linked to a provider) sees Receive and Enter result, and Verify disabled with the reason', () => {
     renderAs('labs')
     expect(screen.getByLabelText('Scan or type sample ID')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Enter result' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Amend' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Verify' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled() // WS4 T11
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
   })
 
-  it('pi sees Verify on resulted rows and no receive box', () => {
-    renderAs('pi')
-    expect(screen.getByRole('button', { name: 'Verify' })).toBeInTheDocument()
+  it('pi (linked to the test\'s department) sees Verify on resulted rows and no receive box', () => {
+    renderAs('pi', ALL(), LAB_DEPT)
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeEnabled()
     expect(screen.queryByLabelText('Scan or type sample ID')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Enter result' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Amend' })).toBeNull()
@@ -148,7 +152,7 @@ describe('LabWorklist stages', () => {
   it('Verify posts to the verify route and shows a refusal message', async () => {
     const o = RESULTED()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'Results must be verified by someone other than the person who entered them.' }), { status: 409 })))
-    renderAs('pi', [o])
+    renderAs('pi', [o], LAB_DEPT)
     fireEvent.click(screen.getByRole('button', { name: 'Verify' }))
     await waitFor(() => expect(screen.getByText(/someone other than the person/)).toBeInTheDocument())
     expect(fetch).toHaveBeenCalledWith(`/api/lab-orders/${o.id}/verify`, expect.objectContaining({ method: 'POST' }))
@@ -162,5 +166,37 @@ describe('LabWorklist stages', () => {
     fireEvent.submit(input.closest('form')!)
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/lab-orders/receive', expect.objectContaining({ method: 'POST', body: JSON.stringify({ sampleId: 'L261008-0043-8' }) })))
     await waitFor(() => expect(screen.getByText(/Received L261008-0043-8/)).toBeInTheDocument())
+  })
+})
+
+// WS1 T10: a stat or urgent order carries a chip; routine orders do not; fasting is shown.
+describe('LabWorklist priority chip', () => {
+  it('shows STAT and Urgent chips and the fasting note, nothing for routine', () => {
+    render(<LabWorklist orders={[
+      order({ testName: 'Stat test', priority: 'stat' }),
+      order({ testName: 'Urgent test', priority: 'urgent', fastingRequired: true }),
+      order({ testName: 'Routine test', priority: 'routine' }),
+    ]} labTests={[]} role="labs" />)
+    expect(screen.getByText('STAT')).toBeInTheDocument()
+    expect(screen.getByText('Urgent')).toBeInTheDocument()
+    expect(screen.queryByText('Routine')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Fasting')).toHaveLength(1)
+  })
+})
+
+// WS4 T9: a test with analytes opens the per-analyte form, with the order's sex and age choosing ranges.
+describe('LabWorklist per-analyte entry', () => {
+  it('passes the test\'s analytes, the patient sex and age to the result form', () => {
+    const hgb = {
+      id: 11, code: 'HGB', name: 'Haemoglobin', unit: 'g/dL', valueType: 'numeric' as const, decimals: 1, options: null, abnormalOptions: null, criticalOptions: null,
+      ranges: [{ sex: 'female' as const, ageMinDays: 6570, ageMaxDays: null, normalLow: 12, normalHigh: 15.5, criticalLow: 7, criticalHigh: 20, displayText: null }],
+    }
+    const o = order({ status: 'received', testId: 42, testName: 'CBC', sampleId: 'L26100800440', patientSex: 'female', ageDays: 30 * 365 })
+    render(<LabWorklist orders={[o]} labTests={[]} role="labs" analytesByTest={{ 42: [hgb] }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Enter result' }))
+    expect(screen.queryByLabelText('Result value')).toBeNull()
+    expect(screen.getByText('12.0-15.5 g/dL')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Value for Haemoglobin'), { target: { value: '6.5' } })
+    expect(screen.getByText('Critical low')).toBeInTheDocument()
   })
 })

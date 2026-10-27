@@ -17,8 +17,9 @@ export default async function BillingRulesPage() {
   if (!CHARGE_CAPTURE_ROLES.includes(session.role)) redirect('/')
 
   const editable = BILLING_CONFIG_ROLES.includes(session.role)
-  const [rows, settings, roomServices, payerRows] = await Promise.all([
+  const [rows, settings, roomServices, payerRows, otherServices] = await Promise.all([
     listRuleRows(), getBillingSettings(), listServices({ category: 'room_rent', limit: 200 }), listPayers(),
+    listServices({ category: 'other', limit: 200 }), // WS2 T9: registration-fee candidates
   ])
 
   return (
@@ -42,8 +43,10 @@ export default async function BillingRulesPage() {
               legalName: settings.legalName, gstin: settings.gstin, stateCode: settings.stateCode, address: settings.address, placeOfSupplyMode: settings.placeOfSupplyMode,
               consultationWindowDays: settings.consultationWindowDays, ipdDepositThresholdPaise: settings.ipdDepositThresholdPaise,
               roomRentServiceId: settings.roomRentServiceId, pharmacyGstRateBp: settings.pharmacyGstRateBp, pharmacyHsn: settings.pharmacyHsn,
+              registrationServiceId: settings.registrationServiceId, freeReviewDays: settings.freeReviewDays, // WS2 T9
             }}
             roomRentServices={roomServices.map((s) => ({ id: s.id, code: s.code, name: s.name }))}
+            registrationServices={otherServices.map((s) => ({ id: s.id, code: s.code, name: s.name }))}
             editable={editable}
           />
         </div>

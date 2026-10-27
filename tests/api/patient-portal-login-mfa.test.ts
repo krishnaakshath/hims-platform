@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { eq, and, inArray } from 'drizzle-orm'
 import { decodeJwt } from 'jose'
 import * as OTPAuth from 'otpauth'
-import { brand, cookieName } from '@/lib/brand'
+import { envBrand, cookieName } from '@/lib/brand'
 import { encryptSensitive } from '@/lib/crypto'
 import { POST as loginRoute } from '@/app/api/patient-portal/login/route'
 import { POST as loginMfaRoute } from '@/app/api/patient-portal/login/mfa/route'
@@ -124,7 +124,7 @@ describe('patient login with MFA enabled', () => {
     expect(res.cookies.get(cookieName('patient_session'))).toBeFalsy()
 
     const pendingCookie = res.cookies.get(cookieName('pending_patient_mfa'))?.value
-    const totp = new OTPAuth.TOTP({ issuer: brand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret })
+    const totp = new OTPAuth.TOTP({ issuer: envBrand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret })
     usedCode = totp.generate()
     const verifyRes = await loginMfa(mfaReq({ code: usedCode }, `${cookieName('pending_patient_mfa')}=${pendingCookie}`))
     expect(verifyRes.status).toBe(200)
@@ -217,7 +217,7 @@ describe('patient login by email', () => {
     expect(pendingClaims.patientId).toBe(ID_MFA)
     expect(JSON.stringify(pendingClaims).toLowerCase()).not.toContain(EMAIL_MFA)
 
-    const totp = new OTPAuth.TOTP({ issuer: brand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret })
+    const totp = new OTPAuth.TOTP({ issuer: envBrand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret })
     const verifyRes = await loginMfa(mfaReq({ code: totp.generate() }, `${cookieName('pending_patient_mfa')}=${pendingCookie}`))
     expect(verifyRes.status).toBe(200)
     const sessionClaims = decodeJwt(verifyRes.cookies.get(cookieName('patient_session'))!.value)

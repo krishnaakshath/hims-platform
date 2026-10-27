@@ -4,6 +4,7 @@ import { RCM_SETTINGS_ROLES } from '@/lib/role-policy'
 import { rcmSettingsSchema } from '@/lib/rcm/validation'
 import { updateHospitalIdentifiers } from '@/lib/queries/rcm-payers'
 import { invalid, rcmErrorResponse, rcmServerError, readJsonBody } from '@/lib/rcm/route-responses'
+import { invalidateBrandCache } from '@/lib/brand-server'
 
 // SP7: the hospital ROHINI and HFR identifiers printed on every claim (admin only).
 export async function PUT(request: NextRequest) {
@@ -19,6 +20,8 @@ export async function PUT(request: NextRequest) {
   try {
     const r = await updateHospitalIdentifiers(parsed.data, session)
     if (!r.ok) return rcmErrorResponse(r)
+    // The brand snapshot carries the ROHINI and HFR identifiers.
+    invalidateBrandCache()
     return NextResponse.json({ ok: true })
   } catch (err) {
     return rcmServerError('hospital identifiers', err, 'Could not save the identifiers')

@@ -2,7 +2,7 @@
 // SP5: book a home sample collection. Find the patient (id or UHID), tick the waiting lab tests,
 // pick a date and window, confirm the visit address (prefilled from the registered address,
 // editable: the visit PIN decides whether the lab can travel there) and the contact phone.
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -21,10 +21,14 @@ interface AddressForm { line1: string; line2: string; city: string; district: st
 
 const opt = (s: string) => (s.trim() === '' ? undefined : s.trim())
 
-export function BookHomeCollectionModal({ date, onClose }: { date: string; onClose: () => void }) {
+// WS2 T10: opened from a lab order, `initialPatient` is looked up at once and only `initialOrderIds`
+// (those still waiting for collection) are ticked.
+export function BookHomeCollectionModal({ date, onClose, initialPatient, initialOrderIds }: {
+  date: string; onClose: () => void; initialPatient?: string; initialOrderIds?: number[]
+}) {
   const router = useRouter()
   const id = useId()
-  const [lookup, setLookup] = useState('')
+  const [lookup, setLookup] = useState(initialPatient ?? '')
   const [finding, setFinding] = useState(false)
   const [context, setContext] = useState<HomeCollectionContext | null>(null)
   const [selected, setSelected] = useState<number[]>([])
@@ -37,22 +41,32 @@ export function BookHomeCollectionModal({ date, onClose }: { date: string; onClo
   const [error, setError] = useState<string | null>(null)
   const [booked, setBooked] = useState<{ sampleIds: [number, string][] } | null>(null)
 
-  async function find() {
+  async function find(patient: string = lookup, onlyOrderIds?: number[]) {
     setError(null)
-    if (!lookup.trim()) { setError('Enter a patient ID or UHID.'); return }
+    if (!patient.trim()) { setError('Enter a patient ID or UHID.'); return }
     setFinding(true)
-    const r = await fetchBookingContext(lookup.trim())
+    const r = await fetchBookingContext(patient.trim())
     setFinding(false)
     if (!r.ok) { setContext(null); setError(r.error); return }
     const p = r.data.patient
     setContext(r.data)
-    setSelected(r.data.bookableOrders.map((o) => o.id))
+    const bookable = r.data.bookableOrders.map((o) => o.id)
+    setSelected(onlyOrderIds ? bookable.filter((o) => onlyOrderIds.includes(o)) : bookable)
     setAddress({
       line1: p.addressLine1 ?? '', line2: p.addressLine2 ?? '', city: p.city ?? '', district: p.district ?? '',
       stateCode: p.stateCode ?? '', pinCode: p.pinCode ?? '', landmark: '',
     })
     setPhone(p.phone ?? '')
   }
+
+  // WS2 T10: look the initial patient up once, on open.
+  const initialLookupDone = useRef(false)
+  useEffect(() => {
+    if (initialLookupDone.current || !initialPatient) return
+    initialLookupDone.current = true
+    void find(initialPatient, initialOrderIds)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, with the props it was opened with
+  }, [])
 
   function toggle(orderId: number) {
     setSelected((s) => (s.includes(orderId) ? s.filter((x) => x !== orderId) : [...s, orderId]))
@@ -134,7 +148,7 @@ export function BookHomeCollectionModal({ date, onClose }: { date: string; onClo
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void find() } }}
                   />
                 </div>
-                <Button variant="outline" onClick={find} disabled={finding}>{finding ? 'Finding…' : 'Find patient'}</Button>
+                <Button variant="outline" onClick={() => void find()} disabled={finding}>{finding ? 'Finding…' : 'Find patient'}</Button>
               </div>
 
               {context && (

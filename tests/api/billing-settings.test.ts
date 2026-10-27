@@ -15,6 +15,7 @@ import { PUT as putSettings } from '@/app/api/billing/settings/route'
 import { PUT as putRule } from '@/app/api/billing/rules/[code]/route'
 import { PUT as putPayer } from '@/app/api/billing/payers/[id]/route'
 import { setRuleConfig, updateBillingSettings, updatePayerBillingFlags } from '@/lib/queries/billing-settings'
+import { revalidateTag } from 'next/cache'
 
 const send = (path: string, body: unknown) =>
   new NextRequest(`http://localhost${path}`, { method: 'PUT', body: typeof body === 'string' ? body : JSON.stringify(body) })
@@ -30,6 +31,7 @@ beforeEach(() => {
   vi.mocked(updateBillingSettings).mockReset().mockResolvedValue({ ok: true })
   vi.mocked(setRuleConfig).mockReset().mockResolvedValue({ ok: true })
   vi.mocked(updatePayerBillingFlags).mockReset().mockResolvedValue(true)
+  vi.mocked(revalidateTag).mockClear()
 })
 
 describe('PUT /api/billing/settings', () => {
@@ -46,6 +48,27 @@ describe('PUT /api/billing/settings', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
     expect(updateBillingSettings).toHaveBeenCalledWith(expect.objectContaining({ legalName: 'Sunrise Hospital' }), expect.objectContaining({ role: 'admin' }))
+  })
+
+  it('a successful save expires the brand cache (the snapshot carries the billing identity)', async () => {
+    const res = await putSettings(send('/api/billing/settings', SETTINGS))
+    expect(res.status).toBe(200)
+    expect(revalidateTag).toHaveBeenCalledTimes(1)
+    expect(revalidateTag).toHaveBeenCalledWith('brand-settings', { expire: 0 })
+  })
+
+  it('a refused, rejected or failed save does not expire the brand cache', async () => {
+    role = 'billing'
+    expect((await putSettings(send('/api/billing/settings', SETTINGS))).status).toBe(403)
+    role = 'admin'
+    expect((await putSettings(send('/api/billing/settings', { ...SETTINGS, stateCode: 'IN-TN' }))).status).toBe(400)
+    vi.mocked(updateBillingSettings).mockResolvedValueOnce({ ok: false, error: 'room_rent_service_invalid' })
+    expect((await putSettings(send('/api/billing/settings', { ...SETTINGS, roomRentServiceId: 9 }))).status).toBe(400)
+    vi.mocked(updateBillingSettings).mockRejectedValueOnce(new Error('db down'))
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect((await putSettings(send('/api/billing/settings', SETTINGS))).status).toBe(500)
+    quiet.mockRestore()
+    expect(revalidateTag).not.toHaveBeenCalled()
   })
 
   it('a lowercase GSTIN is accepted and stored uppercase', async () => {
@@ -78,6 +101,18 @@ describe('PUT /api/billing/settings', () => {
     const res = await putSettings(send('/api/billing/settings', { ...SETTINGS, roomRentServiceId: 9 }))
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: 'Choose a room-rent service from the Room rent category' })
+  })
+
+  // WS2 T9
+  it('accepts the registration service and free review days; refuses an invalid registration service or range', async () => {
+    const ok = await putSettings(send('/api/billing/settings', { ...SETTINGS, registrationServiceId: 12, freeReviewDays: 7 }))
+    expect(ok.status).toBe(200)
+    expect(updateBillingSettings).toHaveBeenCalledWith(expect.objectContaining({ registrationServiceId: 12, freeReviewDays: 7 }), expect.anything())
+    expect((await putSettings(send('/api/billing/settings', { ...SETTINGS, freeReviewDays: 31 }))).status).toBe(400)
+    vi.mocked(updateBillingSettings).mockResolvedValue({ ok: false, error: 'registration_service_invalid' })
+    const bad = await putSettings(send('/api/billing/settings', { ...SETTINGS, registrationServiceId: 9 }))
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toEqual({ error: 'Choose an active registration service from the Other category' })
   })
 
   it('a deadlock is a 409 with the retry message; anything else a generic 500', async () => {

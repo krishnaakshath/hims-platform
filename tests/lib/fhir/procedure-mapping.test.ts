@@ -8,7 +8,7 @@ function proc(o: Partial<ProcedureFhirRow> = {}): ProcedureFhirRow {
     id: 21, encounterId: 5, patientId: 'RD-1', description: 'Knee arthroscopy', codeId: 3, codeSystemKind: 'icd10pcs', code: '0SJC4ZZ',
     codeDisplay: 'Inspection of right knee joint, percutaneous endoscopic approach', codingStatus: 'coded', performedOn: '2099-03-01',
     performedByProviderId: 2, serviceId: null, sequence: null, createdByName: 'Coder', createdAt: new Date('2099-03-01T00:00:00Z'),
-    proposedByName: null, proposedAt: null, codedByName: 'Coder', codedAt: null, voidedAt: null, voidedByName: null,
+    proposedByName: null, proposedAt: null, codedByName: 'Coder', codedAt: null, voidedAt: null, voidedByName: null, orderNotes: null,
     binding: { kind: 'icd10pcs', version: '2026', isSample: false }, performedByName: 'Dr. Rao',
     ...o,
   }

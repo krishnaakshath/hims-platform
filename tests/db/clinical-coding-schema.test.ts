@@ -14,6 +14,7 @@ import {
 import { readMigration, idempotencyProblems, missingColumns } from './migration-sql'
 
 const MIGRATION = '2026-10-07-sp6-b-clinical-coding.sql'
+const WS2_PROCEDURE_ORDER_NOTES = '2026-10-24-ws2-procedure-order-notes.sql' // WS2 T11
 const NEW_TABLES = [codeSystems, codes, encounterProcedures, encounterCoding, encounterCodingEvents, codingQueries, codingQueryResponses, serviceProcedureCodes]
 const SP6_DIAGNOSIS_COLUMNS = ['encounter_id', 'code_id', 'code_system_kind', 'code_display', 'diagnosis_type', 'coding_status', 'sequence', 'proposed_by_name', 'proposed_at', 'coded_by_name', 'coded_at', 'voided_at', 'voided_by_name', 'created_by_name', 'created_at']
 const SP6_ENUMS = [codeSystemKindEnum, codeEntryStatusEnum, diagnosisTypeEnum, encounterCodingStatusEnum, codingEventActionEnum, codingQueryStatusEnum]
@@ -36,7 +37,8 @@ describe('SP6 clinical coding schema', () => {
   })
 
   it.each(NEW_TABLES.map((t) => [getTableConfig(t).name, t] as const))('declares every %s column', (_n, t) => {
-    expect(missingColumns(t, readMigration(MIGRATION))).toEqual([])
+    // WS2 T11 adds encounter_procedures.order_notes in its own migration.
+    expect(missingColumns(t, readMigration(MIGRATION) + readMigration(WS2_PROCEDURE_ORDER_NOTES))).toEqual([])
   })
 
   it('declares the SP6 diagnosis columns, and diagnoses keeps its legacy columns untouched', () => {
@@ -46,18 +48,20 @@ describe('SP6 clinical coding schema', () => {
     expect(s).toMatch(/ADD COLUMN IF NOT EXISTS coding_status code_entry_status NOT NULL DEFAULT 'uncoded'/)
     // The legacy NOT NULL `code`/`description` columns are never altered.
     expect(s).not.toMatch(/ALTER COLUMN/i)
-    const legacy = getTableConfig(diagnoses).columns.filter((c) => !SP6_DIAGNOSIS_COLUMNS.includes(c.name)).map((c) => c.name)
+    // WS1 T4 adds on_problem_list in its own migration (2026-10-24-ws1-diagnoses-referrals.sql).
+    const legacy = getTableConfig(diagnoses).columns.filter((c) => !SP6_DIAGNOSIS_COLUMNS.includes(c.name) && c.name !== 'on_problem_list').map((c) => c.name)
     expect(legacy.sort()).toEqual(['code', 'date', 'description', 'id', 'patient_id'])
   })
 
   it('every FK, unique, check and index name is in the SQL and fits 63 chars', () => {
     const s = readMigration(MIGRATION)
+    const withWs2 = s + readMigration(WS2_PROCEDURE_ORDER_NOTES) // WS2 T11: encounter_procedures_order_notes_length
     for (const t of NEW_TABLES) {
       const names = constraintNames(t)
       expect(names.length).toBeGreaterThan(0)
       for (const n of names) {
         expect(n.length, n).toBeLessThanOrEqual(63)
-        expect(s, n).toContain(n)
+        expect(withWs2, n).toContain(n)
       }
     }
     // diagnoses: only the SP6 additions (the legacy patient FK predates this migration).

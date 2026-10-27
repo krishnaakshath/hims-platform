@@ -3,7 +3,7 @@
 // receive → result. Fixtures use a TEST-SP5 patient and a probe session name, so every audit row
 // written here is deleted by name (staff) or by that patient id (LIS).
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, providers, labTests, labOrders, labResults, documents, auditLog } from '@/db/schema'
 import type { Session } from '@/lib/auth'
@@ -53,7 +53,9 @@ afterAll(async () => {
 
 async function makeOrder() {
   const db = getDb()
-  const [test] = await db.select({ id: labTests.id }).from(labTests).limit(1)
+  // WS4 T9: a single-value test (a test with analytes takes a per-analyte body).
+  const [test] = await db.select({ id: labTests.id }).from(labTests)
+    .where(sql`not exists (select 1 from lab_test_analytes a where a.lab_test_id = ${labTests.id})`).limit(1)
   const [providerRow] = await db.select({ id: providers.id }).from(providers).limit(1)
   const [order] = await db.insert(labOrders).values({ patientId: PATIENT, labTestId: test.id, orderedByProviderId: providerRow.id }).returning()
   createdOrderIds.push(order.id)

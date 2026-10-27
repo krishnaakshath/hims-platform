@@ -7,6 +7,7 @@ import { parseId } from '@/lib/http'
 import { getPortalInvoice } from '@/lib/queries/patient-portal-records'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { InvoiceDocument } from '@/components/billing/InvoiceDocument'
+import { getBrand } from '@/lib/brand-server'
 import { BackLink } from '@/components/BackLink'
 import { PrintButton } from '@/components/PrintButton'
 
@@ -16,6 +17,7 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
   if (id === null) notFound()
   const invoice = await getPortalInvoice(session.patientId, id)
   if (!invoice) notFound()
+  const { print } = await getBrand()
   await logPatientPortalAction('viewed invoice via patient portal', session.patientId, `invoice=${invoice.id}`)
 
   return (
@@ -24,7 +26,7 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
         <BackLink href="/patient-portal/bills" label="Back to bills" />
         <PrintButton />
       </div>
-      <InvoiceDocument invoice={invoice} />
+      <InvoiceDocument invoice={invoice} marks={print} />
     </main>
   )
 }

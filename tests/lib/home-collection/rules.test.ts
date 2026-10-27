@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   HOME_COLLECTION_STATUSES, RESCHEDULE_REASONS, VISIT_CANCEL_REASONS, COLLECTOR_CANCEL_REASONS, RESCHEDULE_REASON_LABEL,
   VISIT_CANCEL_REASON_LABEL, MAX_BOOKING_DAYS_AHEAD, MIN_BOOKING_LEAD_MINUTES, HHMM_PATTERN, bookingDateProblem, windowClosed,
-  windowsOverlap,
+  windowsOverlap, doorAmountDue, doorPaymentNote,
 } from '@/lib/home-collection/rules'
 
 describe('home-collection rules', () => {
@@ -36,5 +36,20 @@ describe('home-collection rules', () => {
     expect(windowsOverlap({ startTime: '07:00', endTime: '09:00' }, { startTime: '09:00', endTime: '11:00' })).toBe(false)
     expect(windowsOverlap({ startTime: '07:00', endTime: '09:30' }, { startTime: '09:00', endTime: '11:00' })).toBe(true)
     expect(windowsOverlap({ startTime: '09:00', endTime: '11:00' }, { startTime: '07:00', endTime: '09:30' })).toBe(true)
+  })
+})
+
+// WS6 T12
+describe('doorAmountDue / doorPaymentNote', () => {
+  it('sums the quotes of the tests still to be drawn and counts the unpriced ones', () => {
+    expect(doorAmountDue([
+      { status: 'scheduled', quotedPricePaise: 45000 },
+      { status: 'scheduled', quotedPricePaise: null },
+      { status: 'scheduled', quotedPricePaise: 15000 },
+      { status: 'collected', quotedPricePaise: 99900 },
+      { status: 'cancelled', quotedPricePaise: 12300 },
+    ])).toEqual({ amountPaise: 60000, unpriced: 1 })
+    expect(doorAmountDue([])).toEqual({ amountPaise: 0, unpriced: 0 })
+    expect(doorPaymentNote(77)).toBe('Home collection visit #77')
   })
 })

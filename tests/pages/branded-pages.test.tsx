@@ -32,6 +32,8 @@ function mockDeps() {
   vi.doMock('@/lib/queries/settings', () => ({ getPracticeIdentity: vi.fn(async () => ({ practiceName: null, practiceSite: null })) }))
   vi.doMock('@/lib/queries/providers', () => ({ listActiveProviders: vi.fn(async () => []) }))
   vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange: vi.fn(async () => []) }))
+  // WL T4: the root layout reads the stored brand; none is stored here (env layer only).
+  vi.doMock('@/lib/queries/brand-settings', () => ({ loadBrandSnapshot: vi.fn(async () => null) }))
 }
 
 async function setup(env: Record<string, string>) {
@@ -40,11 +42,11 @@ async function setup(env: Record<string, string>) {
   vi.resetModules()
   mockDeps()
   const { default: RootLayout } = await import('@/app/layout')
-  return (page: ReactElement) => renderToStaticMarkup(<RootLayout>{page}</RootLayout>)
+  return async (page: ReactElement) => renderToStaticMarkup(await RootLayout({ children: page }))
 }
 
 afterEach(() => {
-  for (const m of ['geist/font/sans', 'geist/font/mono', 'next/navigation', '@/lib/auth', '@/lib/audit', '@/lib/queries/prescriptions', '@/lib/queries/patients', '@/lib/queries/settings', '@/lib/queries/providers', '@/lib/queries/appointments']) vi.doUnmock(m)
+  for (const m of ['geist/font/sans', 'geist/font/mono', 'next/navigation', '@/lib/auth', '@/lib/audit', '@/lib/queries/prescriptions', '@/lib/queries/patients', '@/lib/queries/settings', '@/lib/queries/providers', '@/lib/queries/appointments', '@/lib/queries/brand-settings']) vi.doUnmock(m)
   vi.unstubAllEnvs()
   vi.resetModules()
 })
@@ -57,14 +59,15 @@ async function renderAll(env: Record<string, string>) {
   const { default: PublicBookingPage } = await import('@/app/book/page')
   const { AddClientModal } = await import('@/components/AddClientModal')
   const { DeletePatientDialog } = await import('@/components/DeletePatientDialog')
+  const { ToastProvider } = await import('@/components/ui/toast') // WS6 T8: registration shows toasts
   return {
-    login: render(<LoginPage />),
-    portalLogin: render(<PatientPortalLoginPage />),
-    print: render(await PrescriptionPrintPage({ searchParams: Promise.resolve({ ids: '1' }) })),
-    book: render(await PublicBookingPage()),
+    login: await render(<LoginPage />),
+    portalLogin: await render(<PatientPortalLoginPage />),
+    print: await render(await PrescriptionPrintPage({ searchParams: Promise.resolve({ ids: '1' }) })),
+    book: await render(await PublicBookingPage()),
     // Radix dialogs portal their content, which renderToStaticMarkup does
     // not emit -- so only assert these don't throw and carry no old name.
-    dialogs: render(<><AddClientModal onClose={() => {}} /><DeletePatientDialog target={{ id: 'RD-0001', name: 'X' }} onClose={() => {}} onDeleted={() => {}} /></>),
+    dialogs: await render(<ToastProvider><AddClientModal onClose={() => {}} /><DeletePatientDialog target={{ id: 'RD-0001', name: 'X' }} onClose={() => {}} onDeleted={() => {}} /></ToastProvider>),
   }
 }
 

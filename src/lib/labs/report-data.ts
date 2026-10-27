@@ -5,11 +5,24 @@
 import type { Brand } from '@/lib/brand'
 import { GENDERS } from '@/lib/india/reference'
 import { ageOnDate, istDateOf } from '@/lib/india-time'
+import type { Interpretation } from '@/lib/labs/analytes' // WS4 T10
 
 export type LabResultFlag = 'normal' | 'abnormal' | 'critical'
 
+// WS4 T10 (spec 3.7 item 30): what the report prints in an analyte row's flag column.
+export type AnalyteFlagText = '' | 'LOW' | 'HIGH' | 'CRITICAL LOW' | 'CRITICAL HIGH' | 'ABNORMAL' | 'CRITICAL'
+export interface LabReportAnalyteRow { name: string; value: string; unit: string | null; referenceRange: string | null; flagText: AnalyteFlagText }
+/** One analyte value as the loader reads it (a subset of AnalyteResultRow; extra fields are ignored). */
+export interface LabReportAnalyteSource { name: string; value: string; unit: string | null; referenceRange: string | null; flag: LabResultFlag; interpretation: Interpretation | null }
+// end WS4 T10
+
 export interface LabReportData {
-  hospital: { name: string; legalName: string; site: string | null }
+  /**
+   * WL T10: the brand resolved at request time. `headerText` heads page 1 (spec D4 chain), `site`
+   * is the print subline, `footerText` prints in every page footer, `logoPng` holds the stored
+   * light logo's PNG bytes (never its blob URL) or null. `name` is the PDF producer/creator.
+   */
+  hospital: { name: string; legalName: string; headerText: string; site: string | null; footerText: string | null; logoPng: Uint8Array | null }
   reportNumber: string
   version: number
   generatedAt: string // ISO instant
@@ -27,8 +40,13 @@ export interface LabReportData {
     receivedAt: string | null
     verifiedByName: string
     verifiedAt: string
+    // WS4 T10: the analyte rows in definition order ([] for a single-value test) and the
+    // co-signers of the result (lane ruling R5: [] until the signoffs of Task 11).
+    analytes: LabReportAnalyteRow[]
+    cosignedBy: string[]
   }[]
   verifiers: string[] // distinct, in row order
+  cosigners: string[] // WS4 T10: distinct, in row order
 }
 
 /** The raw inputs, each already reduced to named columns by the loader (Task 14). */
@@ -49,15 +67,20 @@ export interface LabReportSource {
     /** Null for a result that is not verified: such an order never becomes a report row. */
     verifiedAt: Date | null
     verifiedByName: string | null
-    result: { value: string; unit: string | null; referenceRange: string | null; flag: LabResultFlag }
+    // WS4 T10: `analytes` in definition order; absent or [] for a single-value test.
+    result: { value: string; unit: string | null; referenceRange: string | null; flag: LabResultFlag; analytes?: LabReportAnalyteSource[] }
+    cosignedBy?: string[] // WS4 T10 (R5)
   }[]
 }
 
 const GENDER_LABEL = new Map<string, string>(GENDERS.map((g) => [g.code, g.label]))
 
-/** The report header names from the brand module (passed in, so this module stays pure). */
-export function hospitalFromBrand(b: Pick<Brand, 'name' | 'legalName'>, site: string | null = null): LabReportData['hospital'] {
-  return { name: b.name, legalName: b.legalName, site }
+/**
+ * The report header from the resolved brand (passed in, so this module stays pure): the print
+ * header text, subline and footer, plus the stored light logo's PNG bytes when the caller has them.
+ */
+export function hospitalFromBrand(b: Pick<Brand, 'name' | 'legalName' | 'print'>, logoPng: Uint8Array | null = null): LabReportData['hospital'] {
+  return { name: b.name, legalName: b.legalName, headerText: b.print.headerText, site: b.print.subline, footerText: b.print.footerText, logoPng }
 }
 
 /** The same rule as SP3's discharge summary. */
@@ -84,14 +107,23 @@ export function buildLabReportData(src: LabReportSource, now: Date): LabReportDa
       receivedAt: o.receivedAt ? o.receivedAt.toISOString() : null,
       verifiedByName: o.verifiedByName,
       verifiedAt: o.verifiedAt.toISOString(),
+      analytes: (o.result.analytes ?? []).map((a) => ({
+        name: a.name, value: a.value, unit: a.unit, referenceRange: a.referenceRange, flagText: analyteFlagText(a.interpretation, a.flag),
+      })),
+      cosignedBy: [...(o.cosignedBy ?? [])],
     })
   }
   const verifiers: string[] = []
   for (const r of rows) if (!verifiers.includes(r.verifiedByName)) verifiers.push(r.verifiedByName)
+  const cosigners: string[] = []
+  for (const r of rows) for (const c of r.cosignedBy) if (!cosigners.includes(c)) cosigners.push(c)
 
   const p = src.patient
   return {
-    hospital: { name: src.hospital.name, legalName: src.hospital.legalName, site: src.hospital.site },
+    hospital: {
+      name: src.hospital.name, legalName: src.hospital.legalName, headerText: src.hospital.headerText, site: src.hospital.site,
+      footerText: src.hospital.footerText, logoPng: src.hospital.logoPng,
+    },
     reportNumber: src.reportNumber,
     version: src.version,
     generatedAt: now.toISOString(),
@@ -105,7 +137,17 @@ export function buildLabReportData(src: LabReportSource, now: Date): LabReportDa
     referringDoctor: { name: src.provider.name, registration: registration(src.provider) },
     rows,
     verifiers,
+    cosigners,
   }
+}
+
+/** WS4 T10: severity from the flag, direction from the interpretation (L/LL low, H/HH high). */
+export function analyteFlagText(interpretation: Interpretation | null, flag: LabResultFlag): AnalyteFlagText {
+  const low = interpretation === 'L' || interpretation === 'LL'
+  const high = interpretation === 'H' || interpretation === 'HH'
+  if (flag === 'critical') return low ? 'CRITICAL LOW' : high ? 'CRITICAL HIGH' : 'CRITICAL'
+  if (flag === 'abnormal') return low ? 'LOW' : high ? 'HIGH' : 'ABNORMAL'
+  return ''
 }
 
 export function flagLabel(flag: LabResultFlag): '' | 'ABNORMAL' | 'CRITICAL' {

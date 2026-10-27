@@ -4,7 +4,7 @@ import { and, asc, desc, eq, getTableColumns, gte, isNull, lt, sql } from 'drizz
 import { istDayBounds } from '@/lib/india-time'
 import { hasSchedulingConflict, lockProviderSchedule } from './appointments'
 import { sendMessage } from './messages'
-import { SYSTEM_SENDER_NAME } from './eligibility'
+import { systemSenderName } from './eligibility'
 import { buildVisitConfirmationBody } from '@/lib/notification-templates'
 
 // Assignments are created only by checkInVisit (src/lib/queries/encounters.ts),
@@ -126,14 +126,19 @@ export async function declineAssignment(assignmentId: number, reason: string): P
   return updated ?? null
 }
 
-export async function listAllAssignments(): Promise<DoctorAssignmentRow[]> {
-  return getDb()
-    .select()
+// WS6 T9: the assignments page names the patient (name and UHID), never the chart id.
+export type AssignmentWithPatientRow = DoctorAssignmentRow & { patientName: string; uhid: string | null }
+
+export async function listAllAssignments(): Promise<AssignmentWithPatientRow[]> {
+  const rows = await getDb()
+    .select({ ...getTableColumns(doctorAssignments), patientName: patients.name, uhid: patients.uhid })
     .from(doctorAssignments)
+    .innerJoin(patients, eq(patients.id, doctorAssignments.patientId))
     .orderBy(
       sql`CASE WHEN ${doctorAssignments.status} = 'declined' AND ${doctorAssignments.declineAcknowledgedAt} IS NULL THEN 0 ELSE 1 END`,
       desc(doctorAssignments.createdAt),
     )
+  return rows.map((r) => ({ ...r, patientName: r.patientName.trim() }))
 }
 
 /**
@@ -178,6 +183,8 @@ export async function notifyPatientOfScheduledAssignment(
   appointment: typeof appointments.$inferSelect,
   providerName: string,
 ): Promise<void> {
+  // Resolved before the transaction so the brand read never runs inside it.
+  const senderName = await systemSenderName()
   await getDb().transaction(async (tx) => {
     const claimed = await tx
       .update(doctorAssignments)
@@ -192,6 +199,6 @@ export async function notifyPatientOfScheduledAssignment(
       visitReason: appointment.visitReason,
       visitType: assignment.visitType,
     })
-    await sendMessage(assignment.patientId, 'system', SYSTEM_SENDER_NAME, body, false, tx)
+    await sendMessage(assignment.patientId, 'system', senderName, body, false, tx)
   })
 }

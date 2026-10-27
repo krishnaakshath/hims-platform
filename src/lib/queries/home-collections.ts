@@ -21,16 +21,17 @@ import { and, asc, count, eq, inArray, ne, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import {
-  encounters, homeCollectionVisits, homeCollectionWindows, labOrders, labTests, patients, providers, users,
+  encounters, homeCollectionVisits, homeCollectionWindows, labOrders, labTests, patientPayments, patients, paymentRequests, providers, users,
   type HomeCollectionVisitRow,
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
 import { ageOnDate, istDateOf } from '@/lib/india-time'
 import {
-  COLLECTOR_CANCEL_REASONS, bookingDateProblem, windowClosed,
-  type RescheduleReason, type VisitCancelReason,
+  COLLECTOR_CANCEL_REASONS, bookingDateProblem, collectorVisitRefusal, windowClosed,
+  type CollectorVisitRefusal, type HandoverWaiverReason, type RescheduleReason, type VisitCancelReason,
 } from '@/lib/home-collection/rules'
+import { HANDOVER_OTP_MAX_ATTEMPTS, checkHandoverOtp } from '@/lib/home-collection/handover-otp'
 import { isLocalPin } from '@/lib/labs/service-area'
 import { parseSampleId } from '@/lib/labs/sample-id'
 import type { LabOrderStatus } from '@/lib/labs/status'
@@ -38,6 +39,9 @@ import type { SampleContainer, SampleType } from '@/lib/labs/catalog'
 import type { BookHomeCollectionRequest } from '@/lib/labs/validation'
 import type { WriteExecutor } from '@/lib/queries/executor'
 import { ensureSampleIds } from '@/lib/queries/lab-lifecycle'
+import { lockPatientBilling } from '@/lib/queries/charge-capture'
+import { insertPaymentInTx, withSeriesGuard } from '@/lib/queries/patient-ledger'
+import { doorPaymentNote } from '@/lib/home-collection/rules'
 import { getActiveServicePins, isLocalPatientPin } from '@/lib/queries/lab-setup'
 
 export type { HomeCollectionVisitRow }
@@ -571,7 +575,10 @@ export interface RouteStop {
   contactPhone: string
   address: { line1: string; line2: string | null; city: string; district: string | null; stateCode: string; pinCode: string; landmark: string | null }
   notes: string | null
-  tests: { orderId: number; testName: string; sampleType: SampleType | null; container: SampleContainer | null; sampleId: string | null; status: LabOrderStatus }[]
+  tests: {
+    orderId: number; testName: string; sampleType: SampleType | null; container: SampleContainer | null; sampleId: string | null; status: LabOrderStatus
+    quotedPricePaise: number | null // WS6 T12: the tariff quote, for the amount due at the door
+  }[]
 }
 
 /** "Asha Devi Rao" → "Asha R."; a single name is shown as is. */
@@ -631,6 +638,7 @@ export async function listCollectorRoute(collectorUserId: number | null, dateIso
       container: labTests.container,
       sampleId: labOrders.sampleId,
       status: labOrders.status,
+      quotedPricePaise: labOrders.quotedPricePaise, // WS6 T12
     })
     .from(labOrders)
     .innerJoin(labTests, eq(labTests.id, labOrders.labTestId))
@@ -661,7 +669,16 @@ export async function listCollectorRoute(collectorUserId: number | null, dateIso
 
 export type CollectHomeVisitResult =
   | { ok: true; collectedOrderIds: number[]; notCollectedOrderIds: number[]; encounterId: number }
-  | { ok: false; error: 'not_found' | 'not_collectable' | 'not_assigned' | 'invalid_sample_id' | 'sample_not_on_visit'; sampleId?: string }
+  | {
+      ok: false
+      error: 'not_found' | 'not_collectable' | 'not_assigned' | 'invalid_sample_id' | 'sample_not_on_visit'
+        | 'not_due' | 'otp_required' | 'otp_invalid' | 'otp_expired' | 'otp_locked' // WS6 T11
+      sampleId?: string
+      visitDate?: string // WS6 T11: with not_due
+    }
+
+/** WS6 T11: how the handover was proven -- the patient's code, or a recorded reason it could not be used. */
+export interface CollectHandover { otp?: string; waiverReason?: HandoverWaiverReason }
 
 /**
  * The collector at the door: the tubes drawn are identified by their scanned/typed sample IDs.
@@ -669,10 +686,17 @@ export type CollectHomeVisitResult =
  * transaction, in the module's lock order: the visit's scheduled order rows (ascending id), then
  * the visit row, then the encounter insert. Matched orders become `collected`; the rest go back to
  * `ordered` (visit link cleared, sample ID kept). A completed `lab` encounter is written and
- * linked to the visit, and the audit row is on the same transaction. Every refusal writes nothing.
+ * linked to the visit, and the audit row is on the same transaction. Every refusal writes nothing,
+ * except that a wrong handover code is counted (WS6 T11): the refusal is RETURNED, so the
+ * transaction commits that one attempts increment and nothing else.
  * A concurrent second collect waits on the order/visit locks and then sees `not_collectable`.
+ *
+ * WS6 T11: refused before the visit's IST date (`not_due`), and the handover must be proven by the
+ * code sent to the visit phone (`otp`), or recorded as waived (`waiverReason`).
  */
-export async function collectHomeVisit(visitId: number, sampleIds: string[], session: Session, now = new Date()): Promise<CollectHomeVisitResult> {
+export async function collectHomeVisit(
+  visitId: number, sampleIds: string[], session: Session, now: Date, handover: CollectHandover,
+): Promise<CollectHomeVisitResult> {
   const canonical: string[] = []
   for (const input of sampleIds) {
     const parsed = parseSampleId(input)
@@ -692,19 +716,38 @@ export async function collectHomeVisit(visitId: number, sampleIds: string[], ses
     if (linked.length > 0) {
       await tx.select({ id: labOrders.id }).from(labOrders).where(inArray(labOrders.id, linked.map((o) => o.id))).orderBy(asc(labOrders.id)).for('update')
     }
-    // Lock order 4: the visit row.
+    // Lock order 4: the visit row (WS6 T11: through the shared door guard, Ruling R4).
+    const guard = await assertCollectorVisit(visitId, session, istDateOf(now), tx)
+    if (!guard.ok) return guard.error === 'not_due' ? { ok: false, error: 'not_due', visitDate: guard.visitDate } : { ok: false, error: guard.error }
     const [visit] = await tx
-      .select({ id: homeCollectionVisits.id, patientId: homeCollectionVisits.patientId, status: homeCollectionVisits.status, collectorUserId: homeCollectionVisits.collectorUserId })
+      .select({
+        id: homeCollectionVisits.id, patientId: homeCollectionVisits.patientId,
+        otpHash: homeCollectionVisits.handoverOtpHash, otpExpiresAt: homeCollectionVisits.handoverOtpExpiresAt, otpAttempts: homeCollectionVisits.handoverOtpAttempts,
+      })
       .from(homeCollectionVisits)
       .where(eq(homeCollectionVisits.id, visitId))
-      .for('update')
-    if (!visit) return { ok: false, error: 'not_found' }
-    // A collector acts only on their own visits; checked before the status so a collector
-    // learns nothing about another collector's visit.
-    if (session.role === 'collector' && (session.userId === null || visit.collectorUserId !== session.userId)) {
-      return { ok: false, error: 'not_assigned' }
+
+    // WS6 T11: the handover proof, before anything is written.
+    let handoverSet: { handoverVerifiedAt: Date; handoverOtpHash: null; handoverOtpExpiresAt: null } | { handoverWaiverReason: HandoverWaiverReason }
+    if (handover.otp !== undefined) {
+      const check = checkHandoverOtp({ hash: visit.otpHash, expiresAt: visit.otpExpiresAt, attempts: visit.otpAttempts }, handover.otp, now)
+      if (check === 'locked') return { ok: false, error: 'otp_locked' }
+      if (check === 'expired') return { ok: false, error: 'otp_expired' }
+      if (check === 'invalid') {
+        // Counted and committed: the refusal is returned, not thrown.
+        await tx.update(homeCollectionVisits)
+          .set({ handoverOtpAttempts: sql`least(${homeCollectionVisits.handoverOtpAttempts} + 1, ${HANDOVER_OTP_MAX_ATTEMPTS})` })
+          .where(eq(homeCollectionVisits.id, visitId))
+        return { ok: false, error: 'otp_invalid' }
+      }
+      handoverSet = { handoverVerifiedAt: now, handoverOtpHash: null, handoverOtpExpiresAt: null }
+    } else if (handover.waiverReason !== undefined) {
+      // Ruling R24: a locked code cannot be side-stepped with a waiver; send a new code instead.
+      if (visit.otpAttempts >= HANDOVER_OTP_MAX_ATTEMPTS) return { ok: false, error: 'otp_locked' }
+      handoverSet = { handoverWaiverReason: handover.waiverReason }
+    } else {
+      return { ok: false, error: 'otp_required' }
     }
-    if (visit.status !== 'booked') return { ok: false, error: 'not_collectable' }
 
     const scheduled = await tx
       .select({ id: labOrders.id, sampleId: labOrders.sampleId, orderedByProviderId: labOrders.orderedByProviderId })
@@ -755,13 +798,104 @@ export async function collectHomeVisit(visitId: number, sampleIds: string[], ses
 
     await tx
       .update(homeCollectionVisits)
-      .set({ status: 'collected', collectedAt: now, collectedByName: session.name, encounterId: encounter.id, updatedAt: now })
+      .set({ status: 'collected', collectedAt: now, collectedByName: session.name, encounterId: encounter.id, updatedAt: now, ...handoverSet })
       .where(eq(homeCollectionVisits.id, visitId))
 
+    const proof = 'handoverVerifiedAt' in handoverSet ? 'handover=otp' : `handover=waived:${handoverSet.handoverWaiverReason}`
     await logAudit(
       session, 'collected home samples', visit.patientId,
-      `visit=${visitId} orders=${collectedOrderIds.join(',')} missed=${notCollectedOrderIds.join(',')} encounter=${encounter.id}`, tx,
+      `visit=${visitId} orders=${collectedOrderIds.join(',')} missed=${notCollectedOrderIds.join(',')} encounter=${encounter.id} ${proof}`, tx,
     )
     return { ok: true, collectedOrderIds, notCollectedOrderIds, encounterId: encounter.id }
   })
 }
+
+// ── WS6 T11: the collector's door guard (Ruling R4: shared by the OTP route, collect and payment) ──
+
+export type AssertCollectorVisitResult =
+  | { ok: true; patientId: string }
+  | { ok: false; error: 'not_found' | CollectorVisitRefusal; visitDate?: string }
+
+/**
+ * May this session act at the door for this visit on `todayIso` (IST)? `not_assigned` for a
+ * collector on someone else's visit (checked first), `not_collectable` once collected or
+ * cancelled, `not_due` (with the visit date) before the visit's day. Given a transaction, the
+ * visit row is locked `for update` (lock order 4: take the order rows first).
+ */
+export async function assertCollectorVisit(visitId: number, session: Session, todayIso: string, tx?: WriteExecutor): Promise<AssertCollectorVisitResult> {
+  const q = (tx ?? getDb())
+    .select({
+      patientId: homeCollectionVisits.patientId, status: homeCollectionVisits.status,
+      collectorUserId: homeCollectionVisits.collectorUserId, visitDate: homeCollectionVisits.visitDate,
+    })
+    .from(homeCollectionVisits)
+    .where(eq(homeCollectionVisits.id, visitId))
+  const [visit] = tx ? await q.for('update') : await q
+  if (!visit) return { ok: false, error: 'not_found' }
+  const refusal = collectorVisitRefusal(visit, session, todayIso)
+  if (refusal === 'not_due') return { ok: false, error: 'not_due', visitDate: visit.visitDate }
+  if (refusal) return { ok: false, error: refusal }
+  return { ok: true, patientId: visit.patientId }
+}
+// end WS6 T11
+
+// WS6 T12: a UPI request confirmed at the door must be one raised for this visit (its patient
+// and the visit's door note).
+export async function upiRequestOwner(requestId: number): Promise<{ patientId: string; note: string } | null> {
+  const [row] = await getDb().select({ patientId: paymentRequests.patientId, note: paymentRequests.note })
+    .from(paymentRequests).where(eq(paymentRequests.id, requestId)).limit(1)
+  return row ?? null
+}
+
+// Ruling R24: one door receipt per visit, never above what the visit's tests are quoted at.
+export type DoorPaymentRefusal = 'already_paid' | 'amount_exceeds_due'
+
+/**
+ * Run under lockPatientBilling. `already_paid` when a receipt for this visit's door note exists
+ * (a cash receipt whose reference is the note, or a confirmed UPI request with the note);
+ * `amount_exceeds_due` when the amount is above the sum of the quotes of the visit's scheduled tests.
+ */
+async function doorPaymentRefusal(tx: WriteExecutor, visitId: number, patientId: string, amountPaise: number | null): Promise<DoorPaymentRefusal | null> {
+  const note = doorPaymentNote(visitId)
+  const [cash] = await tx.select({ id: patientPayments.id }).from(patientPayments)
+    .where(and(eq(patientPayments.patientId, patientId), eq(patientPayments.mode, 'cash'), eq(patientPayments.reference, note))).limit(1)
+  if (cash) return 'already_paid'
+  const [upi] = await tx.select({ id: paymentRequests.id }).from(paymentRequests)
+    .where(and(eq(paymentRequests.patientId, patientId), eq(paymentRequests.note, note), eq(paymentRequests.status, 'confirmed'))).limit(1)
+  if (upi) return 'already_paid'
+  if (amountPaise === null) return null
+  const [due] = await tx.select({ paise: sql<string | null>`sum(${labOrders.quotedPricePaise})` }).from(labOrders)
+    .where(and(eq(labOrders.homeCollectionVisitId, visitId), eq(labOrders.status, 'scheduled')))
+  return amountPaise > Number(due?.paise ?? 0) ? 'amount_exceeds_due' : null
+}
+
+/** Check (under the patient billing lock) before a UPI QR is shown, or before one is confirmed (amount null). */
+export async function checkDoorPayment(visitId: number, patientId: string, amountPaise: number | null): Promise<DoorPaymentRefusal | null> {
+  return getDb().transaction(async (tx) => {
+    await lockPatientBilling(tx, patientId)
+    return doorPaymentRefusal(tx, visitId, patientId, amountPaise)
+  })
+}
+
+/**
+ * The already_paid half of the door check, for confirmUpiRequest's under-lock hook: it runs inside
+ * the confirm transaction after the patient billing lock, so two UPI confirms for one visit cannot
+ * both post a receipt (the second sees the first's confirmed request).
+ */
+export function doorAlreadyPaidCheck(visitId: number, patientId: string) {
+  return async (tx: WriteExecutor): Promise<'already_paid' | null> => (await doorPaymentRefusal(tx, visitId, patientId, null)) === 'already_paid' ? 'already_paid' : null
+}
+
+/** Cash at the door: the checks and the ledger write in ONE transaction under the patient billing lock. */
+export async function takeDoorCashPayment(
+  visitId: number, patientId: string, amountPaise: number, session: Session, now = new Date(),
+): Promise<{ ok: true; receiptNumber: string } | { ok: false; error: DoorPaymentRefusal | 'series_exhausted' | 'admission_mismatch' | 'invoice_not_payable' }> {
+  return withSeriesGuard(() => getDb().transaction(async (tx) => {
+    await lockPatientBilling(tx, patientId)
+    const refusal = await doorPaymentRefusal(tx, visitId, patientId, amountPaise)
+    if (refusal) return { ok: false as const, error: refusal }
+    const r = await insertPaymentInTx(tx, { patientId, kind: 'receipt', mode: 'cash', reference: doorPaymentNote(visitId), amountPaise }, session, now)
+    return r.ok ? { ok: true as const, receiptNumber: r.receiptNumber } : r
+  }))
+}
+// end WS6 T12

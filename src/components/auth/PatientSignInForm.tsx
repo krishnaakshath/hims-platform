@@ -8,12 +8,14 @@ import { PasswordField } from '@/components/auth/PasswordField'
 import { SubmitButton } from '@/components/auth/SubmitButton'
 import { BADGE as s, rise } from '@/components/auth/auth-styles'
 import { sendJson } from '@/lib/client-fetch'
+import { useBrand } from '@/components/BrandProvider'
 
 // Patient portal sign-in: email or patient ID + password, or a code sent to
 // the mobile on file (Wave J, P1-20), then TOTP when the account has it.
 
 export function PatientSignInForm({ below }: { below?: React.ReactNode }) {
   const router = useRouter()
+  const { portalName } = useBrand()
   const [patientId, setPatientId] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -75,6 +77,7 @@ export function PatientSignInForm({ below }: { below?: React.ReactNode }) {
   return (
     <>
       <div className={`auth-rise ${s.head}`} style={rise(1)}>
+        <p className={s.eyebrow}>{portalName}</p>
         <h1 className={s.title}>Sign in</h1>
         <p className={s.subtitle}>Your records, forms and messages.</p>
       </div>

@@ -7,6 +7,7 @@ import {
   adverseEvents, drugAccountabilityEntries, signatures,
   // SP3
   encounters, followUpOrders,
+  prescriptions, // WS1 T6
   // SP4
   chargeLines, invoices, patientPayments, refunds,
   // SP5
@@ -24,15 +25,23 @@ import {
   abhaLinkOverrides, // WS12 T5
   bookingRequests, // Wave J
   payers,
+  medicationBatches, // WS5 T5
 } from '@/db/schema'
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { isExpired, type BatchStock } from '@/lib/pharmacy/fefo' // WS5 T5
+import { todayIsoIn } from '@/lib/india-time' // WS5 T5
+import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
-import type { ChargeStatus } from '@/lib/charge-status'
+import { dispenseBilling, dispenseBillingColumns, type DispenseBilling } from './medication-dispenses' // WS2 T8
+import { activeAllergies } from './prescriptions' // WS2 T8
+import type { AllergyInput } from '@/lib/prescriptions/allergy-check' // WS2 T8
 import { toAadhaarSummary, type AadhaarSummary } from '@/lib/patient-identity'
 import { publicPatientColumns, patientPortalConfiguredSql, type PublicPatientRow } from '@/lib/queries/patient-columns'
+import { encounterVitals, encounterConsults } from '@/db/schema' // WS1 T2
+import { referrals } from '@/db/schema' // WS1 T4
+import { labCriticalAlerts } from '@/db/schema' // WS4 T12
 import { logAudit } from '@/lib/audit'
 import { lockPatientBilling } from './charge-capture' // SP4
 import type { Session } from '@/lib/auth'
@@ -194,7 +203,7 @@ export async function getPatientDetail(anonId: string) {
     const criteria = screening ? await getDb().select().from(screeningCriteriaResults).where(eq(screeningCriteriaResults.screeningId, screening.id)) : []
     const dx = await getDb().select().from(diagnoses).where(and(eq(diagnoses.patientId, anonId), liveDiagnosis)) // SP6: voided rows hidden
     const meds = await getDb().select().from(medicationEpisodes).where(eq(medicationEpisodes.patientId, anonId))
-    const patientAllergies = await getDb().select().from(allergies).where(eq(allergies.patientId, anonId))
+    const patientAllergies = await getDb().select().from(allergies).where(and(eq(allergies.patientId, anonId), isNull(allergies.inactivatedAt))) // WS1 T4: active only
     // Project down to only what callers need. The full row includes
     // `idNumberEncrypted` (encrypted ciphertext of the ID number) and the
     // internal `id`/`patientId` keys -- never decrypted here, but there's no
@@ -256,6 +265,8 @@ export interface PharmacyEpisode {
   startDate: string
   stopDate: string | null
   catalogMedicationId: number | null
+  quantityPrescribed: number | null // WS2 T8: pre-fills the dispense quantity
+  batches: BatchStock[] // WS5 T5: the catalogue drug's dispensable batches (live, unexpired), FEFO order
 }
 
 export interface PharmacyPatientView {
@@ -268,6 +279,7 @@ export interface PharmacyPatientView {
   diagnoses: { id: number; code: string; description: string }[]
   activeMedications: PharmacyEpisode[]
   pastMedications: PharmacyEpisode[]
+  allergies: AllergyInput[] // WS2 T8: active allergies, for the dispense allergy banner
   dispenses: {
     id: number
     medicationId: number
@@ -277,7 +289,7 @@ export interface PharmacyPatientView {
     dispensedByName: string
     dispensedAt: Date
     notes: string | null
-    charge: { id: number; status: ChargeStatus; amountCents: number } | null
+    billing: DispenseBilling // WS2 T8: from charge_lines
   }[]
 }
 
@@ -331,7 +343,7 @@ export interface PharmacyPatientView {
  * this view needs to see a dispense or a just-logged bill immediately; a
  * stale "not billed yet" at the counter invites a double-bill attempt.
  */
-export async function getPatientPharmacyView(patientId: string): Promise<PharmacyPatientView | null> {
+export async function getPatientPharmacyView(patientId: string, todayIso: string = todayIsoIn()): Promise<PharmacyPatientView | null> {
   const db = getDb()
   const trimmed = patientId.trim()
 
@@ -364,6 +376,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
       startDate: medicationEpisodes.startDate,
       stopDate: medicationEpisodes.stopDate,
       status: medicationEpisodes.status,
+      quantityPrescribed: medicationEpisodes.quantityPrescribed, // WS2 T8
     })
     .from(medicationEpisodes)
     .where(eq(medicationEpisodes.patientId, patientRow.id))
@@ -371,15 +384,34 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
   const catalogRows = await db.select({ id: medications.id, name: medications.name }).from(medications)
   const catalogIdByName = new Map(catalogRows.map((m) => [m.name.toLowerCase(), m.id]))
 
-  const toEpisode = (e: (typeof episodeRows)[number]): PharmacyEpisode => ({
-    id: e.id,
-    name: e.name,
-    medicationClass: e.medicationClass,
-    dose: e.dose,
-    startDate: e.startDate,
-    stopDate: e.stopDate,
-    catalogMedicationId: catalogIdByName.get(e.name.toLowerCase()) ?? null,
-  })
+  // WS5 T5: one read of the live batches of every catalogue drug these episodes name.
+  const catalogIds = [...new Set(episodeRows.map((e) => catalogIdByName.get(e.name.toLowerCase())).filter((id) => id !== undefined))]
+  const batchRows = catalogIds.length === 0 ? [] : await db
+    .select({
+      medicationId: medicationBatches.medicationId, id: medicationBatches.id, batchNo: medicationBatches.batchNo, expiryDate: medicationBatches.expiryDate,
+      quantityOnHand: medicationBatches.quantityOnHand, mrpPerUnitPaise: medicationBatches.mrpPerUnitPaise,
+    })
+    .from(medicationBatches)
+    .where(and(inArray(medicationBatches.medicationId, catalogIds), isNull(medicationBatches.writtenOffAt), gt(medicationBatches.quantityOnHand, 0)))
+    .orderBy(sql`${medicationBatches.expiryDate} ASC NULLS LAST`, asc(medicationBatches.id))
+  const batchesOf = (medicationId: number | null): BatchStock[] => batchRows
+    .filter((b) => b.medicationId === medicationId && !isExpired(b, todayIso))
+    .map((b) => ({ id: b.id, batchNo: b.batchNo, expiryDate: b.expiryDate, quantityOnHand: b.quantityOnHand, mrpPerUnitPaise: b.mrpPerUnitPaise, writtenOff: false }))
+
+  const toEpisode = (e: (typeof episodeRows)[number]): PharmacyEpisode => {
+    const catalogMedicationId = catalogIdByName.get(e.name.toLowerCase()) ?? null
+    return {
+      id: e.id,
+      name: e.name,
+      medicationClass: e.medicationClass,
+      dose: e.dose,
+      startDate: e.startDate,
+      stopDate: e.stopDate,
+      catalogMedicationId,
+      quantityPrescribed: e.quantityPrescribed, // WS2 T8
+      batches: batchesOf(catalogMedicationId),
+    }
+  }
 
   const activeMedications = episodeRows.filter((e) => e.status === 'active').map(toEpisode)
   const pastMedications = episodeRows.filter((e) => e.status === 'inactive').map(toEpisode)
@@ -394,12 +426,11 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
       dispensedByName: medicationDispenses.dispensedByName,
       dispensedAt: medicationDispenses.dispensedAt,
       notes: medicationDispenses.notes,
-      chargeId: charges.id,
-      chargeStatus: charges.status,
-      chargeAmountCents: charges.amountCents,
+      ...dispenseBillingColumns, // WS2 T8
     })
     .from(medicationDispenses)
     .leftJoin(medications, eq(medications.id, medicationDispenses.medicationId))
+    .leftJoin(chargeLines, eq(chargeLines.medicationDispenseId, medicationDispenses.id)) // WS2 T8
     .leftJoin(charges, eq(charges.id, medicationDispenses.chargeId))
     .where(eq(medicationDispenses.patientId, patientRow.id))
     .orderBy(desc(medicationDispenses.dispensedAt), desc(medicationDispenses.id))
@@ -413,6 +444,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
     diagnoses: dx,
     activeMedications,
     pastMedications,
+    allergies: await activeAllergies(patientRow.id), // WS2 T8
     dispenses: dispenseRows.map((r) => ({
       id: r.id,
       medicationId: r.medicationId,
@@ -425,7 +457,7 @@ export async function getPatientPharmacyView(patientId: string): Promise<Pharmac
       dispensedByName: r.dispensedByName,
       dispensedAt: r.dispensedAt,
       notes: r.notes,
-      charge: r.chargeId != null ? { id: r.chargeId, status: r.chargeStatus as ChargeStatus, amountCents: r.chargeAmountCents! } : null,
+      billing: dispenseBilling(r), // WS2 T8
     })),
   }
 }
@@ -557,6 +589,13 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   await db.delete(coverageVerifications).where(eq(coverageVerifications.patientId, anonId))
   await db.execute(sql`select set_config('hims.allow_document_purge', 'off', true)`)
   // end WS12 T1
+  // WS1 T2: vitals and the consultation record reference encounters and patients.
+  await db.delete(encounterVitals).where(eq(encounterVitals.patientId, anonId))
+  await db.delete(encounterConsults).where(eq(encounterConsults.patientId, anonId))
+  // end WS1 T2
+  // WS1 T4: referrals reference encounters and patients.
+  await db.delete(referrals).where(eq(referrals.patientId, anonId))
+  // end WS1 T4
 
   // SP8, before the SP7 deletes (eligibility checks reference policies; exchanges reference
   // claims, pre-auths and policies). abdm_consents is append-only, so the purge setting is on for
@@ -662,6 +701,9 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // class in this function, alongside care_plans below.)
   await db.delete(medicationDispenses).where(eq(medicationDispenses.patientId, anonId))
   await db.delete(medicationEpisodes).where(eq(medicationEpisodes.patientId, anonId))
+  // WS1 T6: prescription headers, after their episodes (prescription_id) and before encounters.
+  await db.delete(prescriptions).where(eq(prescriptions.patientId, anonId))
+  // end WS1 T6
   await db.delete(diagnoses).where(eq(diagnoses.patientId, anonId))
   // form_submission_consents.form_submission_id references form_submissions
   // with no ON DELETE action, so this patient's consent rows must go before
@@ -773,6 +815,8 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   if (labOrderIds.length > 0) {
     await db.update(documents).set({ labOrderId: null }).where(inArray(documents.labOrderId, labOrderIds))
   }
+  // WS4 T12: lab_critical_alerts cascades from lab_orders and patients; deleted explicitly so the FK guard sees it.
+  await db.delete(labCriticalAlerts).where(eq(labCriticalAlerts.patientId, anonId))
   await db.delete(labOrders).where(eq(labOrders.patientId, anonId))
   // SP5: lab_orders.home_collection_visit_id is ON DELETE SET NULL and lab_orders.requisition_id
   // has no ON DELETE action, so visits and requisitions go after this patient's orders.

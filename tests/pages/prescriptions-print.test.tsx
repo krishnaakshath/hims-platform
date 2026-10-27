@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients, providers, medicationEpisodes } from '@/db/schema'
 import { getPatientIdentityForPrint } from '@/lib/queries/patients'
-import { brand } from '@/lib/brand'
+import { envBrand } from '@/lib/brand'
 
 class NotFound extends Error {}
 class Redirect extends Error {}
@@ -21,6 +21,8 @@ vi.mock('@/lib/auth', () => ({
 }))
 
 vi.mock('@/lib/audit', () => ({ logAudit: state.logAudit }))
+// WL T10: the print reads the brand at request time; with no stored brand getBrand() is the env brand.
+vi.mock('@/lib/brand-server', async () => ({ getBrand: vi.fn(async () => (await import('@/lib/brand')).envBrand) }))
 const logAudit = state.logAudit
 
 import PrescriptionPrintPage from '@/app/prescriptions/print/page'
@@ -135,13 +137,13 @@ describe('GET /prescriptions/print', () => {
     expect(screen.getByText(patientAName)).toBeInTheDocument()
     expect(screen.getByText(/sertraline/i)).toBeInTheDocument()
     expect(screen.getByText(/2 times daily/i)).toBeInTheDocument()
-    expect(screen.getByText(/for 30 days/i)).toBeInTheDocument()
+    expect(screen.getByText(/× 30 days/i)).toBeInTheDocument() // WS1 formatDoseLine
     expect(screen.getByText(/take with food, in the morning\./i)).toBeInTheDocument()
     expect(screen.getByText(new RegExp(providerName))).toBeInTheDocument()
     if (providerCredentials) expect(screen.getByText(new RegExp(`, ${providerCredentials}$`))).toBeInTheDocument()
     expect(screen.getByText(providerSpecialty)).toBeInTheDocument()
     expect(screen.getByText(
-      `This printout is a record of a prescription entered in ${brand.name}. It was not transmitted electronically to a pharmacy.`,
+      `This printout is a record of a prescription entered in ${envBrand.name}. It was not transmitted electronically to a pharmacy.`,
     )).toBeInTheDocument()
   })
 

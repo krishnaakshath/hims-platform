@@ -6,11 +6,27 @@ import { SessionTimeoutWarning } from '@/components/SessionTimeoutWarning'
 import { getNavBadges } from '@/lib/nav-badges'
 import { demoFeaturesEnabled } from '@/lib/demo-features'
 import { trialsEnabled } from '@/lib/features'
+import { getBrandOnboarding } from '@/lib/brand-server'
+import type { BrandOnboardingStatus } from '@/lib/brand-resolve'
+import { BrandOnboardingCard } from '@/components/BrandOnboardingCard'
+import { BRAND_SETTINGS_ROLES } from '@/lib/role-policy'
+import { ToastProvider } from '@/components/ui/toast'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession()
   if (!session) redirect('/login')
   const badges = await getNavBadges(session)
+
+  // WL T11: first-run branding checklist, for the roles that may edit branding; any failure renders nothing.
+  let onboarding: BrandOnboardingStatus | null = null
+  if (BRAND_SETTINGS_ROLES.includes(session.role)) {
+    try {
+      onboarding = await getBrandOnboarding()
+    } catch {
+      onboarding = null
+    }
+  }
+  // end WL T11
 
   return (
     // h-screen + overflow-hidden (not min-h-screen) is deliberate: without a
@@ -28,7 +44,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
           screen instead of each side scrolling independently within it. */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <LeftNav role={session.role} badges={badges} demoFeatures={demoFeaturesEnabled()} trials={trialsEnabled()} />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-6">
+          <ToastProvider>
+            {onboarding && !onboarding.complete && !onboarding.dismissed && <BrandOnboardingCard status={onboarding} />}
+            {children}
+          </ToastProvider>
+        </main>
       </div>
     </div>
   )

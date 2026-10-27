@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { eq, desc, and, inArray, or } from 'drizzle-orm'
+import { eq, and, inArray, or } from 'drizzle-orm'
 import { POST } from '@/app/api/front-desk/check-in/route'
 import { getDb } from '@/db/client'
-import { doctorAssignments, rooms, admissions, encounters } from '@/db/schema'
+import { doctorAssignments, rooms, admissions, encounters, chargeLines } from '@/db/schema'
 import { listActiveProviders } from '@/lib/queries/providers'
 
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role: 'frontdesk', name: 'Taylor Nguyen' })) }))
@@ -18,6 +18,8 @@ afterEach(async () => {
     createdAssignmentIds.length > 0 ? inArray(encounters.doctorAssignmentId, createdAssignmentIds) : undefined,
     and(eq(encounters.patientId, 'RD-0001'), eq(encounters.checkedInByName, 'Taylor Nguyen')),
   ))
+  // WS2 T9: check-in captures the visit charges; they go before their encounter.
+  await getDb().delete(chargeLines).where(inArray(chargeLines.encounterId, sp3Encounters))
   await getDb().delete(encounters).where(inArray(encounters.id, sp3Encounters))
   while (createdAdmissionIds.length > 0) await getDb().delete(admissions).where(eq(admissions.id, createdAdmissionIds.pop()!))
   // Safety net: several of the pre-existing tests above (not part of this
@@ -50,14 +52,14 @@ describe('POST /api/front-desk/check-in', () => {
     expect(body.status).toBe('pending')
   })
 
-  it('allows an inpatient check-in with no roomId (room assigned once one frees up)', async () => {
+  // WS3 T2: admission moved to POST /api/inpatient/admissions.
+  it('refuses an inpatient check-in with use_admission_form and admits nobody', async () => {
     const providers = await listActiveProviders()
     const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-0001', visitType: 'inpatient', urgency: 'urgent', reason: 'Admission', providerId: providers[0].id }) })
     const res = await POST(req as never)
-    expect(res.status).toBe(201)
-    const body = await res.json()
-    createdAssignmentIds.push(body.id)
-    expect(body.roomId).toBeNull()
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ code: 'use_admission_form' })
+    expect(await getDb().select().from(admissions).where(and(eq(admissions.patientId, 'RD-0001'), eq(admissions.status, 'admitted'), eq(admissions.attendingProviderId, providers[0].id)))).toHaveLength(0)
   })
 
   it('rejects a roomId on an outpatient check-in', async () => {
@@ -83,39 +85,16 @@ describe('POST /api/front-desk/check-in', () => {
     expect(res.status).toBe(404)
   })
 
-  it('does not occupy a room when the providerId does not exist', async () => {
+  it('never occupies a room: a roomId is not part of check-in any more (WS3 T2)', async () => {
     const [room] = await getDb().insert(rooms).values({ ward: 'Test Ward', roomNumber: '304', bedNumber: 'A', status: 'available' }).returning()
     createdRoomIds.push(room.id)
 
     const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-0001', visitType: 'inpatient', urgency: 'urgent', reason: 'Admission', providerId: 999999, roomId: room.id }) })
     const res = await POST(req as never)
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(400)
 
     const [reloaded] = await getDb().select().from(rooms).where(eq(rooms.id, room.id))
     expect(reloaded.status).toBe('available')
-  })
-
-  it('assigns the given room and flips it to occupied for an inpatient check-in', async () => {
-    const providers = await listActiveProviders()
-    const [room] = await getDb().insert(rooms).values({ ward: 'Test Ward', roomNumber: '301', bedNumber: 'A', status: 'available' }).returning()
-    createdRoomIds.push(room.id)
-
-    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-0001', visitType: 'inpatient', urgency: 'urgent', reason: 'Admission', providerId: providers[0].id, roomId: room.id }) })
-    const res = await POST(req as never)
-    expect(res.status).toBe(201)
-    const body = await res.json()
-    createdAssignmentIds.push(body.id)
-    expect(body.roomId).toBe(room.id)
-  })
-
-  it('returns 409 when the requested room is no longer available', async () => {
-    const providers = await listActiveProviders()
-    const [room] = await getDb().insert(rooms).values({ ward: 'Test Ward', roomNumber: '302', bedNumber: 'A', status: 'occupied', occupiedByPatientId: 'RD-0002' }).returning()
-    createdRoomIds.push(room.id)
-
-    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-0001', visitType: 'inpatient', urgency: 'urgent', reason: 'Admission', providerId: providers[0].id, roomId: room.id }) })
-    const res = await POST(req as never)
-    expect(res.status).toBe(409)
   })
 
   it('returns 403 for a pi session', async () => {
@@ -150,69 +129,6 @@ describe('POST /api/front-desk/check-in', () => {
     createdAssignmentIds.push(body2.id)
 
     expect(body2.queueTicketNumber).toBe(body1.queueTicketNumber + 1)
-  })
-})
-
-describe('POST /api/front-desk/check-in — admissions', () => {
-  it('creates an admission record for an inpatient check-in', async () => {
-    const providers = await listActiveProviders()
-    const req = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-0001', visitType: 'inpatient', urgency: 'urgent', reason: 'Admission for observation', providerId: providers[0].id }) })
-    const res = await POST(req as never)
-    expect(res.status).toBe(201)
-    const body = await res.json()
-    createdAssignmentIds.push(body.id)
-
-    const [admission] = await getDb().select().from(admissions).where(eq(admissions.patientId, 'RD-0001')).orderBy(desc(admissions.admittedAt)).limit(1)
-    createdAdmissionIds.push(admission.id)
-    expect(admission.status).toBe('admitted')
-    expect(admission.attendingProviderId).toBe(providers[0].id)
-    expect(admission.createdFromAssignmentId).toBe(body.id)
-  })
-
-  it('does not create a second admission when the patient already has an active one', async () => {
-    const providers = await listActiveProviders()
-    const firstReq = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-0001', visitType: 'inpatient', urgency: 'urgent', reason: 'First admission', providerId: providers[0].id }) })
-    const firstRes = await POST(firstReq as never)
-    const firstBody = await firstRes.json()
-    createdAssignmentIds.push(firstBody.id)
-
-    const secondReq = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-0001', visitType: 'inpatient', urgency: 'routine', reason: 'Duplicate check-in attempt', providerId: providers[0].id }) })
-    const secondRes = await POST(secondReq as never)
-    const secondBody = await secondRes.json()
-    createdAssignmentIds.push(secondBody.id)
-
-    const activeAdmissions = await getDb().select().from(admissions).where(and(eq(admissions.patientId, 'RD-0001'), eq(admissions.status, 'admitted')))
-    for (const a of activeAdmissions) createdAdmissionIds.push(a.id)
-    expect(activeAdmissions.length).toBe(1)
-  })
-
-  it('rejects a duplicate inpatient check-in with a roomId for a patient who is already admitted, and never claims the room', async () => {
-    const providers = await listActiveProviders()
-
-    const firstReq = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-0001', visitType: 'inpatient', urgency: 'urgent', reason: 'First admission', providerId: providers[0].id }) })
-    const firstRes = await POST(firstReq as never)
-    expect(firstRes.status).toBe(201)
-    const firstBody = await firstRes.json()
-    createdAssignmentIds.push(firstBody.id)
-
-    const [room] = await getDb().insert(rooms).values({ ward: 'Test Ward', roomNumber: '305', bedNumber: 'A', status: 'available' }).returning()
-    createdRoomIds.push(room.id)
-
-    const secondReq = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ patientId: 'RD-0001', visitType: 'inpatient', urgency: 'urgent', reason: 'Duplicate check-in with a room', providerId: providers[0].id, roomId: room.id }) })
-    const secondRes = await POST(secondReq as never)
-    expect(secondRes.status).toBe(409)
-
-    // The room must never have been claimed -- this is the actual bed leak
-    // this test guards against. Verify real DB state, not a mock.
-    const [roomAfter] = await getDb().select().from(rooms).where(eq(rooms.id, room.id))
-    expect(roomAfter.status).toBe('available')
-    expect(roomAfter.occupiedByPatientId).toBeNull()
-
-    // Still only one active admission -- the duplicate must not have created
-    // a second one either.
-    const activeAdmissions = await getDb().select().from(admissions).where(and(eq(admissions.patientId, 'RD-0001'), eq(admissions.status, 'admitted')))
-    for (const a of activeAdmissions) createdAdmissionIds.push(a.id)
-    expect(activeAdmissions.length).toBe(1)
   })
 })
 

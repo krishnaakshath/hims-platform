@@ -1,12 +1,19 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { patients, encounterNotes } from '@/db/schema'
+import { patients, encounterNotes, signatures } from '@/db/schema'
 import { createNote, signNote, listNotesForPatient, getNoteById } from '@/lib/queries/encounter-notes'
+
+// WS1 T5: signNote(noteId, patientId, { typedName, session }).
+const as = (name: string, role: 'pi' | 'admin' = 'pi') => ({ typedName: name, session: { name, role, userId: null } })
 
 const createdNoteIds: number[] = []
 afterEach(async () => {
-  while (createdNoteIds.length > 0) await getDb().delete(encounterNotes).where(eq(encounterNotes.id, createdNoteIds.pop()!))
+  while (createdNoteIds.length > 0) {
+    const noteId = createdNoteIds.pop()!
+    await getDb().delete(signatures).where(and(eq(signatures.signableType, 'encounter_note'), eq(signatures.signableId, noteId)))
+    await getDb().delete(encounterNotes).where(eq(encounterNotes.id, noteId))
+  }
 })
 
 describe('encounter notes queries', () => {
@@ -20,7 +27,7 @@ describe('encounter notes queries', () => {
     const byId = await getNoteById(created.id)
     expect(byId?.subjective).toBe('Feeling better')
 
-    const signed = await signNote(created.id, patientRow.id, 'Dr. R. Kunam', false)
+    const signed = await signNote(created.id, patientRow.id, as('Dr. R. Kunam'))
     expect(signed.ok).toBe(true)
     const afterSign = await getNoteById(created.id)
     expect(afterSign?.status).toBe('signed')
@@ -32,7 +39,7 @@ describe('encounter notes queries', () => {
     const created = await createNote({ patientId: patientRow.id, appointmentId: null, admissionId: null, noteType: 'progress', authorName: 'Dr. R. Kunam', authorRole: 'pi', subjective: null, objective: null, assessment: null, plan: null })
     createdNoteIds.push(created.id)
 
-    const result = await signNote(created.id, patientRow.id, 'Someone Else', false)
+    const result = await signNote(created.id, patientRow.id, as('Someone Else'))
     expect(result.ok).toBe(false)
   })
 
@@ -41,7 +48,7 @@ describe('encounter notes queries', () => {
     const created = await createNote({ patientId: patientRow.id, appointmentId: null, admissionId: null, noteType: 'progress', authorName: 'Dr. R. Kunam', authorRole: 'pi', subjective: null, objective: null, assessment: null, plan: null })
     createdNoteIds.push(created.id)
 
-    const result = await signNote(created.id, patientRow.id, 'Test Admin', true)
+    const result = await signNote(created.id, patientRow.id, as('Test Admin', 'admin'))
     expect(result.ok).toBe(true)
   })
 
@@ -53,9 +60,8 @@ describe('encounter notes queries', () => {
     const created = await createNote({ patientId: patientA.id, appointmentId: null, admissionId: null, noteType: 'progress', authorName: 'Dr. R. Kunam', authorRole: 'pi', subjective: null, objective: null, assessment: null, plan: null })
     createdNoteIds.push(created.id)
 
-    const result = await signNote(created.id, patientB.id, 'Dr. R. Kunam', false)
-    expect(result.ok).toBe(false)
-    expect(result.error).toBe('Note not found')
+    const result = await signNote(created.id, patientB.id, as('Dr. R. Kunam'))
+    expect(result).toEqual({ ok: false, error: 'Note not found' })
 
     const afterAttempt = await getNoteById(created.id)
     expect(afterAttempt?.status).toBe('draft')

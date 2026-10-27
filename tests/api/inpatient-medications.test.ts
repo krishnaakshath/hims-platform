@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq, ne, sql } from 'drizzle-orm'
 import { GET as listRoute, POST as orderRoute } from '@/app/api/inpatient/admissions/[id]/medications/route'
 import { POST as administerRoute } from '@/app/api/inpatient/admissions/[id]/medications/[medId]/administer/route'
 import { getDb } from '@/db/client'
@@ -126,7 +126,10 @@ describe('POST /api/inpatient/admissions/[id]/medications/[medId]/administer', (
 
   it('rejects administering a medication through a different admission\'s URL than the one it was ordered under', async () => {
     const admissionA = await makeAdmission()
-    const admissionB = await makeAdmission()
+    // WS3 T1: one active stay per patient, so the second admission is another patient's with no active stay.
+    const [other] = await getDb().select({ id: patients.id }).from(patients)
+      .where(and(ne(patients.id, admissionA.patientId), sql`NOT EXISTS (SELECT 1 FROM admissions a WHERE a.patient_id = ${patients.id} AND a.status = 'admitted')`)).limit(1)
+    const admissionB = await makeAdmission(other.id)
     const orderReq = new Request('http://localhost', { method: 'POST', body: JSON.stringify({ medicationName: 'Sertraline', dose: '100mg', scheduledFor: new Date().toISOString() }) })
     const orderRes = await orderRoute(orderReq as never, { params: Promise.resolve({ id: String(admissionA.id) }) })
     const ordered = await orderRes.json()

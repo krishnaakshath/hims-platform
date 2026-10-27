@@ -3,6 +3,7 @@ import {
   SAMPLE_TYPES, SAMPLE_TYPE_LABEL, SAMPLE_CONTAINERS, SAMPLE_CONTAINER_LABEL, LAB_QUOTE_STATUSES, MAX_QUOTED_PAISE,
   quoteFromResolution,
 } from '@/lib/labs/catalog'
+import { labCategoryForService } from '@/lib/labs/catalog' // WS4 T13
 
 describe('lab catalog', () => {
   it('labels every sample type and container', () => {
@@ -23,4 +24,17 @@ describe('lab catalog', () => {
     expect(quoteFromResolution({ ok: false, reason: 'no_rate' }).quoteStatus).toBe('no_rate')
     expect(quoteFromResolution({ ok: false, reason: 'invalid_date' })).toEqual({ quotedPricePaise: null, quotedTariffRateId: null, quoteStatus: 'no_rate' })
   })
+
+  // WS4 T13
+  it('maps a tariff category to a lab test category; a procedure only when an admin picks it', () => {
+    expect(labCategoryForService('investigation_lab')).toBe('lab')
+    expect(labCategoryForService('investigation_imaging')).toBe('imaging')
+    expect(labCategoryForService('procedure')).toBeNull()
+    expect(labCategoryForService('procedure', { allowProcedure: false })).toBeNull()
+    expect(labCategoryForService('procedure', { allowProcedure: true })).toBe('imaging')
+    for (const c of ['consultation', 'room_rent', 'nursing', 'pharmacy', 'consumable', 'package', 'other'] as const) {
+      expect(labCategoryForService(c, { allowProcedure: true }), c).toBeNull()
+    }
+  })
+  // end WS4 T13
 })

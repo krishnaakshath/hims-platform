@@ -3,8 +3,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 let role = 'frontdesk'
 vi.mock('@/lib/auth', () => ({ requireSession: vi.fn(async () => ({ role, name: 'Taylor Nguyen', userId: null })) }))
 vi.mock('@/lib/queries/encounters', () => ({ checkInVisit: vi.fn() }))
-vi.mock('@/lib/queries/admissions', () => ({ getActiveAdmissionForPatient: vi.fn(async () => null) }))
-vi.mock('@/lib/queries/rooms', () => ({ assignRoomToPatient: vi.fn(async () => true) }))
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn() }))
 vi.mock('@/db/client', () => ({
   getDb: () => ({ select: () => ({ from: () => ({ where: async () => [{ id: 1 }] }) }) }),
@@ -12,9 +10,9 @@ vi.mock('@/db/client', () => ({
 
 import { POST } from '@/app/api/front-desk/check-in/route'
 import { checkInVisit } from '@/lib/queries/encounters'
-import { getActiveAdmissionForPatient } from '@/lib/queries/admissions'
 import { logAudit } from '@/lib/audit'
 import { RETRY_MESSAGE } from '@/lib/db-errors'
+import type { AutoChargeOutcome } from '@/lib/queries/auto-charge' // WS2 T9
 
 const valid = { patientId: 'RD-0001', providerId: 1, visitType: 'outpatient', urgency: 'routine', reason: 'Review' }
 const req = (body: unknown) => new Request('http://localhost/api/front-desk/check-in', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) }) as never
@@ -22,27 +20,42 @@ const req = (body: unknown) => new Request('http://localhost/api/front-desk/chec
 beforeEach(() => {
   role = 'frontdesk'
   vi.mocked(checkInVisit).mockReset()
-  vi.mocked(getActiveAdmissionForPatient).mockResolvedValue(null)
 })
 
 describe('POST /api/front-desk/check-in (encounter)', () => {
   it('passes appointmentId through and returns encounterId + opdToken', async () => {
-    vi.mocked(checkInVisit).mockResolvedValue({ ok: true, assignment: { id: 5, roomId: null, status: 'scheduled' } as never, encounter: { id: 9, opdToken: 4 } as never, admissionId: null, completedFollowUpOrderId: 3 })
+    vi.mocked(checkInVisit).mockResolvedValue({ ok: true, assignment: { id: 5, roomId: null, status: 'scheduled' } as never, encounter: { id: 9, opdToken: 4 } as never, completedFollowUpOrderId: 3, charges: [] })
     const res = await POST(req({ ...valid, appointmentId: 77 }))
     expect(res.status).toBe(201)
     expect(await res.json()).toMatchObject({ id: 5, roomId: null, status: 'scheduled', encounterId: 9, opdToken: 4 })
-    expect(checkInVisit).toHaveBeenCalledWith(expect.objectContaining({ appointmentId: 77, createAdmission: false, roomId: null }), expect.objectContaining({ name: 'Taylor Nguyen' }))
+    expect(checkInVisit).toHaveBeenCalledWith({ patientId: 1, providerId: 1, visitType: 'outpatient', urgency: 'routine', reason: 'Review', appointmentId: 77 }, expect.objectContaining({ name: 'Taylor Nguyen' }))
     // The audit row is written inside the transaction now, not by the route.
     expect(logAudit).not.toHaveBeenCalled()
   })
 
-  it('creates the admission only for an inpatient with no active admission', async () => {
-    vi.mocked(checkInVisit).mockResolvedValue({ ok: true, assignment: { id: 5 } as never, encounter: { id: 9, opdToken: 1 } as never, admissionId: 2, completedFollowUpOrderId: null })
-    await POST(req({ ...valid, visitType: 'inpatient' }))
-    expect(checkInVisit).toHaveBeenLastCalledWith(expect.objectContaining({ createAdmission: true, appointmentId: null }), expect.anything())
-    vi.mocked(getActiveAdmissionForPatient).mockResolvedValue({ id: 1 } as never)
-    await POST(req({ ...valid, visitType: 'inpatient' }))
-    expect(checkInVisit).toHaveBeenLastCalledWith(expect.objectContaining({ createAdmission: false }), expect.anything())
+  // WS2 T9
+  it('returns the automatic visit charge outcomes', async () => {
+    const charges: AutoChargeOutcome[] = [
+      { ok: true, source: 'consultation', lineId: 3, itemName: 'Consultation', taxablePaise: 60000, billTo: 'self', existing: false },
+      { ok: false, source: 'registration', reason: 'price_unresolved', rules: ['price_unresolved'] },
+    ]
+    vi.mocked(checkInVisit).mockResolvedValue({ ok: true, assignment: { id: 5 } as never, encounter: { id: 9, opdToken: 4 } as never, completedFollowUpOrderId: null, charges })
+    const res = await POST(req(valid))
+    expect(res.status).toBe(201)
+    expect((await res.json()).charges).toEqual(charges)
+  })
+
+  // WS3 T2: admission has its own form and route.
+  it('refuses an inpatient with use_admission_form before any write', async () => {
+    const res = await POST(req({ ...valid, visitType: 'inpatient' }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Inpatients are admitted from the admission form.', code: 'use_admission_form' })
+    expect(checkInVisit).not.toHaveBeenCalled()
+  })
+
+  it('400s a roomId (no longer part of check-in)', async () => {
+    expect((await POST(req({ ...valid, roomId: 3 }))).status).toBe(400)
+    expect(checkInVisit).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -63,10 +76,10 @@ describe('POST /api/front-desk/check-in (encounter)', () => {
     expect((await POST(req({ ...valid, appointmentId: 77 }))).status).toBe(409)
   })
 
-  it('rejects appointmentId on an inpatient check-in before any write', async () => {
+  it('an inpatient with an appointmentId is still use_admission_form, before any write', async () => {
     const res = await POST(req({ ...valid, visitType: 'inpatient', appointmentId: 77 }))
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'appointmentId is only valid for an outpatient check-in' })
+    expect(await res.json()).toMatchObject({ code: 'use_admission_form' })
     expect(checkInVisit).not.toHaveBeenCalled()
   })
 

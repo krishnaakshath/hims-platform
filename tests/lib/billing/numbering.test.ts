@@ -13,9 +13,9 @@ describe('document numbering', () => {
     expect(financialYearOf(istDateOf(new Date('2027-03-31T18:20:00Z')))).toBe('2026-27')
   })
   it('rejects a malformed date', () => { expect(() => financialYearOf('2026/04/01')).toThrow(RangeError) })
-  it('has the four series with their prefixes', () => {
-    expect([...DOCUMENT_SERIES]).toEqual(['invoice', 'receipt', 'credit_note', 'refund'])
-    expect(SERIES_PREFIX).toEqual({ invoice: 'INV', receipt: 'RCT', credit_note: 'CRN', refund: 'RFD' })
+  it('has the five series with their prefixes', () => {
+    expect([...DOCUMENT_SERIES]).toEqual(['invoice', 'receipt', 'credit_note', 'refund', 'grn']) // WS5 T3: + grn
+    expect(SERIES_PREFIX).toEqual({ invoice: 'INV', receipt: 'RCT', credit_note: 'CRN', refund: 'RFD', grn: 'GRN' })
   })
   it('formats every series within the GST 16-character limit', () => {
     expect(formatDocumentNumber('invoice', '2026-27', 123)).toBe('INV/26-27/000123')

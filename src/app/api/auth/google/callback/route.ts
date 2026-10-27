@@ -7,7 +7,7 @@ import { getDb } from '@/db/client'
 import { users } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
-import { brand } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 
 export async function GET(request: NextRequest) {
   const clientId = process.env.GOOGLE_CLIENT_ID
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
   const [bySub] = await getDb().select().from(users).where(eq(users.googleSub, identity.sub))
   const user = bySub ?? (await findUserByEmail(identity.email))
   if (!user) {
-    return NextResponse.json({ error: `No ${brand.name} account is linked to this Google account. Ask an admin to add you.` }, { status: 403 })
+    return NextResponse.json({ error: `No ${(await getBrand()).name} account is linked to this Google account. Ask an admin to add you.` }, { status: 403 })
   }
 
   if (!bySub) {

@@ -17,7 +17,11 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: state.role, name: 'Dr. Test', userId: null })) }))
 vi.mock('@/lib/audit', () => ({ logAudit: state.logAudit }))
 vi.mock('@/lib/queries/discharge-summary', () => ({ getDischargeSummaryData: state.getData }))
-vi.mock('@/lib/queries/settings', () => ({ getPracticeIdentity: vi.fn(async () => ({ practiceName: 'Sunrise Multispeciality Hospital', practiceSite: 'Pune' })) }))
+// WL T10: the header comes from the brand's print identity, resolved at request time (spec D4 chain).
+vi.mock('@/lib/brand-server', async () => {
+  const { envBrand } = await import('@/lib/brand')
+  return { getBrand: vi.fn(async () => ({ ...envBrand, print: { ...envBrand.print, headerText: 'Sunrise Multispeciality Hospital', subline: 'Pune', gstin: '27AAACS1234F1Z5' } })) }
+})
 
 import DischargeSummaryPrintPage from '@/app/print/discharge/[admissionId]/page'
 
@@ -72,6 +76,8 @@ describe('/print/discharge/[admissionId]', () => {
     expect(state.getData).toHaveBeenCalledWith(55, expect.objectContaining({ viewerRole: 'pi' }))
     expect(screen.getByRole('heading', { level: 1, name: /discharge summary/i })).toBeInTheDocument()
     expect(screen.getByText('Sunrise Multispeciality Hospital')).toBeInTheDocument()
+    expect(screen.getByText('Pune')).toBeInTheDocument()
+    expect(screen.getByText('GSTIN 27AAACS1234F1Z5')).toBeInTheDocument()
     expect(screen.getByText('Asha Rao')).toBeInTheDocument()
     expect(screen.getByText('UH-000042')).toBeInTheDocument()
     expect(screen.getByText('46 y / Female')).toBeInTheDocument()

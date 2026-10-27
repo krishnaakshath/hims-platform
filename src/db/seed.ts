@@ -7,6 +7,10 @@ import { nextUhid } from '../lib/queries/uhid'
 import { setPatientPortalPassword } from '../lib/queries/patient-portal'
 import { addDaysIso } from '../lib/follow-ups/rules'
 import { todayIsoIn } from '../lib/india-time'
+import { encounterVitals, encounterConsults } from './schema' // WS1 T2
+import { referrals } from './schema' // WS1 T4
+import { labResultSignoffs } from './schema' // WS4 T11
+import { labCriticalAlerts } from './schema' // WS4 T12
 import {
   // SP6
   codingQueryResponses, codingQueries, encounterCodingEvents, encounterCoding, encounterProcedures, serviceProcedureCodes,
@@ -14,6 +18,7 @@ import {
   patients,
   diagnoses,
   medicationEpisodes,
+  prescriptions, // WS1 T6
   patientTrialScreenings,
   screeningCriteriaResults,
   users,
@@ -59,6 +64,7 @@ import {
   // SP8
   nhcxInboundCalls, nhcxExchanges, nhcxEligibilityChecks, abdmProfileShares, abdmConsents,
   admissionCoverage, coverageVerifications, // WS12 T1
+  admissionDuesClearances, // WS3 T5
   abhaLinkOverrides, // WS12 T5
   // SP3
   encounters,
@@ -98,6 +104,7 @@ import {
   reviews,
   medications,
   medicationInventory,
+  medicationBatches,
   labTests,
   staffMembers,
   staffCredentials,
@@ -105,6 +112,8 @@ import {
   adverseEvents,
   drugAccountabilityEntries,
   regulatoryDocuments,
+  providerSchedules, // WS6 T6
+  providerLeave, // WS6 T6
 } from './schema'
 // Wave D: India demo data
 import {
@@ -490,11 +499,11 @@ async function seedTrialCompliance() {
 // Lab test catalog -- standalone reference data (like the payer directory),
 // independent of whether the rest of the DB has been seeded. Wave D adds the
 // common Indian OPD panels (seed-india-data.ts INDIA_LAB_TESTS) on top.
-const LAB_TESTS_SEED: { name: string; code: string; category: 'lab' | 'imaging'; defaultUnit: string | null; referenceRange: string | null }[] = [
+const LAB_TESTS_SEED: { name: string; code: string; category: 'lab' | 'imaging'; defaultUnit: string | null; referenceRange: string | null; fastingRequired?: boolean }[] = [
   { name: 'CBC with differential', code: 'CBC-DIFF', category: 'lab', defaultUnit: 'cells/mcL', referenceRange: '4.5-11.0 x10^3/mcL' },
   { name: 'Comprehensive Metabolic Panel', code: 'CMP', category: 'lab', defaultUnit: null, referenceRange: 'See individual analytes' },
   { name: 'TSH', code: 'TSH', category: 'lab', defaultUnit: 'mIU/L', referenceRange: '0.4-4.0' },
-  { name: 'Lipid Panel', code: 'LIPID', category: 'lab', defaultUnit: 'mg/dL', referenceRange: 'Total chol <200' },
+  { name: 'Lipid Panel', code: 'LIPID', category: 'lab', defaultUnit: 'mg/dL', referenceRange: 'Total chol <200', fastingRequired: true }, // WS2 T10
   { name: 'HbA1c', code: 'HBA1C', category: 'lab', defaultUnit: '%', referenceRange: '4.0-5.6' },
   { name: 'Lithium level', code: 'LITH', category: 'lab', defaultUnit: 'mEq/L', referenceRange: '0.6-1.2' },
   { name: 'Valproic acid level', code: 'VPA', category: 'lab', defaultUnit: 'mcg/mL', referenceRange: '50-100' },
@@ -622,6 +631,11 @@ async function seedMedications() {
     if (medsWithInventory.has(med.id)) continue
     const stock = MEDICATION_INVENTORY_SEED[med.name] ?? { quantityOnHand: 50, reorderThreshold: 10, unit: 'units' }
     await db.insert(medicationInventory).values({ medicationId: med.id, ...stock })
+    // WS5 T3: the seeded stock sits in an OPENING batch (as the batches migration backfills it).
+    if (stock.quantityOnHand > 0) {
+      await db.insert(medicationBatches).values({ medicationId: med.id, batchNo: 'OPENING', mrpPerUnitPaise: 0, quantityOnHand: stock.quantityOnHand })
+        .onConflictDoNothing({ target: [medicationBatches.medicationId, medicationBatches.batchNo] })
+    }
   }
 }
 
@@ -642,6 +656,7 @@ const STAFF_SEED: {
   { name: 'Dr. Rajiv Kunam', linkUserLocal: 'pi', linkProviderName: 'Dr. Rajiv Kunam', department: 'Psychiatry', title: 'Consultant Psychiatrist', employmentStatus: 'active', hireDate: '2021-03-01', terminationDate: null },
   { name: 'Dr. Ananya Rao', linkUserLocal: null, linkProviderName: 'Dr. Ananya Rao', department: 'General Medicine', title: 'Consultant Physician', employmentStatus: 'active', hireDate: '2022-06-15', terminationDate: null },
   { name: 'Dr. Suresh Babu', linkUserLocal: 'pathologist', linkProviderName: 'Dr. Suresh Babu', department: 'Laboratory', title: 'Consultant Pathologist', employmentStatus: 'active', hireDate: '2019-01-10', terminationDate: null },
+  { name: 'Dr. Nandini Kulkarni', linkUserLocal: 'radiologist', linkProviderName: 'Dr. Nandini Kulkarni', department: 'Radiology', title: 'Consultant Radiologist', employmentStatus: 'active', hireDate: '2020-02-03', terminationDate: null }, // WS4 T11
   { name: 'Jaya Raman', linkUserLocal: 'crc', linkProviderName: null, department: 'Clinical Research', title: 'Clinical Research Coordinator', employmentStatus: 'active', hireDate: '2022-09-01', terminationDate: null },
   { name: 'Sanjay Patil', linkUserLocal: 'admin', linkProviderName: null, department: 'Administration', title: 'Hospital Administrator', employmentStatus: 'active', hireDate: '2020-11-01', terminationDate: null },
   { name: 'Pooja Nair', linkUserLocal: 'frontdesk', linkProviderName: null, department: 'Front Office', title: 'Front Office Executive', employmentStatus: 'active', hireDate: '2023-04-20', terminationDate: null },
@@ -851,6 +866,8 @@ async function clearExistingData() {
     // verifications (append-only, purge flag above) reference eligibility checks and policies.
     await tx.delete(admissionCoverage)
     await tx.delete(coverageVerifications)
+    // WS3 T5: dues clearances cascade from admissions but also reference users (cleared_by_user_id).
+    await tx.delete(admissionDuesClearances)
     // SP8: NHCX exchanges reference claims, claim versions, pre-auths, queries, policies and
     // eligibility checks; eligibility checks reference policies and payers; consents and shares
     // reference patients. Inbound calls and consents are append-only (purge flag above).
@@ -889,7 +906,7 @@ async function clearExistingData() {
     await tx.delete(documentCounters)
   })
   await db.delete(chargeRuleConfigs)
-  await db.update(billingSettings).set({ roomRentServiceId: null })
+  await db.update(billingSettings).set({ roomRentServiceId: null, registrationServiceId: null }) // WS3 T2: WS2 T9's registration link too
   // end SP4
   // Wave D: everything else that hangs off appointments, admissions, rooms and medication
   // episodes, children first.
@@ -921,6 +938,7 @@ async function clearExistingData() {
   await db.delete(screeningCriteriaResults)
   await db.delete(patientTrialScreenings)
   await db.delete(medicationEpisodes)
+  await db.delete(prescriptions) // WS1 T6: after its episodes, before encounters/patients
   await db.delete(diagnoses)
   await db.delete(formSubmissionScores)
   await db.delete(formChartDiscrepancies)
@@ -948,6 +966,8 @@ async function clearExistingData() {
   await db.delete(notificationLog)
   await db.delete(patientNotificationPreferences)
   await db.delete(labReports)
+  await db.delete(labResultSignoffs) // WS4 T11: cascades from lab_orders but also references providers/users
+  await db.delete(labCriticalAlerts) // WS4 T12: cascades from lab_orders/patients but also references users
   await db.delete(labResults)
   await db.delete(labOrders)
   await db.delete(homeCollectionVisits)
@@ -966,6 +986,13 @@ async function clearExistingData() {
   await db.delete(encounterCoding)
   await db.delete(encounterProcedures)
   // end SP6
+  // WS1 T2: vitals and consult records reference encounters and patients.
+  await db.delete(encounterVitals)
+  await db.delete(encounterConsults)
+  // end WS1 T2
+  // WS1 T4: referrals reference encounters and patients.
+  await db.delete(referrals)
+  // end WS1 T4
   await db.delete(encounters)
   // Wave D: an admission references its doctor assignment, appointment and room.
   await db.delete(admissions)
@@ -982,6 +1009,9 @@ async function clearExistingData() {
   // deleted before providers/users below.
   await db.delete(staffCredentials)
   await db.delete(staffMembers)
+  // WS6 T6: working hours and leave reference providers.
+  await db.delete(providerSchedules)
+  await db.delete(providerLeave)
   await db.delete(providers)
   // SP2: service_catalog references departments; room_categories is
   // referenced by rooms, which were already deleted above.
@@ -1447,7 +1477,7 @@ export async function seed(opts: { reset?: boolean } = {}) {
     heroIds,
     sessions: {
       admin: sessionFor('admin'), frontdesk: sessionFor('frontdesk'), billing: sessionFor('billing'), labs: sessionFor('labs'),
-      pathologist: sessionFor('pathologist'), collector: sessionFor('collector'), coder: sessionFor('coder'), pharmacy: sessionFor('pharmacy'),
+      pathologist: sessionFor('pathologist'), radiologist: sessionFor('radiologist'), collector: sessionFor('collector'), coder: sessionFor('coder'), pharmacy: sessionFor('pharmacy'),
       crc: sessionFor('crc'), pi: sessionFor('pi'), rcm: sessionFor('rcm'),
     },
   })

@@ -7,9 +7,10 @@ import { CLINICAL_ROLES } from '@/lib/role-policy'
 import { logAudit } from '@/lib/audit'
 import { getPrintablePrescriptions } from '@/lib/queries/prescriptions'
 import { getPatientDocumentIdentity } from '@/lib/queries/print-slips'
-import { getPracticeIdentity } from '@/lib/queries/settings'
 import { DocField, PrintDocument } from '@/components/print/PrintDocument'
-import { brand } from '@/lib/brand'
+import { formatDoseLine } from '@/lib/prescriptions/print-format'
+import { printIdentity } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 
 // Printing is a read of the prescriptions shown on the chart, so it uses the
 // chart's gate (CLINICAL_ROLES: admin, crc, pi) -- not narrowed to admin/pi
@@ -61,13 +62,16 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
   // medication_episodes.patient_id references a real patient row.
   if (!patient) notFound()
 
-  const practice = await getPracticeIdentity()
+  // WL T10: header chain (spec D4) print header text -> billing legal name -> practice name -> env legal name.
+  const identity = printIdentity(await getBrand())
 
   // After validation, so a rejected URL writes no audit row, and on every
   // successful render, so every print is an audited PHI access.
   await logAudit(session, `printed prescription(s) ${ids.join(',')}`, rows[0].patientId)
 
   const first = rows[0]
+  // The header advice is shared by every drug written together; show it once.
+  const adviceText = rows.find((r) => r.advice)?.advice ?? null
   // Wave F P1-16: the age on the (IST) date the prescription was written.
   const writtenOn = istDateOf(first.prescribedAt)
   const age = ageOnDate(patient.dob, writtenOn)
@@ -78,8 +82,7 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
       title="Prescription"
       backHref={`/patients/${patient.id}/medical-record`}
       backLabel="Back to Medical Record"
-      hospitalName={practice.practiceName ?? brand.legalName}
-      hospitalSubline={practice.practiceSite}
+      identity={identity}
       meta={[{ label: 'Date', value: formatIstDate(first.prescribedAt) }]}
       printedAt={new Date()}
     >
@@ -102,10 +105,12 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
                 <p className="font-semibold">
                   {row.name} <span className="font-normal text-neutral-600">({row.medicationClass})</span>
                 </p>
+                {row.genericName && <p className="text-xs text-neutral-600">{row.genericName}</p>}
                 <div className="flex flex-wrap gap-x-4 text-[13px]">
                   {row.dose && <p>{row.dose}</p>}
-                  <p>{row.frequencyPerDay} times daily</p>
-                  <p>for {row.durationDays} days</p>
+                  {row.route && row.route !== 'oral' && <p className="uppercase">{row.route}</p>}
+                  <p>{formatDoseLine(row)}</p>
+                  {row.quantityPrescribed != null && <p>Qty {row.quantityPrescribed}</p>}
                 </div>
                 {row.instructions && <p className="text-xs italic">{row.instructions}</p>}
               </div>
@@ -113,6 +118,13 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
           ))}
         </ol>
       </section>
+
+      {adviceText && (
+        <section className="mt-4" aria-label="Advice">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-600">Advice</p>
+          <p className="whitespace-pre-line text-[13px]">{adviceText}</p>
+        </section>
+      )}
 
       <section className="mt-12 flex items-end justify-between gap-6">
         <div className="text-xs text-neutral-700">
@@ -130,7 +142,7 @@ export default async function PrescriptionPrintPage({ searchParams }: { searchPa
       </section>
 
       <p className="mt-6 text-[10px] text-neutral-600">
-        This printout is a record of a prescription entered in {brand.name}. It was not transmitted electronically to a pharmacy.
+        This printout is a record of a prescription entered in {identity.name}. It was not transmitted electronically to a pharmacy.
       </p>
     </PrintDocument>
   )

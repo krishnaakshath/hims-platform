@@ -9,9 +9,16 @@ afterEach(() => { cleanup() })
 
 const order = (id: number, status: string) => ({ id, status, patientId: 'RD-1', patientName: 'P', testName: 'T', testCode: 'X', orderedAt: new Date(), collectedAt: null, category: 'lab', attachments: [], orderedByProviderId: 1, orderedByProviderName: 'D' })
 
+// WS4 T12: one open critical alert on the worklist banner.
+const CRITICAL_ALERT = {
+  orderId: 5, patientId: 'RD-1', patientName: 'Lakshmi Iyer', uhid: 'UH000123', testName: 'Complete Blood Count', summary: 'Platelets 38 ×10³/µL; Haemoglobin 6.5 g/dL',
+  status: 'open', raisedAt: '2026-10-24T04:30:00.000Z', notifiedAt: null, notifiedByName: null, notifiedToName: null, notifyChannel: null, readBack: null,
+  acknowledgedAt: null, acknowledgedByName: null, orderedByProviderId: 1,
+}
+
 async function renderLabs(role: string, searchParams: Record<string, string> = {}) {
   vi.resetModules()
-  vi.doMock('next/navigation', () => ({ redirect: () => { throw new Error('NEXT_REDIRECT') } }))
+  vi.doMock('next/navigation', () => ({ redirect: () => { throw new Error('NEXT_REDIRECT') }, useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) })) // WS4 T12: useRouter for the banner actions
   vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role, name: 'Test', userId: null })) }))
   vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
   vi.doMock('@/lib/queries/lab-orders', () => ({
@@ -20,8 +27,9 @@ async function renderLabs(role: string, searchParams: Record<string, string> = {
   }))
   vi.doMock('@/lib/queries/lab-tests', () => ({ listLabTests: vi.fn(async () => []) }))
   vi.doMock('@/lib/queries/hospital-kpis', () => ({
-    getLabKpis: vi.fn(async () => ({ awaitingCollection: 0, inTransit: 0, atBench: 0, toVerify: 0, toReport: 0, criticalUnverified: 1, resultedToday: 9, criticalToday: 2, medianTatMinutes: 75 })),
+    getLabKpis: vi.fn(async () => ({ awaitingCollection: 0, inTransit: 0, atBench: 0, toVerify: 0, toReport: 0, criticalUnverified: 1, resultedToday: 9, criticalToday: 2, medianTatMinutes: 75, criticalOpen: 1 })),
   }))
+  vi.doMock('@/lib/queries/lab-critical', () => ({ listOpenCriticalAlerts: vi.fn(async () => [CRITICAL_ALERT]), acknowledgeableCriticalOrderIds: vi.fn(async () => []) })) // WS4 T12
   vi.doMock('@/components/LabWorklist', () => ({ LabWorklist: ({ stage }: { stage?: string | null }) => <p>worklist stage={String(stage ?? 'none')}</p> }))
   vi.doMock('@/components/LabsPatientReports', () => ({ LabsPatientReports: () => null }))
   vi.doMock('@/components/Tabs', () => ({ Tabs: ({ tabs, initialId }: { tabs: { id: string; content: React.ReactNode }[]; initialId?: string }) => <div data-initial={initialId ?? tabs[0].id}>{tabs.map((t) => <div key={t.id}>{t.content}</div>)}</div> }))
@@ -59,9 +67,10 @@ describe('labs home (Wave E P1-15)', () => {
     expect(tile(container, 'To verify')).toEqual({ value: '2', href: '/labs?stage=to-verify' })
   })
 
-  it('adds critical-today, resulted-today and median TAT figures', async () => {
+  it('adds critical-open (N today), resulted-today and median TAT figures', async () => {
     const { container } = await renderLabs('labs')
-    expect(tile(container, 'Critical today')).toEqual({ value: '2', href: '/labs?stage=to-verify' })
+    expect(tile(container, 'Critical open')).toEqual({ value: '1', href: '/labs?stage=to-verify' }) // WS4 T12
+    expect(container.textContent).toContain('2 today')
     expect(tile(container, 'Resulted today')).toEqual({ value: '9', href: '/labs?stage=all' })
     expect(tile(container, 'Median TAT today')).toEqual({ value: '1 h 15 min', href: '/labs?stage=all' })
   })
@@ -79,6 +88,15 @@ describe('labs home (Wave E P1-15)', () => {
     const b = await renderLabs('labs', { stage: 'bogus' })
     expect(b.screen.getByText('worklist stage=none')).toBeTruthy()
   })
+
+  // WS4 T12
+  it('shows the critical banner with Log call for the lab and no Acknowledge', async () => {
+    const { screen } = await renderLabs('labs')
+    expect(screen.getByText(/CRITICAL · Platelets 38 ×10³\/µL; Haemoglobin 6\.5 g\/dL · Lakshmi Iyer \(UH000123\)/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /log the call/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /acknowledge/i })).toBeNull()
+  })
+  // end WS4 T12
 
   it('the pi gets the same tiles (it verifies results)', async () => {
     const { container } = await renderLabs('pi')

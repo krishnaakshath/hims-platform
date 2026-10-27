@@ -10,16 +10,22 @@ import { and, asc, count, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzl
 import { getDb } from '@/db/client'
 import {
   admissions, chargeLines, charges, encounterNotes, encounters, invoices, labOrders, labResults, labTests, medicationDispenses,
-  medicationInventory, patientPayments, patients, refunds, rooms,
+  medicationInventory, medicationBatches, patientPayments, patients, refunds, rooms,
 } from '@/db/schema'
-import { getOrSetCache } from '@/lib/cache'
+import { getOrSetCache, invalidateCache } from '@/lib/cache'
 import { startOfIstDay, todayIsoIn } from '@/lib/india-time'
+import { addDaysIso } from '@/lib/follow-ups/rules' // WS5 T4
+import { EXPIRING_SOON_DAYS } from '@/lib/queries/medications' // WS5 T4
 import { listFollowUpWorklist } from '@/lib/queries/follow-up-recall'
 import { countWorklistBuckets, type WorklistBucket } from '@/lib/follow-ups/worklist'
 import { getRcmDashboard } from '@/lib/queries/rcm-worklist'
 import { countPendingBookingRequests } from '@/lib/queries/booking-requests'
 import { snapshotScope, type HospitalSnapshot } from '@/lib/dashboard-tiles'
 import type { Role } from '@/lib/auth'
+import { dispenseNotBilledSql } from '@/lib/queries/medication-dispenses' // WS2 T8
+import { previewInvoiceReady } from '@/lib/queries/invoice-ready' // WS2 T12
+import { labResultSignoffs } from '@/db/schema' // WS4 T11
+import { labCriticalAlerts } from '@/db/schema' // WS4 T12
 
 const KPI_TTL_SECONDS = 20
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -100,18 +106,26 @@ export async function loadCollectionsToday(today: string): Promise<CollectionsTo
   return { date: today, receiptCount: n(p?.n), collectedPaise, refundedPaise, netPaise: collectedPaise - refundedPaise }
 }
 
-export interface BillingQueueKpi { draftInvoices: number; uninvoicedLines: number; uninvoicedPaise: number; pharmacyDraftCharges: number; pendingApprovalCharges: number }
+export interface BillingQueueKpi {
+  draftInvoices: number; uninvoicedLines: number; uninvoicedPaise: number; pharmacyDraftCharges: number; pendingApprovalCharges: number
+  /** WS2 T12: uninvoiced lines "Invoice all ready lines" would draft now (and their taxable value), and those waiting for the visit/stay to close. */
+  readyLines: number; readyPaise: number; waitingLines: number
+}
 
 /** Work waiting for billing: SP4 draft invoices, captured charge lines on no invoice yet (taxable value), and pharmacy bills (legacy charges from a dispense) still in draft. */
 export async function loadBillingQueue(): Promise<BillingQueueKpi> {
   const db = getDb()
-  const [[d], [l], [ph], [pa]] = await Promise.all([
+  const [[d], [l], [ph], [pa], ready] = await Promise.all([
     db.select({ n: count() }).from(invoices).where(eq(invoices.status, 'draft')),
     db.select({ n: count(), paise: sql<string | null>`sum(${chargeLines.taxablePaise})` }).from(chargeLines).where(and(eq(chargeLines.status, 'captured'), isNull(chargeLines.invoiceId))),
     db.select({ n: count() }).from(charges).innerJoin(medicationDispenses, eq(medicationDispenses.chargeId, charges.id)).where(eq(charges.status, 'draft')),
     db.select({ n: count() }).from(charges).where(eq(charges.status, 'pending_approval')),
+    previewInvoiceReady(), // WS2 T12
   ])
-  return { draftInvoices: n(d?.n), uninvoicedLines: n(l?.n), uninvoicedPaise: n(l?.paise), pharmacyDraftCharges: n(ph?.n), pendingApprovalCharges: n(pa?.n) }
+  return {
+    draftInvoices: n(d?.n), uninvoicedLines: n(l?.n), uninvoicedPaise: n(l?.paise), pharmacyDraftCharges: n(ph?.n), pendingApprovalCharges: n(pa?.n),
+    readyLines: ready.lines, readyPaise: ready.taxablePaise, waitingLines: ready.waitingLines,
+  }
 }
 
 // ---------- Labs ----------
@@ -127,13 +141,15 @@ export interface LabKpi {
   criticalToday: number
   /** Median minutes from sample collection to result entry, for results entered on the day. */
   medianTatMinutes: number | null
+  /** WS4 T12 (spec 3.5 item 26): critical alerts not yet acknowledged (open + notified). */
+  criticalOpen: number
 }
 
 /** Lab bench stages (same buckets as the worklist sections) and the day's result/TAT figures. */
 export async function loadLabKpis(today: string): Promise<LabKpi> {
   const db = getDb()
   const { start, end } = istDay(today)
-  const [stageRows, [crit], [day]] = await Promise.all([
+  const [stageRows, [crit], [day], [alerts]] = await Promise.all([
     db.select({ status: labOrders.status, n: count() }).from(labOrders).groupBy(labOrders.status),
     db.select({ n: count() }).from(labOrders).innerJoin(labResults, eq(labResults.labOrderId, labOrders.id))
       .where(and(eq(labOrders.status, 'resulted'), eq(labResults.flag, 'critical'))),
@@ -143,6 +159,7 @@ export async function loadLabKpis(today: string): Promise<LabKpi> {
       median: sql<string | null>`percentile_cont(0.5) within group (order by extract(epoch from (${labResults.resultedAt} - ${labOrders.collectedAt})) / 60) filter (where ${labOrders.collectedAt} is not null)`,
     }).from(labResults).innerJoin(labOrders, eq(labOrders.id, labResults.labOrderId))
       .where(and(gte(labResults.resultedAt, start), lt(labResults.resultedAt, end))),
+    db.select({ n: count() }).from(labCriticalAlerts).where(inArray(labCriticalAlerts.status, ['open', 'notified'])), // WS4 T12
   ])
   const by = Object.fromEntries(stageRows.map((r) => [r.status, n(r.n)])) as Partial<Record<string, number>>
   return {
@@ -155,32 +172,56 @@ export async function loadLabKpis(today: string): Promise<LabKpi> {
     resultedToday: n(day?.n),
     criticalToday: n(day?.critical),
     medianTatMinutes: day?.median === null || day?.median === undefined ? null : Math.round(Number(day.median)),
+    criticalOpen: n(alerts?.n), // WS4 T12
   }
 }
 
-/** Results on one doctor's own orders waiting for verification (the doctor home's "Results to verify"). */
-export async function countResultsToVerifyForProvider(providerId: number): Promise<number> {
-  const [r] = await getDb().select({ n: count() }).from(labOrders).where(and(eq(labOrders.orderedByProviderId, providerId), eq(labOrders.status, 'resulted')))
+// WS4 T11 (spec 3.4): verification moved to the reporting department, so the doctor home lists
+// verified results on the doctor's own orders that this doctor has not yet acknowledged.
+function resultsToReviewWhere(providerId: number) {
+  return and(
+    eq(labOrders.orderedByProviderId, providerId),
+    inArray(labOrders.status, ['verified', 'reported']),
+    sql`not exists (select 1 from ${labResultSignoffs} s where s.lab_order_id = ${labOrders.id} and s.kind = 'acknowledge' and s.provider_id = ${providerId})`,
+  )
+}
+
+/** Verified results on one doctor's own orders not yet acknowledged (the doctor home's "Results to review"). */
+export async function countResultsToReviewForProvider(providerId: number): Promise<number> {
+  const [r] = await getDb().select({ n: count() }).from(labOrders).where(resultsToReviewWhere(providerId))
   return n(r?.n)
 }
 
 // ---------- Pharmacy ----------
 
-export interface PharmacyKpi { outOfStock: number; lowStock: number; dispensedToday: number; unbilledDispenses: number }
+export interface PharmacyKpi {
+  outOfStock: number; lowStock: number; dispensedToday: number; unbilledDispenses: number
+  // WS5 T4: live batches (not written off, stock left) expiring within 90 days of `today` / already expired.
+  expiringIn90Days: number; expiredBatches: number
+}
 
-/** Stock alerts (same rule as the pharmacy stock table: 0 = out, at or below reorder = low) and the day's dispensing. */
+/** Stock alerts (same rule as the pharmacy stock table: 0 = out, at or below reorder = low), expiry alerts and the day's dispensing. */
 export async function loadPharmacyKpis(today: string): Promise<PharmacyKpi> {
   const db = getDb()
   const { start, end } = istDay(today)
-  const [[stock], [disp], [unbilled]] = await Promise.all([
+  const soonEnd = addDaysIso(today, EXPIRING_SOON_DAYS)
+  const [[stock], [disp], [unbilled], [expiry]] = await Promise.all([
     db.select({
       out: sql<string>`count(*) filter (where ${medicationInventory.quantityOnHand} = 0)`,
       low: sql<string>`count(*) filter (where ${medicationInventory.quantityOnHand} > 0 and ${medicationInventory.quantityOnHand} <= ${medicationInventory.reorderThreshold})`,
     }).from(medicationInventory),
     db.select({ n: count() }).from(medicationDispenses).where(and(gte(medicationDispenses.dispensedAt, start), lt(medicationDispenses.dispensedAt, end))),
-    db.select({ n: count() }).from(medicationDispenses).where(isNull(medicationDispenses.chargeId)),
+    // WS2 T8: not billed = no live charge line, no free-dispense reason, no pre-SP4 legacy bill.
+    db.select({ n: count() }).from(medicationDispenses).where(dispenseNotBilledSql),
+    db.select({
+      soon: sql<string>`count(*) filter (where ${medicationBatches.expiryDate} >= ${today} and ${medicationBatches.expiryDate} <= ${soonEnd})`,
+      expired: sql<string>`count(*) filter (where ${medicationBatches.expiryDate} < ${today})`,
+    }).from(medicationBatches).where(and(isNull(medicationBatches.writtenOffAt), sql`${medicationBatches.quantityOnHand} > 0`)),
   ])
-  return { outOfStock: n(stock?.out), lowStock: n(stock?.low), dispensedToday: n(disp?.n), unbilledDispenses: n(unbilled?.n) }
+  return {
+    outOfStock: n(stock?.out), lowStock: n(stock?.low), dispensedToday: n(disp?.n), unbilledDispenses: n(unbilled?.n),
+    expiringIn90Days: n(expiry?.soon), expiredBatches: n(expiry?.expired),
+  }
 }
 
 // ---------- Follow-ups ----------
@@ -203,7 +244,7 @@ export interface DoctorNoteRow { noteId: number; patientId: string; patientName:
 export interface DoctorWorkload {
   encountersToday: DoctorEncounterRow[]
   inpatients: DoctorInpatientRow[]
-  resultsToVerify: DoctorLabRow[]
+  resultsToReview: DoctorLabRow[] // WS4 T11 (was resultsToVerify)
   labsAwaitingResult: number
   followUps: DoctorFollowUpRow[]
   unsignedNotes: number
@@ -214,8 +255,8 @@ const FLAG_ORDER = { critical: 0, abnormal: 1, normal: 2 } as const
 const DOCTOR_LIST_LIMIT = 50
 
 /**
- * One doctor's own work: today's OPD (open tokens), current inpatients, results
- * on orders they placed that wait for verification (critical first), lab orders
+ * One doctor's own work: today's OPD (open tokens), current inpatients, verified results
+ * on orders they placed that they have not acknowledged (critical first; WS4 T11), lab orders
  * still before a result, due/overdue follow-ups they prescribed, and their
  * draft notes. Matched by provider id; notes carry only the author's name.
  */
@@ -233,7 +274,7 @@ export async function loadDoctorWorkload({ providerId, authorName, today }: { pr
       .orderBy(asc(admissions.admittedAt)).limit(DOCTOR_LIST_LIMIT),
     db.select({ orderId: labOrders.id, patientId: labOrders.patientId, patientName: patients.name, uhid: patients.uhid, testName: labTests.name, flag: labResults.flag, resultedAt: labResults.resultedAt })
       .from(labOrders).innerJoin(labResults, eq(labResults.labOrderId, labOrders.id)).innerJoin(labTests, eq(labTests.id, labOrders.labTestId)).innerJoin(patients, eq(patients.id, labOrders.patientId))
-      .where(and(eq(labOrders.orderedByProviderId, providerId), eq(labOrders.status, 'resulted')))
+      .where(resultsToReviewWhere(providerId)) // WS4 T11
       .orderBy(desc(labResults.resultedAt)).limit(DOCTOR_LIST_LIMIT),
     db.select({ n: count() }).from(labOrders).where(and(eq(labOrders.orderedByProviderId, providerId), inArray(labOrders.status, ['ordered', 'scheduled', 'collected', 'received']))),
     db.select({ n: count() }).from(encounterNotes).where(noteScope),
@@ -253,7 +294,7 @@ export async function loadDoctorWorkload({ providerId, authorName, today }: { pr
       admissionId: r.admissionId, patientId: r.patientId, patientName: r.patientName, uhid: r.uhid, ward: r.ward,
       bed: r.roomNumber !== null && r.bedNumber !== null ? `${r.roomNumber}-${r.bedNumber}` : null, admittedAt: r.admittedAt.toISOString(),
     })),
-    resultsToVerify: labRows
+    resultsToReview: labRows
       .map((r) => ({ ...r, resultedAt: r.resultedAt.toISOString() }))
       .sort((a, b) => FLAG_ORDER[a.flag] - FLAG_ORDER[b.flag]),
     labsAwaitingResult: n(pending?.n),
@@ -294,13 +335,27 @@ export const getCollectionsToday = (today = todayIsoIn()) =>
   getOrSetCache(hospitalKpiCacheKey('collections', today), KPI_TTL_SECONDS, () => loadCollectionsToday(today))
 export const getBillingQueue = () => getOrSetCache(hospitalKpiCacheKey('billing-queue'), KPI_TTL_SECONDS, () => loadBillingQueue())
 export const getLabKpis = (today = todayIsoIn()) => getOrSetCache(hospitalKpiCacheKey('labs', today), KPI_TTL_SECONDS, () => loadLabKpis(today))
+// WS4 T9 (spec 3.5 item 26, lane ruling R6): every result write (and, from Task 12, every verify,
+// notify and acknowledge) drops today's lab KPI entry so the tiles never lag a critical value.
+// Never throws (invalidateCache logs a failure); call it after the write has committed.
+export async function invalidateLabKpis(now: Date = new Date()): Promise<void> {
+  await invalidateCache(hospitalKpiCacheKey('labs', todayIsoIn(undefined, now)))
+}
+// end WS4 T9
 export const getPharmacyKpis = (today = todayIsoIn()) =>
   getOrSetCache(hospitalKpiCacheKey('pharmacy', today), KPI_TTL_SECONDS, () => loadPharmacyKpis(today))
 export const getFollowUpBuckets = (providerId: number | null = null, today = todayIsoIn()) =>
   getOrSetCache(hospitalKpiCacheKey('follow-ups', today, providerId ?? 'all'), KPI_TTL_SECONDS, () => loadFollowUpBuckets(today, providerId))
 export const getClaimAgeing = () => getOrSetCache(hospitalKpiCacheKey('claims'), 60, () => loadClaimAgeing())
+const doctorWorkloadKey = (providerId: number, authorName: string, today: string) =>
+  hospitalKpiCacheKey('doctor', today, providerId, encodeURIComponent(authorName))
 export const getDoctorWorkload = (providerId: number, authorName: string, today = todayIsoIn()) =>
-  getOrSetCache(hospitalKpiCacheKey('doctor', today, providerId, encodeURIComponent(authorName)), KPI_TTL_SECONDS, () => loadDoctorWorkload({ providerId, authorName, today }))
+  getOrSetCache(doctorWorkloadKey(providerId, authorName, today), KPI_TTL_SECONDS, () => loadDoctorWorkload({ providerId, authorName, today }))
+// WS4 T11: an acknowledgement removes the result from the doctor's "Results to review" at once.
+// Never throws (invalidateCache logs a failure); call it after the write has committed.
+export async function invalidateDoctorWorkloadCache(providerId: number, authorName: string, now: Date = new Date()): Promise<void> {
+  await invalidateCache(doctorWorkloadKey(providerId, authorName, todayIsoIn(undefined, now)))
+}
 
 /** The hospital overview for one role: only the sections that role may open (dashboard-tiles.ts). */
 export async function getHospitalSnapshot(role: Role): Promise<HospitalSnapshot> {

@@ -17,7 +17,7 @@ import { getDb } from '@/db/client'
 import { followUpOrders, labOrders, labReports, labRequisitions, labResults, labTests, patients, providers } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
 import type { Session } from '@/lib/auth'
-import { brand } from '@/lib/brand'
+import { getBrand, readStoredBrandPng } from '@/lib/brand-server'
 import { isUniqueViolation } from '@/lib/db-errors'
 import { istDateOf } from '@/lib/india-time'
 import { buildLabReportData, hospitalFromBrand, type LabReportData, type LabReportSource } from '@/lib/labs/report-data'
@@ -25,8 +25,9 @@ import { renderLabReportPdf } from '@/lib/labs/report-pdf'
 import { PRE_RESULT_STATUSES, type LabOrderStatus } from '@/lib/labs/status'
 import { putPrivateBlob } from '@/lib/blob-store'
 import { createFollowUpOrder } from './follow-ups'
+import { listAnalyteResults } from './lab-result-values' // WS4 T10
+import { listSignoffs } from './lab-signoffs' // WS4 T11
 import type { WriteExecutor } from './executor'
-import { getPracticeIdentity } from './settings'
 
 export type LabReportRow = typeof labReports.$inferSelect
 export type LabRequisitionRow = typeof labRequisitions.$inferSelect
@@ -103,14 +104,14 @@ function fingerprint(rows: { id: number; status: LabOrderStatus; amendedAt: Date
 const sameFingerprint = (a: Fingerprint, b: Fingerprint) =>
   a.verified.join(',') === b.verified.join(',') && a.reported.join(',') === b.reported.join(',') && a.amended === b.amended
 
-async function hospitalHeader(): Promise<LabReportData['hospital']> {
-  let site: string | null = null
-  try {
-    site = (await getPracticeIdentity()).practiceSite
-  } catch {
-    site = null
-  }
-  return hospitalFromBrand(brand, site)
+/**
+ * WL T10: the report header from the brand resolved at request time (getBrand never throws) and
+ * the stored light logo's bytes (null when there is none or it cannot be read; logged by error
+ * class only, never the blob URL). The subline is the billing address, else the practice site.
+ */
+export async function labReportHospital(): Promise<LabReportData['hospital']> {
+  const [b, logoPng] = await Promise.all([getBrand(), readStoredBrandPng('logo_light')])
+  return hospitalFromBrand(b, logoPng)
 }
 
 function summarize(names: string[]): string {
@@ -147,9 +148,11 @@ export async function releaseLabReport(requisitionId: number, session: Session, 
     .where(eq(labReports.requisitionId, requisitionId))
   const version = Number(maxVersion ?? 0) + 1
 
-  // 3. Render and store, before any lock.
+  // 3. Render and store, before any lock. WS4 T10: analyte values in definition order; an
+  // amendment between here and the lock changes amendedAt, so the fingerprint catches it.
+  const [analytes, signoffs] = await Promise.all([listAnalyteResults(snapshot.map((o) => o.id)), listSignoffs(snapshot.map((o) => o.id))])
   const source: LabReportSource = {
-    hospital: await hospitalHeader(),
+    hospital: await labReportHospital(),
     reportNumber,
     version,
     patient,
@@ -163,7 +166,9 @@ export async function releaseLabReport(requisitionId: number, session: Session, 
       receivedAt: o.receivedAt,
       verifiedAt: o.verifiedAt,
       verifiedByName: o.verifiedByName,
-      result: { value: o.value, unit: o.unit, referenceRange: o.referenceRange, flag: o.flag },
+      result: { value: o.value, unit: o.unit, referenceRange: o.referenceRange, flag: o.flag, analytes: analytes.get(o.id) ?? [] },
+      // WS4 T11 (lane ruling R5): the co-signing providers, oldest first.
+      cosignedBy: (signoffs.get(o.id) ?? []).filter((x) => x.kind === 'cosign').map((x) => x.providerName),
     })),
   }
   const bytes = await deps.render(buildLabReportData(source, now))

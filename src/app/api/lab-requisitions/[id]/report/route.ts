@@ -3,7 +3,7 @@
 // are sent only after it has committed, with a stable dedupe key, and never fail the request.
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth'
-import { brand } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 import { LAB_REPORT_RELEASE_ROLES } from '@/lib/role-policy'
 import { releaseLabReport } from '@/lib/queries/lab-reports'
 import { notifyPatientSafely } from '@/lib/queries/notifications'
@@ -37,10 +37,11 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
 
   // After commit. Each never throws.
   const { report, followUp } = result
+  const { smsName } = await getBrand()
   await notifyPatientSafely(session, {
     patientId: report.patientId,
     templateKey: 'lab_report_ready',
-    vars: { hospitalName: brand.name },
+    vars: { hospitalName: smsName },
     related: { type: 'lab_report', id: report.id },
     dedupeKey: `lab_report_ready:report=${report.id}`,
   })

@@ -82,6 +82,8 @@ export async function registerPatient(input: PatientRegistrationInput, session: 
       primaryPlanType: input.primaryPlanType ?? null,
       primarySubscriberName: input.primarySubscriberName ?? null,
       primarySubscriberRelationship: input.primarySubscriberRelationship ?? null,
+      referralSource: input.referralSource ?? null, // WS6 T8
+      referralNote: input.referralSource ? (input.referralNote ?? null) : null, // WS6 T8
     })
 
     if (input.contacts.length > 0) {

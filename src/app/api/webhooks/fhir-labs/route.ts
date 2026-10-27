@@ -8,6 +8,8 @@ import { recordLabResult } from '@/lib/queries/lab-lifecycle'
 import { isAcceptedLisObservationStatus } from '@/lib/labs/status'
 import { RETRY_MESSAGE, isRetryableConflict } from '@/lib/db-errors'
 // end SP5
+import { invalidateLabKpis } from '@/lib/queries/hospital-kpis' // WS4 T9
+import { analyteEntryError } from '@/lib/labs/route-responses' // WS4 T9
 // In a real HIPAA-compliant integration, you would verify an API key,
 // mutual TLS (mTLS), or OAuth 2.0 Client Credentials token from your LIS
 // (Lab Information System) like Quest Diagnostics, LabCorp, or an interface engine (Redox).
@@ -118,10 +120,13 @@ export async function POST(request: NextRequest) {
       notes: 'Received electronically via FHIR LIS interface',
     }, { kind: 'lis' }, { expectedPatientId })
 
+    // WS4 T9 (spec 3.3 item 22): one Observation cannot fill a test entered per analyte.
+    if (!result.ok && result.error === 'analytes_required') return analyteEntryError('analytes_required')
     if (!result.ok) {
       return NextResponse.json({ error: 'Order not found, not awaiting a result, or does not belong to this patient' }, { status: 409 })
     }
 
+    await invalidateLabKpis() // WS4 T9
     return NextResponse.json({ ok: true, message: 'Electronic lab result processed successfully' })
   } catch (error) {
     // SP5: a deadlock / serialization failure wrote nothing; the LIS may retry.
