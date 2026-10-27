@@ -12,6 +12,7 @@ import { getDb } from '@/db/client'
 import {
   DATA_PRINCIPAL_CHECKLIST_KEYS,
   dataPrincipalRequests,
+  patientContacts,
   patients,
   type DataPrincipalChecklist,
   type DataPrincipalChecklistKey,
@@ -26,6 +27,7 @@ import { retentionBlocksErasure } from '@/lib/governance/retention'
 import { todayIsoIn } from '@/lib/india-time'
 import { archivePatient } from '@/lib/queries/patient-archive'
 import { resetPatientMfa, revokePatientPortalAccess } from '@/lib/queries/patient-portal'
+import { deletePatient } from '@/lib/queries/patients'
 
 export type DataPrincipalRequestKind = (typeof dataPrincipalRequests.kind.enumValues)[number]
 export type DataPrincipalRequestVia = (typeof dataPrincipalRequests.receivedVia.enumValues)[number]
@@ -285,8 +287,11 @@ export type ErasureCheck =
   | { ok: false; error: 'not_found' | 'not_erasure' | 'closed' | 'no_patient' | 'uhid_mismatch' }
 
 /** Facts for the retention schedule: any financial record, the MLC flag, the last visit date (IST). */
-async function retentionFacts(patientId: string): Promise<{ hasFinancial: boolean; hasMlc: boolean; lastEncounterDate: string | null }> {
-  const result = await getDb().execute<{ has_financial: boolean; has_mlc: boolean; last_date: string | null }>(sql`
+async function retentionFacts(
+  patientId: string,
+  db: Pick<ReturnType<typeof getDb>, 'execute'> = getDb(),
+): Promise<{ hasFinancial: boolean; hasMlc: boolean; lastEncounterDate: string | null }> {
+  const result = await db.execute<{ has_financial: boolean; has_mlc: boolean; last_date: string | null }>(sql`
     select
       (exists (select 1 from invoices where patient_id = ${patientId})
         or exists (select 1 from charge_lines where patient_id = ${patientId})
@@ -339,7 +344,7 @@ export type RestrictResult = { ok: true } | { ok: false; error: 'active_admissio
 
 /**
  * Retention applies: archive the chart (Task 13; an already-archived chart stays archived) and scrub
- * its contact fields, photo and portal credentials. Every clinical, financial and medico-legal
+ * its contact fields, next-of-kin/emergency contacts, photo and portal credentials. Every clinical, financial and medico-legal
  * record is kept. Re-running after a partial failure is safe.
  */
 export async function restrictPatientForErasure(check: Extract<ErasureCheck, { ok: true }>, session: Session): Promise<RestrictResult> {
@@ -363,11 +368,13 @@ export async function restrictPatientForErasure(check: Extract<ErasureCheck, { o
       .update(patients)
       .set({ phone: null, email: null, addressLine1: null, addressLine2: null, photoBlobPath: null })
       .where(eq(patients.id, check.patientId))
+    // Next-of-kin, guardian and emergency contacts are contact data too (spec D18).
+    const contacts = await tx.delete(patientContacts).where(eq(patientContacts.patientId, check.patientId)).returning({ id: patientContacts.id })
     await tx
       .update(dataPrincipalRequests)
       .set({ checklist: sql`${dataPrincipalRequests.checklist} || '{"erasure_reviewed": true}'::jsonb`, handledByName: session.name })
       .where(eq(dataPrincipalRequests.id, check.requestId))
-    await logAudit(session, 'restricted patient data (DPDP erasure)', check.patientId, `request=${check.requestId} reasons=${check.reasons.length}`, tx)
+    await logAudit(session, 'restricted patient data (DPDP erasure)', check.patientId, `request=${check.requestId} reasons=${check.reasons.length} contacts=${contacts.length}`, tx)
     return p?.photo ?? null
   })
   if (photo) await deletePrivateBlob(photo)
@@ -375,6 +382,33 @@ export async function restrictPatientForErasure(check: Extract<ErasureCheck, { o
   await invalidateCacheByPrefix(patientListCachePrefix())
   await invalidateCache(dashboardCacheKey())
   return { ok: true }
+}
+
+/** The retention schedule now keeps records that the erasure check did not see: nothing was deleted. */
+export class RetentionAppliesError extends Error {
+  constructor(readonly reasons: string[]) {
+    super('retention_applies')
+    this.name = 'RetentionAppliesError'
+  }
+}
+
+/**
+ * No retention reason at check time: delete the chart. The retention schedule is evaluated again
+ * inside deletePatient's transaction, after the patient row is locked FOR UPDATE (a new encounter or
+ * admission, or an MLC flag, cannot be written while the lock is held), so a chart that gained a
+ * reason since checkErasure is never deleted -- RetentionAppliesError, and nothing changes.
+ * Returns false when the chart is already gone.
+ */
+export async function erasePatientForRequest(check: Extract<ErasureCheck, { ok: true }>, session: Session, todayIso: string = todayIsoIn()): Promise<boolean> {
+  const deleted = await deletePatient(check.patientId, { session, action: 'erased patient (DPDP)' }, {
+    guard: async (tx) => {
+      const reasons = retentionBlocksErasure(await retentionFacts(check.patientId, tx), todayIso)
+      if (reasons.length > 0) throw new RetentionAppliesError(reasons)
+    },
+  })
+  if (!deleted) return false
+  await recordErasedChart(check, session)
+  return true
 }
 
 /**

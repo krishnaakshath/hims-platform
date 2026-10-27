@@ -48,6 +48,7 @@ import { labCriticalAlerts } from '@/db/schema' // WS4 T12
 import { logAudit } from '@/lib/audit'
 import { lockPatientBilling } from './charge-capture' // SP4
 import type { Session } from '@/lib/auth'
+import { deletePrivateBlob } from '@/lib/blob-store' // WS8 T14
 
 export interface CriteriaSummary {
   inclusionMet: number
@@ -502,6 +503,8 @@ export async function listPharmacyPatientRoster(): Promise<PharmacyRosterRow[]> 
 }
 
 type DeleteTx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
+/** The transaction deletePatient's `guard` runs in (WS8 T14). */
+export type DeletePatientTx = DeleteTx
 
 // SP4 (plan ruling 11): issued bills, receipts and refunds are tax records that must be kept,
 // so a patient who has any cannot be deleted. The DELETE route maps this to a 409.
@@ -557,10 +560,18 @@ async function hasNhcxExchanges(db: DeleteTx, anonId: string): Promise<boolean> 
  * patient-linked tables: extend deletePatientRows (inside the transaction),
  * never add deletes outside it.
  */
-export async function deletePatient(anonId: string, audit?: { session: Session; action?: string }): Promise<boolean> {
-  const outcome = await getDb().transaction((db) => deletePatientRows(db, anonId, audit))
+export async function deletePatient(
+  anonId: string,
+  audit?: { session: Session; action?: string },
+  // WS8 T14: runs inside the transaction once the patient row is locked FOR UPDATE and the
+  // financial guards passed, before anything is deleted; throwing aborts the whole delete.
+  opts?: { guard?: (tx: DeleteTx) => Promise<void> },
+): Promise<boolean> {
+  const outcome = await getDb().transaction((db) => deletePatientRows(db, anonId, audit, opts?.guard))
   if (!outcome) return false
-  const { screenings } = outcome
+  const { screenings, exportBlobUrls } = outcome
+  // WS8 T14: export bundles of the erased chart (any request's) are unreachable now; remove them.
+  for (const url of exportBlobUrls) await deletePrivateBlob(url)
 
   await invalidateCache(patientDetailCacheKey(anonId))
   await invalidateCache(patientListCacheKey(null))
@@ -574,7 +585,7 @@ export async function deletePatient(anonId: string, audit?: { session: Session; 
 }
 
 // The body of deletePatient's transaction: `db` here IS the transaction.
-async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session: Session; action?: string } | undefined) {
+async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session: Session; action?: string } | undefined, guard?: (tx: DeleteTx) => Promise<void>) {
   // SP4: the billing lock first (the order every billing write uses), so a concurrent receipt or
   // capture for this patient either commits before the check below or waits for the delete.
   await lockPatientBilling(db, anonId)
@@ -584,6 +595,7 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   if (await hasFinancialRecords(db, anonId)) throw new PatientHasFinancialRecordsError()
   if (await hasRetainedClaimRecords(db, anonId)) throw new PatientHasFinancialRecordsError() // SP7
   if (await hasNhcxExchanges(db, anonId)) throw new PatientHasFinancialRecordsError() // SP8
+  if (guard) await guard(db) // WS8 T14: e.g. the DPDP retention schedule, re-checked under the lock
 
   // WS12 T1, before SP8 and SP7: verifications reference eligibility checks and policies;
   // admission coverage references admissions, policies, pre-auths and verifications.
@@ -839,13 +851,16 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   await db.delete(drugAccountabilityEntries).where(eq(drugAccountabilityEntries.patientId, anonId))
   await db.delete(signatures).where(eq(signatures.patientId, anonId))
 
-  // WS8 T14: a DPDP request register entry outlives the chart an erasure deletes; only its link goes.
-  await db.update(dataPrincipalRequests).set({ patientId: null }).where(eq(dataPrincipalRequests.patientId, anonId))
+  // WS8 T14: a DPDP request register entry outlives the chart an erasure deletes; its link and any
+  // export bundle (it holds the deleted chart) go. The bundles are removed after commit.
+  const exported = await db.select({ url: dataPrincipalRequests.exportBlobUrl }).from(dataPrincipalRequests)
+    .where(eq(dataPrincipalRequests.patientId, anonId)).for('update')
+  await db.update(dataPrincipalRequests).set({ patientId: null, exportBlobUrl: null }).where(eq(dataPrincipalRequests.patientId, anonId))
 
   await db.delete(patients).where(eq(patients.id, anonId))
   if (audit) await logAudit(audit.session, audit.action ?? 'deleted patient record', anonId, null, db)
 
-  return { screenings }
+  return { screenings, exportBlobUrls: exported.map((r) => r.url).filter((u): u is string => u !== null) }
 }
 
 export interface PatientPrintIdentity {

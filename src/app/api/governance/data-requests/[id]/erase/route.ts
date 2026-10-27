@@ -3,14 +3,14 @@ import { z } from 'zod'
 import { requireSession } from '@/lib/auth'
 import { invalidIdResponse, parseId, readJsonBody } from '@/lib/http'
 import { RETRY_MESSAGE, isRetryableConflict } from '@/lib/db-errors'
-import { deletePatient, PatientHasFinancialRecordsError } from '@/lib/queries/patients'
-import { checkErasure, recordErasedChart, restrictPatientForErasure } from '@/lib/queries/data-principal-requests'
+import { PatientHasFinancialRecordsError } from '@/lib/queries/patients'
+import { checkErasure, erasePatientForRequest, restrictPatientForErasure, RetentionAppliesError } from '@/lib/queries/data-principal-requests'
 
 // WS8 T14 (spec D18): act on a DPDP erasure request. Admin only; the admin types the patient's UHID.
 // When the retention schedule keeps records (financial, medico-legal or recent medical records) the
 // chart is archived and its contact fields, photo and portal credentials are scrubbed -- outcome
 // 'restricted' with the reasons. Otherwise the chart is deleted -- outcome 'erased'. This is the only
-// route that may call deletePatient (tests/api/patients-archive.test.ts).
+// route that may call deletePatient, through erasePatientForRequest (tests/api/patients-archive.test.ts).
 const bodySchema = z.object({ confirmUhid: z.string().trim().min(1).max(64) }).strict()
 
 const ERRORS = {
@@ -48,11 +48,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
       return NextResponse.json({ outcome: 'restricted', reasons: check.reasons })
     }
-    const deleted = await deletePatient(check.patientId, { session, action: 'erased patient (DPDP)' })
+    const deleted = await erasePatientForRequest(check, session)
     if (!deleted) return NextResponse.json({ error: ERRORS.no_patient.message, code: 'no_patient' }, { status: 409 })
-    await recordErasedChart(check, session)
     return NextResponse.json({ outcome: 'erased' })
   } catch (err) {
+    if (err instanceof RetentionAppliesError) {
+      return NextResponse.json({ error: 'Records that must be kept were added meanwhile; act on the request again.', code: 'retained_records', reasons: err.reasons }, { status: 409 })
+    }
     if (err instanceof PatientHasFinancialRecordsError) {
       return NextResponse.json({ error: 'Financial records were added meanwhile; act on the request again.', code: 'retained_records' }, { status: 409 })
     }
