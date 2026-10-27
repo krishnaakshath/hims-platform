@@ -17,10 +17,13 @@ import type { AdmitPatientRequest } from '@/lib/inpatient/validation'
 import { formatPaise, formatRupeesWhole, parseRupeesToPaise } from '@/lib/money'
 import { VISIT_REASON_MAX_LENGTH } from '@/lib/notification-templates'
 import type { AdmissionFormContext } from '@/lib/queries/admission-form-context'
+import { CoverageBadge } from '@/components/insurance/CoverageBadge'
+import type { CoverageVerdict } from '@/lib/insurance/coverage'
 
 type AdmissionType = AdmitPatientRequest['admissionType']
 type Bed = AdmissionFormContext['beds'][number]
-interface Admitted { uhid: string | null; roomLabel: string; depositRequiredPaise: number; cashDeskHref?: string }
+interface Admitted { uhid: string | null; roomLabel: string; depositRequiredPaise: number; cashDeskHref?: string; coverage?: CoverageVerdict; eligibility?: { started: boolean; message?: string } }
+type CoverMode = 'cashless' | 'reimbursement'
 
 const ADMISSION_TYPES: AdmissionType[] = ['elective', 'emergency', 'transfer_in']
 const FIELD = 'w-full rounded-md border border-border bg-background px-3 py-2 text-sm'
@@ -66,6 +69,10 @@ export function AdmitPatientModal({ patient, initialRoomId = null, providers, on
   const [policyId, setPolicyId] = useState<number | ''>('')
   const [preauthId, setPreauthId] = useState<number | ''>('')
   const [deposit, setDeposit] = useState('')
+  const [coverMode, setCoverMode] = useState<CoverMode>('cashless')
+  // WS12 T9: each policy's verdict at IPD admission (a cashless stay whose cover blocks is refused
+  // unless it is an emergency; the route re-checks). Null when the cover cannot be read.
+  const [verdicts, setVerdicts] = useState<Map<number, CoverageVerdict> | null>(null)
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -84,6 +91,22 @@ export function AdmitPatientModal({ patient, initialRoomId = null, providers, on
     return () => { live = false }
   }, [patient.id, initialRoomId])
 
+  useEffect(() => {
+    let live = true
+    void fetchJson<{ policies: { policyId: number; verdict: CoverageVerdict }[] }>(`/api/patients/${encodeURIComponent(patient.id)}/coverage?context=ipd_admission`).then((r) => {
+      if (live && r.ok && Array.isArray(r.data?.policies)) setVerdicts(new Map(r.data.policies.map((p) => [p.policyId, p.verdict])))
+    })
+    return () => { live = false }
+  }, [patient.id])
+
+  /** R12: the deposit default follows the payer: the self-pay threshold, nothing for an insured stay. */
+  function choosePayer(next: number | '') {
+    setPolicyId(next)
+    setPreauthId('')
+    setCoverMode('cashless')
+    if (ctx) setDeposit(rupeesInput(next === '' ? ctx.depositThresholdPaise : 0))
+  }
+
   const bed = ctx?.beds.find((b) => b.id === roomId) ?? null
   const needsOverride = bed?.conflict != null
   const attendantFilled = [attendant.name, attendant.relationship, attendant.phone].map((s) => s.trim())
@@ -92,11 +115,14 @@ export function AdmitPatientModal({ patient, initialRoomId = null, providers, on
   const days = /^\d+$/.test(stayDays.trim()) ? Number(stayDays.trim()) : NaN
   const preauthChoices = ctx && policyId !== '' ? ctx.preauths.filter((p) => p.policyId === policyId) : []
   const diagnosisOk = typed ? diagnosisText.trim().length >= 3 : code !== null
+  const verdict = policyId !== '' ? verdicts?.get(policyId) ?? null : null
+  const emergency = admissionType === 'emergency'
+  const coverBlocks = policyId !== '' && coverMode === 'cashless' && verdict?.severity === 'block' && !emergency
 
   const valid = ctx !== null && ctx.activeAdmissionId === null && providerId !== '' && reason.trim() !== '' && diagnosisOk
     && Number.isInteger(days) && days >= 1 && days <= 365 && bed !== null
     && (!needsOverride || overrideReason.trim().length >= OVERRIDE_REASON_MIN)
-    && attendantState !== 'partial' && depositPaise !== null
+    && attendantState !== 'partial' && depositPaise !== null && !coverBlocks
 
   function body(openOpdVisit: AdmitPatientRequest['openOpdVisit']): AdmitPatientRequest {
     return {
@@ -110,6 +136,7 @@ export function AdmitPatientModal({ patient, initialRoomId = null, providers, on
       attendant: attendantState === 'complete' ? { name: attendantFilled[0], relationship: attendantFilled[1], phone: attendantFilled[2] } : null,
       policyId: policyId === '' ? null : policyId,
       preauthId: policyId === '' || preauthId === '' ? null : preauthId,
+      coverageMode: policyId === '' ? 'self_pay' : coverMode,
       depositRequiredPaise: depositPaise ?? 0,
       wardGenderOverrideReason: needsOverride ? overrideReason.trim() : null,
       openOpdVisit,
@@ -145,6 +172,8 @@ export function AdmitPatientModal({ patient, initialRoomId = null, providers, on
             <hr className="border-border" />
             <p className="text-sm text-muted-foreground">Bed</p>
             <p className="text-lg font-semibold text-foreground">{admitted.roomLabel}</p>
+            {admitted.coverage && <p className="flex flex-wrap items-center justify-center gap-2 text-sm"><span className="text-muted-foreground">Insurance</span><CoverageBadge verdict={admitted.coverage} /></p>}
+            {admitted.eligibility?.message && <p className="text-xs text-muted-foreground">{admitted.eligibility.message}</p>}
             {admitted.depositRequiredPaise > 0 && (
               <p className="text-sm text-muted-foreground">Deposit to collect: <span className="font-medium text-foreground">{money(admitted.depositRequiredPaise)}</span></p>
             )}
@@ -238,10 +267,24 @@ export function AdmitPatientModal({ patient, initialRoomId = null, providers, on
 
             <fieldset className={SECTION}>
               <legend className={LEGEND}>Payer</legend>
-              <select value={policyId} onChange={(e) => { setPolicyId(e.target.value === '' ? '' : Number(e.target.value)); setPreauthId('') }} aria-label="Payer" className={FIELD}>
+              <select value={policyId} onChange={(e) => choosePayer(e.target.value === '' ? '' : Number(e.target.value))} aria-label="Payer" className={FIELD}>
                 <option value="">Self-pay</option>
                 {ctx.policies.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
               </select>
+              {policyId !== '' && (
+                <select value={coverMode} onChange={(e) => setCoverMode(e.target.value as CoverMode)} aria-label="Cover type" className={FIELD}>
+                  <option value="cashless">Cashless</option>
+                  <option value="reimbursement">Reimbursement (patient pays, claims later)</option>
+                </select>
+              )}
+              {verdict && (
+                <div className="space-y-1 text-sm">
+                  <p className="flex flex-wrap items-center gap-2"><span className="text-muted-foreground">Cover</span><CoverageBadge verdict={verdict} /></p>
+                  {verdict.detail && <p className="text-xs text-muted-foreground">{verdict.detail}</p>}
+                  {coverBlocks && <p role="alert" className="text-xs text-destructive">A cashless admission needs cover in force. Choose Reimbursement or Self-pay, or fix the policy.</p>}
+                  {coverMode === 'cashless' && verdict.severity === 'block' && emergency && <p className="text-xs text-warning">Emergency admission: proceeding, settle cover or self-pay later.</p>}
+                </div>
+              )}
               {policyId !== '' && (
                 <select value={preauthId} onChange={(e) => setPreauthId(e.target.value === '' ? '' : Number(e.target.value))} aria-label="Pre-authorisation" className={FIELD}>
                   <option value="">No pre-authorisation</option>

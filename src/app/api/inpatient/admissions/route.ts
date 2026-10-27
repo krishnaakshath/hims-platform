@@ -8,6 +8,7 @@ import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { readJsonBody } from '@/lib/http'
 import { admitPatientSchema } from '@/lib/inpatient/validation'
 import { admitPatient, type AdmitPatientError } from '@/lib/queries/admit-patient'
+import { maybeStartEligibility } from '@/lib/queries/coverage'
 import { ADMISSION_ROLES } from '@/lib/role-policy'
 
 // WS3 T2: the one admission path (spec 3.1). Fixed messages; never echo input.
@@ -19,8 +20,9 @@ const ERRORS: Record<AdmitPatientError, { status: number; error: string }> = {
   open_opd_visit: { status: 409, error: 'The patient has an open OPD visit today. Choose whether to complete it or keep it open.' },
   ward_gender_conflict: { status: 422, error: 'This bed is in a ward for the other gender. Give a reason to override, or choose another bed.' },
   policy_mismatch: { status: 422, error: 'That policy does not belong to this patient.' },
-  policy_inactive: { status: 422, error: 'That policy is not active today.' },
   preauth_mismatch: { status: 422, error: 'That pre-authorisation cannot be used for this admission.' },
+  preauth_closed: { status: 409, error: 'That pre-authorisation was rejected or cancelled.' },
+  coverage_blocked: { status: 409, error: 'The policy does not cover this admission today. Fix the policy or admit as self-pay.' },
   code_not_found: { status: 422, error: 'That diagnosis code is not in the current ICD-10 version.' },
 }
 
@@ -55,12 +57,18 @@ export async function POST(request: NextRequest) {
         error: mapped.error, code: result.error,
         ...(result.conflict ? { conflict: result.conflict } : {}),
         ...(result.openEncounterId !== undefined ? { openEncounterId: result.openEncounterId } : {}),
+        ...(result.coverage ? { state: result.coverage.state, coverage: result.coverage } : {}),
       }, { status: mapped.status })
     }
+    // WS12 T9 (R5): after the commit, an NHCX check for the stay's policy when one can help; never fails the admission.
+    const eligibility = result.coverageMode !== 'self_pay' && input.policyId !== null
+      ? await maybeStartEligibility({ policyId: input.policyId, context: 'admission', providerId: input.attendingProviderId }, session)
+      : undefined
     const deposit = input.depositRequiredPaise
     return NextResponse.json({
       admissionId: result.admissionId, encounterId: result.encounterId, patientId: patient.id, uhid: patient.uhid,
-      roomLabel: result.roomLabel, depositRequiredPaise: deposit,
+      roomLabel: result.roomLabel, depositRequiredPaise: deposit, coverage: result.coverage,
+      ...(eligibility ? { eligibility } : {}),
       ...(deposit > 0 ? { cashDeskHref: `/cash-desk?patientId=${encodeURIComponent(patient.id)}&amountPaise=${deposit}` } : {}),
     }, { status: 201 })
   } catch (err) {
