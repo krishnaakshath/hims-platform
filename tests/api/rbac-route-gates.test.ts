@@ -623,6 +623,10 @@ import { HOSPITAL_REPORTS } from '@/lib/reports/catalog'
 import { GET as getPatientCoverage } from '@/app/api/patients/[anonId]/coverage/route'
 import { COVERAGE_READ_ROLES } from '@/lib/role-policy'
 // end WS12 T2
+// WS12 T9
+import { PUT as putAdmissionCoverage } from '@/app/api/admissions/[id]/coverage/route'
+import { ADMISSION_COVERAGE_ROLES } from '@/lib/role-policy'
+// end WS12 T9
 // WS12 T3
 import { POST as postPolicyVerification } from '@/app/api/rcm/policies/[id]/verifications/route'
 import { GET as getVerificationDocument } from '@/app/api/rcm/verification-documents/[id]/route'
@@ -1203,6 +1207,9 @@ const API_GATES: ApiGateCase[] = [
   { name: 'POST /api/rcm/policies/[id]/verifications', call: () => settle(() => postPolicyVerification(send('POST', `/api/rcm/policies/${BOGUS_ID}/verifications`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_VERIFY_ROLES] },
   { name: 'GET /api/rcm/verification-documents/[id]', call: () => settle(() => getVerificationDocument(get(`/api/rcm/verification-documents/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: [...COVERAGE_READ_ROLES] },
   // end WS12 T3
+  // WS12 T9: an admission's payer, pre-auth and deposit (an empty body is the 400 an allowed role gets).
+  { name: 'PUT /api/admissions/[id]/coverage', call: () => settle(() => putAdmissionCoverage(send('PUT', `/api/admissions/${BOGUS_ID}/coverage`), ctx({ id: BOGUS_ID }))), allowed: [...ADMISSION_COVERAGE_ROLES] },
+  // end WS12 T9
   { name: 'POST /api/encounters/[id]/vitals', call: () => settle(() => postEncounterVitals(send('POST', `/api/encounters/${BOGUS_ID}/vitals`), ctx({ id: BOGUS_ID }))), allowed: [...VITALS_ROLES] }, // WS1 T2
   { name: 'PUT /api/encounters/[id]/consult', call: () => settle(() => putEncounterConsult(send('PUT', `/api/encounters/${BOGUS_ID}/consult`), ctx({ id: BOGUS_ID }))), allowed: [...CLINICAL_WRITE_ROLES] }, // WS1 T2
   { name: 'POST /api/encounters/[id]/start', call: () => settle(() => postEncounterStart(send('POST', `/api/encounters/${BOGUS_ID}/start`), ctx({ id: BOGUS_ID }))), allowed: [...CLINICAL_WRITE_ROLES] }, // WS1 T3
@@ -1501,6 +1508,9 @@ const SP8_WRITE_GATES: typeof SP1_WRITE_GATES = [
   // WS12 T6
   { name: 'POST /api/abdm/shares/simulate', call: () => postSimulateAbdmShare(send('POST', '/api/abdm/shares/simulate', NOT_JSON)), allowed: ABDM_SHARE_QUEUE_ROLES },
   // end WS12 T6
+  // WS12 T9
+  { name: 'PUT /api/admissions/[id]/coverage', call: () => putAdmissionCoverage(send('PUT', `/api/admissions/${BOGUS_ID}/coverage`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: ADMISSION_COVERAGE_ROLES },
+  // end WS12 T9
   { name: 'POST /api/encounters/[id]/vitals', call: () => postEncounterVitals(send('POST', `/api/encounters/${BOGUS_ID}/vitals`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: VITALS_ROLES }, // WS1 T2
   { name: 'PUT /api/encounters/[id]/consult', call: () => putEncounterConsult(send('PUT', `/api/encounters/${BOGUS_ID}/consult`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CLINICAL_WRITE_ROLES }, // WS1 T2
   { name: 'POST /api/encounters/[id]/start', call: () => postEncounterStart(send('POST', `/api/encounters/${BOGUS_ID}/start`, NOT_JSON), ctx({ id: BOGUS_ID })), allowed: CLINICAL_WRITE_ROLES }, // WS1 T3

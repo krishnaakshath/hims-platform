@@ -292,4 +292,19 @@ describe('CheckInModal', () => {
       expect(screen.getByLabelText(/reason/i)).toHaveAttribute('maxLength', '140')
     })
   })
+
+  // WS12 T9: the chosen patient's cover as a badge; OPD check-in never blocks on it.
+  it('shows the chosen patient\'s cover at check-in and still allows checking in', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/patients/RD-0001/coverage?context=opd_checkin') return new Response(JSON.stringify({ primary: { verdict: { state: 'policy_expired', severity: 'warn', label: 'Policy expired', detail: 'Fix the policy dates or status, or treat as self-pay', verifiedHoursAgo: null, isMock: false, policyId: 7, verificationId: null } }, policies: [] }), { status: 200 })
+      if (url === '/api/front-desk/queue-summary') return summaryResponse()
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CheckInModal providers={PROVIDERS} departments={DEPARTMENTS} initialPatient={ASHA} onClose={vi.fn()} />)
+    expect(await screen.findByText('Policy expired')).toBeInTheDocument()
+    pickDoctor(1)
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Fever' } })
+    expect(screen.getByText('Check In')).toBeEnabled()
+  })
 })

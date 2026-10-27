@@ -253,16 +253,18 @@ describe.skipIf(!process.env.DATABASE_URL)('admitPatient (DB)', () => {
     expect((await admitPatient(input({ roomId: await room() }), SESSION, NOW)).ok).toBe(true)
   })
 
-  it('a policy: someone else\'s is policy_mismatch; expired or inactive is policy_inactive; the patient\'s own is recorded as cashless', async () => {
+  it('a policy: someone else\'s is policy_mismatch; expired or inactive blocks a cashless elective stay (WS12 T9); the patient\'s own is recorded as cashless', async () => {
     const r1 = await room()
     expect(await admitPatient(input({ roomId: r1, policyId: other.policyId }), SESSION, NOW)).toEqual({ ok: false, error: 'policy_mismatch' })
     const [expired] = await getDb().insert(patientPolicies).values({
       patientId: female.patientId, insurerPayerId: female.insurerId, policyNumber: 'POL-EXP', memberId: 'M', policyType: 'individual',
       holderName: 'H', relationship: 'self', validFrom: '2090-01-01', validTo: '2099-04-30', priority: 'secondary', createdByName: PROBE,
     }).returning()
-    expect(await admitPatient(input({ roomId: r1, policyId: expired.id }), SESSION, NOW)).toEqual({ ok: false, error: 'policy_inactive' })
+    expect(await admitPatient(input({ roomId: r1, policyId: expired.id, admissionType: 'elective' }), SESSION, NOW))
+      .toEqual({ ok: false, error: 'coverage_blocked', coverage: expect.objectContaining({ state: 'policy_expired', severity: 'block' }) })
     await getDb().update(patientPolicies).set({ validTo: '2099-12-31', status: 'inactive' }).where(eq(patientPolicies.id, expired.id))
-    expect(await admitPatient(input({ roomId: r1, policyId: expired.id }), SESSION, NOW)).toEqual({ ok: false, error: 'policy_inactive' })
+    expect(await admitPatient(input({ roomId: r1, policyId: expired.id, admissionType: 'elective' }), SESSION, NOW))
+      .toEqual({ ok: false, error: 'coverage_blocked', coverage: expect.objectContaining({ state: 'policy_inactive', severity: 'block' }) })
     expect((await roomRow(r1)).status).toBe('available')
     const r = await admitPatient(input({ roomId: r1, policyId: female.policyId, depositRequiredPaise: 5_000_00 }), SESSION, NOW)
     if (!r.ok) throw new Error(r.error)

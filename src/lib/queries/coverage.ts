@@ -58,7 +58,7 @@ function primaryOf(policies: readonly PolicyView[]): PolicyView | null {
   return policies.find((p) => p.status === 'active' && p.priority === 'primary') ?? policies.find((p) => p.status === 'active') ?? null
 }
 
-async function coverageOf(executor: WriteExecutor, p: PolicyView, onNhcx: boolean, context: CoverageContext, now: Date, onDate?: string): Promise<PolicyCoverage> {
+async function coverageOf(executor: WriteExecutor, p: PolicyView, onNhcx: boolean, context: CoverageContext, now: Date, onDate?: string, emergency?: boolean): Promise<PolicyCoverage> {
   const rows = await executor.select().from(coverageVerifications).where(eq(coverageVerifications.policyId, p.id))
     .orderBy(desc(coverageVerifications.verifiedAt), desc(coverageVerifications.id)).limit(HISTORY_LIMIT)
   const history = rows.map(toFacts)
@@ -71,7 +71,7 @@ async function coverageOf(executor: WriteExecutor, p: PolicyView, onNhcx: boolea
   const pendingCheckId = pending?.id ?? null
   const own = policyLimits(p)
   const facts: CoveragePolicyFacts = { id: p.id, status: p.status, validFrom: p.validFrom, validTo: p.validTo, insurerName: p.insurer.name, onNhcx, limits: own }
-  const verdict = evaluateCoverage({ policy: facts, verification: current ?? latest, pendingCheck: pendingCheckId !== null, context, now, onDate })
+  const verdict = evaluateCoverage({ policy: facts, verification: current ?? latest, pendingCheck: pendingCheckId !== null, context, now, onDate, emergency })
   return { policyId: p.id, verdict, current, history, pendingCheckId, limits: effectiveLimits(own, current?.limits ?? null) }
 }
 
@@ -80,9 +80,9 @@ async function coverageOf(executor: WriteExecutor, p: PolicyView, onNhcx: boolea
  * `context`, its current verification, the last five verifications and a pending NHCX check
  * newer than the latest verification. `primary` is null when no policy is active. `onDate`
  * (default: today in IST) is the date the policy must be in force on, e.g. a pre-auth's planned
- * admission date (WS12 T8).
+ * admission date (WS12 T8). `emergency` relaxes an `ipd_admission` block to a warning (WS12 T9).
  */
-export async function getCoverageSummary(patientId: string, context: CoverageContext, now: Date = new Date(), given?: WriteExecutor, onDate?: string): Promise<CoverageSummary> {
+export async function getCoverageSummary(patientId: string, context: CoverageContext, now: Date = new Date(), given?: WriteExecutor, onDate?: string, emergency?: boolean): Promise<CoverageSummary> {
   const views = await listPatientPolicies(patientId, given)
   if (views.length === 0) return { primary: null, policies: [] }
   // Resolved only once there is a policy: a patient without one costs a single query.
@@ -92,7 +92,7 @@ export async function getCoverageSummary(patientId: string, context: CoverageCon
     .from(payerProfiles).where(inArray(payerProfiles.payerId, payerIds))
   const onNhcx = payersOnNhcx(views, new Map(codes.map((c) => [c.payerId, c.code])))
   const policies: PolicyCoverage[] = []
-  for (const p of views) policies.push(await coverageOf(executor, p, onNhcx[p.id] ?? false, context, now, onDate))
+  for (const p of views) policies.push(await coverageOf(executor, p, onNhcx[p.id] ?? false, context, now, onDate, emergency))
   const primaryView = primaryOf(views)
   return { primary: primaryView ? policies.find((c) => c.policyId === primaryView.id) ?? null : null, policies }
 }

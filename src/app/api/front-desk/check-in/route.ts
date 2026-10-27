@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readJsonBody } from '@/lib/http'
 import { z } from 'zod'
 import { and, eq, or, sql } from 'drizzle-orm'
-import { requireSession } from '@/lib/auth'
+import { requireSession, type Session } from '@/lib/auth'
+import { logAudit } from '@/lib/audit'
+import type { CoverageVerdict } from '@/lib/insurance/coverage'
+import { getCoverageSummary, maybeStartEligibility, type MaybeEligibilityResult } from '@/lib/queries/coverage'
 import { getDb } from '@/db/client'
 import { patients, providers } from '@/db/schema'
 import { checkInVisit, type CheckInVisitError } from '@/lib/queries/encounters'
@@ -21,6 +24,24 @@ const checkInSchema = z.object({
   // SP3: check in against a booked appointment (e.g. a follow-up).
   appointmentId: z.number().int().positive().optional(),
 }).strict()
+
+/**
+ * WS12 T9 (R4, R5): after the check-in commits, the primary policy's verdict in the OPD check-in
+ * context (warn or info, never block) and, when it can help, an NHCX check with context `checkin`.
+ * Never fails the check-in: an error is logged by class name only and reported as no verdict.
+ */
+async function checkInCoverage(patientId: string, providerId: number, session: Session): Promise<{ coverage: CoverageVerdict | null; eligibility?: MaybeEligibilityResult }> {
+  try {
+    const summary = await getCoverageSummary(patientId, 'opd_checkin')
+    if (!summary.primary) return { coverage: null }
+    await logAudit(session, 'insurance: viewed coverage', patientId, 'context=opd_checkin')
+    const eligibility = await maybeStartEligibility({ policyId: summary.primary.policyId, context: 'checkin', providerId }, session)
+    return { coverage: summary.primary.verdict, eligibility }
+  } catch (err) {
+    console.error(`[check-in] coverage lookup failed (${err instanceof Error ? err.constructor.name : 'unknown'})`)
+    return { coverage: null }
+  }
+}
 
 const CHECK_IN_ERRORS: Record<CheckInVisitError, { status: number; error: string }> = {
   appointment_not_found: { status: 404, error: 'Appointment not found' },
@@ -78,7 +99,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: mapped.error }, { status: mapped.status })
     }
     // WS2 T9: the automatic visit charges (or why one was not captured) for the ticket and "Collect now".
-    return NextResponse.json({ ...result.assignment, encounterId: result.encounter.id, opdToken: result.encounter.opdToken, charges: result.charges }, { status: 201 })
+    // WS12 T9: the primary policy's cover at check-in (never blocks) and an automatic NHCX check.
+    const { coverage, eligibility } = await checkInCoverage(patientId, providerId, session)
+    return NextResponse.json({
+      ...result.assignment, encounterId: result.encounter.id, opdToken: result.encounter.opdToken, charges: result.charges,
+      coverage, ...(eligibility ? { eligibility } : {}),
+    }, { status: 201 })
   } catch (err) {
     if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
     console.error(`[check-in] failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)

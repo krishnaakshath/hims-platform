@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { normalizePhone } from '@/lib/india/phone'
 import { visitReasonSchema } from '@/lib/visit-reason-schema'
 import { OVERRIDE_REASON_MIN } from './admission-rules'
+import { ADMISSION_COVERAGE_MODES } from '@/lib/insurance/coverage'
 
 const positiveInt = z.number().int().positive()
 
@@ -35,9 +36,14 @@ export const admitPatientSchema = z.object({
   }).strict().nullable(),
   policyId: positiveInt.nullable(),
   preauthId: positiveInt.nullable(),
+  // WS12 T9: how the stay is paid. Omitted: cashless with a policy, self-pay without.
+  coverageMode: z.enum(ADMISSION_COVERAGE_MODES).optional(),
   depositRequiredPaise: z.number().int().min(0).max(1_000_000_000),
   wardGenderOverrideReason: z.string().trim().min(OVERRIDE_REASON_MIN).max(300).nullable(),
   openOpdVisit: z.enum(['complete', 'keep']).nullable(),
-}).strict()
+}).strict().superRefine((b, ctx) => {
+  if (b.coverageMode === 'self_pay' && (b.policyId !== null || b.preauthId !== null)) ctx.addIssue({ code: 'custom', path: ['coverageMode'], message: 'Self-pay takes no policy or pre-authorisation' })
+  if ((b.coverageMode === 'cashless' || b.coverageMode === 'reimbursement') && b.policyId === null) ctx.addIssue({ code: 'custom', path: ['policyId'], message: 'Choose the policy' })
+})
 
 export type AdmitPatientRequest = z.infer<typeof admitPatientSchema>

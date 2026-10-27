@@ -1,9 +1,9 @@
 // WS3 T2: the one admission path (spec 3.1 items 1-11). POST /api/inpatient/admissions calls it;
 // front-desk check-in no longer admits.
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import {
-  admissionCoverage, admissions, codeSystems, codes, diagnoses, doctorAssignments, encounters, patientPolicies, patients, preauths,
+  admissions, codeSystems, codes, diagnoses, doctorAssignments, encounters, patients, preauths,
   providers, rooms,
 } from '@/db/schema'
 import { logAudit } from '@/lib/audit'
@@ -12,6 +12,8 @@ import { isUniqueViolation } from '@/lib/db-errors'
 import { ageOnDate, istDateOf } from '@/lib/india-time'
 import { wardGenderConflict, type WardGenderConflict } from '@/lib/inpatient/admission-rules'
 import type { AdmitPatientRequest } from '@/lib/inpatient/validation'
+import type { AdmissionCoverageMode, CoverageVerdict } from '@/lib/insurance/coverage'
+import { CLOSED_PREAUTH_STATUSES, checkAdmissionCoverage, upsertAdmissionCoverage } from './admission-coverage'
 import { ensureConsultationChargeInTx } from './auto-charge'
 import { lockPatientBilling } from './billing-lock'
 import { refusesSampleCodes } from './coding'
@@ -22,11 +24,11 @@ export type AdmitPatientInput = AdmitPatientRequest
 
 export type AdmitPatientError =
   | 'patient_not_found' | 'provider_not_found' | 'room_unavailable' | 'already_admitted' | 'ward_gender_conflict' | 'open_opd_visit'
-  | 'policy_mismatch' | 'policy_inactive' | 'preauth_mismatch' | 'code_not_found'
+  | 'policy_mismatch' | 'preauth_mismatch' | 'preauth_closed' | 'coverage_blocked' | 'code_not_found'
 
 export type AdmitPatientResult =
-  | { ok: true; admissionId: number; encounterId: number; roomLabel: string }
-  | { ok: false; error: AdmitPatientError; conflict?: WardGenderConflict; openEncounterId?: number }
+  | { ok: true; admissionId: number; encounterId: number; roomLabel: string; coverage: CoverageVerdict; coverageMode: AdmissionCoverageMode }
+  | { ok: false; error: AdmitPatientError; conflict?: WardGenderConflict; openEncounterId?: number; coverage?: CoverageVerdict }
 
 type Refusal = Extract<AdmitPatientResult, { ok: false }>
 
@@ -43,31 +45,27 @@ const OPEN_OPD_STATUSES = ['checked_in', 'in_consultation'] as const
 export interface AdmissionCoverageSeamInput {
   admissionId: number
   patientId: string
+  mode: AdmissionCoverageMode
   policyId: number | null
   preauthId: number | null
   depositRequiredPaise: number
 }
 
+/** The payment mode of an admission request: as chosen, else cashless with a policy and self-pay without. */
+export function admissionCoverageMode(input: Pick<AdmitPatientInput, 'coverageMode' | 'policyId'>): AdmissionCoverageMode {
+  return input.coverageMode ?? (input.policyId !== null ? 'cashless' : 'self_pay')
+}
+
 /**
- * WS12 Task 9 hook seam (lane ruling R3): the ONE place an admission's payer, pre-auth and deposit
- * are persisted, in WS12's `admission_coverage` row. WS12 T9 will replace this body with
- * evaluateCoverage + upsertAdmissionCoverage (and may then refuse before the bed claim). Until then
- * it records the payer as chosen: cashless and `unverified` with a policy, self-pay and `no_policy`
- * without one (self-pay never carries a policy or a pre-auth: the table's check requires it).
- * Runs on the caller's transaction; the caller has already validated the policy and pre-auth.
+ * WS12 Task 9 hook (lane ruling R3): the ONE place an admission's payer, pre-auth and deposit are
+ * persisted, in WS12's `admission_coverage` row, with the verdict admitInTx computed by
+ * checkAdmissionCoverage BEFORE the bed claim (any coverage refusal happens there, so nothing
+ * here refuses). Runs on the caller's transaction.
  */
-export async function recordAdmissionCoverageInTx(tx: WriteExecutor, input: AdmissionCoverageSeamInput, session: Session): Promise<void> {
-  const cashless = input.policyId !== null
-  await tx.insert(admissionCoverage).values({
-    admissionId: input.admissionId,
-    mode: cashless ? 'cashless' : 'self_pay',
-    policyId: input.policyId,
-    preauthId: cashless ? input.preauthId : null,
-    depositRequiredPaise: input.depositRequiredPaise,
-    coverageState: cashless ? 'unverified' : 'no_policy',
-    recordedByName: session.name,
-    recordedByUserId: session.userId,
-  })
+export async function recordAdmissionCoverageInTx(tx: WriteExecutor, input: AdmissionCoverageSeamInput, verdict: CoverageVerdict, session: Session, now: Date): Promise<void> {
+  await upsertAdmissionCoverage(tx, input.admissionId, input.patientId, {
+    mode: input.mode, policyId: input.policyId, preauthId: input.preauthId, depositRequiredPaise: input.depositRequiredPaise,
+  }, verdict, session, now)
 }
 
 /**
@@ -76,6 +74,9 @@ export async function recordAdmissionCoverageInTx(tx: WriteExecutor, input: Admi
  * the patient's open OPD encounters of today (ascending id) -> the patient billing lock (only when
  * an open OPD visit is completed -- its consultation charge, as transitionEncounter does -- or a
  * pre-auth is linked) -> the pre-auth row (SP7's billing-lock-then-row order).
+ * WS12 T9: the payer, pre-auth and cover are checked (reads only) before the bed claim; a cashless
+ * stay whose cover blocks (R4: expired, not started, inactive, insurer says not in force) is
+ * refused as `coverage_blocked` unless the admission is an emergency.
  * Refusals are returned with nothing written; the partial unique index
  * `admissions_one_active_per_patient` is the backstop and maps to `already_admitted`.
  * `now` is the admission instant; "today" is its IST date.
@@ -113,23 +114,19 @@ async function admitInTx(tx: WriteExecutor, input: AdmitPatientInput, session: S
     .for('update')
   if (openOpd.length > 0 && input.openOpdVisit === null) refuse('open_opd_visit', { openEncounterId: openOpd[0].id })
 
+  // WS12 T9: the payer, pre-auth and cover, before the bed claim (reads only).
+  const mode = admissionCoverageMode(input)
+  const coverage = await checkAdmissionCoverage(tx, {
+    patientId: patient.id,
+    input: { mode, policyId: input.policyId, preauthId: input.preauthId },
+    emergency: input.admissionType === 'emergency',
+  }, now)
+  if (!coverage.ok) refuse(coverage.error, coverage.verdict ? { coverage: coverage.verdict } : {})
+
   // Claim the bed (re-checked at write time). From here on a refusal rolls the claim back.
   const claimed = await tx.update(rooms).set({ status: 'occupied', occupiedByPatientId: patient.id })
     .where(and(eq(rooms.id, room.id), eq(rooms.status, 'available'))).returning({ id: rooms.id })
   if (claimed.length === 0) refuse('room_unavailable')
-
-  if (input.policyId !== null) {
-    const [policy] = await tx.select().from(patientPolicies).where(eq(patientPolicies.id, input.policyId))
-    if (!policy || policy.patientId !== patient.id) refuse('policy_mismatch')
-    if (policy.status !== 'active' || policy.validFrom > today || policy.validTo < today) refuse('policy_inactive')
-  }
-  if (input.preauthId !== null) {
-    // A pre-auth belongs to one policy, so it needs that policy chosen as the payer (self-pay with a
-    // pre-auth is a mismatch); it must be the patient's and not yet attached to a stay.
-    const [pa] = await tx.select({ patientId: preauths.patientId, policyId: preauths.policyId, admissionId: preauths.admissionId })
-      .from(preauths).where(eq(preauths.id, input.preauthId))
-    if (!pa || pa.patientId !== patient.id || pa.admissionId !== null || input.policyId === null || pa.policyId !== input.policyId) refuse('preauth_mismatch')
-  }
 
   let code: { id: number; code: string; display: string } | null = null
   if ('codeId' in input.provisionalDiagnosis) {
@@ -224,18 +221,19 @@ async function admitInTx(tx: WriteExecutor, input: AdmitPatientInput, session: S
     // (re-entrant when the OPD completion above already holds it).
     await lockPatientBilling(tx, patient.id)
     const linked = await tx.update(preauths).set({ admissionId: admission.id, updatedAt: now })
-      .where(and(eq(preauths.id, input.preauthId), isNull(preauths.admissionId))).returning({ id: preauths.id })
+      .where(and(eq(preauths.id, input.preauthId), isNull(preauths.admissionId), notInArray(preauths.status, [...CLOSED_PREAUTH_STATUSES])))
+      .returning({ id: preauths.id })
     if (linked.length === 0) refuse('preauth_mismatch')
   }
 
   await recordAdmissionCoverageInTx(tx, {
-    admissionId: admission.id, patientId: patient.id, policyId: input.policyId, preauthId: input.preauthId, depositRequiredPaise: input.depositRequiredPaise,
-  }, session)
+    admissionId: admission.id, patientId: patient.id, mode, policyId: input.policyId, preauthId: input.preauthId, depositRequiredPaise: input.depositRequiredPaise,
+  }, coverage.verdict, session, now)
 
   // Ids only -- never the reason, diagnosis, attendant or override text.
   await logAudit(session, 'admitted patient', patient.id, `admission=${admission.id} room=${room.id}`, tx)
   if (override) await logAudit(session, 'ward gender override', patient.id, `admission=${admission.id} room=${room.id}`, tx)
   if (input.preauthId !== null) await logAudit(session, 'linked pre-auth at admission', patient.id, `preauth=${input.preauthId} admission=${admission.id}`, tx)
 
-  return { ok: true, admissionId: admission.id, encounterId: encounter.id, roomLabel: `${room.ward} ${room.roomNumber}-${room.bedNumber}` }
+  return { ok: true, admissionId: admission.id, encounterId: encounter.id, roomLabel: `${room.ward} ${room.roomNumber}-${room.bedNumber}`, coverage: coverage.verdict, coverageMode: mode }
 }

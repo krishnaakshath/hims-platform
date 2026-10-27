@@ -162,9 +162,9 @@ Every cover check is saved in one append-only table, `coverage_verifications`, w
 - **Limit codes.** The codes read from the eligibility response are unverified fact U21, below.
 - **Environment.** Names only: `ABDM_USE_MOCKS`, `ALLOW_DEMO_MOCKS`, `DEMO_FEATURES`, `INTEGRATION_PAYLOAD_KEY` (required for the ABHA and NHCX flows), `BLOB_DRIVER` (where verification documents are stored).
 
-### Not yet built
-
-Coverage at admission and OPD check-in (WS12 Task 9) is pending. The `admission_coverage` table exists, but the check-in and inpatient admission screens do not yet show or record a coverage verdict, so cashless admission is not yet blocked on an expired policy. This waits for the inpatient `admitPatient` work.
+- **OPD check-in.** The check-in dialog shows the chosen patient's primary cover as a badge. Check-in never blocks on cover; after it commits, the route returns the verdict and starts an NHCX check (context `checkin`) when one can help.
+- **IPD admission.** The admission form records the payer as self-pay, cashless or reimbursement in `admission_coverage` (one row per admission), with the pre-auth and the deposit (self-pay default: the billing deposit threshold; insured default: 0). Only a **cashless** admission is evaluated in the admission context: an expired, not-started or inactive policy, or one the insurer says is not in force, is refused with 409 `coverage_blocked` before any bed is claimed, unless the admission is an emergency (admitted with a warning). Rejected or cancelled pre-auths are refused. After the commit an NHCX check (context `admission`) starts when one can help.
+- **Editing.** `PUT /api/admissions/[id]/coverage` (roles admin, frontdesk, crc, rcm) re-records an active admission's payer with the same rules; a discharged admission is 404. The audit entry carries ids and enum values only.
 
 ## Phase 2 (not built): ABDM M2/M3
 

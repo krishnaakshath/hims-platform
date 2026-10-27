@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
 import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
 import { AdmitPatientModal } from '@/components/inpatient/AdmitPatientModal'
+import { CoverageBadge } from '@/components/insurance/CoverageBadge'
+import type { CoverageVerdict } from '@/lib/insurance/coverage'
 
 export interface CheckInDoctor { id: number; name: string; departmentId: number | null }
 export interface CheckInDepartment { id: number; name: string }
@@ -98,6 +100,18 @@ export function CheckInModal({ providers, departments, onClose, initialPatient =
     encounterId: number | null
     charges: ChargeOutcome[]
   } | null>(null)
+
+  // WS12 T9: the chosen patient's primary cover at OPD check-in (a badge only: check-in never
+  // blocks on cover; the check-in itself starts an NHCX check when one can help).
+  const [coverage, setCoverage] = useState<CoverageVerdict | null>(null)
+  useEffect(() => {
+    if (!patientId) return
+    let live = true
+    void fetchJson<{ primary: { verdict: CoverageVerdict } | null }>(`/api/patients/${encodeURIComponent(patientId)}/coverage?context=opd_checkin`).then((r) => {
+      if (live) setCoverage(r.ok ? r.data?.primary?.verdict ?? null : null)
+    })
+    return () => { live = false; setCoverage(null) }
+  }, [patientId])
 
   // WS2 T9: what this check-in will charge, refreshed as the form changes (outpatient only).
   const [preview, setPreview] = useState<FeePreview | null>(null)
@@ -211,6 +225,7 @@ export function CheckInModal({ providers, departments, onClose, initialPatient =
         </DialogHeader>
         <div className="space-y-3">
           <PatientPicker value={patient} onChange={setPatient} autoFocus={!initialPatient} />
+          {coverage && <p className="flex flex-wrap items-center gap-2 text-sm" aria-label="Insurance cover"><span className="text-muted-foreground">Insurance</span><CoverageBadge verdict={coverage} /></p>}
 
           <div className="flex gap-4 text-sm">
             <label className="flex items-center gap-1.5"><input type="radio" name="visitType" checked={visitType === 'outpatient'} onChange={() => setVisitType('outpatient')} aria-label="Outpatient" /> Outpatient</label>

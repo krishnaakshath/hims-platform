@@ -115,7 +115,7 @@ describe('AdmitPatientModal', () => {
     fireEvent.change(screen.getByLabelText('Attendant phone'), { target: { value: '9876543210' } })
     fireEvent.change(screen.getByRole('combobox', { name: 'Payer' }), { target: { value: '7' } })
     fireEvent.change(screen.getByRole('combobox', { name: 'Pre-authorisation' }), { target: { value: '21' } })
-    expect(screen.getByLabelText('Deposit required (₹)')).toHaveValue('5000')
+    expect(screen.getByLabelText('Deposit required (₹)')).toHaveValue('0') // WS12 T9 (R12): an insured stay defaults to no deposit
     fireEvent.change(screen.getByLabelText('Deposit required (₹)'), { target: { value: '6,000' } })
     fireEvent.click(admit())
     await waitFor(() => expect(postBodies(f)).toHaveLength(1))
@@ -123,7 +123,7 @@ describe('AdmitPatientModal', () => {
       patientId: 'RD-0001', attendingProviderId: 2, roomId: 11, admissionType: 'emergency', reason: 'Planned hernia repair',
       provisionalDiagnosis: { codeId: 501 }, expectedStayDays: 4,
       attendant: { name: 'Ravi Rao', relationship: 'Husband', phone: '9876543210' },
-      policyId: 7, preauthId: 21, depositRequiredPaise: 600_000, wardGenderOverrideReason: null, openOpdVisit: null,
+      policyId: 7, preauthId: 21, coverageMode: 'cashless', depositRequiredPaise: 600_000, wardGenderOverrideReason: null, openOpdVisit: null,
     })
   })
 
@@ -229,5 +229,45 @@ describe('BedBoard "Admit here"', () => {
     render(<BedBoard rooms={[FREE]} providers={PROVIDERS} canManageFacilities={false} canBlock={false} canAdmit={false} {...NO_STAY_ACTIONS} />)
     fireEvent.click(screen.getByRole('button', { name: /Room 2 · Bed A/ }))
     expect(screen.queryByRole('button', { name: 'Admit here' })).not.toBeInTheDocument()
+  })
+})
+
+// WS12 T9: the payer's cover at IPD admission (GET /api/patients/[anonId]/coverage?context=ipd_admission).
+describe('AdmitPatientModal cover (WS12 T9)', () => {
+  function stubWithCover(severity: 'block' | 'warn') {
+    const base = stubFetch([{ status: 201, body: { ...CREATED, coverage: { state: 'policy_expired', severity: 'warn', label: 'Policy expired', detail: 'Fix the policy dates or status, or treat as self-pay', verifiedHoursAgo: null, isMock: false, policyId: 7, verificationId: null } } }])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/patients/RD-0001/coverage?context=ipd_admission') return new Response(JSON.stringify({ primary: null, policies: [{ policyId: 7, verdict: { ...{ state: 'policy_expired', severity: 'warn', label: 'Policy expired', detail: 'Fix the policy dates or status, or treat as self-pay', verifiedHoursAgo: null, isMock: false, policyId: 7, verificationId: null }, severity } }] }), { status: 200 })
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('a blocking cover disables a cashless elective admission; Reimbursement or Emergency allows it', async () => {
+    const f = stubWithCover('block')
+    await open()
+    fillRequired()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Payer' }), { target: { value: '7' } })
+    expect(await screen.findByText('Policy expired')).toBeInTheDocument()
+    expect(screen.getByText(/needs cover in force/i)).toBeInTheDocument()
+    expect(admit()).toBeDisabled()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Cover type' }), { target: { value: 'reimbursement' } })
+    expect(admit()).toBeEnabled()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Cover type' }), { target: { value: 'cashless' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Admission type' }), { target: { value: 'emergency' } })
+    expect(screen.getByText(/Emergency admission: proceeding/)).toBeInTheDocument()
+    expect(admit()).toBeEnabled()
+    fireEvent.click(admit())
+    await waitFor(() => expect(postBodies(f as never)).toHaveLength(1))
+    expect(postBodies(f as never)[0]).toMatchObject({ policyId: 7, coverageMode: 'cashless', admissionType: 'emergency' })
+    expect(await screen.findByRole('heading', { name: 'Patient admitted' })).toBeInTheDocument()
+  })
+
+  it('self-pay shows no cover badge', async () => {
+    stubWithCover('warn')
+    await open()
+    expect(screen.queryByText('Policy expired')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Cover type' })).not.toBeInTheDocument()
   })
 })
