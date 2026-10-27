@@ -204,11 +204,11 @@ describe('GET /api/coding/codes', () => {
   })
 
   it('admits every lookup role and denies the rest', async () => {
-    for (const role of ['admin', 'coder', 'pi', 'crc', 'billing', 'rcm'] as Role[]) { // SP7: + rcm
+    for (const role of ['admin', 'coder', 'pi', 'crc', 'billing', 'rcm', 'frontdesk'] as Role[]) { // SP7: + rcm; WS3 T3: + frontdesk
       sessionRole = role
       expect((await GET_CODES(get('/api/coding/codes?kind=icd10&q=e11'))).status, role).toBe(200)
     }
-    for (const role of ['frontdesk', 'pharmacy', 'labs'] as Role[]) {
+    for (const role of ['pharmacy', 'labs'] as Role[]) {
       sessionRole = role
       expect((await GET_CODES(get('/api/coding/codes?kind=icd10&q=e11'))).status, role).toBe(403)
     }

@@ -38,6 +38,10 @@ vi.mock('@/lib/queries/hospital-kpis', () => ({
     encountersToday: [{ encounterId: 77, patientId: 'RD-0501', patientName: 'Meena Iyer', uhid: 'UH-501', opdToken: 4, status: 'checked_in' }],
     inpatients: [], resultsToReview: [], labsAwaitingResult: 0, followUps: [], unsignedNotes: 0, draftNotes: [],
   })),
+  getLabKpis: vi.fn(async () => ({ criticalUnverified: 0 })),
+}))
+vi.mock('@/lib/queries/needs-attention', () => ({
+  loadNeedsAttention: vi.fn(async () => []),
 }))
 vi.mock('@/lib/queries/encounter-workspace', () => ({
   encountersForAppointments: vi.fn(async () => new Map([[501, { encounterId: 77, status: 'checked_in' }], [503, { encounterId: 78, status: 'in_consultation' }]])),

@@ -162,7 +162,7 @@ describe.skipIf(!process.env.DATABASE_URL)('manual coverage verification (DB)', 
 
   it('answers 503 storage_not_configured with a file and no driver, writing no row', async () => {
     vi.stubEnv('NODE_ENV', 'production')
-    vi.stubEnv('BLOB_DRIVER', '')
+    vi.stubEnv('BLOB_DRIVER', 'no-such-driver')
     const before = (await rowsOf(b.policyId)).length
     const res = await post(b.policyId, form(fields(), { bytes: PDF, type: 'application/pdf' }))
     expect(res.status).toBe(503)

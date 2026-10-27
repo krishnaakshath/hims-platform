@@ -68,6 +68,7 @@ describe('NewEventModal', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Video' }))
     expect(screen.getByRole('radio', { name: 'Video' })).toHaveAttribute('aria-checked', 'true')
     fireEvent.change(screen.getByLabelText(/doctor/i), { target: { value: '1' } })
+    await screen.findByLabelText('Start time (IST)')
     fireEvent.change(screen.getByPlaceholderText('Visit reason'), { target: { value: 'Review' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
