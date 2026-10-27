@@ -67,7 +67,7 @@ describe('encounter notes queries', () => {
 
     const result = await signNote(created.id, patientB.id, as('Dr. R. Kunam'))
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Note not found')
+    if (!result.ok) expect(result.error).toBe('Note not found')
 
     const afterAttempt = await getNoteById(created.id)
     expect(afterAttempt?.status).toBe('draft')

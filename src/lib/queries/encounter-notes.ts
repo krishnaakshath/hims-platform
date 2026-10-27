@@ -13,7 +13,7 @@ export async function createNote(input: {
   appointmentId: number | null
   admissionId: number | null
   encounterId?: number | null
-  noteType: 'soap' | 'progress' | 'nursing' | 'discharge_summary'
+  noteType: 'progress' | 'nursing' | 'intake'
   authorName: string
   authorRole: Role
   subjective: string | null

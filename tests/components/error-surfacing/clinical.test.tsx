@@ -17,7 +17,6 @@ import { BedBoard } from '@/components/BedBoard'
 import { CarePlanSection } from '@/components/CarePlanSection'
 import { CheckInModal } from '@/components/CheckInModal'
 import { ArchivePatientDialog } from '@/components/ArchivePatientDialog'
-import { ToastProvider } from '@/components/ui/toast' // WS7 T16: the dashboard layout provides toasts
 import { DischargeAdmissionModal } from '@/components/DischargeAdmissionModal'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
 import { EnterLabResultModal } from '@/components/EnterLabResultModal'

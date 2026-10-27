@@ -3,7 +3,7 @@ import { createContext, useContext, useState, useCallback, useId, type ReactNode
 import Link from 'next/link'
 import { CheckCircle2, AlertTriangle, AlertCircle, Info, X } from 'lucide-react'
 
-export type ToastTone = 'info' | 'success' | 'warning' | 'danger'
+export type ToastTone = 'info' | 'success' | 'warning' | 'danger' | 'error'
 
 export interface ToastInput {
   title: string
@@ -20,6 +20,7 @@ interface ToastItem extends ToastInput {
 
 interface ToastContextValue {
   showToast: (toast: ToastInput) => void
+  show: (toast: ToastInput) => void
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null)
@@ -29,6 +30,7 @@ const TONE_STYLES: Record<ToastTone, { border: string; icon: typeof CheckCircle2
   success: { border: 'border-emerald-300 dark:border-emerald-700', icon: CheckCircle2, iconClass: 'text-emerald-600 dark:text-emerald-400' },
   warning: { border: 'border-amber-300 dark:border-amber-700', icon: AlertTriangle, iconClass: 'text-amber-600 dark:text-amber-400' },
   danger: { border: 'border-destructive/40', icon: AlertCircle, iconClass: 'text-destructive' },
+  error: { border: 'border-destructive/40', icon: AlertCircle, iconClass: 'text-destructive' },
 }
 
 function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => void }) {
@@ -86,7 +88,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={{ showToast, show: showToast }}>
       {children}
       <div
         aria-label="Notifications"
@@ -105,6 +107,7 @@ export function useToast(): ToastContextValue {
   if (!ctx) {
     return {
       showToast: () => {},
+      show: () => {},
     }
   }
   return ctx

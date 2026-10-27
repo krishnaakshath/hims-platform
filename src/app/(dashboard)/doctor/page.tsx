@@ -28,7 +28,6 @@ import { NeedsAttentionStrip } from '@/components/dashboards/NeedsAttentionStrip
 import { loadNeedsAttention } from '@/lib/queries/needs-attention' // WS8 T15
 // end Wave E
 // WS1 T3: hospital-first home (trials off) and Start Encounter through the visit's start route.
-import { todayIsoIn } from '@/lib/india-time'
 import { trialsEnabled } from '@/lib/features'
 import { addDaysIso } from '@/lib/follow-ups/rules'
 import { encountersForAppointments, listMyRecentPatients, providerDepartmentName, uhidsForPatients } from '@/lib/queries/encounter-workspace'

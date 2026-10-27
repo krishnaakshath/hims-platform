@@ -6,7 +6,7 @@ import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { listBroadcasts, listBroadcastRecipientCandidates, sendBroadcast, invalidateBroadcastsList, DuplicateBroadcastError } from '@/lib/queries/broadcasts'
 import { trialsEnabled } from '@/lib/features'
-import { brand } from '@/lib/brand'
+import { getBrand } from '@/lib/brand-server'
 import { BROADCAST_MESSAGE_MAX, summariseAudience, validateAudienceFilters } from '@/lib/broadcasts/audience'
 
 // WS7 T10 (spec D16): a hospital broadcast is one staff-written line sent as the
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
 
   let result
   try {
-    result = await sendBroadcast({ message: parsed.data.message, filters: audience.filters, hospitalName: brand.name, sentBy: session.name, audience: members })
+    result = await sendBroadcast({ message: parsed.data.message, filters: audience.filters, hospitalName: (await getBrand()).name, sentBy: session.name, audience: members })
   } catch (err) {
     if (err instanceof DuplicateBroadcastError) {
       return NextResponse.json({ error: 'This broadcast was already sent a few minutes ago. Check the broadcast history before sending it again.', code: 'duplicate_broadcast' }, { status: 409 })

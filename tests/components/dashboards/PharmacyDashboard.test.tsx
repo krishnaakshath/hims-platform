@@ -90,6 +90,7 @@ describe('PharmacyDashboard (Wave E P1-18)', () => {
     render(<PharmacyDashboard {...props('pi')} medications={[{ ...med(1, 'Paracetamol 500', 50), mrpPerUnitPaise: 350 }]} />)
     expect(screen.getByText('₹3.50')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /edit price/i })).toBeNull()
+  })
 
   // WS8 T15
   it('shows the needs-attention strip for the pharmacy home', () => {

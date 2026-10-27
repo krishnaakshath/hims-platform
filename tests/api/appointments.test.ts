@@ -397,6 +397,9 @@ describe('POST /api/appointments working hours', () => {
 
   it('rejects a non-boolean outsideHoursConfirmed', async () => {
     expect((await book(monday, '14:00', '14:15', { outsideHoursConfirmed: 'yes' })).status).toBe(400)
+  })
+})
+
 // WS7 T6 (spec D20): visit mode. Only video appointments offer telemedicine.
 describe('appointments visit mode (WS7 T6)', () => {
   afterAll(() => { sessionRef.current = { role: 'crc', name: 'Jamie Ruiz' } })

@@ -160,7 +160,7 @@ describe('patient login with MFA enabled', () => {
     try {
       // Refused before the code is checked (the archived chart has no MFA state): the
       // expired-session answer, not "Invalid code".
-      const totp = new OTPAuth.TOTP({ issuer: brand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret })
+      const totp = new OTPAuth.TOTP({ issuer: envBrand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret })
       const archivedRes = await loginMfa(mfaReq({ code: totp.generate() }, `${cookieName('pending_patient_mfa')}=${pendingCookie}`))
       expect(archivedRes.status).toBe(401)
       expect(await archivedRes.json()).toEqual({ error: 'Your login session expired. Please sign in again.' })

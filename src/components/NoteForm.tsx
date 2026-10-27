@@ -49,7 +49,7 @@ const NOTE_TYPE_LABEL: Record<NoteRecord['noteType'], string> = {
   intake: 'Intake',
 }
 
-export function NoteForm({ patientId, canWrite }: { patientId: string; canWrite: boolean }) {
+export function NoteForm({ patientId, canWrite, encounterId }: { patientId: string; canWrite: boolean; encounterId?: number }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [noteType, setNoteType] = useState<NoteRecord['noteType']>('progress')
