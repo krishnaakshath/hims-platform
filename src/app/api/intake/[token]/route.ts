@@ -4,7 +4,8 @@ import { z } from 'zod'
 import { getDb } from '@/db/client'
 import { formSubmissions } from '@/db/schema'
 import { and, eq, ne } from 'drizzle-orm'
-import { getIntakePortalData, getSubmissionPatientIdByToken } from '@/lib/queries/intake-portal'
+import { documentIdsOfPatient, getActiveIntakeSubmission, getIntakePortalData, getSubmissionPatientIdByToken } from '@/lib/queries/intake-portal'
+import { FORM_LANGS, validateAnswers } from '@/lib/forms/question-model'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { invalidateCache, patientDetailCacheKey } from '@/lib/cache'
 import { recordFormChartDiscrepancies } from '@/lib/queries/discrepancies'
@@ -29,12 +30,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 const submitSchema = z.object({
   answers: z.record(z.string(), z.string()),
   complete: z.boolean(),
+  language: z.enum(FORM_LANGS).optional(), // WS7 T3: the language the patient is reading the form in
 }).strict()
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
-  const patientId = await getSubmissionPatientIdByToken(token)
-  if (!patientId) return NextResponse.json({ error: 'This link is no longer valid.' }, { status: 404 })
+  const submission = await getActiveIntakeSubmission(token)
+  if (!submission) return NextResponse.json({ error: 'This link is no longer valid.' }, { status: 404 })
+  const { patientId } = submission
 
   const json = await readJsonBody(request)
   if (!json.ok) return json.response
@@ -50,6 +53,27 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'This form has unsigned consent documents' }, { status: 400 })
   }
 
+  // WS7 T3: the answers are judged against the template's questions. Only
+  // `cleaned` is stored: answers to questions hidden by their condition, to
+  // sections and to unknown ids are dropped, phones normalised. A partial save
+  // checks formats but not required answers (the patient may come back later).
+  const questions = parsed.data.complete ? submission.questions : submission.questions.map((q) => ({ ...q, required: false }))
+  const result = validateAnswers(questions, parsed.data.answers)
+  if (!result.ok) return NextResponse.json({ error: 'Please check the answers marked on the form.', errors: result.errors }, { status: 400 })
+  const cleaned = result.cleaned
+  const { language } = parsed.data
+  if (language !== undefined && !submission.languages.includes(language)) {
+    return NextResponse.json({ error: 'This form is not offered in that language.' }, { status: 400 })
+  }
+  // A file answer may only name a document of this patient (its own upload).
+  const fileAnswers = submission.questions.filter((q) => q.type === 'file' && cleaned[q.id] !== undefined)
+  if (fileAnswers.length > 0) {
+    const owned = await documentIdsOfPatient(patientId, fileAnswers.map((q) => Number(cleaned[q.id].slice('doc:'.length))))
+    const errors: Record<string, string> = {}
+    for (const q of fileAnswers) if (!owned.has(Number(cleaned[q.id].slice('doc:'.length)))) errors[q.id] = 'Upload the requested document'
+    if (Object.keys(errors).length > 0) return NextResponse.json({ error: 'Please check the answers marked on the form.', errors }, { status: 400 })
+  }
+
   const status = parsed.data.complete ? 'completed' : 'partial'
   const completedDate = parsed.data.complete ? new Date() : null
   // Re-check status !== 'completed' in the same statement as the write --
@@ -58,7 +82,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   // slip through between them and overwrite an already-completed submission.
   const updated = await getDb()
     .update(formSubmissions)
-    .set({ answers: parsed.data.answers, status, completedDate })
+    .set({ answers: cleaned, status, completedDate, ...(language !== undefined ? { language } : {}) })
     .where(and(eq(formSubmissions.accessToken, token), ne(formSubmissions.status, 'completed')))
     .returning({ id: formSubmissions.id })
   if (updated.length === 0) return NextResponse.json({ error: 'This link is no longer valid.' }, { status: 404 })

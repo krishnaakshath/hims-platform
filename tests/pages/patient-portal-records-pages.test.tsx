@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
-vi.mock('next/navigation', () => ({ redirect: vi.fn(), notFound: () => { throw new Error('NEXT_NOT_FOUND') } }))
+vi.mock('next/navigation', () => ({ redirect: vi.fn(), notFound: () => { throw new Error('NEXT_NOT_FOUND') }, useRouter: () => ({ refresh: vi.fn() }) /* WS7 T8: PayNowDialog */ }))
 vi.mock('@/lib/patient-session', () => ({ requirePatientSessionOrRedirect: vi.fn(async () => ({ patientId: 'RD-0001' })) }))
 vi.mock('@/lib/patient-portal-audit', () => ({ logPatientPortalAction: vi.fn(async () => undefined) }))
 vi.mock('@/lib/queries/patient-portal-records', () => ({
@@ -15,11 +15,15 @@ vi.mock('@/lib/queries/patient-portal-records', () => ({
   getPortalAbhaStatus: vi.fn(async () => ({ abhaNumberMasked: null, abhaAddress: null, unavailableReason: null })),
 }))
 
+// WS7 T9: the insurance page's self-service submissions.
+vi.mock('@/lib/queries/portal-submissions', () => ({ listPortalSubmissionsForPatient: vi.fn(async () => []) }))
+
 import BillsPage from '@/app/patient-portal/(authenticated)/bills/page'
 import DischargePage from '@/app/patient-portal/(authenticated)/discharge-summaries/page'
 import PrescriptionsPage from '@/app/patient-portal/(authenticated)/prescriptions/page'
 import InsurancePage from '@/app/patient-portal/(authenticated)/insurance/page'
 import * as q from '@/lib/queries/patient-portal-records'
+import { listPortalSubmissionsForPatient } from '@/lib/queries/portal-submissions' // WS7 T9
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 
 beforeEach(() => {
@@ -28,7 +32,7 @@ beforeEach(() => {
 
 describe('/patient-portal/bills', () => {
   it('lists own bills and receipts with rupee totals and document links', async () => {
-    vi.mocked(q.listPortalInvoices).mockResolvedValueOnce([{ id: 11, invoiceNumber: 'INV/2026-27/000011', invoiceDate: '2026-10-08', documentTitle: 'Tax Invoice', totalPaise: 123456 }])
+    vi.mocked(q.listPortalInvoices).mockResolvedValueOnce([{ id: 11, invoiceNumber: 'INV/2026-27/000011', invoiceDate: '2026-10-08', documentTitle: 'Tax Invoice', totalPaise: 123456, paidPaise: 123456, outstandingPaise: 0 }])
     vi.mocked(q.listPortalReceipts).mockResolvedValueOnce([{ id: 4, receiptNumber: 'RCT/2026-27/000004', kind: 'advance', receiptDate: '2026-10-07', mode: 'upi', amountPaise: 500000 }])
     render(await BillsPage())
     expect(q.listPortalInvoices).toHaveBeenCalledWith('RD-0001')
@@ -41,6 +45,31 @@ describe('/patient-portal/bills', () => {
     expect(screen.getByText(/Advance · UPI/)).toBeInTheDocument()
     expect(logPatientPortalAction).toHaveBeenCalledWith('viewed patient portal bills', 'RD-0001')
   })
+
+  // WS7 T8 (spec D14)
+  it('shows what is still owed, with Pay now only on an outstanding bill and only when UPI is set up', async () => {
+    const bills = [
+      { id: 11, invoiceNumber: 'INV/2026-27/000011', invoiceDate: '2026-10-08', documentTitle: 'Tax Invoice', totalPaise: 123456, paidPaise: 23456, outstandingPaise: 100000 },
+      { id: 12, invoiceNumber: 'INV/2026-27/000012', invoiceDate: '2026-10-09', documentTitle: 'Tax Invoice', totalPaise: 5000, paidPaise: 5000, outstandingPaise: 0 },
+    ]
+    vi.stubEnv('HOSPITAL_UPI_VPA', 'sunrise.hospital@icici')
+    try {
+      vi.mocked(q.listPortalInvoices).mockResolvedValueOnce(bills)
+      const { unmount } = render(await BillsPage())
+      expect(screen.getByText('Outstanding ₹1,000.00')).toBeInTheDocument()
+      expect(screen.getByText('Paid')).toBeInTheDocument()
+      const payButtons = screen.getAllByRole('button', { name: /Pay now/ })
+      expect(payButtons).toHaveLength(1)
+      expect(payButtons[0]).toHaveAccessibleName(/bill INV\/2026-27\/000011/)
+      unmount()
+      vi.stubEnv('HOSPITAL_UPI_VPA', '')
+      vi.mocked(q.listPortalInvoices).mockResolvedValueOnce(bills)
+      render(await BillsPage())
+      expect(screen.getByText('Outstanding ₹1,000.00')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Pay now/ })).toBeNull()
+    } finally { vi.unstubAllEnvs() }
+  })
+  // end WS7 T8
 
   it('shows empty states', async () => {
     render(await BillsPage())
@@ -94,7 +123,8 @@ describe('/patient-portal/insurance', () => {
     expect(screen.getByText('₹5,00,000.00')).toBeInTheDocument()
     expect(screen.getByText('Medi Assist')).toBeInTheDocument()
     expect(screen.getByText('XX-XXXX-XXXX-0123')).toBeInTheDocument()
-    expect(screen.queryByRole('button')).toBeNull()
+    // WS7 T9: the only actions are the two self-service forms; nothing edits a policy in place.
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Add a policy', 'Add my ABHA'])
     expect(logPatientPortalAction).toHaveBeenCalledWith('viewed patient portal insurance', 'RD-0001')
   })
 
@@ -103,5 +133,19 @@ describe('/patient-portal/insurance', () => {
     render(await InsurancePage())
     expect(screen.getByText(/You chose not to link one/)).toBeInTheDocument()
     expect(screen.getByText(/No insurance policy on file/)).toBeInTheDocument()
+  })
+
+  // WS7 T9: a pending submission hides that form; a rejected one shows the front desk's reason.
+  it('lists self-service submissions with their status and reason', async () => {
+    vi.mocked(listPortalSubmissionsForPatient).mockResolvedValueOnce([
+      { id: 2, kind: 'policy', status: 'pending', summary: 'Star Health · P-123', submittedAt: new Date('2026-10-20T05:00:00Z'), reviewedAt: null, rejectReason: null },
+      { id: 1, kind: 'abha', status: 'rejected', summary: 'ABHA XX-XXXX-XXXX-0123', submittedAt: new Date('2026-10-19T05:00:00Z'), reviewedAt: new Date('2026-10-19T09:00:00Z'), rejectReason: 'The number does not match the card' },
+    ])
+    render(await InsurancePage())
+    expect(listPortalSubmissionsForPatient).toHaveBeenCalledWith('RD-0001')
+    expect(screen.getByText(/Policy: Star Health · P-123/)).toBeInTheDocument()
+    expect(screen.getByText(/Waiting for the front desk to check/)).toBeInTheDocument()
+    expect(screen.getByText('Reason: The number does not match the card')).toBeInTheDocument()
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Add my ABHA'])
   })
 })

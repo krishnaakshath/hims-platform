@@ -1,6 +1,6 @@
 'use client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { IntakeQuestionField, type IntakeQuestion } from '@/components/IntakeQuestionField'
+import { QuestionField, type IntakeQuestion } from '@/components/intake/QuestionField'
 
 // Read-only preview. This creates NO formSubmissions row and issues NO token --
 // it only renders the template's questions through the same field renderer the
@@ -19,7 +19,7 @@ export function FormTemplatePreviewModal({ name, questions, onClose }: {
         <div className="space-y-4">
           {questions.length === 0 && <p className="text-sm text-muted-foreground">This form has no questions yet.</p>}
           {questions.map((q) => (
-            <IntakeQuestionField key={q.id} question={q} value={undefined} onChange={() => {}} disabled />
+            <QuestionField key={q.id} question={q} value={undefined} onChange={() => {}} disabled />
           ))}
         </div>
       </DialogContent>

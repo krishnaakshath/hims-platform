@@ -15,7 +15,6 @@ import { AddStaffMemberModal } from '@/components/AddStaffMemberModal'
 import { AutoClassifyToggle } from '@/components/AutoClassifyToggle'
 import { ChargesTable } from '@/components/ChargesTable'
 import { ConsentDocumentEditor } from '@/components/ConsentDocumentEditor'
-import { CreateFormButton } from '@/components/CreateFormButton'
 import { EditCredentialModal } from '@/components/EditCredentialModal'
 import { EditStaffMemberModal } from '@/components/EditStaffMemberModal'
 import { FolderActions } from '@/components/FolderActions'
@@ -44,7 +43,7 @@ const CASES: Case[] = [
   { name: 'AutoClassifyToggle', ui: () => <AutoClassifyToggle initialEnabled={false} isAdmin />, submit: /^Off$/, fill: false },
   { name: 'ChargesTable', ui: () => <ChargesTable charges={[{ id: 1, patientId: 'RD-1', patientName: 'P', providerName: 'Dr', dateOfService: '2026-10-01', amountCents: 100, status: 'draft' }]} patients={[]} />, submit: /submit|approve|send/i, fill: false },
   { name: 'ConsentDocumentEditor', ui: () => <ConsentDocumentEditor document={{ id: 1, name: 'Consent', bodyText: 'Body', legalReviewStatus: 'draft', signedCount: 0 } as never} />, submit: /^Save$/, fill: false },
-  { name: 'CreateFormButton', ui: () => <CreateFormButton folderId={null} />, submit: /form/i, fill: false },
+  // CreateFormButton (WS7 T2) only navigates to /forms/new; the create request and its error live in FormBuilderEditor below.
   { name: 'FolderActions delete', ui: () => <FolderActions folder={{ id: 1, name: 'F' }} templateCount={0} />, submit: /^Delete$/, fill: false , ownMessage: true },
   { name: 'MarkProcessedButton', ui: () => <MarkProcessedButton documentId={1} disabled={false} />, submit: /^Mark Processed$/, fill: false },
   { name: 'NewConsentDocumentButton', ui: () => <NewConsentDocumentButton />, before: () => fireEvent.click(screen.getAllByRole('button')[0]), submit: /^Create$/ },
@@ -147,6 +146,7 @@ describe('more admin components (500 -> alert, no server text)', () => {
 import { ReceiveDocumentModal } from '@/components/ReceiveDocumentModal'
 import { SignConsentFormAction } from '@/components/SignConsentFormAction'
 import { BroadcastWizard } from '@/components/BroadcastWizard'
+import { ToastProvider } from '@/components/ui/toast' // WS7 T16: the dashboard layout provides toasts
 
 describe('billing, documents, consent and broadcast components', () => {
   it('ReceiveDocumentModal shows a 413/500 failure', async () => {
@@ -171,7 +171,7 @@ describe('billing, documents, consent and broadcast components', () => {
 
   it('BroadcastWizard shows a failed recipient preview', async () => {
     mockFetch(500, { error: LEAK })
-    render(<BroadcastWizard trials={[{ id: 't1', condition: 'C' }] as never} />)
+    render(<ToastProvider><BroadcastWizard trials={[{ id: 't1', condition: 'C' }] as never} /></ToastProvider>)
     await fillAll()
     const next = screen.queryByRole('button', { name: /next/i })
     if (next) fireEvent.click(next)
@@ -187,12 +187,24 @@ import { FormBuilderEditor } from '@/components/FormBuilderEditor'
 describe('FormBuilderEditor', () => {
   it('shows a failed save in an alert', async () => {
     mockFetch(500, { error: LEAK })
-    render(<FormBuilderEditor templateId={1} initialName="F" initialCategory="C" initialDiagnosisTag="D" initialFolderId={null} initialIsActive folders={[]} attachedConsents={[]} allConsentDocuments={[]} patients={[]}
-      initialQuestions={[{ id: 'q1', label: 'Name', type: 'text', hipaaSensitive: false, required: true }]} />)
+    render(<FormBuilderEditor templateId={1} initialIsActive folders={[]} attachedConsents={[]} allConsentDocuments={[]}
+      initial={{ name: 'F', category: 'C', diagnosisTag: 'D', folderId: null, languages: ['en'], questions: [{ id: 'q1', label: 'Name', type: 'text', hipaaSensitive: false, required: true }] }} />)
     fireEvent.change(screen.getAllByRole('textbox')[0], { target: { value: 'Renamed form' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Form' }))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
+    expect(screen.getByRole('button', { name: 'Save Form' })).toBeEnabled()
+  })
+
+  it('shows a failed create on /forms/new in an alert', async () => {
+    mockFetch(500, { error: LEAK })
+    render(<FormBuilderEditor templateId={null} initialIsActive folders={[]} attachedConsents={[]} allConsentDocuments={[]}
+      initial={{ name: '', category: '', diagnosisTag: '', folderId: null, languages: ['en'], questions: [] }} />)
+    fireEvent.change(screen.getAllByRole('textbox')[0], { target: { value: 'New form' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Form' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(CLIENT_ERROR_MESSAGES.server)
+    expect(alert).not.toHaveTextContent('Cannot read properties')
     expect(screen.getByRole('button', { name: 'Save Form' })).toBeEnabled()
   })
 })

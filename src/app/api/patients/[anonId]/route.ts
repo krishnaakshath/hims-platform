@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { logAudit } from '@/lib/audit'
 import { requireSession } from '@/lib/auth'
 import { CLINICAL_ROLES } from '@/lib/role-policy'
-import { getPatientDetail, deletePatient, PatientHasFinancialRecordsError } from '@/lib/queries/patients'
-import { RETRY_MESSAGE, isRetryableConflict, pgConstraint, pgErrorCode } from '@/lib/db-errors'
+import { getPatientDetail } from '@/lib/queries/patients'
 import { toAadhaarView } from '@/lib/patient-identity'
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
@@ -18,6 +17,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const detail = await getPatientDetail(anonId)
 
   if (!detail) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  // WS8 T13: an archived chart is visible to admin only.
+  if (detail.archivedAt && session.role !== 'admin') return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   await logAudit(session, 'viewed patient detail', anonId)
 
@@ -26,30 +27,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   return NextResponse.json({ ...detail, aadhaar: toAadhaarView(detail.aadhaar, session.role) })
 }
 
-// Admin-only: permanently removes a patient chart (and everything that
-// references it) from this app -- for correcting a real mistake, e.g. a
-// duplicate created by a mis-confirmed identity match, or a chart added
-// with wrong details. This is the app's own single-sourced copy of the
-// chart; there's no separate upstream record left to reconcile against.
-export async function DELETE(request: NextRequest, { params }: { params: Promise<{ anonId: string }> }) {
+// WS8 T13 (spec D17): patients are archived (POST ./archive), never deleted through the API. The
+// hard delete (deletePatient) is reachable only from DPDP erasure when no retained records exist.
+export async function DELETE() {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
-  const { anonId } = await params
-  // One transaction: the chart, every row referencing it and the audit entry
-  // commit together or not at all.
-  let deleted: boolean
-  try {
-    deleted = await deletePatient(anonId, { session })
-  } catch (err) {
-    // SP4: tax records (issued bills, receipts, refunds) must be kept.
-    if (err instanceof PatientHasFinancialRecordsError) return NextResponse.json({ error: err.message }, { status: 409 })
-    if (isRetryableConflict(err)) return NextResponse.json({ error: RETRY_MESSAGE }, { status: 409 })
-    console.error(`[patients] delete failed (code ${pgErrorCode(err) ?? 'unknown'}, constraint ${pgConstraint(err) ?? 'none'})`)
-    return NextResponse.json({ error: 'Could not delete the patient record' }, { status: 500 })
-  }
-  if (!deleted) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ error: 'Patients are archived, not deleted. Use Archive.' }, { status: 405 })
 }

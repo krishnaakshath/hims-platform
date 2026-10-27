@@ -9,6 +9,7 @@ import { stateName } from '@/lib/india/reference'
 import { publicPatientColumns, patientPortalConfiguredSql } from '@/lib/queries/patient-columns'
 import { parseUhid } from '@/lib/uhid' // Wave J
 import type { PortalOtpIdentifier } from '@/lib/patient-portal-otp' // Wave J
+import { notArchived } from './patient-archive' // WS8 T13
 
 /**
  * The patient's own identity details for the portal's "Your details"
@@ -172,7 +173,7 @@ export async function findPortalLoginCandidate(identifier: string): Promise<Port
   const matches = await getDb()
     .select({ id: patients.id, portalPasswordHash: patients.portalPasswordHash })
     .from(patients)
-    .where(where)
+    .where(and(where, notArchived())) // WS8 T13: an archived chart signs in like an unknown account
     .limit(2)
   return matches.length === 1 ? matches[0] : null
 }
@@ -212,7 +213,7 @@ export async function findPortalOtpCandidate(id: PortalOtpIdentifier): Promise<{
   const matches = await getDb()
     .select({ id: patients.id, phone: patients.phone, mfaEnabled: patients.mfaEnabled, provisioned: patientPortalConfiguredSql })
     .from(patients)
-    .where(where)
+    .where(and(where, notArchived())) // WS8 T13
     .limit(2)
   if (matches.length !== 1) return null
   const [m] = matches
@@ -228,8 +229,9 @@ export async function revokePatientPortalAccess(patientId: string): Promise<void
   await getDb().update(patients).set({ portalPasswordHash: null }).where(eq(patients.id, patientId))
 }
 
+/** WS8 T13: null for an archived chart, so the TOTP step of sign-in fails like an unknown account. */
 export async function getPatientMfaState(patientId: string): Promise<{ mfaSecretEncrypted: string | null; mfaEnabled: boolean } | null> {
-  const [row] = await getDb().select({ mfaSecretEncrypted: patients.mfaSecretEncrypted, mfaEnabled: patients.mfaEnabled }).from(patients).where(eq(patients.id, patientId))
+  const [row] = await getDb().select({ mfaSecretEncrypted: patients.mfaSecretEncrypted, mfaEnabled: patients.mfaEnabled }).from(patients).where(and(eq(patients.id, patientId), notArchived()))
   return row ?? null
 }
 

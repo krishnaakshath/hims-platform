@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { ReportTable, type ReportColumn } from '@/components/ReportTable'
+import { EmptyState } from '@/components/ui/empty-state' // WS7 T16
 import type { DataGridFilterField } from '@/components/DataGridToolbar'
 import { ReceiveDocumentModal } from '@/components/ReceiveDocumentModal'
 import { AssignDocumentPatientControl } from '@/components/AssignDocumentPatientControl'
@@ -144,6 +145,9 @@ export function DocumentsReportTable({ rows, patientOptions, activeAdmissions, c
         ))}
       </div>
 
+      {rows.length === 0 ? (
+        <div className="mt-6"><EmptyState title="No documents yet" description={canWrite ? 'Use Receive Document to add the first one.' : undefined} /></div>
+      ) : (
       <ReportTable
         rows={tabRows}
         columns={columns}
@@ -152,6 +156,7 @@ export function DocumentsReportTable({ rows, patientOptions, activeAdmissions, c
         searchFields={['name', 'receivedFrom']}
         rowKey={(d) => d.id}
       />
+      )}
 
       {showReceiveModal && (
         <ReceiveDocumentModal

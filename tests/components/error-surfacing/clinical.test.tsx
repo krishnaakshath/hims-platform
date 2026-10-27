@@ -16,7 +16,8 @@ import { AttachImagingModal } from '@/components/AttachImagingModal'
 import { BedBoard } from '@/components/BedBoard'
 import { CarePlanSection } from '@/components/CarePlanSection'
 import { CheckInModal } from '@/components/CheckInModal'
-import { DeletePatientDialog } from '@/components/DeletePatientDialog'
+import { ArchivePatientDialog } from '@/components/ArchivePatientDialog'
+import { ToastProvider } from '@/components/ui/toast' // WS7 T16: the dashboard layout provides toasts
 import { DischargeAdmissionModal } from '@/components/DischargeAdmissionModal'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
 import { EnterLabResultModal } from '@/components/EnterLabResultModal'
@@ -45,7 +46,8 @@ const CASES: Case[] = [
     // WS2 T8: a charged dispense needs an expiry month (fillAll cannot type a month input).
     before: async () => { await pickPatient(); fireEvent.change(screen.getByLabelText('Expiry month'), { target: { value: '2099-12' } }) } },
   { name: 'EnterLabResultModal', ui: () => <EnterLabResultModal orderId={1} testName="CBC" defaultUnit="g/dL" defaultReferenceRange="12-16" category="lab" attachments={[]} onClose={vi.fn()} />, submit: /^Save result$/ },
-  { name: 'DeletePatientDialog', ui: () => <DeletePatientDialog target={{ id: 'RD-1', name: 'P' }} onClose={vi.fn()} onDeleted={vi.fn()} />, submit: /delete/i },
+  { name: 'ArchivePatientDialog', ui: () => <ToastProvider><ArchivePatientDialog target={{ id: 'RD-1', name: 'P', uhid: 'UH-000001' }} onClose={vi.fn()} onArchived={vi.fn()} /></ToastProvider>,
+    before: () => { fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Duplicate registration' } }) }, submit: /^Archive patient$/ },
   // WS6 T9: department then doctor; the success toast needs a ToastProvider.
   { name: 'CheckInModal', ui: () => <ToastProvider><CheckInModal providers={[{ id: 1, name: 'Dr A', departmentId: 1 }]} departments={[{ id: 1, name: 'General Medicine' }]} initialPatient={{ id: 'RD-1', name: 'P', uhid: null }} onClose={vi.fn()} /></ToastProvider>, submit: /^Check In$/ },
   { name: 'NoteForm', ui: () => <NoteForm patientId="RD-1" canWrite />, before: () => { fireEvent.click(screen.getByRole('button', { name: /new note/i })) }, submit: /^(Save|Create)/ },

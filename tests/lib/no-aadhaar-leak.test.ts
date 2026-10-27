@@ -130,6 +130,7 @@ describe('no Aadhaar leak (static)', () => {
       'src/lib/integrations/payload-vault.ts', // SP8: encryptWithKey/decryptWithKey under INTEGRATION_PAYLOAD_KEY (never Aadhaar)
       'src/lib/patient-identity.ts', // the one Aadhaar encryptor
       'src/lib/queries/patient-registration.ts', // KYC document (never Aadhaar)
+      'src/lib/reauth.ts', // WS7 T5: decrypts the staff TOTP secret for note-signing re-authentication (never Aadhaar)
     ])
   })
 

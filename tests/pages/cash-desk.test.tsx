@@ -16,12 +16,17 @@ vi.mock('@/lib/queries/patient-ledger', () => ({
 }))
 vi.mock('@/lib/queries/billing-settings', () => ({ getBillingSettings: vi.fn(async () => ({ legalName: 'Sunrise Hospital', gstin: '29AAGCB7383J1Z4', address: 'MG Road' })) }))
 vi.mock('@/components/billing/CashDeskPanel', () => ({ CashDeskPanel: vi.fn(() => <div data-testid="panel" />) }))
+vi.mock('@/lib/payments/manual-upi', () => ({ listPendingUpiRequests: vi.fn(async () => []) })) // WS7 T8
+vi.mock('@/lib/client-fetch', () => ({ sendJson: vi.fn() })) // WS7 T8
 
 import { findPatientForCashDesk, getPatientLedger, getReceipt } from '@/lib/queries/patient-ledger'
 import { CashDeskPanel } from '@/components/billing/CashDeskPanel'
 import { logAudit } from '@/lib/audit'
 import CashDeskPage from '@/app/(dashboard)/cash-desk/page'
 import ReceiptPrintPage from '@/app/print/receipts/[id]/page'
+import { fireEvent } from '@testing-library/react' // WS7 T8
+import { listPendingUpiRequests } from '@/lib/payments/manual-upi' // WS7 T8
+import { sendJson } from '@/lib/client-fetch' // WS7 T8
 
 const LEDGER = {
   patient: { id: 'RD-1', name: 'Asha Rao', uhid: 'HMS-000123' },
@@ -113,3 +118,50 @@ describe('/print/receipts/[id]', () => {
     await expect(ReceiptPrintPage({ params: Promise.resolve({ id: '9' }) })).rejects.toThrow('REDIRECT /')
   })
 })
+
+// WS7 T8 (spec D14): the pending UPI list. A portal request shows the patient-reported UTR masked;
+// the cashier types the full UTR from the bank statement and confirms through the existing route.
+describe('/cash-desk pending UPI payments', () => {
+  const PENDING = [
+    { id: 41, source: 'portal', amountPaise: 30000, invoiceNumber: 'INV/26-27/000007', createdAt: new Date('2026-10-20T05:00:00Z'), reportedUtrMasked: '••••1234', reportedAt: new Date('2026-10-20T05:10:00Z') },
+    { id: 42, source: 'staff', amountPaise: 5000, invoiceNumber: null, createdAt: new Date('2026-10-20T06:00:00Z'), reportedUtrMasked: null, reportedAt: null },
+  ]
+
+  it('lists pending requests with the masked patient-reported UTR, never the full one', async () => {
+    vi.mocked(listPendingUpiRequests).mockResolvedValueOnce(PENDING as never)
+    render(await CashDeskPage({ searchParams: Promise.resolve({ patientId: 'RD-1' }) }))
+    expect(listPendingUpiRequests).toHaveBeenCalledWith('RD-1')
+    expect(screen.getByRole('heading', { name: 'Pending UPI payments' })).toBeInTheDocument()
+    expect(screen.getByText('Patient reported UTR ••••1234')).toBeInTheDocument()
+    expect(screen.getByText(/Patient portal/)).toBeInTheDocument()
+    expect(screen.getByText(/INV\/26-27\/000007/)).toBeInTheDocument()
+    expect(screen.getAllByText(/Patient reported UTR/)).toHaveLength(1)
+  })
+
+  it('shows nothing when no request is pending', async () => {
+    render(await CashDeskPage({ searchParams: Promise.resolve({ patientId: 'RD-1' }) }))
+    expect(screen.queryByRole('heading', { name: 'Pending UPI payments' })).toBeNull()
+  })
+
+  it('confirm posts the typed UTR to the existing confirm route', async () => {
+    vi.mocked(listPendingUpiRequests).mockResolvedValueOnce(PENDING as never)
+    vi.mocked(sendJson).mockResolvedValueOnce({ ok: true, status: 201, data: { receiptNumber: 'RCT/26-27/000009', paymentId: 9 } })
+    render(await CashDeskPage({ searchParams: Promise.resolve({ patientId: 'RD-1' }) }))
+    const confirm = screen.getByRole('button', { name: /Confirm payment request 41/ })
+    expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByLabelText(/UTR for request 41/), { target: { value: '412345671234' } })
+    fireEvent.click(confirm)
+    expect(await screen.findByText(/Recorded RCT\/26-27\/000009/)).toBeInTheDocument()
+    expect(sendJson).toHaveBeenCalledWith('/api/billing/payments/upi-request/41/confirm', 'POST', { utr: '412345671234' })
+  })
+
+  it('a refused confirm (UTR already used) shows the route message', async () => {
+    vi.mocked(listPendingUpiRequests).mockResolvedValueOnce(PENDING as never)
+    vi.mocked(sendJson).mockResolvedValueOnce({ ok: false, status: 409, error: 'This UTR has already been recorded' })
+    render(await CashDeskPage({ searchParams: Promise.resolve({ patientId: 'RD-1' }) }))
+    fireEvent.change(screen.getByLabelText(/UTR for request 41/), { target: { value: '412345671234' } })
+    fireEvent.click(screen.getByRole('button', { name: /Confirm payment request 41/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('This UTR has already been recorded')
+  })
+})
+// end WS7 T8

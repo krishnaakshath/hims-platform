@@ -23,6 +23,8 @@ import {
   abdmConsents, abdmProfileShares, nhcxEligibilityChecks, nhcxExchanges,
   admissionCoverage, coverageVerifications, // WS12 T1
   abhaLinkOverrides, // WS12 T5
+  portalSubmissions, // WS7 T9
+  dataPrincipalRequests, // WS8 T14
   bookingRequests, // Wave J
   payers,
   medicationBatches, // WS5 T5
@@ -31,6 +33,7 @@ import { isExpired, type BatchStock } from '@/lib/pharmacy/fefo' // WS5 T5
 import { todayIsoIn } from '@/lib/india-time' // WS5 T5
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm'
 import { liveDiagnosis, withCodeValue } from './diagnoses' // SP6
+import { notArchived } from './patient-archive' // WS8 T13
 import { getOrSetCache, invalidateCache, patientListCacheKey, patientDetailCacheKey, dashboardCacheKey, workbookListCacheKey, type Jsonified } from '@/lib/cache'
 import { listDiscrepanciesForPatient } from '@/lib/queries/discrepancies'
 import type { Verdict } from '@/lib/rule-engine'
@@ -106,6 +109,7 @@ export async function listPatientNameOptions(): Promise<PatientNameOption[]> {
   return getDb()
     .select({ id: patients.id, name: sql<string>`patients.name` })
     .from(patients)
+    .where(notArchived()) // WS8 T13
     .orderBy(sql`patients.name`)
 }
 
@@ -115,7 +119,7 @@ export async function listPatientsWithStatus(trialId: string | null): Promise<Js
       .select({ patient: publicPatientColumns, screening: patientTrialScreenings })
       .from(patients)
       .leftJoin(patientTrialScreenings, eq(patientTrialScreenings.patientId, patients.id))
-      .where(trialId ? eq(patientTrialScreenings.trialId, trialId) : undefined)
+      .where(and(notArchived(), trialId ? eq(patientTrialScreenings.trialId, trialId) : undefined)) // WS8 T13
       .orderBy(patients.id)
 
     // Single grouped query for every screening's criteria results, joined
@@ -491,7 +495,7 @@ export async function listPharmacyPatientRoster(): Promise<PharmacyRosterRow[]> 
     })
     .from(patients)
     .innerJoin(medicationEpisodes, eq(medicationEpisodes.patientId, patients.id))
-    .where(eq(medicationEpisodes.status, 'active'))
+    .where(and(eq(medicationEpisodes.status, 'active'), notArchived())) // WS8 T13
     .groupBy(patients.id, patients.name, patients.currentProvider)
     .orderBy(patients.name)
   return rows
@@ -739,6 +743,7 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   // document filed to someone else (or Unfiled) that still references one of
   // this patient's admissions, which the DB permits even though the routes
   // never create it.
+  await db.delete(portalSubmissions).where(eq(portalSubmissions.patientId, anonId)) // WS7 T9: references documents
   await db.delete(documents).where(eq(documents.patientId, anonId))
   if (patientAdmissionIds.length > 0) {
     await db.update(documents).set({ admissionId: null }).where(inArray(documents.admissionId, patientAdmissionIds))
@@ -834,6 +839,9 @@ async function deletePatientRows(db: DeleteTx, anonId: string, audit: { session:
   await db.delete(drugAccountabilityEntries).where(eq(drugAccountabilityEntries.patientId, anonId))
   await db.delete(signatures).where(eq(signatures.patientId, anonId))
 
+  // WS8 T14: a DPDP request register entry outlives the chart an erasure deletes; only its link goes.
+  await db.update(dataPrincipalRequests).set({ patientId: null }).where(eq(dataPrincipalRequests.patientId, anonId))
+
   await db.delete(patients).where(eq(patients.id, anonId))
   if (audit) await logAudit(audit.session, audit.action ?? 'deleted patient record', anonId, null, db)
 
@@ -883,7 +891,7 @@ export async function findLikelyDuplicatePatients(name: string, dob: string): Pr
   const rows = await getDb()
     .select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid })
     .from(patients)
-    .where(eq(patients.dob, dob))
+    .where(and(eq(patients.dob, dob), notArchived())) // WS8 T13
 
   const needle = name.trim().toLowerCase()
   return rows
@@ -898,6 +906,6 @@ export async function findPatientsByPhone(phone: string): Promise<LikelyDuplicat
   return getDb()
     .select({ id: patients.id, name: patients.name, dob: patients.dob, uhid: patients.uhid })
     .from(patients)
-    .where(eq(patients.phone, phone))
+    .where(and(eq(patients.phone, phone), notArchived())) // WS8 T13
     .limit(10)
 }

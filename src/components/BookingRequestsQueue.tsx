@@ -3,6 +3,7 @@ import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
 import type { BookingRequestRow } from '@/lib/queries/booking-requests'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state' // WS7 T16
 import { ConfirmBookingRequestModal } from '@/components/ConfirmBookingRequestModal'
 import { DeclineBookingRequestModal } from '@/components/DeclineBookingRequestModal'
 import { ConfirmCancelRequestButton } from '@/components/ConfirmCancelRequestButton' // Wave J
@@ -62,6 +63,9 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
 
   return (
     <>
+      {requests.length === 0 ? (
+        <EmptyState title="No booking requests yet" description="Appointment requests patients send from the online booking page appear here." />
+      ) : (
       <div className="overflow-hidden rounded-lg border border-border">
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -76,11 +80,6 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
             </tr>
           </thead>
           <tbody>
-            {requests.length === 0 && (
-              <tr>
-                <td colSpan={canResolve ? 7 : 6} className="p-6 text-center text-muted-foreground">No booking requests yet.</td>
-              </tr>
-            )}
             {requests.map((r, i) => (
               <tr key={r.id} className={`border-b border-border last:border-b-0 ${i % 2 === 1 ? 'bg-muted/40' : ''}`}>
                 <td className="p-3 text-foreground">
@@ -90,6 +89,10 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
                     <div className="mt-1 text-xs font-medium text-primary">
                       Portal · {KIND_LABEL[r.requestKind]}{r.appointmentId ? ` of appointment #${r.appointmentId}` : ''}
                     </div>
+                  )}
+                  {/* WS7 T7 (spec D20): the patient asked to be seen by video; confirming books a video appointment. */}
+                  {r.requestedVisitMode === 'video' && (
+                    <span className="mt-1 inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Video consultation requested</span>
                   )}
                 </td>
                 <td className="p-3 text-foreground">{providerName(r.preferredProviderId)}</td>
@@ -127,6 +130,7 @@ export function BookingRequestsQueue({ requests, providers, canResolve }: {
           </tbody>
         </table>
       </div>
+      )}
 
       {confirmTarget && (
         <ConfirmBookingRequestModal

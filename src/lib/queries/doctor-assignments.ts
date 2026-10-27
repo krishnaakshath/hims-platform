@@ -6,6 +6,7 @@ import { hasSchedulingConflict, lockProviderSchedule } from './appointments'
 import { sendMessage } from './messages'
 import { systemSenderName } from './eligibility'
 import { buildVisitConfirmationBody } from '@/lib/notification-templates'
+import { notArchived } from './patient-archive' // WS8 T13
 
 // Assignments are created only by checkInVisit (src/lib/queries/encounters.ts),
 // in one transaction with the OPD token that is also the lobby ticket.
@@ -18,7 +19,7 @@ export async function listPendingAssignmentsForProvider(providerId: number): Pro
     .select({ ...getTableColumns(doctorAssignments), patientName: patients.name })
     .from(doctorAssignments)
     .innerJoin(patients, eq(patients.id, doctorAssignments.patientId))
-    .where(and(eq(doctorAssignments.providerId, providerId), eq(doctorAssignments.status, 'pending')))
+    .where(and(eq(doctorAssignments.providerId, providerId), eq(doctorAssignments.status, 'pending'), notArchived())) // WS8 T13
     .orderBy(
       sql`CASE ${doctorAssignments.urgency} WHEN 'emergency' THEN 0 WHEN 'urgent' THEN 1 ELSE 2 END`,
       asc(doctorAssignments.createdAt),
@@ -150,9 +151,10 @@ export async function listAllAssignments(): Promise<AssignmentWithPatientRow[]> 
 export async function listTodaysAssignments(): Promise<DoctorAssignmentRow[]> {
   const today = istDayBounds()
   return getDb()
-    .select()
+    .select(getTableColumns(doctorAssignments))
     .from(doctorAssignments)
-    .where(and(gte(doctorAssignments.createdAt, today.start), lt(doctorAssignments.createdAt, today.end)))
+    .innerJoin(patients, eq(patients.id, doctorAssignments.patientId)) // WS8 T13: archived charts leave the queue
+    .where(and(gte(doctorAssignments.createdAt, today.start), lt(doctorAssignments.createdAt, today.end), notArchived()))
     .orderBy(desc(doctorAssignments.createdAt))
 }
 

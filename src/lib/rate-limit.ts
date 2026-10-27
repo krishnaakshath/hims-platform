@@ -490,3 +490,56 @@ export async function checkHandoverOtpSendRateLimit(visitId: number): Promise<{ 
   return { allowed: success }
 }
 // end WS6 T11
+
+// WS7 T3: intake file uploads have no session, only the intake token. The
+// bucket is keyed on the token's submission id (the same bucket as the token,
+// without putting the token itself into a Redis key). Generous for a patient
+// attaching a few documents and retrying a failed one; stops a script from
+// filling the file store through one leaked link.
+let _intakeFileUploadLimiter: Ratelimit | null = null
+export async function checkIntakeFileUploadRateLimit(submissionId: number): Promise<{ allowed: boolean }> {
+  if (!_intakeFileUploadLimiter) {
+    _intakeFileUploadLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(20, '600 s'), prefix: 'ratelimit:intake-file-upload' })
+  }
+  const { success } = await _intakeFileUploadLimiter.limit(`submission:${submissionId}`)
+  return { allowed: success }
+}
+// end WS7 T3
+
+// WS7 T5: re-authentication before signing a clinical note (lib/reauth.ts) is
+// a password / TOTP oracle for whoever holds the session, so every attempt
+// takes a token BEFORE the credential is checked: 5 per 15 minutes per user
+// (reauthIdentity), so even concurrent guesses cannot exceed the budget.
+// A successful re-authentication proves the credential, so the route then
+// clears the bucket (clearReauthRateLimit) -- a doctor signing many notes in
+// a row never runs into the limit; only failures accumulate.
+let _reauthLimiter: Ratelimit | null = null
+function getReauthLimiter() {
+  if (!_reauthLimiter) {
+    _reauthLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(5, '900 s'), prefix: 'ratelimit:reauth' })
+  }
+  return _reauthLimiter
+}
+
+export async function checkReauthRateLimit(identity: string): Promise<{ allowed: boolean }> {
+  const { success } = await getReauthLimiter().limit(identity)
+  return { allowed: success }
+}
+
+export async function clearReauthRateLimit(identity: string): Promise<void> {
+  await getReauthLimiter().resetUsedTokens(identity)
+}
+// end WS7 T5
+
+// WS7 T8: portal "Pay now" UPI requests. Keyed on the session's patient id: 5 an hour is
+// plenty for a patient paying a few bills (a repeat click reuses the pending request anyway).
+let _portalPaymentRequestLimiter: Ratelimit | null = null
+export async function checkPortalPaymentRequestRateLimit(patientId: string): Promise<{ allowed: boolean }> {
+  if (!_portalPaymentRequestLimiter) {
+    _portalPaymentRequestLimiter = new Ratelimit({ redis: getRedis(), limiter: Ratelimit.slidingWindow(5, '3600 s'), prefix: 'ratelimit:portal-payment-request' })
+  }
+  const { success } = await _portalPaymentRequestLimiter.limit(`patient:${patientId}`)
+  return { allowed: success }
+}
+// end WS7 T8
+

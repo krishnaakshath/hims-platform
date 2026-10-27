@@ -5,8 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { LocalDateTime } from '@/components/LocalDateTime'
-import { SignatureCapture } from '@/components/SignatureCapture'
-import { NOTE_ATTESTATION } from '@/lib/encounters/note-signing'
+import { SignNoteDialog, type NoteReauthMethod } from '@/components/notes/SignNoteDialog'
 
 function safeIso(value: string): string {
   const d = new Date(value)
@@ -50,8 +49,7 @@ const NOTE_TYPE_LABEL: Record<NoteRecord['noteType'], string> = {
   intake: 'Intake',
 }
 
-// WS1 T5: `encounterId` links the note to the visit it is written in (the workspace Notes tab).
-export function NoteForm({ patientId, canWrite, encounterId }: { patientId: string; canWrite: boolean; encounterId?: number }) {
+export function NoteForm({ patientId, canWrite }: { patientId: string; canWrite: boolean }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [noteType, setNoteType] = useState<NoteRecord['noteType']>('progress')
@@ -78,7 +76,6 @@ export function NoteForm({ patientId, canWrite, encounterId }: { patientId: stri
     setError(null)
     const res = await sendJson(`/api/patients/${patientId}/notes`, 'POST', {
       noteType,
-      ...(encounterId !== undefined ? { encounterId } : {}),
       ...(subjective ? { subjective } : {}),
       ...(objective ? { objective } : {}),
       ...(assessment ? { assessment } : {}),
@@ -121,26 +118,9 @@ export function NoteForm({ patientId, canWrite, encounterId }: { patientId: stri
   )
 }
 
-export function NoteCard({ note, patientId, canSign }: { note: NoteRecord; patientId: string; canSign: boolean }) {
+export function NoteCard({ note, patientId, canSign, reauthMethod = 'password' }: { note: NoteRecord; patientId: string; canSign: boolean; reauthMethod?: NoteReauthMethod }) {
   const router = useRouter()
   const [signing, setSigning] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // WS1 T5 (spec ruling 10): typed name + attestation, the discharge signing layout.
-  async function sign(typedName: string) {
-    setSubmitting(true)
-    setError(null)
-    const res = await sendJson(`/api/patients/${patientId}/notes/${note.id}/sign`, 'PUT', { typedName, attestation: true })
-    setSubmitting(false)
-    if (res.ok) { setSigning(false); router.refresh(); return }
-    setError(res.error)
-  }
-
-  function closeSigning() {
-    setSigning(false)
-    setError(null)
-  }
 
   return (
     <div className="rounded-lg border border-border bg-secondary/30 px-4 py-3 text-sm">
@@ -153,23 +133,18 @@ export function NoteCard({ note, patientId, canSign }: { note: NoteRecord; patie
           {canSign && note.status === 'draft' && (
             <Button size="xs" variant="outline" onClick={() => setSigning(true)}>Sign</Button>
           )}
+          {signing && (
+            <SignNoteDialog
+              patientId={patientId}
+              noteId={note.id}
+              reauthMethod={reauthMethod}
+              onClose={() => setSigning(false)}
+              onSigned={() => { setSigning(false); router.refresh() }}
+            />
+          )}
         </div>
       </div>
       <p className="mb-1.5 text-xs text-muted-foreground"><LocalDateTime iso={safeIso(note.createdAt)} /></p>
-      {signing && (
-        <Dialog open onOpenChange={(o) => { if (!o) closeSigning() }}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Sign note</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">{NOTE_TYPE_LABEL[note.noteType]} note by {note.authorName}. A signed note cannot be changed.</p>
-            <SignatureCapture attestationLabel={NOTE_ATTESTATION} submitLabel="Sign note" submitting={submitting} error={error} onSign={(typedName) => void sign(typedName)} />
-            <DialogFooter>
-              <Button variant="outline" onClick={closeSigning}>Cancel</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
       <dl className="space-y-1 text-xs text-foreground">
         {note.subjective && <div><dt className="inline font-semibold text-muted-foreground">Subjective: </dt><dd className="inline">{note.subjective}</dd></div>}
         {note.objective && <div><dt className="inline font-semibold text-muted-foreground">Objective: </dt><dd className="inline">{note.objective}</dd></div>}

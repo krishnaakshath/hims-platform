@@ -2,30 +2,23 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readJsonBody } from '@/lib/http'
 import { demoFeaturesEnabled, DEMO_NOT_CONFIGURED_BODY, DEMO_NOT_CONFIGURED_STATUS } from '@/lib/demo-features'
 import { z } from 'zod'
-import { getDb } from '@/db/client'
-import { broadcasts } from '@/db/schema'
 import { requireSession } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
-import { listBroadcasts, listBroadcastRecipientCandidates, simulateBroadcastDelivery, invalidateBroadcastsList } from '@/lib/queries/broadcasts'
+import { listBroadcasts, listBroadcastRecipientCandidates, sendBroadcast, invalidateBroadcastsList, DuplicateBroadcastError } from '@/lib/queries/broadcasts'
+import { trialsEnabled } from '@/lib/features'
+import { brand } from '@/lib/brand'
+import { BROADCAST_MESSAGE_MAX, summariseAudience, validateAudienceFilters } from '@/lib/broadcasts/audience'
 
+// WS7 T10 (spec D16): a hospital broadcast is one staff-written line sent as the
+// `broadcast_notice` template through sendNotification. The sender confirms by typing the
+// number of patients who will receive it (confirmCount).
 const createBroadcastSchema = z
   .object({
-    subject: z.string().min(1).optional(),
-    message: z.string().min(1).max(1000),
-    channel: z.enum(['sms', 'email', 'both']),
-    filterTrialId: z.string().min(1).optional(),
-    filterOverallStatus: z.enum(['green', 'yellow', 'red']).optional(),
-    filterFormStatus: z.enum(['sent', 'partial', 'completed', 'none']).optional(),
+    message: z.string().trim().min(1).max(BROADCAST_MESSAGE_MAX),
+    filters: z.record(z.string(), z.unknown()),
+    confirmCount: z.number().int().min(0),
   })
   .strict()
-  .superRefine((data, ctx) => {
-    if (data.channel === 'sms' && data.message.length > 140) {
-      ctx.addIssue({ code: 'custom', message: 'SMS messages must be 140 characters or fewer', path: ['message'] })
-    }
-    if ((data.channel === 'email' || data.channel === 'both') && !data.subject) {
-      ctx.addIssue({ code: 'custom', message: 'Subject is required when sending email', path: ['subject'] })
-    }
-  })
 
 export async function GET() {
   const session = await requireSession()
@@ -36,51 +29,44 @@ export async function GET() {
   return NextResponse.json(await listBroadcasts())
 }
 
-// Sends a (simulated) broadcast to a patient cohort — LeftNav.tsx:62 —
+// Sends a broadcast to a patient cohort — LeftNav.tsx:62 —
 // { href: '/broadcasts', roles: ['admin', 'crc'] }
 export async function POST(request: NextRequest) {
   const session = await requireSession()
   if (session instanceof NextResponse) return session
   if (!['admin', 'crc'].includes(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  // Wave B P1-21: simulated delivery -- 503 unless DEMO_FEATURES is on (after the role gate, before parsing).
+  // Wave B P1-21: the broadcasts area is still behind DEMO_FEATURES (after the role gate, before parsing).
   if (!demoFeaturesEnabled()) return NextResponse.json(DEMO_NOT_CONFIGURED_BODY, { status: DEMO_NOT_CONFIGURED_STATUS })
 
   const json = await readJsonBody(request)
   if (!json.ok) return json.response
   const parsed = createBroadcastSchema.safeParse(json.body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid broadcast payload', details: parsed.error.flatten() }, { status: 400 })
-
-  const candidates = await listBroadcastRecipientCandidates({
-    trialId: parsed.data.filterTrialId,
-    overallStatus: parsed.data.filterOverallStatus,
-    formStatus: parsed.data.filterFormStatus,
-  })
-  if (candidates.length === 0) {
-    return NextResponse.json({ error: 'No patients match this recipient filter' }, { status: 400 })
+  const audience = validateAudienceFilters(parsed.data.filters, { trialsEnabled: trialsEnabled() })
+  if (!audience.ok) {
+    const error = audience.code === 'trial_filters_disabled' ? 'Trial filters are not available' : 'Invalid recipient filters'
+    return NextResponse.json({ error, code: audience.code }, { status: 400 })
   }
 
-  const recipients = candidates.map((c) => ({
-    patientId: c.id,
-    patientName: c.name,
-    deliveryStatus: simulateBroadcastDelivery(parsed.data.channel, c.phone, c.email),
-  }))
+  const members = await listBroadcastRecipientCandidates(audience.filters)
+  const counts = summariseAudience(members.map((m) => m.recipientClass))
+  if (counts.sendable === 0) {
+    return NextResponse.json({ error: 'No patients can receive this broadcast', code: 'empty_audience', counts }, { status: 422 })
+  }
+  if (parsed.data.confirmCount !== counts.sendable) {
+    return NextResponse.json({ error: 'The number of recipients has changed. Check the new count and confirm again.', code: 'count_changed', count: counts.sendable }, { status: 409 })
+  }
 
-  const [created] = await getDb()
-    .insert(broadcasts)
-    .values({
-      subject: parsed.data.subject ?? null,
-      message: parsed.data.message,
-      channel: parsed.data.channel,
-      filterTrialId: parsed.data.filterTrialId ?? null,
-      filterOverallStatus: parsed.data.filterOverallStatus ?? null,
-      filterFormStatus: parsed.data.filterFormStatus ?? null,
-      recipients,
-      recipientCount: recipients.length,
-      sentBy: session.name,
-    })
-    .returning()
-
+  let result
+  try {
+    result = await sendBroadcast({ message: parsed.data.message, filters: audience.filters, hospitalName: brand.name, sentBy: session.name, audience: members })
+  } catch (err) {
+    if (err instanceof DuplicateBroadcastError) {
+      return NextResponse.json({ error: 'This broadcast was already sent a few minutes ago. Check the broadcast history before sending it again.', code: 'duplicate_broadcast' }, { status: 409 })
+    }
+    throw err
+  }
   await invalidateBroadcastsList()
-  await logAudit(session, `sent broadcast to ${recipients.length} patient(s)`, null)
-  return NextResponse.json(created, { status: 201 })
+  await logAudit(session, 'sent broadcast', null, `broadcast=${result.id} matched=${counts.match} sent=${result.sentCount} skipped=${result.skippedCount} failed=${result.failedCount}`)
+  return NextResponse.json(result, { status: 201 })
 }

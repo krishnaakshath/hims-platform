@@ -1,7 +1,8 @@
 import { getDb } from '@/db/client'
-import { doctorAssignments, appointments, admissions, encounters, providers, rooms } from '@/db/schema'
+import { doctorAssignments, appointments, admissions, encounters, providers, rooms, patients } from '@/db/schema'
 import { and, eq, gte, lt, ne } from 'drizzle-orm'
 import { istDayBounds } from '@/lib/india-time'
+import { notArchived } from './patient-archive' // WS8 T13
 
 export type QueueDisplayStage = 'waiting' | 'ready'
 
@@ -38,12 +39,13 @@ export async function getQueueDisplayRows(): Promise<QueueDisplayRow[]> {
       bedRoomNumber: rooms.roomNumber, // WS6 T10
     })
     .from(doctorAssignments)
+    .innerJoin(patients, eq(patients.id, doctorAssignments.patientId)) // WS8 T13: archived charts leave the board
     .leftJoin(appointments, eq(doctorAssignments.appointmentId, appointments.id))
     .leftJoin(admissions, eq(admissions.createdFromAssignmentId, doctorAssignments.id))
     .leftJoin(encounters, eq(encounters.doctorAssignmentId, doctorAssignments.id)) // SP3
     .innerJoin(providers, eq(providers.id, doctorAssignments.providerId)) // WS6 T10
     .leftJoin(rooms, eq(rooms.id, doctorAssignments.roomId)) // WS6 T10
-    .where(and(gte(doctorAssignments.createdAt, today.start), lt(doctorAssignments.createdAt, today.end), ne(doctorAssignments.status, 'declined')))
+    .where(and(gte(doctorAssignments.createdAt, today.start), lt(doctorAssignments.createdAt, today.end), ne(doctorAssignments.status, 'declined'), notArchived()))
 
   const result: QueueDisplayRow[] = []
   for (const row of rows) {

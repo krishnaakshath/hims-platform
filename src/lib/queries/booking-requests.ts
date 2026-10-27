@@ -1,7 +1,7 @@
 import { getDb } from '@/db/client'
 import { bookingRequests, appointments } from '@/db/schema'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { hasSchedulingConflict, lockProviderSchedule } from '@/lib/queries/appointments'
+import { hasSchedulingConflict, lockProviderSchedule, type VisitMode } from '@/lib/queries/appointments' // WS7 T7: + VisitMode
 import { logAudit } from '@/lib/audit' // Wave J
 import type { Session } from '@/lib/auth' // Wave J
 
@@ -77,8 +77,18 @@ export async function confirmBookingRequest(id: number, input: ConfirmBookingReq
       const updated = await tx.update(bookingRequests)
         .set({ status: 'confirmed', reviewedByName: input.reviewedByName, reviewedAt: new Date() })
         .where(and(eq(bookingRequests.id, id), eq(bookingRequests.status, 'pending')))
-        .returning({ id: bookingRequests.id })
+        .returning({ id: bookingRequests.id, requestedVisitMode: bookingRequests.requestedVisitMode })
       if (updated.length === 0) throw new AlreadyResolved()
+
+      // WS7 T7 (spec D20): the mode the patient asked for; a reschedule that names none keeps
+      // the mode of the appointment it moves; otherwise in person.
+      let visitMode: VisitMode = updated[0].requestedVisitMode ?? 'in_person'
+      if (updated[0].requestedVisitMode === null && input.rescheduleFromAppointmentId) {
+        const [moved] = await tx.select({ visitMode: appointments.visitMode }).from(appointments)
+          .where(and(eq(appointments.id, input.rescheduleFromAppointmentId), eq(appointments.patientId, input.patientId)))
+        if (moved) visitMode = moved.visitMode
+      }
+      // end WS7 T7
 
       const [appointment] = await tx.insert(appointments).values({
         patientId: input.patientId,
@@ -87,6 +97,7 @@ export async function confirmBookingRequest(id: number, input: ConfirmBookingReq
         endsAt: input.endsAt,
         visitReason: input.visitReason,
         status: 'scheduled',
+        visitMode, // WS7 T7
       }).returning()
 
       await tx.update(bookingRequests).set({ resultingAppointmentId: appointment.id }).where(eq(bookingRequests.id, id))

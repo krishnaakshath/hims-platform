@@ -18,6 +18,7 @@ const createAppointmentSchema = z.object({
   visitReason: visitReasonSchema,
   status: z.enum(['scheduled', 'completed', 'cancelled', 'no_show']).optional(),
   outsideHoursConfirmed: z.boolean().optional(), // WS6 T7
+  visitMode: z.enum(['in_person', 'video']).optional(), // WS7 T6 (spec D20)
 }).strict()
 
 export async function GET(request: NextRequest) {
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
     endsAt,
     visitReason: parsed.data.visitReason,
     status: parsed.data.status ?? 'scheduled',
+    visitMode: parsed.data.visitMode ?? 'in_person', // WS7 T6
   })
   if (!result.ok) {
     return NextResponse.json({ error: 'This provider already has an appointment during that time.' }, { status: 409 })

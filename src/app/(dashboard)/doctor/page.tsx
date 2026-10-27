@@ -23,7 +23,9 @@ import { DoctorCodingQueries } from '@/components/coding/DoctorCodingQueries'
 import { getDoctorWorkload, type DoctorWorkload } from '@/lib/queries/hospital-kpis'
 import { ENCOUNTER_STATUS_LABEL } from '@/lib/encounters/register'
 import type { EncounterStatus } from '@/lib/encounters/status'
-import { formatIsoDate } from '@/lib/india-time'
+import { formatIsoDate, todayIsoIn } from '@/lib/india-time'
+import { NeedsAttentionStrip } from '@/components/dashboards/NeedsAttentionStrip' // WS8 T15
+import { loadNeedsAttention } from '@/lib/queries/needs-attention' // WS8 T15
 // end Wave E
 // WS1 T3: hospital-first home (trials off) and Start Encounter through the visit's start route.
 import { todayIsoIn } from '@/lib/india-time'
@@ -136,6 +138,7 @@ export default async function DoctorPortalPage() {
     ? await Promise.all([listOpenCriticalAlerts({ providerId: providerMatch.id }), acknowledgeableCriticalOrderIds(session)])
     : [[], []]
 
+  const attention = await loadNeedsAttention(session.role, todayIsoIn()) // WS8 T15
   await logAudit(session, 'viewed My Patients (doctor portal)', null)
 
   const highAcuityCount = criticalToReview + pendingAssignments.filter(a => a.urgency === 'urgent' || a.urgency === 'emergency').length
@@ -159,22 +162,24 @@ export default async function DoctorPortalPage() {
           </div>
         </div>
         <div className="flex gap-6">
-          <div className="flex flex-col items-end border-r border-border pr-6">
+          {/* WS8 T15: each header count links to the section on this page that lists it. */}
+          <Link href="/doctor#panel" className="flex flex-col items-end border-r border-border pr-6 hover:opacity-80">
             <span className="text-2xl font-bold tabular-nums text-foreground">{panelCount}</span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total Panel</span>
-          </div>
-          <div className="flex flex-col items-end border-r border-border pr-6">
+          </Link>
+          <Link href="/doctor#schedule" className="flex flex-col items-end border-r border-border pr-6 hover:opacity-80">
             <span className="text-2xl font-bold tabular-nums text-foreground">{todaysCheckups.length}</span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Today&apos;s Visits</span>
-          </div>
-          <div className="flex flex-col items-end">
+          </Link>
+          <Link href="/doctor#triage" className="flex flex-col items-end hover:opacity-80">
             <span className={`text-2xl font-bold tabular-nums ${highAcuityCount > 0 ? 'text-destructive' : 'text-foreground'}`}>{highAcuityCount}</span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Action Needed</span>
-          </div>
+          </Link>
         </div>
       </div>
 
       <CriticalResultBanner alerts={criticalAlerts} canNotify={false} canAcknowledge={(a) => criticalAckIds.includes(a.orderId)} /> {/* WS4 T12 */}
+      <NeedsAttentionStrip items={attention} /> {/* WS8 T15 */}
 
       {/* Main EMR Grid - 3 Columns for high density */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
@@ -183,7 +188,7 @@ export default async function DoctorPortalPage() {
         <div className="col-span-1 flex flex-col gap-6 lg:col-span-4">
           
           {/* Pending Triage / Assignments */}
-          <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+          <div id="triage" className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
             <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-3">
               <div className="flex items-center gap-2">
                 <AlertCircle className="h-4 w-4 text-warning" />
@@ -331,7 +336,7 @@ export default async function DoctorPortalPage() {
           )}
 
           {/* Today's Schedule - Timeline View */}
-          <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+          <div id="schedule" className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <div className="flex items-center gap-2">
                 <Clock className="h-5 w-5 text-primary" />
@@ -349,7 +354,7 @@ export default async function DoctorPortalPage() {
 
           {/* Full Patient Panel: the trial panel while trials are on; otherwise (WS1 T3) the doctor's own recent patients. */}
           {trialsOn ? (
-            <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+            <div id="panel" className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
               <div className="flex items-center justify-between border-b border-border px-5 py-4">
                 <h3 className="text-base font-semibold text-foreground">Assigned Patient Panel</h3>
               </div>
@@ -391,6 +396,8 @@ export default async function DoctorPortalPage() {
                 visitReason: a.visitReason,
                 status: a.status,
                 startsAt: a.startsAt.toISOString(),
+                visitMode: a.visitMode, // WS7 T6
+                telemedicine: a.telemedicine, // WS7 T6
               }))}
               canStartTelemedicine={Boolean(providerMatch)}
             />

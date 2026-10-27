@@ -58,8 +58,8 @@ async function renderAll(env: Record<string, string>) {
   const { default: PrescriptionPrintPage } = await import('@/app/prescriptions/print/page')
   const { default: PublicBookingPage } = await import('@/app/book/page')
   const { AddClientModal } = await import('@/components/AddClientModal')
-  const { DeletePatientDialog } = await import('@/components/DeletePatientDialog')
-  const { ToastProvider } = await import('@/components/ui/toast') // WS6 T8: registration shows toasts
+  const { ArchivePatientDialog } = await import('@/components/ArchivePatientDialog')
+  const { ToastProvider } = await import('@/components/ui/toast')
   return {
     login: await render(<LoginPage />),
     portalLogin: await render(<PatientPortalLoginPage />),
@@ -67,7 +67,7 @@ async function renderAll(env: Record<string, string>) {
     book: await render(await PublicBookingPage()),
     // Radix dialogs portal their content, which renderToStaticMarkup does
     // not emit -- so only assert these don't throw and carry no old name.
-    dialogs: await render(<ToastProvider><AddClientModal onClose={() => {}} /><DeletePatientDialog target={{ id: 'RD-0001', name: 'X' }} onClose={() => {}} onDeleted={() => {}} /></ToastProvider>),
+    dialogs: await render(<ToastProvider><AddClientModal onClose={() => {}} /><ArchivePatientDialog target={{ id: 'RD-0001', name: 'X', uhid: 'UH-000001' }} onClose={() => {}} onArchived={() => {}} /></ToastProvider>),
   }
 }
 

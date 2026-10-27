@@ -305,7 +305,7 @@ const paidForInvoice = (invoiceId: SQL | number) => sql<string | null>`greatest(
   coalesce((select sum(${patientPayments.amountPaise}) from ${patientPayments} where ${patientPayments.invoiceId} = ${invoiceId}), 0)
   - coalesce((select sum(${refunds.amountPaise}) from ${refunds} inner join ${patientPayments} on ${patientPayments.id} = ${refunds.againstPaymentId}
       where ${patientPayments.invoiceId} = ${invoiceId}), 0))`
-const invoicePaidSql = paidForInvoice(sql`${invoices.id}`)
+export const invoicePaidSql = paidForInvoice(sql`${invoices.id}`) // WS7 T8: exported for the portal bills list
 
 /** Receipts against the invoice less refunds against those receipts, floored at 0. Usable inside a transaction. */
 export async function invoicePaidPaise(executor: Pick<ReturnType<typeof getDb>, 'execute'>, invoiceId: number): Promise<number> {

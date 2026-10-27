@@ -37,7 +37,7 @@ describe('Wave J booking_requests portal columns', () => {
     for (const col of ['patient_id', 'request_kind', 'appointment_id']) expect(missing).not.toContain(col)
     const c = getTableConfig(bookingRequests)
     const names = [...c.checks.map((k) => k.name), ...c.indexes.map((i) => i.config.name!), ...c.foreignKeys.map((f) => f.getName())]
-    for (const n of names.filter((n) => !n.includes('preferred_provider') && !n.includes('resulting_appointment'))) expect(s, n).toContain(n)
+    for (const n of names.filter((n) => !n.includes('preferred_provider') && !n.includes('resulting_appointment') && !n.includes('requested_visit_mode') /* WS7 T6: 2026-10-26-ws7-visit-mode.sql */)) expect(s, n).toContain(n)
   })
 
   it('a public request defaults to kind new with no patient or appointment', async () => {

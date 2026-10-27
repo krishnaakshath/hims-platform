@@ -128,4 +128,22 @@ describe('AdminDashboard', () => {
     expect(screen.getByText(/credential expiry/i)).toBeInTheDocument()
     expect(screen.getByText(/no credentials expiring soon/i)).toBeInTheDocument()
   })
+
+  // WS8 T15
+  it('shows the needs-attention strip above the tiles, every item a link admin may open, and Total Patients is a link', () => {
+    const { container } = render(<AdminDashboard {...baseProps} attention={[
+      { id: 'overdue_data_requests', label: 'Data requests past the due date', count: 2, href: '/governance/data-requests', tone: 'danger' },
+      { id: 'expiring_credentials', label: 'Staff credentials expired or expiring in 30 days', count: 3, href: '/staff', tone: 'warning' },
+    ]} />)
+    const strip = screen.getByRole('region', { name: 'Needs attention' })
+    expect(strip.querySelector('a[href="/governance/data-requests"]')).not.toBeNull()
+    expect(strip.querySelector('a[href="/staff"]')).not.toBeNull()
+    for (const el of screen.getAllByText('Total Patients')) expect(el.closest('a')).toHaveAttribute('href', '/patients')
+    expect(deadLinks(container, 'admin')).toEqual([])
+  })
+
+  it('renders no strip when nothing needs attention', () => {
+    render(<AdminDashboard {...baseProps} attention={[]} />)
+    expect(screen.queryByRole('region', { name: 'Needs attention' })).toBeNull()
+  })
 })

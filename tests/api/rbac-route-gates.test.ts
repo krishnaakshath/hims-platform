@@ -714,6 +714,28 @@ import { LAB_CRITICAL_ACK_ROLES, LAB_CRITICAL_NOTIFY_ROLES } from '@/lib/role-po
 // WS4 T13
 import { GET as getLabTestsFromTariff, POST as postLabTestsFromTariff } from '@/app/api/lab-tests/from-tariff/route'
 // end WS4 T13
+// WS7 T4
+import { POST as postHospitalFormPack } from '@/app/api/form-templates/hospital-pack/route'
+// WS7 T9
+import { GET as getPortalSubmissions } from '@/app/api/front-desk/portal-submissions/route'
+import { POST as postPortalSubmissionDecision } from '@/app/api/front-desk/portal-submissions/[id]/decision/route'
+import { PORTAL_SUBMISSION_REVIEW_ROLES } from '@/lib/role-policy'
+// end WS7 T9
+// end WS7 T4
+// WS8 T12
+import { GET as exportAuditLog } from '@/app/api/audit-log/export/route'
+// end WS8 T12
+// WS8 T13
+import { POST as postArchivePatient } from '@/app/api/patients/[anonId]/archive/route'
+import { POST as postRestorePatient } from '@/app/api/patients/[anonId]/restore/route'
+// end WS8 T13
+// WS8 T14
+import { GET as listDataRequests, POST as postDataRequest } from '@/app/api/governance/data-requests/route'
+import { GET as getDataRequest, PATCH as patchDataRequest } from '@/app/api/governance/data-requests/[id]/route'
+import { POST as postDataRequestExport } from '@/app/api/governance/data-requests/[id]/export/route'
+import { GET as downloadDataRequestExport } from '@/app/api/governance/data-requests/[id]/export/download/route'
+import { POST as postDataRequestErase } from '@/app/api/governance/data-requests/[id]/erase/route'
+// end WS8 T14
 
 export type ApiGateCase = { name: string; call: () => Promise<Response>; allowed: Role[]; gap?: string }
 
@@ -739,7 +761,8 @@ const fhir = (resource: string, handler: typeof getFhirPatient): ApiGateCase => 
   allowed: [...CLINICAL_ROLES],
 })
 
-export const API_GATES: ApiGateCase[] = [
+export const NOT_JSON = '{not json'
+const API_GATES: ApiGateCase[] = [
   // POLICY.md: patient JSON APIs -- CLINICAL_ROLES (ruling 1: frontdesk denied)
   { name: 'GET /api/patients', call: () => listPatients(get('/api/patients')), allowed: [...CLINICAL_ROLES] },
   // REGISTRATION_ROLES -- admin/frontdesk only (route.ts comment: crc removed by product direction)
@@ -1118,7 +1141,7 @@ export const API_GATES: ApiGateCase[] = [
       { name: 'POST /api/inpatient/rooms/[id]/unblock', call: () => settle(() => unblockRoomRoute(send('POST', `/api/inpatient/rooms/${BOGUS_ID}/unblock`), ctx({ id: BOGUS_ID }))), allowed: ADMIN },
       { name: 'GET /api/labs/patients/[patientId]', call: () => settle(() => getLabsPatient(get(`/api/labs/patients/${BOGUS_PATIENT}`), ctx({ patientId: BOGUS_PATIENT }))), allowed: ['admin', 'pi', 'crc', 'labs'] },
       { name: 'GET /api/nav-badges', call: () => settle(() => getNavBadgesRoute()), allowed: [...ALL_ROLES] },
-      { name: 'DELETE /api/patients/[anonId]', call: () => settle(() => deletePatientRoute(del(`/api/patients/${BOGUS_PATIENT}`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ADMIN },
+      { name: 'DELETE /api/patients/[anonId]', call: () => settle(() => deletePatientRoute()), allowed: ADMIN }, // WS8 T13: fixed 405 after the gate
       { name: 'POST /api/patients/[anonId]/care-plans', call: () => settle(() => postCarePlanRoute(w('POST', `/api/patients/${BOGUS_PATIENT}/care-plans`), ctx({ anonId: BOGUS_PATIENT }))), allowed: PI_ADMIN },
       // Multipart upload: a non-multipart body is the 400 an allowed role gets, after the gate.
       { name: 'POST /api/patients/[anonId]/insurance-card', call: () => settle(() => postInsuranceCardRoute(w('POST', `/api/patients/${BOGUS_PATIENT}/insurance-card`), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin', 'crc', 'frontdesk'] },
@@ -1295,12 +1318,35 @@ export const API_GATES: ApiGateCase[] = [
   { name: 'GET /api/lab-tests/from-tariff', call: () => getLabTestsFromTariff(), allowed: [...LAB_SETUP_ROLES] },
   { name: 'POST /api/lab-tests/from-tariff', call: () => postLabTestsFromTariff(send('POST', '/api/lab-tests/from-tariff', {})), allowed: [...LAB_SETUP_ROLES] },
   // end WS4 T13
+  // WS7 T4: install the hospital form pack -- admin only. Denied roles never reach the seed.
+  { name: 'POST /api/form-templates/hospital-pack', call: () => settle(() => postHospitalFormPack(send('POST', '/api/form-templates/hospital-pack', NOT_JSON))), allowed: ['admin'] },
+  // end WS7 T4  // WS7 T9: portal self-service submissions -- PORTAL_SUBMISSION_REVIEW_ROLES. A non-JSON body is the 400 an allowed role gets, after the gate.
+  { name: 'GET /api/front-desk/portal-submissions', call: () => settle(() => getPortalSubmissions()), allowed: [...PORTAL_SUBMISSION_REVIEW_ROLES] },
+  { name: 'POST /api/front-desk/portal-submissions/[id]/decision', call: () => settle(() => postPortalSubmissionDecision(send('POST', `/api/front-desk/portal-submissions/${BOGUS_ID}/decision`, NOT_JSON), ctx({ id: BOGUS_ID }))), allowed: [...PORTAL_SUBMISSION_REVIEW_ROLES] },
+  // end WS7 T9
+  // WS8 T12: the audit-log CSV export -- admin only.
+  { name: 'GET /api/audit-log/export', call: () => settle(() => exportAuditLog(get('/api/audit-log/export?role=superuser'))), allowed: ['admin'] },
+  // end WS8 T12
+  // WS8 T13: archive and restore -- admin only; a non-JSON body still gets the plain 403 for a denied role.
+  { name: 'POST /api/patients/[anonId]/archive', call: () => settle(() => postArchivePatient(send('POST', `/api/patients/${BOGUS_PATIENT}/archive`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin'] },
+  { name: 'POST /api/patients/[anonId]/restore', call: () => settle(() => postRestorePatient(send('POST', `/api/patients/${BOGUS_PATIENT}/restore`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT }))), allowed: ['admin'] },
+  // end WS8 T13
+  // WS8 T14: the DPDP data-principal request register -- admin only on every route.
+  { name: 'GET /api/governance/data-requests', call: () => settle(() => listDataRequests()), allowed: ['admin'] },
+  { name: 'POST /api/governance/data-requests', call: () => settle(() => postDataRequest(send('POST', '/api/governance/data-requests', NOT_JSON))), allowed: ['admin'] },
+  { name: 'GET /api/governance/data-requests/[id]', call: () => settle(() => getDataRequest(get(`/api/governance/data-requests/${BOGUS_ID}`), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  { name: 'PATCH /api/governance/data-requests/[id]', call: () => settle(() => patchDataRequest(send('PATCH', `/api/governance/data-requests/${BOGUS_ID}`, NOT_JSON), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  { name: 'POST /api/governance/data-requests/[id]/export', call: () => settle(() => postDataRequestExport(send('POST', `/api/governance/data-requests/${BOGUS_ID}/export`), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  { name: 'GET /api/governance/data-requests/[id]/export/download', call: () => settle(() => downloadDataRequestExport(get(`/api/governance/data-requests/${BOGUS_ID}/export/download`), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  { name: 'POST /api/governance/data-requests/[id]/erase', call: () => settle(() => postDataRequestErase(send('POST', `/api/governance/data-requests/${BOGUS_ID}/erase`, NOT_JSON), ctx({ id: BOGUS_ID }))), allowed: ['admin'] },
+  // end WS8 T14
+
 ]
 
 // Deny-before-parse: for the SP1 write routes a denied role sending a body
 // that is not even JSON must still get the plain 403 -- a 400 here would mean
 // the body was read before the gate.
-const NOT_JSON = '{not json'
+// NOT_JSON moved above API_GATES
 const SP1_WRITE_GATES: { name: string; call: () => Promise<Response>; allowed: readonly Role[] }[] = [
   { name: 'PATCH /api/patients/[anonId]/profile', call: () => patchProfile(send('PATCH', `/api/patients/${BOGUS_PATIENT}/profile`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PATIENT_PROFILE_EDIT_ROLES },
   { name: 'PUT /api/patients/[anonId]/contacts', call: () => putContacts(send('PUT', `/api/patients/${BOGUS_PATIENT}/contacts`, NOT_JSON), ctx({ anonId: BOGUS_PATIENT })), allowed: PATIENT_PROFILE_EDIT_ROLES },
@@ -1610,6 +1656,7 @@ const UNGATED_EXEMPT: Record<string, string> = {
   'GET /api/intake/[token]': 'intake token possession (tests/api/intake-portal.test.ts)',
   'PUT /api/intake/[token]': 'intake token possession (tests/api/intake-portal.test.ts)',
   'POST /api/intake/[token]/consents/[formSubmissionConsentId]/sign': 'intake token possession (tests/api/intake-consent-sign.test.ts)',
+  'POST /api/intake/[token]/files': 'intake token possession, rate limited per submission (tests/api/intake-files.test.ts)', // WS7 T3
   'GET /api/telemedicine/join/[token]/signal': 'patient join token possession (tests/api/telemedicine-join-signal.test.ts)',
   'POST /api/telemedicine/join/[token]/signal': 'patient join token possession (tests/api/telemedicine-join-signal.test.ts)',
   'POST /api/public/booking-requests': 'public booking form, rate limited (tests/api/public-booking-requests.test.ts)',
@@ -1617,6 +1664,9 @@ const UNGATED_EXEMPT: Record<string, string> = {
   'POST /api/webhooks/fhir-labs': 'LIS shared-secret token (tests/api/webhooks-fhir-labs.test.ts)',
   'GET /api/messages/[patientId]': 'staff-or-patient dual session via getSession, not requireSession; staff roles pinned in tests/api/messages.test.ts',
   'POST /api/messages/[patientId]': 'staff-or-patient dual session via getSession, not requireSession; staff roles pinned in tests/api/messages.test.ts',
+  'POST /api/patient-portal/payments/upi-request': 'patient session only, own finalised bill, rate limited (tests/api/patient-portal-payments.test.ts)', // WS7 T8
+  'POST /api/patient-portal/payments/[id]/reported-utr': 'patient session only, own portal request; never posts a receipt (tests/api/patient-portal-payments.test.ts)', // WS7 T8
+  'POST /api/patient-portal/self-service': 'patient session only; a pending submission the front desk reviews, never master data (tests/api/portal-submissions.test.ts)', // WS7 T9
 }
 
 function findRouteFiles(dir: string): string[] {

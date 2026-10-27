@@ -2,9 +2,16 @@
 import { sendJson } from '@/lib/client-fetch'
 import { formatIstDate } from '@/lib/india-time'
 import { useState } from 'react'
-import { IntakeQuestionField, type IntakeQuestion as Question } from '@/components/IntakeQuestionField'
+import Link from 'next/link'
+import { QuestionField, type IntakeQuestion as Question } from '@/components/intake/QuestionField'
+import { LanguageSwitch } from '@/components/intake/LanguageSwitch'
 import { SignatureCapture } from '@/components/SignatureCapture'
 import type { SubmissionConsent } from '@/lib/queries/form-submission-consents'
+import { validateAnswers, visibleQuestions, type FormLang } from '@/lib/forms/question-model'
+
+// validateAnswers' fixed message for a blank required question: shown as the
+// submit-blocked reason, not under each field (the asterisk already says it).
+const REQUIRED_MESSAGE = 'This question is required'
 
 function isAnswered(question: Question, value: string | undefined): boolean {
   if (question.type === 'checkbox') return value !== undefined
@@ -16,14 +23,20 @@ function isAnswered(question: Question, value: string | undefined): boolean {
 // server returned them (formSubmissionConsents.sortOrder), then submit.
 type Page = { kind: 'questions' } | { kind: 'consent'; index: number }
 
-export function IntakePortalForm({ token, questions, existingAnswers, autofill, consents: initialConsents = [] }: {
+export function IntakePortalForm({ token, questions, existingAnswers, autofill, consents: initialConsents = [], languages = ['en'], signedCopyHref = null }: {
   token: string
   questions: Question[]
   existingAnswers: Record<string, string>
   autofill: Record<string, string>
   consents?: SubmissionConsent[]
+  /** The template's offered languages ('en' first). */
+  languages?: FormLang[]
+  /** Set by the server only when a portal session for this submission's patient exists. */
+  signedCopyHref?: string | null
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({ ...autofill, ...existingAnswers })
+  const [lang, setLang] = useState<FormLang>('en')
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({})
   const [consents, setConsents] = useState<SubmissionConsent[]>(initialConsents)
   const [pageIndex, setPageIndex] = useState(0)
   const [signingId, setSigningId] = useState<number | null>(null)
@@ -34,14 +47,24 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
 
   function update(id: string, value: string) {
     setAnswers((prev) => ({ ...prev, [id]: value }))
+    setServerErrors((prev) => { if (!(id in prev)) return prev; const next = { ...prev }; delete next[id]; return next })
   }
+
+  // Only what the patient can currently see is sent: an answer to a question
+  // since hidden by its condition is dropped here (and again by the server).
+  const shown = visibleQuestions(questions, answers)
+  const answerable = shown.filter((q) => q.type !== 'section')
 
   async function submit(complete: boolean) {
     setSubmitting(true)
     setError(null)
-    const res = await sendJson(`/api/intake/${token}`, 'PUT', { answers, complete })
+    const sent: Record<string, string> = {}
+    for (const q of answerable) if (answers[q.id] !== undefined) sent[q.id] = answers[q.id]
+    const res = await sendJson(`/api/intake/${token}`, 'PUT', { answers: sent, complete, language: lang })
     setSubmitting(false)
     if (!res.ok) {
+      const fieldErrors = (res.body as { errors?: unknown } | undefined)?.errors
+      if (fieldErrors && typeof fieldErrors === 'object') setServerErrors(fieldErrors as Record<string, string>)
       setError(res.error)
       return
     }
@@ -69,7 +92,11 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
     return (
       <div className="text-center">
         <p className="text-sm font-medium text-foreground">Thank you — your form has been submitted.</p>
-        <p className="mt-1 text-sm text-muted-foreground">You may close this page.</p>
+        {signedCopyHref ? (
+          <PortalLinks signedCopyHref={signedCopyHref} />
+        ) : (
+          <p className="mt-1 text-sm text-muted-foreground">You may close this page.</p>
+        )}
       </div>
     )
   }
@@ -85,19 +112,23 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
   const page = pages[currentIndex]
   const isLastPage = currentIndex === pages.length - 1
 
-  const answeredCount = questions.filter((q) => isAnswered(q, answers[q.id])).length
+  const check = validateAnswers(questions, answers)
+  const fieldErrors: Record<string, string> = check.ok ? {} : check.errors
+  const requiredMissing = Object.values(fieldErrors).some((e) => e === REQUIRED_MESSAGE)
+  const answerInvalid = Object.values(fieldErrors).some((e) => e !== REQUIRED_MESSAGE)
+
+  const answeredCount = answerable.filter((q) => isAnswered(q, answers[q.id])).length
   const signedCount = consents.filter((c) => c.signedAt).length
   const unsignedCount = consents.length - signedCount
   // Questions and consents both count toward progress. A consent-only packet
   // has questions.length === 0, so the total must never be questions alone;
   // and when the total is 0 there is nothing to measure, so no bar renders.
-  const progressTotal = questions.length + consents.length
+  const progressTotal = answerable.length + consents.length
   const progressDone = answeredCount + signedCount
   const progressPercent = progressTotal === 0 ? 0 : Math.round((progressDone / progressTotal) * 100)
-  const requiredMissing = questions.some((q) => q.required && !isAnswered(q, answers[q.id]))
 
   const progressLabel = [
-    questions.length > 0 ? `${answeredCount} of ${questions.length} question${questions.length === 1 ? '' : 's'} answered` : null,
+    answerable.length > 0 ? `${answeredCount} of ${answerable.length} question${answerable.length === 1 ? '' : 's'} answered` : null,
     consents.length > 0 ? `${signedCount} of ${consents.length} consent${consents.length === 1 ? '' : 's'} signed` : null,
   ].filter(Boolean).join(' · ')
 
@@ -105,10 +136,13 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
     ? `Please sign ${unsignedCount === 1 ? 'the remaining consent document' : `all ${unsignedCount} remaining consent documents`} before submitting.`
     : requiredMissing
       ? 'Please answer every required question before submitting.'
-      : null
+      : answerInvalid
+        ? 'Please correct the answers marked below before submitting.'
+        : null
 
   return (
     <div>
+      <LanguageSwitch languages={languages} value={lang} onChange={setLang} />
       {progressTotal > 0 && (
         <div className="mb-6">
           <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-muted-foreground">
@@ -127,8 +161,16 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
 
       {page.kind === 'questions' ? (
         <div className="space-y-4">
-          {questions.map((q) => (
-            <IntakeQuestionField key={q.id} question={q} value={answers[q.id]} onChange={(v) => update(q.id, v)} />
+          {shown.map((q) => (
+            <QuestionField
+              key={q.id}
+              question={q}
+              lang={lang}
+              value={answers[q.id]}
+              onChange={(v) => update(q.id, v)}
+              error={serverErrors[q.id] ?? (fieldErrors[q.id] !== REQUIRED_MESSAGE ? fieldErrors[q.id] : null)}
+              uploadUrl={`/api/intake/${token}/files`}
+            />
           ))}
         </div>
       ) : (
@@ -157,6 +199,17 @@ export function IntakePortalForm({ token, questions, existingAnswers, autofill, 
       {isLastPage && submitBlockedReason && (
         <p role="alert" className="mt-2 text-right text-xs text-muted-foreground" data-testid="submit-blocked-reason">{submitBlockedReason}</p>
       )}
+    </div>
+  )
+}
+
+// Shown only when the server found a patient-portal session for this
+// submission's own patient (never from anything in the URL).
+export function PortalLinks({ signedCopyHref }: { signedCopyHref: string }) {
+  return (
+    <div className="mt-4 flex flex-wrap justify-center gap-2">
+      <Link href="/patient-portal" className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary">Back to your portal</Link>
+      <Link href={signedCopyHref} className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90">View signed copy</Link>
     </div>
   )
 }

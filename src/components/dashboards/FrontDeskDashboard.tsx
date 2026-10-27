@@ -13,6 +13,8 @@ import { AddPatientButton } from '@/components/AddPatientButton'
 import { AssignmentStatusChip } from '@/components/AssignmentStatusChip'
 import { PatientAvatar } from '@/components/PatientAvatar'
 import { DashSection, KpiGrid, KpiTile, WardOccupancy } from '@/components/dashboards/KpiTile'
+import { NeedsAttentionStrip } from '@/components/dashboards/NeedsAttentionStrip' // WS8 T15
+import type { AttentionItem } from '@/lib/queries/needs-attention' // WS8 T15
 
 const URGENCY_ORDER = { emergency: 0, urgent: 1, routine: 2 } as const
 
@@ -31,7 +33,7 @@ function EmptyRow({ text }: { text: string }) {
 // (hospitalTiles, scoped to frontdesk), the assignment queue by patient name,
 // UHID and token, quick actions (register, check in, queue display, price
 // lookup). No staff credential data: frontdesk is barred from /staff.
-export async function FrontDeskDashboard({ session }: { session: Session }) {
+export async function FrontDeskDashboard({ session, attention = [] }: { session: Session; attention?: AttentionItem[] /* WS8 T15 */ }) {
   // The table lists today's assignments only; the "Pending Assignments" tile
   // counts every still-pending one (what /front-desk/assignments lists), and
   // "Declines to acknowledge" is the same count as that nav entry's badge.
@@ -63,6 +65,8 @@ export async function FrontDeskDashboard({ session }: { session: Session }) {
           {TARIFF_LOOKUP_ROLES.includes(session.role) && <Link href="/price-lookup" className={ACTION_LINK}><Calculator className="h-4 w-4" aria-hidden="true" />Price lookup</Link>}
         </div>
       </div>
+
+      <NeedsAttentionStrip items={attention} /> {/* WS8 T15 */}
 
       <KpiGrid>
         {hospitalTiles(session.role, hospital).map(({ id, ...t }) => <KpiTile key={id} {...t} />)}

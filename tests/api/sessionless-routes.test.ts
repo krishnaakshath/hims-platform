@@ -23,6 +23,7 @@ const PRE_EXISTING = [
   'src/app/api/auth/google/callback/route.ts', 'src/app/api/auth/google/start/route.ts', 'src/app/api/health/ready/route.ts', 'src/app/api/health/route.ts',
   'src/app/api/login/mfa/route.ts', 'src/app/api/login/route.ts', 'src/app/api/logout/route.ts', 'src/app/api/messages/[patientId]/route.ts',
   'src/app/api/patients/[anonId]/form-submissions/[id]/sign/route.ts',
+  'src/app/api/intake/[token]/files/route.ts', // WS7 T3: intake token possession (tests/api/intake-files.test.ts)
 ]
 const PORTAL = /^src\/app\/api\/patient-portal\//
 

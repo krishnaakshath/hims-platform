@@ -4,10 +4,12 @@
 // display a choice-type answer" rule in one place rather than duplicated
 // across pages.
 
+import type { QuestionType } from '@/lib/forms/question-model'
+
 export interface AnswerQuestion {
   id: string
   label: string
-  type: 'text' | 'textarea' | 'date' | 'select' | 'checkbox'
+  type: QuestionType
   options?: string[]
 }
 
@@ -19,7 +21,17 @@ export function formatAnswerDisplay(question: AnswerQuestion, rawValue: string |
     return rawValue === 'true' ? 'Yes' : 'No'
   }
 
+  // A section is a heading, never answered.
+  if (question.type === 'section') return UNANSWERED
+
   if (rawValue === undefined || rawValue === '') return UNANSWERED
+
+  // A file answer is a `doc:<id>` reference -- never surface the raw id or any
+  // storage path; the document itself is reached from the patient's chart.
+  if (question.type === 'file') return 'Document uploaded'
+
+  // A signature answer is the patient's typed full name.
+  if (question.type === 'signature') return `Signed as ${rawValue}`
 
   if (question.type === 'select') {
     // The intake form stores the selected option's own text as the answer,

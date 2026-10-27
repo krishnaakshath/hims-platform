@@ -1,40 +1,45 @@
 import { getDb } from '@/db/client'
 import { encounterNotes, signatures } from '@/db/schema'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import type { Role, Session } from '@/lib/auth'
-import { NOTE_ATTESTATION } from '@/lib/encounters/note-signing'
+import { NOTE_ATTESTATION, noteSignSchema } from '@/lib/encounters/note-signing'
 
-export { NOTE_ATTESTATION, noteSignSchema } from '@/lib/encounters/note-signing'
+export { NOTE_ATTESTATION, noteSignSchema }
 
 export type EncounterNote = typeof encounterNotes.$inferSelect
 
-export interface CreateNoteInput {
+export async function createNote(input: {
   patientId: string
   appointmentId: number | null
   admissionId: number | null
-  /** WS1 T5: the visit the note was written in (the route checks it belongs to the patient). */
   encounterId?: number | null
-  noteType: 'progress' | 'nursing' | 'intake'
+  noteType: 'soap' | 'progress' | 'nursing' | 'discharge_summary'
   authorName: string
-  // Full Role, not narrowed to 'pi' | 'admin' -- POST .../notes/route.ts's
-  // own runtime gate is what actually restricts who can call this; matches
-  // the same widen-the-type/gate-at-runtime convention used elsewhere
-  // (auditLog.role, messages.senderRole).
   authorRole: Role
   subjective: string | null
   objective: string | null
   assessment: string | null
   plan: string | null
-}
-
-export async function createNote(input: CreateNoteInput): Promise<EncounterNote> {
-  const [created] = await getDb().insert(encounterNotes).values(input).returning()
+}): Promise<EncounterNote> {
+  const [created] = await getDb().insert(encounterNotes).values({
+    patientId: input.patientId,
+    appointmentId: input.appointmentId,
+    admissionId: input.admissionId,
+    encounterId: input.encounterId ?? null,
+    noteType: input.noteType,
+    authorName: input.authorName,
+    authorRole: input.authorRole,
+    subjective: input.subjective,
+    objective: input.objective,
+    assessment: input.assessment,
+    plan: input.plan,
+  }).returning()
   return created
 }
 
 export async function getNoteById(id: number): Promise<EncounterNote | null> {
-  const [row] = await getDb().select().from(encounterNotes).where(eq(encounterNotes.id, id))
-  return row ?? null
+  const rows = await getDb().select().from(encounterNotes).where(eq(encounterNotes.id, id))
+  return rows[0] ?? null
 }
 
 export async function listNotesForPatient(patientId: string): Promise<EncounterNote[]> {
@@ -46,44 +51,64 @@ export async function listNotesForEncounter(encounterId: number): Promise<Encoun
   return getDb().select().from(encounterNotes).where(eq(encounterNotes.encounterId, encounterId)).orderBy(desc(encounterNotes.createdAt), desc(encounterNotes.id))
 }
 
-export type SignNoteResult =
-  | { ok: true; signatureId: number }
-  | { ok: false; error: 'Note not found' | 'Note is already signed' | 'Only the author can sign' | 'Typed name does not match' }
+// WS7 T5: stored verbatim in signatures.attestation_text for every signed note.
+export const SIGN_NOTE_ATTESTATION = 'I confirm I wrote or reviewed this note and that it is accurate.'
 
-// Only the note's own author, or an admin, may sign it -- and only while
-// it's still a draft. A row's status only ever moves draft -> signed, once;
-// there is deliberately no route anywhere that can move it back or edit a
-// signed row's content (append-only, same principle as the audit log).
-//
-// `patientId` is the URL's patient (the caller-supplied `anonId`) -- it must
-// match the note's own `patientId` or the caller is signing a note through
-// the wrong patient's URL. That's treated the same as "note not found"
-// rather than a distinct error: it never confirms to the caller that a note
-// with this id exists under a different patient, and it keeps the audit log
-// (which the route logs against the URL's patient) from ever attributing a
-// sign action to the wrong patient.
-//
-// WS1 T5 (spec ruling 10): the signer also types their name, which must equal their session name
-// (admin exempt, as discharge), and a signatures row of type encounter_note (with the exact
-// attestation sentence) is written in the same transaction as the status change. The note row is
-// locked first, so two concurrent signs cannot both write a signature.
-export async function signNote(noteId: number, patientId: string, input: { typedName: string; session: Session }): Promise<SignNoteResult> {
-  const { typedName, session } = input
-  const isAdmin = session.role === 'admin'
+export const NOTE_NOT_FOUND = 'Note not found'
+export const NOTE_ALREADY_SIGNED = 'Note is already signed'
+
+export type SignNoteResult =
+  | { ok: true; signatureId?: number }
+  | { ok: false; error: string }
+
+export interface NoteSigner {
+  name: string
+  role: string
+  isAdmin: boolean
+  typedName: string
+}
+
+export async function checkNoteSignable(id: number, patientId: string, signerName: string, signerIsAdmin: boolean): Promise<SignNoteResult> {
+  const note = await getNoteById(id)
+  if (!note || note.patientId !== patientId) return { ok: false, error: NOTE_NOT_FOUND }
+  if (note.status !== 'draft') return { ok: false, error: NOTE_ALREADY_SIGNED }
+  if (note.authorName !== signerName && !signerIsAdmin) return { ok: false, error: 'Only the author can sign' }
+  return { ok: true }
+}
+
+export async function signNote(
+  noteId: number,
+  patientId: string,
+  input: { typedName: string; session: Session } | NoteSigner,
+  attestationOverride?: string,
+): Promise<SignNoteResult> {
+  const isSessionInput = 'session' in input
+  const signerName = isSessionInput ? input.session.name : input.name
+  const signerRole = isSessionInput ? input.session.role : input.role
+  const isAdmin = isSessionInput ? input.session.role === 'admin' : input.isAdmin
+  const typedName = input.typedName
+
+  if (typedName !== signerName.trim() && !isAdmin) {
+    return { ok: false, error: 'Typed name does not match' }
+  }
+
+  const attestation = attestationOverride || (isSessionInput ? NOTE_ATTESTATION : SIGN_NOTE_ATTESTATION)
+
   return getDb().transaction(async (tx): Promise<SignNoteResult> => {
     const [note] = await tx.select().from(encounterNotes).where(eq(encounterNotes.id, noteId)).for('update')
-    if (!note || note.patientId !== patientId) return { ok: false, error: 'Note not found' }
-    if (note.status !== 'draft') return { ok: false, error: 'Note is already signed' }
-    if (note.authorName !== session.name && !isAdmin) return { ok: false, error: 'Only the author can sign' }
-    if (typedName !== session.name.trim() && !isAdmin) return { ok: false, error: 'Typed name does not match' }
+    if (!note || note.patientId !== patientId) return { ok: false, error: NOTE_NOT_FOUND }
+    if (note.status !== 'draft') return { ok: false, error: NOTE_ALREADY_SIGNED }
+    if (note.authorName !== signerName && !isAdmin) return { ok: false, error: 'Only the author can sign' }
 
     const [signature] = await tx.insert(signatures).values({
       signableType: 'encounter_note',
       signableId: noteId,
+      patientId,
       signerTypedName: typedName,
-      signerRole: session.role,
-      attestationText: NOTE_ATTESTATION,
+      signerRole,
+      attestationText: attestation,
     }).returning({ id: signatures.id })
+
     await tx.update(encounterNotes).set({ status: 'signed', signedAt: new Date() }).where(eq(encounterNotes.id, noteId))
     return { ok: true, signatureId: signature.id }
   })

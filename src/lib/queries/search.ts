@@ -9,10 +9,11 @@ import {
   EMPTY_SEARCH_RESULTS, type SearchResult, type SearchResults, type PatientLookupPage, type PatientLookupResult,
   PATIENT_LOOKUP_MIN_QUERY, PATIENT_LOOKUP_MAX_QUERY, PATIENT_LOOKUP_DEFAULT_PAGE_SIZE, PATIENT_LOOKUP_MAX_PAGE_SIZE, PATIENT_LOOKUP_MAX_PAGE,
 } from '@/lib/queries/search-types'
-import { asc, or, sql, type SQL } from 'drizzle-orm'
+import { and, asc, or, sql, type SQL } from 'drizzle-orm'
 import { getDb } from '@/db/client'
 import { patients } from '@/db/schema'
 import { ageOnDate, todayIsoIn } from '@/lib/india-time'
+import { notArchived } from '@/lib/queries/patient-archive' // WS8 T13
 
 export { EMPTY_SEARCH_RESULTS, type SearchResult, type SearchResults, type PatientLookupPage, type PatientLookupResult, PATIENT_LOOKUP_MAX_PAGE_SIZE }
 
@@ -139,7 +140,7 @@ export async function lookupPatients(
   const rows = await getDb()
     .select({ id: patients.id, name: patients.name, uhid: patients.uhid, gender: patients.gender, dob: patients.dob, phone: patients.phone })
     .from(patients)
-    .where(or(...matches))
+    .where(and(notArchived(), or(...matches))) // WS8 T13
     .orderBy(rank, asc(patients.name), asc(patients.id))
     .limit(pageSize + 1)
     .offset((page - 1) * pageSize)
@@ -161,6 +162,6 @@ export async function getPickedPatient(anonId: string): Promise<{ id: string; na
   const [row] = await getDb()
     .select({ id: patients.id, name: patients.name, uhid: patients.uhid })
     .from(patients)
-    .where(sql`${patients.id} = ${anonId}`)
+    .where(and(sql`${patients.id} = ${anonId}`, notArchived())) // WS8 T13
   return row ? { id: row.id, name: row.name.trim(), uhid: row.uhid ?? null } : null
 }

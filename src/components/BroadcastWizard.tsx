@@ -1,11 +1,18 @@
 'use client'
 import { fetchJson, sendJson } from '@/lib/client-fetch'
+import { audienceSummaryLine, BROADCAST_MESSAGE_MAX } from '@/lib/broadcasts/audience'
+import { LANGUAGES } from '@/lib/india/reference'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useToast } from '@/components/ui/toast'
 import { Check, MessageSquareText, Users, Send } from 'lucide-react'
 
 interface Trial { id: string; condition: string }
-interface RecipientCandidate { id: string; name: string; phone: string | null; email: string | null }
+interface Option { id: number; name: string }
+interface PreviewRecipient { id: string; uhid: string | null; name: string }
+interface AudienceCounts { match: number; optedOut: number; noPhone: number; sendable: number }
+interface Preview { counts: AudienceCounts; recipients: PreviewRecipient[] }
+interface SendResult { id: number; recipientCount: number; sentCount: number; skippedCount: number; failedCount: number }
 
 const SECTION = 'rounded-xl border border-primary/10 bg-card/80 p-5 shadow-sm backdrop-blur-sm'
 const FIELD = 'w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring'
@@ -61,35 +68,62 @@ const FORM_STATUS_OPTIONS = [
   { value: 'none', label: 'No form sent yet' },
 ]
 
-export function BroadcastWizard({ trials, showTrialFilters = true }: { trials: Trial[]; showTrialFilters?: boolean }) {
+const FOLLOW_UP_OPTIONS = [
+  { value: '', label: 'Any' },
+  { value: 'overdue', label: 'Follow-up overdue' },
+  { value: 'due_7_days', label: 'Follow-up due in the next 7 days' },
+]
+
+const LABEL = 'mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground'
+
+type FilterKey = 'departmentId' | 'providerId' | 'ageMin' | 'ageMax' | 'ward' | 'followUpDue' | 'language' | 'pinCodePrefix' | 'trialId' | 'overallStatus' | 'formStatus'
+type FilterState = Record<FilterKey, string>
+const EMPTY_FILTERS: FilterState = { departmentId: '', providerId: '', ageMin: '', ageMax: '', ward: '', followUpDue: '', language: '', pinCodePrefix: '', trialId: '', overallStatus: '', formStatus: '' }
+const NUMERIC: FilterKey[] = ['departmentId', 'providerId', 'ageMin', 'ageMax']
+const TRIAL_KEYS: FilterKey[] = ['trialId', 'overallStatus']
+
+function activeFilters(f: FilterState, trialsOn: boolean): [FilterKey, string][] {
+  return (Object.entries(f) as [FilterKey, string][]).filter(([k, v]) => v.trim() !== '' && (trialsOn || !TRIAL_KEYS.includes(k)))
+}
+
+export function BroadcastWizard({
+  trials,
+  showTrialFilters = true,
+  departments = [],
+  providers = [],
+  wards = [],
+}: { trials: Trial[]; showTrialFilters?: boolean; departments?: Option[]; providers?: Option[]; wards?: string[] }) {
   const router = useRouter()
+  const toast = useToast()
   const [step, setStep] = useState<1 | 2 | 3>(1)
-  const [channel, setChannel] = useState<'sms' | 'email' | 'both'>('sms')
-  const [subject, setSubject] = useState('')
   const [message, setMessage] = useState('')
-  const [trialId, setTrialId] = useState('')
-  const [overallStatus, setOverallStatus] = useState('')
-  const [formStatus, setFormStatus] = useState('')
-  const [candidates, setCandidates] = useState<RecipientCandidate[] | null>(null)
-  const [loadingCandidates, setLoadingCandidates] = useState(false)
+  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS)
+  const [preview, setPreview] = useState<Preview | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+  const [typedCount, setTypedCount] = useState('')
   const [sending, setSending] = useState(false)
-  const [sent, setSent] = useState<{ recipientCount: number } | null>(null)
+  const [sent, setSent] = useState<SendResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const messageTooLong = channel === 'sms' && message.length > 140
-  const missingSubject = (channel === 'email' || channel === 'both') && subject.trim().length === 0
+  const messageTooLong = message.length > BROADCAST_MESSAGE_MAX
+  const pinInvalid = filters.pinCodePrefix !== '' && !/^\d{3,6}$/.test(filters.pinCodePrefix)
+  const sendable = preview?.counts.sendable ?? 0
+  const countConfirmed = typedCount.trim() === String(sendable)
 
-  async function loadCandidates() {
-    setLoadingCandidates(true)
+  function setFilter(key: FilterKey, value: string) {
+    setFilters((f) => ({ ...f, [key]: value }))
+    setPreview(null)
+    setTypedCount('')
+  }
+
+  async function loadPreview() {
+    setLoadingPreview(true)
     setError(null)
-    const params = new URLSearchParams()
-    if (trialId) params.set('trialId', trialId)
-    if (overallStatus) params.set('overallStatus', overallStatus)
-    if (formStatus) params.set('formStatus', formStatus)
-    const res = await fetchJson<typeof candidates>(`/api/broadcasts/recipients?${params.toString()}`)
-    setLoadingCandidates(false)
+    const params = new URLSearchParams(activeFilters(filters, showTrialFilters))
+    const res = await fetchJson<Preview>(`/api/broadcasts/recipients?${params.toString()}`)
+    setLoadingPreview(false)
     if (res.ok) {
-      setCandidates(res.data)
+      setPreview(res.data)
     } else {
       setError(`Could not load recipients for this filter. ${res.error}`)
     }
@@ -98,19 +132,20 @@ export function BroadcastWizard({ trials, showTrialFilters = true }: { trials: T
   async function send() {
     setSending(true)
     setError(null)
-    const res = await sendJson<{ recipientCount: number }>('/api/broadcasts', 'POST', {
-      subject: subject || undefined,
-      message,
-      channel,
-      filterTrialId: trialId || undefined,
-      filterOverallStatus: overallStatus || undefined,
-      filterFormStatus: formStatus || undefined,
-    })
+    const body = Object.fromEntries(activeFilters(filters, showTrialFilters).map(([k, v]) => [k, NUMERIC.includes(k) ? Number(v) : v.trim()]))
+    const res = await sendJson<SendResult>('/api/broadcasts', 'POST', { message: message.trim(), filters: body, confirmCount: Number(typedCount.trim()) })
     setSending(false)
     if (res.ok) {
-      const created = res.data
-      setSent({ recipientCount: created.recipientCount })
+      setSent(res.data)
       router.refresh()
+      // WS7 T16: next step is the broadcast's per-patient delivery log.
+      const n = res.data.sentCount
+      toast.show({ title: `Sent to ${n} patient${n === 1 ? '' : 's'}`, action: { label: 'View log', href: `/broadcasts/${res.data.id}` } })
+    } else if (res.status === 409) {
+      // The audience changed since the preview: show the fresh count and ask for it again.
+      await loadPreview()
+      setTypedCount('')
+      setError('The number of recipients has changed. Check the new count and type it again to confirm.')
     } else {
       setError(res.error)
     }
@@ -122,10 +157,12 @@ export function BroadcastWizard({ trials, showTrialFilters = true }: { trials: T
         <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-success/10 text-success" aria-hidden="true">
           <Check className="h-5 w-5" />
         </span>
-        <p className="text-sm font-medium text-foreground">Broadcast sent to {sent.recipientCount} recipient{sent.recipientCount === 1 ? '' : 's'}.</p>
-        <p className="mt-1 text-xs text-muted-foreground">Simulated delivery only — no real SMS or email was sent.</p>
+        <p className="text-sm font-medium text-foreground">Broadcast sent to {sent.sentCount} patient{sent.sentCount === 1 ? '' : 's'}.</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {sent.sentCount} sent · {sent.skippedCount} skipped · {sent.failedCount} not delivered. Each patient&apos;s delivery is in the notification log.
+        </p>
         <button
-          onClick={() => { setSent(null); setStep(1); setMessage(''); setSubject(''); setCandidates(null) }}
+          onClick={() => { setSent(null); setStep(1); setMessage(''); setPreview(null); setTypedCount('') }}
           className="mt-4 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
         >
           Send Another Broadcast
@@ -133,6 +170,15 @@ export function BroadcastWizard({ trials, showTrialFilters = true }: { trials: T
       </div>
     )
   }
+
+  const select = (key: FilterKey, label: string, options: { value: string; label: string }[]) => (
+    <div>
+      <label htmlFor={`broadcast-${key}`} className={LABEL}>{label}</label>
+      <select id={`broadcast-${key}`} value={filters[key]} onChange={(e) => setFilter(key, e.target.value)} className={FIELD}>
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  )
 
   return (
     <div className={`max-w-xl ${SECTION}`}>
@@ -143,21 +189,7 @@ export function BroadcastWizard({ trials, showTrialFilters = true }: { trials: T
       {step === 1 && (
         <div className="space-y-4">
           <div>
-            <label htmlFor="broadcast-channel" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Channel</label>
-            <select id="broadcast-channel" value={channel} onChange={(e) => setChannel(e.target.value as 'sms' | 'email' | 'both')} className={FIELD}>
-              <option value="sms">SMS</option>
-              <option value="email">Email</option>
-              <option value="both">SMS and Email</option>
-            </select>
-          </div>
-          {(channel === 'email' || channel === 'both') && (
-            <div>
-              <label htmlFor="broadcast-subject" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Subject</label>
-              <input id="broadcast-subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject line for this email…" className={FIELD} />
-            </div>
-          )}
-          <div>
-            <label htmlFor="broadcast-message" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message</label>
+            <label htmlFor="broadcast-message" className={LABEL}>Message</label>
             <textarea
               id="broadcast-message"
               value={message}
@@ -166,12 +198,13 @@ export function BroadcastWizard({ trials, showTrialFilters = true }: { trials: T
               placeholder="Type your message to patients here…"
               className={FIELD}
             />
-            {channel === 'sms' && <p className={`mt-1 text-xs ${messageTooLong ? 'text-destructive' : 'text-muted-foreground'}`}>{message.length}/140 characters</p>}
+            <p className={`mt-1 text-xs ${messageTooLong ? 'text-destructive' : 'text-muted-foreground'}`}>{message.length}/{BROADCAST_MESSAGE_MAX} characters</p>
+            <p className="mt-1 text-xs text-muted-foreground">Sent by SMS or WhatsApp with the hospital name in front. Do not include clinical details.</p>
           </div>
           <div className="flex justify-end">
             <button
               onClick={() => setStep(2)}
-              disabled={message.trim().length === 0 || messageTooLong || missingSubject}
+              disabled={message.trim().length === 0 || messageTooLong}
               className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               Next: Specify Recipients
@@ -182,42 +215,47 @@ export function BroadcastWizard({ trials, showTrialFilters = true }: { trials: T
 
       {step === 2 && (
         <div className="space-y-4">
-          {showTrialFilters && (
-            <>
-          <div>
-            <label htmlFor="broadcast-trial" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trial</label>
-            <select id="broadcast-trial" value={trialId} onChange={(e) => { setTrialId(e.target.value); setCandidates(null) }} className={FIELD}>
-              <option value="">All trials</option>
-              {trials.map((t) => <option key={t.id} value={t.id}>{t.condition}</option>)}
-            </select>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {select('departmentId', 'Department (last 12 months)', [{ value: '', label: 'Any department' }, ...departments.map((d) => ({ value: String(d.id), label: d.name }))])}
+            {select('providerId', 'Doctor (last 12 months)', [{ value: '', label: 'Any doctor' }, ...providers.map((p) => ({ value: String(p.id), label: p.name }))])}
+            <div>
+              <label htmlFor="broadcast-ageMin" className={LABEL}>Minimum age</label>
+              <input id="broadcast-ageMin" type="number" min={0} max={120} inputMode="numeric" value={filters.ageMin} onChange={(e) => setFilter('ageMin', e.target.value)} className={FIELD} />
+            </div>
+            <div>
+              <label htmlFor="broadcast-ageMax" className={LABEL}>Maximum age</label>
+              <input id="broadcast-ageMax" type="number" min={0} max={120} inputMode="numeric" value={filters.ageMax} onChange={(e) => setFilter('ageMax', e.target.value)} className={FIELD} />
+            </div>
+            {select('ward', 'Currently admitted in ward', [{ value: '', label: 'Any (admitted or not)' }, ...wards.map((w) => ({ value: w, label: w }))])}
+            {select('followUpDue', 'Follow-up', FOLLOW_UP_OPTIONS)}
+            {select('language', 'Preferred language', [{ value: '', label: 'Any language' }, ...LANGUAGES.map((l) => ({ value: l.code, label: l.label }))])}
+            <div>
+              <label htmlFor="broadcast-pinCodePrefix" className={LABEL}>PIN code starts with</label>
+              <input id="broadcast-pinCodePrefix" inputMode="numeric" maxLength={6} placeholder="e.g. 560" value={filters.pinCodePrefix} onChange={(e) => setFilter('pinCodePrefix', e.target.value)} className={FIELD} />
+              {pinInvalid && <p className="mt-1 text-xs text-destructive">Enter 3 to 6 digits.</p>}
+            </div>
+            {showTrialFilters && (
+              <>
+                {select('trialId', 'Trial', [{ value: '', label: 'All trials' }, ...trials.map((t) => ({ value: t.id, label: t.condition }))])}
+                {select('overallStatus', 'Screening Status', OVERALL_STATUS_OPTIONS)}
+              </>
+            )}
+            {select('formStatus', 'Form Status', FORM_STATUS_OPTIONS)}
           </div>
-          <div>
-            <label htmlFor="broadcast-overall-status" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Screening Status</label>
-            <select id="broadcast-overall-status" value={overallStatus} onChange={(e) => { setOverallStatus(e.target.value); setCandidates(null) }} className={FIELD}>
-              {OVERALL_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
-            </>
-          )}
-          <div>
-            <label htmlFor="broadcast-form-status" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Form Status</label>
-            <select id="broadcast-form-status" value={formStatus} onChange={(e) => { setFormStatus(e.target.value); setCandidates(null) }} className={FIELD}>
-              {FORM_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
-          <button onClick={loadCandidates} disabled={loadingCandidates} className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50">
-            {loadingCandidates ? 'Loading…' : 'Preview Recipients'}
+          <button onClick={loadPreview} disabled={loadingPreview || pinInvalid} className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50">
+            {loadingPreview ? 'Loading…' : 'Preview Recipients'}
           </button>
-          {candidates && (
-            <p className="rounded-md border border-primary/10 bg-primary/5 px-3 py-2 text-sm font-medium text-foreground">
-              {candidates.length} patient{candidates.length === 1 ? '' : 's'} match this filter.
-            </p>
+          {preview && (
+            <div className="rounded-md border border-primary/10 bg-primary/5 px-3 py-2 text-sm text-foreground">
+              <p className="font-medium">{audienceSummaryLine(preview.counts)}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{preview.counts.sendable} patient{preview.counts.sendable === 1 ? '' : 's'} will receive this message. Opted-out patients and patients without a mobile number are skipped.</p>
+            </div>
           )}
           <div className="flex justify-between">
             <button onClick={() => setStep(1)} className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary">Back</button>
             <button
               onClick={() => setStep(3)}
-              disabled={!candidates || candidates.length === 0}
+              disabled={!preview || preview.counts.sendable === 0}
               className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               Next: Review and Send
@@ -226,23 +264,25 @@ export function BroadcastWizard({ trials, showTrialFilters = true }: { trials: T
         </div>
       )}
 
-      {step === 3 && candidates && (
+      {step === 3 && preview && (
         <div className="space-y-4">
           <div className="rounded-lg border border-border bg-secondary/30 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message</p>
-            <p className="mt-1 text-sm text-foreground">{message}</p>
-            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Channel</p>
-            <p className="mt-1 text-sm text-foreground">{channel === 'both' ? 'SMS and Email' : channel === 'sms' ? 'SMS' : 'Email'}</p>
+            <p className="mt-1 text-sm text-foreground">{message.trim()}</p>
             <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recipients</p>
-            <p className="mt-1 text-sm text-foreground">{candidates.length} patient{candidates.length === 1 ? '' : 's'}</p>
+            <p className="mt-1 text-sm text-foreground">{audienceSummaryLine(preview.counts)}</p>
             <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm text-muted-foreground">
-              {candidates.map((c) => <li key={c.id}>{c.name}</li>)}
+              {preview.recipients.map((r) => <li key={r.id}>{r.uhid ? `${r.uhid} · ` : ''}{r.name}</li>)}
             </ul>
+          </div>
+          <div>
+            <label htmlFor="broadcast-confirm-count" className={LABEL}>Type {sendable} to confirm the number of recipients</label>
+            <input id="broadcast-confirm-count" inputMode="numeric" autoComplete="off" value={typedCount} onChange={(e) => setTypedCount(e.target.value)} className={FIELD} />
           </div>
           <div className="flex justify-between">
             <button onClick={() => setStep(2)} className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary">Back</button>
-            <button onClick={send} disabled={sending} className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
-              {sending ? 'Sending…' : 'Send Broadcast'}
+            <button onClick={send} disabled={sending || !countConfirmed || sendable === 0} className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+              {sending ? 'Sending…' : `Send to ${sendable} patient${sendable === 1 ? '' : 's'}`}
             </button>
           </div>
         </div>

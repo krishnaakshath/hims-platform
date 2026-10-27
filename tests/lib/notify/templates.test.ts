@@ -1,13 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { NOTIFICATION_TEMPLATE_KEYS, renderNotification, templateParams } from '@/lib/notify/templates'
+import { NOTIFICATION_TEMPLATE_KEYS, renderNotification, templateParams, templateVarsValid } from '@/lib/notify/templates'
 
 describe('notification templates', () => {
-  it('has the five SP5 templates plus the four Foundations T8 templates', () => {
+  it('has the five SP5 templates, the four Foundations T8 templates and the WS7 T10 broadcast notice', () => {
     expect(NOTIFICATION_TEMPLATE_KEYS).toEqual([
       'lab_tests_ordered', 'home_collection_booked', 'home_collection_rescheduled', 'home_collection_cancelled', 'lab_report_ready',
       'form_sent', 'video_visit_link', 'booking_confirmed', 'appointment_reminder',
-      'home_collection_handover_otp', // WS6 T11
+      'home_collection_handover_otp',
+      'broadcast_notice',
     ])
+  })
+
+  // WS7 T10
+  it('broadcast_notice is the hospital name plus the staff message, which must be 1–140 characters', () => {
+    expect(renderNotification('broadcast_notice', { hospitalName: 'City Hospital', message: 'Free eye camp on Sunday.' })).toBe('City Hospital: Free eye camp on Sunday.')
+    expect(templateParams('broadcast_notice', { hospitalName: 'H', message: 'Hi' })).toEqual(['H', 'Hi'])
+    expect(templateVarsValid('broadcast_notice', { hospitalName: 'H', message: 'x'.repeat(140) })).toBe(true)
+    expect(templateVarsValid('broadcast_notice', { hospitalName: 'H', message: 'x'.repeat(141) })).toBe(false)
+    expect(templateVarsValid('broadcast_notice', { hospitalName: 'H', message: ' ' })).toBe(false)
   })
 
   // Foundations T8

@@ -17,6 +17,7 @@ import { CLINICAL_ROLES, LAB_ORDER_ROLES, LAB_REPORT_READ_ROLES } from '@/lib/ro
 import { logAudit } from '@/lib/audit'
 import { getPatientDetail } from '@/lib/queries/patients'
 import { listNotesForPatient } from '@/lib/queries/encounter-notes'
+import { getReauthMethod } from '@/lib/reauth' // WS7 T5
 import { getPayerName } from '@/lib/queries/payers'
 import { listDispensesForPatient } from '@/lib/queries/medication-dispenses'
 import { listMedicationsWithInventory } from '@/lib/queries/medications'
@@ -96,6 +97,8 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
   const patient = await getPatientDetail(anonId)
   if (!patient) notFound()
   const notes = await listNotesForPatient(anonId)
+  // WS7 T5: which proof the note-signing dialog asks for (password or TOTP).
+  const noteReauthMethod = notes.some((n) => n.status === 'draft') ? await getReauthMethod(session) : null
   const primaryPayerName = await getPayerName(patient.primaryPayerId)
   const secondaryPayerName = await getPayerName(patient.secondaryPayerId)
   const dispenses = await listDispensesForPatient(anonId)
@@ -323,7 +326,7 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
         )}
       </section>
 
-      <section className={SECTION}>
+      <section id="notes" className={SECTION}>{/* WS7 T6: target of the video-visit "Write note" link */}
         <div className="mb-3 flex items-center justify-between">
           <h2 className={SECTION_HEADING}>Notes</h2>
           <NoteForm patientId={anonId} canWrite={['pi', 'admin'].includes(session.role)} />
@@ -337,6 +340,7 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
                 key={n.id}
                 patientId={anonId}
                 canSign={n.status === 'draft' && (n.authorName === session.name || session.role === 'admin')}
+                reauthMethod={noteReauthMethod}
                 note={{
                   id: n.id,
                   noteType: n.noteType,

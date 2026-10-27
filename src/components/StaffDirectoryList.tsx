@@ -3,6 +3,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { AlertTriangle, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state' // WS7 T16
 import { AddStaffMemberModal, type UserOption, type ProviderOption } from '@/components/AddStaffMemberModal'
 import type { staffMembers } from '@/db/schema'
 import type { ExpiringCredential } from '@/lib/queries/staff-credentials'
@@ -71,7 +72,7 @@ export function StaffDirectoryList({
       </div>
 
       {staff.length === 0 ? (
-        <p className="mt-2 rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No staff members on file.</p>
+        <EmptyState title="No staff members on file." description={canWrite ? 'Add staff members with the button above.' : undefined} />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full border-collapse text-sm">

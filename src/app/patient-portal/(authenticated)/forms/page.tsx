@@ -53,6 +53,13 @@ export default async function PatientPortalFormsPage() {
                         <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                       </Link>
                     )}
+                    {/* WS7 T3: a completed form's printable signed copy. */}
+                    {f.status === 'completed' && (
+                      <Link href={`/patient-portal/documents/forms/${f.id}`} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                        View signed copy
+                        <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Link>
+                    )}
                   </div>
                 </div>
                 {/* Only offer signing once the patient has actually opened/started this

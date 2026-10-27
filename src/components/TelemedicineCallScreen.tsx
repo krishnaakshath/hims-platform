@@ -4,6 +4,9 @@ import { Mic, MicOff, Video, VideoOff, PhoneOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { TelemedicineSessionStatus } from '@/lib/queries/telemedicine-sessions'
 import { readError, sendJson } from '@/lib/client-fetch'
+import Link from 'next/link'
+import { formatCallClock, formatCallDuration } from '@/lib/telemedicine/call-duration'
+import type { VisitNextStepLinks } from '@/lib/telemedicine/next-steps'
 
 // STUN-only, no TURN relay -- per spec §1's explicit, flagged-not-fixed
 // scope boundary: a real TURN server is a real infra/vendor decision this
@@ -50,9 +53,16 @@ export interface TelemedicineCallScreenProps {
   pollUrl: string
   initialStatus: TelemedicineSessionStatus
   onEnd?: () => void
+  // WS7 T6: ISO time the provider first joined; the clock runs from it (so a
+  // reload keeps the count). Absent -> from when this screen opened.
+  startedAt?: string | null
+  // WS7 T6: the doctor's links after the call (provider page only).
+  nextSteps?: VisitNextStepLinks
 }
 
-export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: TelemedicineCallScreenProps) {
+const CLOCK_TICK_MS = 1000
+
+export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd, startedAt = null, nextSteps }: TelemedicineCallScreenProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const pcRef = useRef<RTCPeerConnection | null>(null)
@@ -66,7 +76,11 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
   const [remoteTrackArrived, setRemoteTrackArrived] = useState(false)
   const [micOn, setMicOn] = useState(true)
   const [cameraOn, setCameraOn] = useState(true)
-  const [ended, setEnded] = useState(false)
+  // WS7 T6: when the call ended (null while live) and the running clock.
+  const [endedAt, setEndedAt] = useState<Date | null>(null)
+  const ended = endedAt !== null
+  const [clockStart] = useState(() => (startedAt ? new Date(startedAt) : new Date()))
+  const [now, setNow] = useState(() => Date.now())
   const [mediaError, setMediaError] = useState<string | null>(null)
   // A failed signal send/poll or end-call: shown, never swallowed. Cleared by
   // the next successful poll.
@@ -145,7 +159,7 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
         // an explicit 'completed' status.
         if (role === 'patient' && res.status === 404 && !cancelled) {
           teardown()
-          setEnded(true)
+          setEndedAt((prev) => prev ?? new Date())
           return
         }
         const message = await readError(res)
@@ -188,7 +202,7 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
       // polling forever showing a stale "Connected"/"Connecting…" status.
       if (data.sessionStatus === 'completed') {
         teardown()
-        setEnded(true)
+        setEndedAt((prev) => prev ?? new Date())
       }
     }
 
@@ -228,6 +242,12 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, pollUrl])
 
+  useEffect(() => {
+    if (ended) return
+    const tick = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS)
+    return () => clearInterval(tick)
+  }, [ended])
+
   async function handleEndCall() {
     // The patient side has no end route (Task 3 didn't build one -- ending
     // is provider-initiated). A patient clicking "End call" only leaves
@@ -246,12 +266,12 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
       // would keep waiting: keep the call up and let the doctor retry.
       if (!result.ok) { setSignalError(`Could not end the call: ${result.error}`); return }
       teardown()
-      setEnded(true)
+      setEndedAt((prev) => prev ?? new Date())
       onEnd?.()
       return
     }
     teardown()
-    setEnded(true)
+    setEndedAt((prev) => prev ?? new Date())
     onEnd?.()
   }
 
@@ -265,11 +285,20 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
     setCameraOn((prev) => !prev)
   }
 
-  if (ended) {
+  if (endedAt) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card p-8 text-center">
         <p className="text-lg font-semibold text-foreground">Call ended</p>
-        <p className="text-sm text-muted-foreground">You can safely close this window.</p>
+        <p className="text-sm text-foreground">Call lasted {formatCallDuration(clockStart, endedAt)}</p>
+        {nextSteps ? (
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+            <Link href={nextSteps.completeVisitHref} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">Complete visit</Link>
+            <Link href={nextSteps.writeNoteHref} className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary">Write note</Link>
+            {nextSteps.billHref && <Link href={nextSteps.billHref} className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary">Bill</Link>}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">You can safely close this window.</p>
+        )}
       </div>
     )
   }
@@ -291,7 +320,10 @@ export function TelemedicineCallScreen({ role, pollUrl, initialStatus, onEnd }: 
         <span className="font-medium text-foreground">
           {showWaitingForPatient ? 'Waiting for patient to join…' : CONNECTION_LABEL[phase]}
         </span>
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">{sessionStatus.replace('_', ' ')}</span>
+        <span className="flex items-center gap-3">
+          <span role="timer" aria-label="Call time" className="font-mono text-sm tabular-nums text-foreground">{formatCallClock(now - clockStart.getTime())}</span>
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">{sessionStatus.replace('_', ' ')}</span>
+        </span>
       </div>
       {signalError && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2 text-sm text-destructive">{signalError}</p>}
 

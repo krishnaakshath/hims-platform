@@ -4,15 +4,18 @@ import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { sendJson } from '@/lib/client-fetch'
+import { PatientPicker, type PickedPatient } from '@/components/PatientPicker'
+import { useToast } from '@/components/ui/toast'
 
-export function SendFormModal({ templates, patients, onClose }: {
+export function SendFormModal({ templates, onClose, initialPatient = null }: {
   templates: { id: number; name: string }[]
-  patients: { id: string; name: string }[]
   onClose: () => void
+  initialPatient?: PickedPatient | null
 }) {
   const router = useRouter()
+  const toast = useToast()
   const [templateId, setTemplateId] = useState<number | ''>('')
-  const [patientId, setPatientId] = useState('')
+  const [patient, setPatient] = useState<PickedPatient | null>(initialPatient)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // After a successful send, the intake link to hand the patient.
@@ -21,16 +24,24 @@ export function SendFormModal({ templates, patients, onClose }: {
   async function submit() {
     setSubmitting(true)
     setError(null)
-    const result = await sendJson<{ accessToken?: string | null }>('/api/form-submissions', 'POST', { templateId, patientId })
+    const result = await sendJson<{ accessToken?: string | null }>('/api/form-submissions', 'POST', { templateId, patientId: patient?.id ?? '' })
     setSubmitting(false)
     if (!result.ok) { setError(result.error); return }
     router.refresh()
     if (result.data?.accessToken) setIntakePath(`/intake/${result.data.accessToken}`)
-    else onClose()
+    else finish(null)
   }
 
+  // WS7 T16: "Form sent" toast once the dialog closes (a modal dialog makes the page behind it
+  // inert, so a toast shown under it could not be clicked). Its next step is the intake link.
+  function finish(path: string | null) {
+    toast.show({ title: 'Form sent', description: 'The patient has been notified where a channel is available.', ...(path ? { action: { label: 'Copy link', href: path } } : {}) })
+    onClose()
+  }
+  const close = () => { if (intakePath) finish(intakePath); else onClose() }
+
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog open onOpenChange={(open) => { if (!open) close() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Send Form to Client</DialogTitle>
@@ -42,10 +53,7 @@ export function SendFormModal({ templates, patients, onClose }: {
           </div>
         ) : (
         <div className="space-y-3">
-          <select value={patientId} onChange={(e) => setPatientId(e.target.value)} className="w-full rounded-md border border-border px-3 py-2 text-sm">
-            <option value="">Select a client…</option>
-            {patients.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
-          </select>
+          <PatientPicker value={patient} onChange={setPatient} />
           <select value={templateId} onChange={(e) => setTemplateId(Number(e.target.value))} className="w-full rounded-md border border-border px-3 py-2 text-sm">
             <option value="">Select a form…</option>
             {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -55,11 +63,11 @@ export function SendFormModal({ templates, patients, onClose }: {
         )}
         <DialogFooter>
           {intakePath ? (
-            <Button onClick={onClose}>Done</Button>
+            <Button onClick={close}>Done</Button>
           ) : (
             <>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={submit} disabled={submitting || !templateId || !patientId}>{submitting ? 'Sending…' : 'Send Form'}</Button>
+              <Button onClick={submit} disabled={submitting || !templateId || !patient}>{submitting ? 'Sending…' : 'Send Form'}</Button>
             </>
           )}
         </DialogFooter>

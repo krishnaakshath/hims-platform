@@ -163,6 +163,70 @@ describe('PUT /api/form-templates/[id]', () => {
   })
 })
 
+// WS7 T1: question model v2 on the template routes.
+describe('question model v2 on /api/form-templates', () => {
+  const post = (questions: unknown[], extra: Record<string, unknown> = {}) => POST(new Request('http://localhost/api/form-templates', {
+    method: 'POST',
+    body: JSON.stringify({ name: `V2 Form ${Date.now()}`, category: 'Consent Forms', diagnosisTag: 'General', questions, ...extra }),
+  }) as never)
+
+  it('POST with a signature question returns 201 and stores it', async () => {
+    const res = await post([
+      { id: 'sec', label: 'Declaration', type: 'section', hipaaSensitive: false },
+      { id: 'sig', label: 'Type your full name', type: 'signature', hipaaSensitive: false, required: true },
+    ], { languages: ['en', 'kn'] })
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    createdTemplateId = body.id
+    expect(body.questions[1].type).toBe('signature')
+    expect(body.questions[0].required).toBe(false)
+    expect(body.languages).toEqual(['en', 'kn'])
+  })
+
+  it('POST without languages defaults to English only', async () => {
+    const res = await post([])
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    createdTemplateId = body.id
+    expect(body.languages).toEqual(['en'])
+  })
+
+  it('POST with an unknown question type returns 400', async () => {
+    const res = await post([{ id: 'q1', label: 'Q', type: 'colour', hipaaSensitive: false, required: false }])
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('Invalid template payload')
+  })
+
+  it('POST with visibleIf pointing at a later question returns 400', async () => {
+    const res = await post([
+      { id: 'a', label: 'A', type: 'text', hipaaSensitive: false, required: false, visibleIf: { questionId: 'b', equals: 'Yes' } },
+      { id: 'b', label: 'B', type: 'select', options: ['Yes', 'No'], hipaaSensitive: false, required: false },
+    ])
+    const leaked = await res.clone().json().catch(() => null)
+    if (typeof leaked?.id === 'number') createdTemplateId = leaked.id
+    expect(res.status).toBe(400)
+  })
+
+  it('POST with visibleIf on an answer the select trigger does not have returns 400 (review round 1)', async () => {
+    const res = await post([
+      { id: 'b', label: 'B', type: 'select', options: ['Yes', 'No'], hipaaSensitive: false, required: false },
+      { id: 'a', label: 'A', type: 'text', hipaaSensitive: false, required: false, visibleIf: { questionId: 'b', equals: 'Maybe' } },
+    ])
+    const leaked = await res.clone().json().catch(() => null)
+    if (typeof leaked?.id === 'number') createdTemplateId = leaked.id
+    expect(res.status).toBe(400)
+  })
+
+  it('PUT with an unknown question type returns 400', async () => {
+    const [existing] = await getDb().select().from(formTemplates).limit(1)
+    const res = await putTemplate(new Request(`http://localhost/api/form-templates/${existing.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ questions: [{ id: 'q1', label: 'Q', type: 'colour', hipaaSensitive: false, required: false }] }),
+    }) as never, { params: Promise.resolve({ id: String(existing.id) }) })
+    expect(res.status).toBe(400)
+  })
+})
+
 describe('folderId on /api/form-templates', () => {
   async function makeFolder(name: string) {
     const [folder] = await getDb().insert(formTemplateFolders).values({ name }).returning()

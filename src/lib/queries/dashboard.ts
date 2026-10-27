@@ -5,6 +5,7 @@ import { eq, desc, or, inArray, sql } from 'drizzle-orm'
 import { getOrSetCache, dashboardCacheKey } from '@/lib/cache'
 import { getAverageExperienceRating } from '@/lib/queries/reviews'
 import { publicPatientColumns } from '@/lib/queries/patient-columns'
+import { notArchived } from '@/lib/queries/patient-archive' // WS8 T13
 
 const ACCOUNT_EVENT_ACTIONS = ['sent intake form', 'completed intake form', 'verified identity', 'ran classification']
 
@@ -89,7 +90,7 @@ export async function getDashboardData() {
       // only those -- no reason to cache clinician notes or the
       // encrypted-ID columns here. dateAdded also feeds the "patients added
       // by month" chart, so one select covers both needs.
-      db.select({ id: patients.id, name: patients.name, dateAdded: patients.dateAdded }).from(patients),
+      db.select({ id: patients.id, name: patients.name, dateAdded: patients.dateAdded }).from(patients).where(notArchived()), // WS8 T13
       db.select({ patientId: patientTrialScreenings.patientId, overallStatus: patientTrialScreenings.overallStatus }).from(patientTrialScreenings),
       db.select({ id: formSubmissions.patientId }).from(formSubmissions).where(eq(formSubmissions.status, 'completed')),
       db

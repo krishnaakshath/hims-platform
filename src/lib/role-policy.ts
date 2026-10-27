@@ -311,3 +311,11 @@ export const LAB_SIGNOFF_ROLES: readonly Role[] = ['pi', 'admin']
 export const LAB_CRITICAL_NOTIFY_ROLES: readonly Role[] = ['admin', 'labs', 'pi']
 export const LAB_CRITICAL_ACK_ROLES: readonly Role[] = ['admin', 'pi']
 // end WS4 T12
+
+
+// WS7 T9 (spec D15): portal self-service policy and ABHA submissions -- who reviews them
+// (/front-desk/portal-submissions, its list and decision routes, the LeftNav badge). rcm sees the
+// ABHA number masked (src/lib/queries/portal-submissions.ts).
+export const PORTAL_SUBMISSION_REVIEW_ROLES: readonly Role[] = ['admin', 'frontdesk', 'rcm']
+// end WS7 T9
+

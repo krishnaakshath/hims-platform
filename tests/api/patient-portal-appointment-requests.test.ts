@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { NextRequest, NextResponse } from 'next/server'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '@/db/client'
-import { appointments, auditLog, bookingRequests, patients, providers } from '@/db/schema'
+import { appointments, auditLog, bookingRequests, departments, patients, providers } from '@/db/schema'
 
 const h = vi.hoisted(() => ({ session: null as string | null, allowed: true }))
 vi.mock('@/lib/patient-session', () => ({
@@ -28,6 +28,7 @@ const TAG = `WJA${process.pid}`
 const A = `${TAG}-A`
 const B = `${TAG}-B`
 let providerId = 0
+let pathologistId = 0 // WS7 T7
 let apptA = 0
 let apptPastA = 0
 let apptB = 0
@@ -41,8 +42,13 @@ beforeAll(async () => {
     { id: A, name: 'Request Patient A', dob: '1980-02-03', phone: '+91 98450 00001', email: 'a@example.com' },
     { id: B, name: 'Request Patient B', dob: '1981-02-03' },
   ])
-  const [p] = await db.select({ id: providers.id }).from(providers).where(eq(providers.isActive, true)).limit(1)
+  // WS7 T7: a doctor the portal offers (portal-bookable, clinical department).
+  const [p] = await db.select({ id: providers.id }).from(providers).innerJoin(departments, eq(departments.id, providers.departmentId))
+    .where(and(eq(providers.isActive, true), eq(providers.portalBookable, true), eq(departments.kind, 'clinical'))).limit(1)
   providerId = p.id
+  const [diag] = await db.select({ id: providers.id }).from(providers).innerJoin(departments, eq(departments.id, providers.departmentId))
+    .where(and(eq(providers.isActive, true), eq(departments.kind, 'diagnostic'))).limit(1)
+  pathologistId = diag?.id ?? 0
   const mk = async (pid: string, startsAt: Date) => (await db.insert(appointments).values({ patientId: pid, providerId, startsAt, endsAt: new Date(startsAt.getTime() + 1800_000), visitReason: 'Diabetes review' }).returning({ id: appointments.id }))[0].id
   apptA = await mk(A, new Date('2099-03-10T04:30:00Z'))
   apptPastA = await mk(A, new Date('2001-03-10T04:30:00Z'))
@@ -133,6 +139,28 @@ describe('POST /api/patient-portal/appointment-requests', () => {
     expect((await call({ kind: 'new', preferredProviderId: 2_000_000_000, preferredDateRangeStart: D1, preferredDateRangeEnd: D2, reason: 'x' })).status).toBe(400)
     expect((await call({ kind: 'new', preferredDateRangeStart: D1, preferredDateRangeEnd: D2, reason: '' })).status).toBe(400)
     expect((await call({ kind: 'delete', appointmentId: apptA })).status).toBe(400)
+    expect(await requestsOf(A)).toHaveLength(0)
+  })
+
+  // WS7 T7 (spec D6, D20)
+  it('a new request records the visit mode asked for; an unknown mode is a 400', async () => {
+    const res = await call({ kind: 'new', preferredProviderId: providerId, preferredDateRangeStart: D1, preferredDateRangeEnd: D2, reason: 'Skin rash', visitMode: 'video' })
+    expect(res.status).toBe(201)
+    const [row] = await requestsOf(A)
+    expect(row.requestedVisitMode).toBe('video')
+    expect((await call({ kind: 'new', preferredDateRangeStart: D1, preferredDateRangeEnd: D2, reason: 'x', visitMode: 'phone' })).status).toBe(400)
+    expect(await requestsOf(A)).toHaveLength(1)
+  })
+
+  it('a new request without a mode leaves it unstated', async () => {
+    expect((await call({ kind: 'new', preferredDateRangeStart: D1, preferredDateRangeEnd: D2, reason: 'Cough' })).status).toBe(201)
+    expect((await requestsOf(A))[0].requestedVisitMode).toBeNull()
+  })
+
+  it('a doctor the portal does not offer (pathologist) cannot be named', async () => {
+    expect(pathologistId).toBeGreaterThan(0)
+    const res = await call({ kind: 'new', preferredProviderId: pathologistId, preferredDateRangeStart: D1, preferredDateRangeEnd: D2, reason: 'x' })
+    expect(res.status).toBe(400)
     expect(await requestsOf(A)).toHaveLength(0)
   })
 })

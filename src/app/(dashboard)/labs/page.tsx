@@ -20,6 +20,9 @@ import { acknowledgeableCriticalOrderIds, listOpenCriticalAlerts } from '@/lib/q
 import { CriticalResultBanner } from '@/components/labs/CriticalResultBanner'
 import { LAB_CRITICAL_ACK_ROLES, LAB_CRITICAL_NOTIFY_ROLES } from '@/lib/role-policy'
 // end WS4 T12
+import { NeedsAttentionStrip } from '@/components/dashboards/NeedsAttentionStrip' // WS8 T15
+import { loadNeedsAttention } from '@/lib/queries/needs-attention' // WS8 T15
+import { todayIsoIn } from '@/lib/india-time' // WS8 T15
 
 export default async function LabsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   const session = await requireSessionOrRedirect()
@@ -28,9 +31,10 @@ export default async function LabsPage({ searchParams }: { searchParams?: Promis
   if (!LAB_WORKLIST_ROLES.includes(session.role)) redirect('/')
 
   const stageParam = parseLabStage((await searchParams)?.stage)
-  const [orders, labTests, patientRoster, kpis, verifierDepartmentId, criticalAlerts, ackOrderIds] = await Promise.all([
+  const [orders, labTests, patientRoster, kpis, verifierDepartmentId, criticalAlerts, ackOrderIds, attention] = await Promise.all([
     listWorklist(), listLabTests(), listPatientsWithLabOrders(), getLabKpis(), resolveVerifierDepartmentId(session), // WS4 T11
     listOpenCriticalAlerts({}), LAB_CRITICAL_ACK_ROLES.includes(session.role) ? acknowledgeableCriticalOrderIds(session) : Promise.resolve([]), // WS4 T12
+    session.role === 'labs' ? loadNeedsAttention(session.role, todayIsoIn()) : Promise.resolve([]),
   ])
   // WS4 T12: a pi logs a call only for orders it may verify (its department); the route re-checks per order.
   const canNotifyCritical = LAB_CRITICAL_NOTIFY_ROLES.includes(session.role) && (session.role !== 'pi' || verifierDepartmentId !== null)
@@ -73,6 +77,7 @@ export default async function LabsPage({ searchParams }: { searchParams?: Promis
       </div>
 
       <CriticalResultBanner alerts={criticalAlerts} canNotify={canNotifyCritical} canAcknowledge={(a) => ackOrderIds.includes(a.orderId)} /> {/* WS4 T12 */}
+      <NeedsAttentionStrip items={attention} /> {/* WS8 T15 */}
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiTile label="Awaiting collection" value={inStage('to-collect')} href="/labs?stage=to-collect" icon={ClipboardList} tone="warning" />

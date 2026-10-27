@@ -3,6 +3,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state' // WS7 T16
 import { FollowUpStatusChip } from './FollowUpStatusChip'
 import { BookFollowUpModal } from './BookFollowUpModal'
 import { ContactAttemptModal } from './ContactAttemptModal'
@@ -96,7 +97,7 @@ export function FollowUpWorklist({ rows, counts, filters, providers, departments
       )}
 
       {rows.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No follow-ups in this list.</p>
+        <EmptyState title="No follow-ups in this list." description="Change the list or the filters above to see other follow-ups." />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full border-collapse text-sm">

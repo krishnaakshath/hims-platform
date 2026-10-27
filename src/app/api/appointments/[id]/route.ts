@@ -17,6 +17,7 @@ const updateAppointmentSchema = z.object({
   startsAt: appointmentInstantSchema.optional(),
   endsAt: appointmentInstantSchema.optional(),
   notes: z.string().optional(),
+  visitMode: z.enum(['in_person', 'video']).optional(), // WS7 T6 (spec D20)
 }).strict()
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -35,6 +36,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (numericId === null) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   const existing = await getAppointment(numericId)
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // WS7 T6: switching to in person while a call is open would strand it (no Rejoin,
+  // no link recovery), so refuse until the session has ended.
+  if (parsed.data.visitMode === 'in_person' && existing.telemedicine && ['scheduled', 'waiting', 'in_progress'].includes(existing.telemedicine.status)) {
+    return NextResponse.json({ error: 'This appointment has an open video session. End the call before changing it to in person.', code: 'session_active' }, { status: 409 })
+  }
 
   const patch: Record<string, unknown> = { ...parsed.data }
   if (parsed.data.startsAt) patch.startsAt = new Date(parsed.data.startsAt)

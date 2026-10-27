@@ -23,8 +23,8 @@ import { ENCOUNTER_REGISTER_ROLES } from '@/lib/role-policy' // Wave F
 import { NotebookTabs } from 'lucide-react' // Wave F
 import { QrCode, Plug } from 'lucide-react' // SP8
 import { REPORTS_ROLES } from '@/lib/role-policy' // Wave I
-import { CLINICAL_ROLES } from '@/lib/role-policy' // WS3 T7
-import { HeartPulse } from 'lucide-react' // WS3 T7
+import { CLINICAL_ROLES, PORTAL_SUBMISSION_REVIEW_ROLES } from '@/lib/role-policy'
+import { HeartPulse, Inbox, ShieldCheck } from 'lucide-react'
 import { BrandLogo } from '@/components/BrandLogo'
 import { useLiveNavBadges } from '@/components/useLiveNavBadges'
 
@@ -83,6 +83,8 @@ export const NAV_ITEMS: { href: string; label: string; icon: Icon; roles?: Role[
   // Wave F P1-04: OPD register (SP3 encounters) -- ENCOUNTER_REGISTER_ROLES.
   { href: '/encounters', label: 'OPD Register', icon: NotebookTabs, roles: [...ENCOUNTER_REGISTER_ROLES] },
   // end Wave F
+  // WS7 T9: portal self-service policy / ABHA submissions -- PORTAL_SUBMISSION_REVIEW_ROLES.
+  { href: '/front-desk/portal-submissions', label: 'Portal submissions', icon: Inbox, roles: [...PORTAL_SUBMISSION_REVIEW_ROLES] }, // WS7
 
   // Pharmacy — dedicated section; no full patient record access
   { href: '/pharmacy', label: 'Pharmacy', icon: Pill, roles: ['crc', 'pi', 'admin', 'pharmacy'] as Role[] },
@@ -170,6 +172,8 @@ export const NAV_TRAILING_ITEMS: { href: string; label: string; icon: Icon; role
   { href: '/price-lookup', label: 'Price Lookup', icon: Calculator, roles: [...TARIFF_LOOKUP_ROLES] },
   // Wave B P1-01: own account (MFA, capabilities) -- every staff role.
   { href: '/account', label: 'My Account', icon: UserCircle2, roles: [...ACCOUNT_ROLES] },
+  // WS8 T14: DPDP data-principal requests and the retention schedule -- admin only.
+  { href: '/governance/data-requests', label: 'Data requests', icon: ShieldCheck, roles: ['admin'] as Role[] }, // WS8
 ]
 
 function isActive(pathname: string | null, href: string): boolean {

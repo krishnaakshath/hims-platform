@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import DoctorPortalPage from '@/app/(dashboard)/doctor/page'
 
+// WS8 T15: the needs-attention strip has its own tests (tests/lib/queries/needs-attention.test.ts).
+vi.mock('@/lib/queries/needs-attention', () => ({ loadNeedsAttention: vi.fn(async () => []) }))
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Dr. R. Kunam' })) }))
 // WS4 T11: the Acknowledge button (a client component) needs the app router.
 vi.mock('next/navigation', () => ({
@@ -93,7 +95,7 @@ describe('PI dashboard (/doctor)', () => {
     const listAppointmentsInRange = vi.fn(async () => [{
       id: 501, patientId: 'RD-0001', patientName: 'Jane Doe', providerId: 7, providerName: 'Dr. R. Kunam',
       providerColorTag: 'chart-1', startsAt: new Date('2026-01-15T10:00:00Z'), endsAt: new Date('2026-01-15T10:30:00Z'),
-      visitReason: 'Follow-up', status: 'scheduled' as const, notes: null,
+      visitReason: 'Follow-up', status: 'scheduled' as const, notes: null, visitMode: 'video' as const, telemedicine: null,
     }])
     vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange }))
     const { default: DoctorPortalPageWithAppointments } = await import('@/app/(dashboard)/doctor/page')
@@ -124,7 +126,7 @@ describe('PI dashboard (/doctor)', () => {
     const listAppointmentsInRange = vi.fn(async () => [{
       id: 502, patientId: 'RD-0001', patientName: 'Jane Doe', providerId: 7, providerName: 'Dr. R. Kunam',
       providerColorTag: 'chart-1', startsAt: new Date('2026-01-15T10:00:00Z'), endsAt: new Date('2026-01-15T10:30:00Z'),
-      visitReason: 'Follow-up', status: 'scheduled' as const, notes: null,
+      visitReason: 'Follow-up', status: 'scheduled' as const, notes: null, visitMode: 'video' as const, telemedicine: null,
     }])
     vi.doMock('@/lib/queries/appointments', () => ({ listAppointmentsInRange }))
     const { default: DoctorPortalPageNoMatch } = await import('@/app/(dashboard)/doctor/page')
@@ -286,6 +288,9 @@ describe('PI dashboard (/doctor)', () => {
     expect(screen.getByRole('link', { name: /note patient/i })).toHaveAttribute('href', '/patients/RD-0002/medical-record')
     expect(container.querySelector('a[href="/encounters?doctor=1"]')).not.toBeNull()
     expect(deadLinks(container, 'pi')).toEqual([])
+    // WS8 T15: the header counts are links to the sections that list them.
+    for (const href of ['/doctor#panel', '/doctor#schedule', '/doctor#triage']) expect(container.querySelector(`a[href="${href}"]`), href).not.toBeNull()
+    for (const id of ['panel', 'schedule', 'triage']) expect(container.querySelector(`#${id}`), id).not.toBeNull()
   })
 
   it('Wave E: no workload query (and no panels) without a matched provider row', async () => {

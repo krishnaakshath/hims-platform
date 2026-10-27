@@ -145,6 +145,7 @@ const NON_STAFF_PAGES: Record<string, string> = {
   '/patient-portal/medications': 'patient session only, (authenticated) layout',
   '/patient-portal/messages': 'patient session only, (authenticated) layout',
   '/patient-portal/security': 'patient session only, (authenticated) layout',
+  '/patient-portal/documents/forms/[submissionId]': 'patient session only, own records (tests/pages/patient-portal-page-gates.test.tsx)', // WS7 T3
 }
 
 describe('every page file in src/app has a PAGE_GATES row or a documented exemption (Wave I P2-14)', () => {

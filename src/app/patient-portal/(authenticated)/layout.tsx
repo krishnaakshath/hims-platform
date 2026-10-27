@@ -1,10 +1,11 @@
 import { notFound, redirect } from 'next/navigation'
 import { requirePatientSessionOrRedirect } from '@/lib/patient-session'
-import { getPatientPortalIdentity } from '@/lib/queries/patient-portal'
+import { getPatientMfaState, getPatientPortalIdentity } from '@/lib/queries/patient-portal' // WS7 T7: + getPatientMfaState
 import { hasAcceptedCurrentPolicies } from '@/lib/queries/policy-documents'
 import { PatientPortalSideNav } from '@/components/PatientPortalSideNav'
 import { PatientPortalTopBar } from '@/components/PatientPortalTopBar'
 import { PatientPortalSessionTimeoutWarning } from '@/components/PatientPortalSessionTimeoutWarning'
+import { MfaNudge } from '@/components/portal/MfaNudge' // WS7 T7
 
 // Same shell shape as the staff app's (dashboard) layout -- a persistent
 // left sidebar (logo + nav) plus a slim top identity bar -- so the
@@ -16,7 +17,7 @@ export default async function PatientPortalLayout({ children }: { children: Reac
   // same "check before fetch" discipline requireSessionOrRedirect's own
   // callers use elsewhere in this app.
   if (!(await hasAcceptedCurrentPolicies(session.patientId))) redirect('/patient-portal/consent')
-  const identity = await getPatientPortalIdentity(session.patientId)
+  const [identity, mfa] = await Promise.all([getPatientPortalIdentity(session.patientId), getPatientMfaState(session.patientId)]) // WS7 T7: + MFA state
   if (!identity) notFound()
 
   return (
@@ -29,6 +30,8 @@ export default async function PatientPortalLayout({ children }: { children: Reac
       <PatientPortalSideNav />
       <div className="flex flex-1 flex-col overflow-hidden">
         <PatientPortalTopBar name={identity.name} dob={identity.dob} patientId={identity.id} uhid={identity.uhid} />
+        {/* WS7 T7 (spec D13): patient MFA is recommended, not required. */}
+        {mfa && !mfa.mfaEnabled && <MfaNudge dismissible />}
         <main className="flex-1 overflow-y-auto bg-background p-6">{children}</main>
       </div>
     </div>

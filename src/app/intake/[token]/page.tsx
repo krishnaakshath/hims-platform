@@ -1,6 +1,18 @@
-import { getIntakePortalData } from '@/lib/queries/intake-portal'
-import { IntakePortalForm } from '@/components/IntakePortalForm'
+import { getIntakePortalData, getIntakeSubmissionRef } from '@/lib/queries/intake-portal'
+import { getPatientSession } from '@/lib/patient-session'
+import { IntakePortalForm, PortalLinks } from '@/components/IntakePortalForm'
 import { BrandLogo } from '@/components/BrandLogo'
+
+// WS7 T3: "portal-linked" means a patient-portal session exists for THIS
+// submission's patient. It is decided here from the session cookie alone --
+// never from a query parameter -- and only then does the thank-you view offer
+// the way back to the portal and the signed copy.
+async function signedCopyHrefFor(token: string): Promise<string | null> {
+  const session = await getPatientSession()
+  if (!session) return null
+  const ref = await getIntakeSubmissionRef(token)
+  return ref && ref.patientId === session.patientId ? `/patient-portal/documents/forms/${ref.submissionId}` : null
+}
 
 export default async function IntakePortalPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
@@ -12,8 +24,13 @@ export default async function IntakePortalPage({ params }: { params: Promise<{ t
   if (data.state === 'expired') {
     return <PortalMessage title="This link has expired" body="For your security, intake links expire after 30 days. Please contact the office to request a new one." />
   }
+  const signedCopyHref = await signedCopyHrefFor(token)
   if (data.state === 'completed') {
-    return <PortalMessage title="Already submitted" body="This form has already been completed. If you need to make a change, please contact the office directly." />
+    return (
+      <PortalMessage title="Already submitted" body="This form has already been completed. If you need to make a change, please contact the office directly.">
+        {signedCopyHref && <PortalLinks signedCopyHref={signedCopyHref} />}
+      </PortalMessage>
+    )
   }
 
   return (
@@ -28,7 +45,7 @@ export default async function IntakePortalPage({ params }: { params: Promise<{ t
             ? 'Please answer the questions below. Fields marked with an asterisk are required.'
             : 'Please read and sign the documents below.'}
         </p>
-        <IntakePortalForm token={token} questions={data.questions!} existingAnswers={data.existingAnswers!} autofill={data.autofill!} consents={data.consents ?? []} />
+        <IntakePortalForm token={token} questions={data.questions!} existingAnswers={data.existingAnswers!} autofill={data.autofill!} consents={data.consents ?? []} languages={data.languages ?? ['en']} signedCopyHref={signedCopyHref} />
         <p className="mt-6 border-t border-border pt-4 text-xs text-muted-foreground">
           Your answers are sent directly and securely to the office. This page does not store your information anywhere else.
         </p>
@@ -37,7 +54,7 @@ export default async function IntakePortalPage({ params }: { params: Promise<{ t
   )
 }
 
-function PortalMessage({ title, body }: { title: string; body: string }) {
+function PortalMessage({ title, body, children }: { title: string; body: string; children?: React.ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <div className="w-full max-w-md rounded-xl border border-primary/10 bg-card p-8 text-center shadow-sm">
@@ -46,6 +63,7 @@ function PortalMessage({ title, body }: { title: string; body: string }) {
         </div>
         <h1 className="mb-2 text-lg font-semibold text-foreground">{title}</h1>
         <p className="text-sm text-muted-foreground">{body}</p>
+        {children}
       </div>
     </div>
   )

@@ -6,6 +6,8 @@ import { describe, it, expect, vi } from 'vitest'
 // version) -- `vi.hoisted` is the supported way to get the same effect, with
 // no change to what the test actually verifies.
 const { mockRedirect } = vi.hoisted(() => ({ mockRedirect: vi.fn() }))
+// WS8 T15: the needs-attention strip has its own tests (tests/lib/queries/needs-attention.test.ts).
+vi.mock('@/lib/queries/needs-attention', () => ({ loadNeedsAttention: vi.fn(async () => []) }))
 vi.mock('next/navigation', () => ({ redirect: mockRedirect }))
 vi.mock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'pi', name: 'Test PI' })) }))
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
@@ -89,4 +91,20 @@ describe('dashboard role routing', () => {
     expect(listPatients).not.toHaveBeenCalled()
   })
   // end SP7
+
+  // Task 11: Send Form searches by name or UHID, so the home page no longer loads every patient for it.
+  it('does not load the patient list for an admin home page', async () => {
+    vi.resetModules()
+    const listPatients = vi.fn(async () => [])
+    vi.doMock('next/navigation', () => ({ redirect: mockRedirect }))
+    vi.doMock('@/lib/auth', () => ({ requireSessionOrRedirect: vi.fn(async () => ({ role: 'admin', name: 'Asha Menon' })) }))
+    vi.doMock('@/lib/audit', () => ({ logAudit: vi.fn(async () => undefined) }))
+    vi.doMock('@/lib/queries/patients', () => ({ listPatientsWithStatus: listPatients }))
+    vi.doMock('@/lib/queries/staff-credentials', () => ({ listExpiringOrExpiredCredentials: vi.fn(async () => []) }))
+    vi.doMock('@/lib/queries/hospital-kpis', () => ({ getHospitalSnapshot: vi.fn(async () => ({})) }))
+    const { default: Page } = await import('@/app/(dashboard)/page')
+    const el = (await Page()) as { props: Record<string, unknown> }
+    expect(listPatients).not.toHaveBeenCalled()
+    expect(el.props).not.toHaveProperty('patients')
+  })
 })

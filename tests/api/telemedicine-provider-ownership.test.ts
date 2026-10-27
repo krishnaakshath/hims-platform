@@ -58,7 +58,7 @@ async function makeLeesonSession() {
   const [patientRow] = await db.select({ id: patients.id }).from(patients).limit(1)
   const [appt] = await db.insert(appointments).values({
     patientId: patientRow.id, providerId: LEESON_ID,
-    startsAt: new Date(), endsAt: new Date(Date.now() + 30 * 60000), visitReason: 'Telemedicine ownership test',
+    startsAt: new Date(), endsAt: new Date(Date.now() + 30 * 60000), visitReason: 'Telemedicine ownership test', visitMode: 'video', // WS7 T6: only video visits offer telemedicine
   }).returning()
   createdAppointmentIds.push(appt.id)
   const { session } = await createTelemedicineSession(appt.id)

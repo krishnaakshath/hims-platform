@@ -58,6 +58,22 @@ describe('NewEventModal', () => {
     expect(screen.getByText('Asha Rao')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: /patient/i })).not.toBeInTheDocument()
   })
+
+  // WS7 T6 (spec D20): In person / Video toggle; in person is the default.
+  it('books in person by default and sends visitMode video when Video is chosen', async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () => new Response('{}', { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<NewEventModal providers={[{ id: 1, name: 'Dr. Test' }]} defaultDate="2026-09-25" initialPatient={{ id: 'RD-0001', name: 'Asha Rao', uhid: 'UH00000042' }} onClose={vi.fn()} />)
+    expect(screen.getByRole('radio', { name: 'In person' })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(screen.getByRole('radio', { name: 'Video' }))
+    expect(screen.getByRole('radio', { name: 'Video' })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.change(screen.getByLabelText(/doctor/i), { target: { value: '1' } })
+    fireEvent.change(screen.getByPlaceholderText('Visit reason'), { target: { value: 'Review' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const [, init] = fetchMock.mock.calls.find(([u]) => u === '/api/appointments')!
+    expect(JSON.parse(init!.body as string).visitMode).toBe('video')
+  })
 })
 
 // WS6 T7 (spec D5): no past default date; the time comes from the doctor's slots.

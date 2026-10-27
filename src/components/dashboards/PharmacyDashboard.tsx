@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, XCircle, Pill, PackagePlus, PackageCheck, Clock, Search, CalendarClock, CalendarX, ChevronDown, ChevronRight, PackageSearch } from 'lucide-react'
 import { KpiTile } from '@/components/dashboards/KpiTile'
+import { NeedsAttentionStrip } from '@/components/dashboards/NeedsAttentionStrip' // WS8 T15
+import type { AttentionItem } from '@/lib/queries/needs-attention' // WS8 T15
 import type { PharmacyKpi } from '@/lib/queries/hospital-kpis'
 import { Button } from '@/components/ui/button'
 import { DispenseMedicationModal } from '@/components/DispenseMedicationModal'
@@ -170,6 +172,8 @@ export function PharmacyDashboard({
   canUseCounter = false,
   canEditPrice = false,
   today = todayIsoIn(),
+  attention = [],
+
 }: {
   session: Session
   medications: MedicationWithInventory[]
@@ -184,6 +188,9 @@ export function PharmacyDashboard({
   canEditPrice?: boolean // WS2 T8: MEDICATION_PRICE_ROLES
   // WS5 T4: the IST business date the expiry fields were computed for (server-supplied).
   today?: string
+  // WS8 T15: the needs-attention strip, loaded by the page for the pharmacy role's home.
+  attention?: AttentionItem[]
+
 }) {
   const [dispensing, setDispensing] = useState<MedicationWithInventory | null>(null)
   // `null` = closed; `{}` = open with no prefill (header button);
@@ -217,6 +224,8 @@ export function PharmacyDashboard({
           </Link>
         )}
       </div>
+
+      <NeedsAttentionStrip items={attention} /> {/* WS8 T15 */}
 
       {/* Wave E P1-18: every tile drills somewhere -- stock tiles filter the table below. */}
       <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">

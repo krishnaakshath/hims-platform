@@ -152,6 +152,24 @@ describe('patient login with MFA enabled', () => {
     expect(auditEntries.length).toBeGreaterThan(0)
   })
 
+  it('a chart archived after the password step cannot finish sign-in with a correct code (WS8 T13)', async () => {
+    const res = await login(req({ patientId: TEST_PATIENT_ID, password: TEST_PASSWORD }))
+    expect(await res.json()).toEqual({ mfaRequired: true })
+    const pendingCookie = res.cookies.get(cookieName('pending_patient_mfa'))?.value
+    await getDb().update(patients).set({ archivedAt: new Date(), archivedByName: 'Test Admin', archiveReason: 'Duplicate chart for testing' }).where(eq(patients.id, TEST_PATIENT_ID))
+    try {
+      // Refused before the code is checked (the archived chart has no MFA state): the
+      // expired-session answer, not "Invalid code".
+      const totp = new OTPAuth.TOTP({ issuer: brand.mfaIssuer, label: 'x', algorithm: 'SHA1', digits: 6, period: 30, secret })
+      const archivedRes = await loginMfa(mfaReq({ code: totp.generate() }, `${cookieName('pending_patient_mfa')}=${pendingCookie}`))
+      expect(archivedRes.status).toBe(401)
+      expect(await archivedRes.json()).toEqual({ error: 'Your login session expired. Please sign in again.' })
+      expect(archivedRes.cookies.get(cookieName('patient_session'))).toBeFalsy()
+    } finally {
+      await getDb().update(patients).set({ archivedAt: null, archivedByName: null, archiveReason: null }).where(eq(patients.id, TEST_PATIENT_ID))
+    }
+  })
+
   it('returns 401 with no pending cookie', async () => {
     const res = await loginMfa(mfaReq({ code: '123456' }))
     expect(res.status).toBe(401)

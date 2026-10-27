@@ -2,7 +2,7 @@
 // the legacy prefill and the RCM patient search. Card blob URLs never leave the server; audit
 // details carry ids and enum values only (never policy or member numbers).
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, between, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { getDb } from '@/db/client'
 import { patientPolicies, patients, payerProfiles, payers, type PatientPolicyRow } from '@/db/schema'
@@ -17,6 +17,7 @@ import { policyNotInForceMessage, rcmFail, rcmOk, type RcmWriteResult } from '@/
 import { sha256Hex } from '@/lib/rcm/hash'
 import type { PolicyInput, PolicyPatchInput } from '@/lib/rcm/validation'
 import type { WriteExecutor } from './executor'
+import { notArchived } from './patient-archive' // WS8 T13
 
 // ---- RCM patient search (the RCM minimum: no phone, email, address or identity numbers) ----
 
@@ -27,9 +28,9 @@ export async function findPatientsForRcm(q: string, now: Date = new Date()): Pro
   if (term.length < 2) return []
   const cols = { id: patients.id, name: patients.name, uhid: patients.uhid, gender: patients.gender, dob: patients.dob }
   const db = getDb()
-  const exact = await db.select(cols).from(patients).where(or(sql`upper(${patients.uhid}) = upper(${term})`, eq(patients.id, term))).limit(10)
+  const exact = await db.select(cols).from(patients).where(and(notArchived(), or(sql`upper(${patients.uhid}) = upper(${term})`, eq(patients.id, term)))).limit(10) // WS8 T13
   const escaped = term.replace(/[\\%_]/g, (c) => `\\${c}`)
-  const byName = await db.select(cols).from(patients).where(ilike(patients.name, `${escaped}%`)).orderBy(asc(patients.name), asc(patients.id)).limit(10)
+  const byName = await db.select(cols).from(patients).where(and(notArchived(), ilike(patients.name, `${escaped}%`))).orderBy(asc(patients.name), asc(patients.id)).limit(10) // WS8 T13
   const seen = new Set<string>()
   const today = todayIsoIn(undefined, now)
   const out: RcmPatientHit[] = []
@@ -112,7 +113,11 @@ async function checkPayers(executor: WriteExecutor, insurerPayerId: number, tpaP
 
 const isActivePrimary = (p: { status: PolicyStatus; priority: PolicyPriority }) => p.status === 'active' && p.priority === 'primary'
 
-export async function createPolicy(input: PolicyInput, session: Session, now: Date = new Date()): Promise<RcmWriteResult<{ policyId: number }>> {
+type Tx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
+
+// WS7 T9: `outer` runs the write as a savepoint inside the caller's transaction (the portal
+// submission approval), so the policy and the submission's decision commit together.
+export async function createPolicy(input: PolicyInput, session: Session, now: Date = new Date(), outer?: Tx): Promise<RcmWriteResult<{ policyId: number }>> {
   // WS12 T4 (R3, R4): an 'active' policy that has already ended is refused; staff record it as
   // inactive or fix the dates. A future start is allowed (cover begins later).
   const today = todayIsoIn(undefined, now)
@@ -121,7 +126,7 @@ export async function createPolicy(input: PolicyInput, session: Session, now: Da
   }
   let result: RcmWriteResult<{ policyId: number }>
   try {
-    result = await getDb().transaction(async (tx) => {
+    const write = async (tx: Tx): Promise<RcmWriteResult<{ policyId: number }>> => {
       const [patient] = await tx.select({ id: patients.id }).from(patients).where(eq(patients.id, input.patientId)).for('update')
       if (!patient) return rcmFail('patient_not_found')
       const tpaPayerId = input.tpaPayerId ?? null
@@ -139,7 +144,8 @@ export async function createPolicy(input: PolicyInput, session: Session, now: Da
       }
       await logAudit(session, 'rcm: added policy', input.patientId, `policy=${row.id} insurer=${input.insurerPayerId} tpa=${tpaPayerId ?? 'none'} priority=${input.priority}`, tx)
       return rcmOk({ policyId: row.id })
-    })
+    }
+    result = outer ? await outer.transaction(write) : await getDb().transaction(write)
   } catch (err) {
     if (isUniqueViolation(err, 'patient_policies_one_active_primary')) return rcmFail('primary_exists')
     throw err
@@ -249,3 +255,14 @@ export async function legacyPolicyPrefill(patientId: string): Promise<Partial<Po
   if (p.relationship) out.relationship = p.relationship
   return out
 }
+
+// WS8 T15: the dashboard needs-attention strip. Same rule as listExpiringPolicies (coverage-attention.ts),
+// the list /rcm/policies?expiring=7 shows: active policies whose valid_to falls in [fromIso, toIso].
+export async function countPoliciesExpiringBetween(fromIso: string, toIso: string): Promise<number> {
+  const [r] = await getDb()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(patientPolicies)
+    .where(and(eq(patientPolicies.status, 'active'), between(patientPolicies.validTo, fromIso, toIso)))
+  return r?.n ?? 0
+}
+// end WS8 T15

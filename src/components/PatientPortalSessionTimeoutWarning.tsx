@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { clearMfaNudgeDismissal } from '@/components/portal/MfaNudge' // WS7 T7
 
 const WARN_AFTER_MS = 10 * 60 * 1000
 const LOGOUT_AFTER_MS = 12 * 60 * 1000
@@ -17,6 +18,7 @@ export function PatientPortalSessionTimeoutWarning() {
     setShowWarning(false)
     warnTimer.current = setTimeout(() => setShowWarning(true), WARN_AFTER_MS)
     logoutTimer.current = setTimeout(() => {
+      clearMfaNudgeDismissal() // WS7 T7
       fetch('/api/patient-portal/logout', { method: 'POST' }).finally(() => router.push('/patient-portal/login'))
     }, LOGOUT_AFTER_MS)
   }, [router])

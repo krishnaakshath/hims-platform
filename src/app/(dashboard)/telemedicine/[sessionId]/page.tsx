@@ -5,6 +5,8 @@ import { logAudit } from '@/lib/audit'
 import { getSessionById } from '@/lib/queries/telemedicine-sessions'
 import { resolveDoctorQueueProvider } from '@/lib/doctor-queue-provider'
 import { TelemedicineCallScreen } from '@/components/TelemedicineCallScreen'
+import { visitNextStepLinks } from '@/lib/telemedicine/next-steps'
+import { CASH_DESK_ROLES } from '@/lib/role-policy'
 
 export default async function TelemedicineCallPage({ params }: { params: Promise<{ sessionId: string }> }) {
   // Must be the first statement -- see src/lib/auth.ts's comment on
@@ -46,6 +48,9 @@ export default async function TelemedicineCallPage({ params }: { params: Promise
         role="provider"
         pollUrl={`/api/telemedicine/${telemedicineSession.id}/signal`}
         initialStatus={telemedicineSession.status}
+        // WS7 T6: the clock runs from the provider's first join, so a reload keeps the count.
+        startedAt={telemedicineSession.providerJoinedAt?.toISOString() ?? null}
+        nextSteps={visitNextStepLinks(telemedicineSession.appointmentPatientId, { canBill: CASH_DESK_ROLES.includes(session.role) })}
       />
     </div>
   )

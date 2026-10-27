@@ -2,9 +2,11 @@ import { describe, it, expect, vi, afterEach, afterAll, beforeAll } from 'vitest
 import { and, eq } from 'drizzle-orm'
 import { GET, POST } from '@/app/api/appointments/route'
 import { PUT } from '@/app/api/appointments/[id]/route'
+import { POST as startTelemedicine } from '@/app/api/appointments/[id]/telemedicine/route'
 import { listActiveProviders } from '@/lib/queries/providers'
+import { createTelemedicineSession, endSession } from '@/lib/queries/telemedicine-sessions'
 import { getDb } from '@/db/client'
-import { appointments, auditLog, providerLeave, providerSchedules, providers } from '@/db/schema'
+import { appointments, auditLog, providerLeave, providerSchedules, providers, telemedicineSessions } from '@/db/schema'
 import { todayIsoIn } from '@/lib/india-time'
 
 // Mutable so the role-gate tests below can act as a denied/allowed role.
@@ -395,5 +397,83 @@ describe('POST /api/appointments working hours', () => {
 
   it('rejects a non-boolean outsideHoursConfirmed', async () => {
     expect((await book(monday, '14:00', '14:15', { outsideHoursConfirmed: 'yes' })).status).toBe(400)
+// WS7 T6 (spec D20): visit mode. Only video appointments offer telemedicine.
+describe('appointments visit mode (WS7 T6)', () => {
+  afterAll(() => { sessionRef.current = { role: 'crc', name: 'Jamie Ruiz' } })
+
+  async function create(body: Record<string, unknown>) {
+    const providers = await listActiveProviders()
+    const res = await POST(new Request('http://localhost/api/appointments', {
+      method: 'POST',
+      body: JSON.stringify({ patientId: 'RD-0001', providerId: providers[0].id, visitReason: 'T6 visit mode', ...body }),
+    }) as never)
+    const created = await res.json()
+    if (typeof created?.id === 'number') createdIds.push(created.id)
+    return { res, created }
+  }
+
+  it('POST stores visitMode video and defaults to in_person when omitted', async () => {
+    sessionRef.current = { role: 'crc', name: 'Jamie Ruiz' }
+    const video = await create({ startsAt: '2032-01-05T09:00:00+05:30', endsAt: '2032-01-05T09:30:00+05:30', visitMode: 'video' })
+    expect(video.res.status).toBe(201)
+    const [videoRow] = await getDb().select().from(appointments).where(eq(appointments.id, video.created.id))
+    expect(videoRow.visitMode).toBe('video')
+
+    const plain = await create({ startsAt: '2032-01-05T10:00:00+05:30', endsAt: '2032-01-05T10:30:00+05:30' })
+    expect(plain.res.status).toBe(201)
+    const [plainRow] = await getDb().select().from(appointments).where(eq(appointments.id, plain.created.id))
+    expect(plainRow.visitMode).toBe('in_person')
+  })
+
+  it('POST rejects an unknown visitMode with 400 and creates nothing', async () => {
+    sessionRef.current = { role: 'crc', name: 'Jamie Ruiz' }
+    const bad = await create({ startsAt: '2032-01-06T09:00:00+05:30', endsAt: '2032-01-06T09:30:00+05:30', visitMode: 'phone' })
+    expect(bad.res.status).toBe(400)
+    expect(bad.created.id).toBeUndefined()
+  })
+
+  it('PUT switches visitMode, and GET returns visitMode and telemedicine', async () => {
+    sessionRef.current = { role: 'crc', name: 'Jamie Ruiz' }
+    const { created } = await create({ startsAt: '2032-01-07T09:00:00+05:30', endsAt: '2032-01-07T09:30:00+05:30' })
+    const put = await PUT(new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ visitMode: 'video' }) }) as never, { params: Promise.resolve({ id: String(created.id) }) })
+    expect(put.status).toBe(200)
+    const list = await (await GET(new Request('http://localhost/api/appointments?from=2032-01-07&to=2032-01-07') as never)).json()
+    const row = list.find((a: { id: number }) => a.id === created.id)
+    expect(row.visitMode).toBe('video')
+    expect(row.telemedicine).toBeNull()
+  })
+
+  it('PUT refuses switching to in person while a session is open (409 session_active), allows it once ended', async () => {
+    sessionRef.current = { role: 'crc', name: 'Jamie Ruiz' }
+    const { created } = await create({ startsAt: '2032-01-09T09:00:00+05:30', endsAt: '2032-01-09T09:30:00+05:30', visitMode: 'video' })
+    const { session } = await createTelemedicineSession(created.id)
+    try {
+      const put = () => PUT(new Request('http://localhost', { method: 'PUT', body: JSON.stringify({ visitMode: 'in_person' }) }) as never, { params: Promise.resolve({ id: String(created.id) }) })
+      for (const status of ['scheduled', 'waiting', 'in_progress'] as const) {
+        await getDb().update(telemedicineSessions).set({ status }).where(eq(telemedicineSessions.id, session!.id))
+        const res = await put()
+        expect(res.status).toBe(409)
+        expect(await res.json()).toMatchObject({ code: 'session_active' })
+        const [row] = await getDb().select().from(appointments).where(eq(appointments.id, created.id))
+        expect(row.visitMode).toBe('video')
+      }
+      await endSession(session!.id)
+      expect((await put()).status).toBe(200)
+      const [after] = await getDb().select().from(appointments).where(eq(appointments.id, created.id))
+      expect(after.visitMode).toBe('in_person')
+    } finally {
+      await getDb().delete(telemedicineSessions).where(eq(telemedicineSessions.id, session!.id))
+    }
+  })
+
+  it('starting telemedicine on an in-person appointment is refused with 409 not_video and creates no session', async () => {
+    const { created } = await create({ startsAt: '2032-01-08T09:00:00+05:30', endsAt: '2032-01-08T09:30:00+05:30' })
+    sessionRef.current = { role: 'admin', name: 'T6 Admin' }
+    const res = await startTelemedicine(new Request(`http://localhost/api/appointments/${created.id}/telemedicine`, { method: 'POST' }) as never, { params: Promise.resolve({ id: String(created.id) }) })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ code: 'not_video' })
+    const sessions = await getDb().select().from(telemedicineSessions).where(eq(telemedicineSessions.appointmentId, created.id))
+    expect(sessions).toHaveLength(0)
+
   })
 })

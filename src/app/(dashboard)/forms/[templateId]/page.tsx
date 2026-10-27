@@ -7,8 +7,8 @@ import { getFormTemplate } from '@/lib/queries/form-templates'
 import { listFormTemplateFolders } from '@/lib/queries/form-template-folders'
 import { listConsentsForTemplate } from '@/lib/queries/form-template-consents'
 import { listConsentDocuments } from '@/lib/queries/consent-documents'
-import { listPatientsWithStatus } from '@/lib/queries/patients'
 import { FormBuilderEditor } from '@/components/FormBuilderEditor'
+import { formLanguages } from '@/lib/forms/question-model'
 
 export default async function FormTemplateDetailPage({ params }: { params: Promise<{ templateId: string }> }) {
   const session = await requireSessionOrRedirect()
@@ -23,28 +23,28 @@ export default async function FormTemplateDetailPage({ params }: { params: Promi
   if (numericId === null) notFound()
   const template = await getFormTemplate(numericId)
   if (!template) notFound()
-  const [folders, attachedConsents, consentDocuments, patients] = await Promise.all([
+  const [folders, attachedConsents, consentDocuments] = await Promise.all([
     listFormTemplateFolders(),
     listConsentsForTemplate(template.id),
     listConsentDocuments(),
-    listPatientsWithStatus(null),
   ])
   await logAudit(session, `viewed form template ${templateId}`, null)
 
   return (
     <FormBuilderEditor
       templateId={template.id}
-      initialName={template.name}
-      initialCategory={template.category}
-      initialDiagnosisTag={template.diagnosisTag}
-      initialQuestions={template.questions}
-      initialFolderId={template.folderId}
+      initial={{
+        name: template.name,
+        category: template.category,
+        diagnosisTag: template.diagnosisTag,
+        questions: template.questions,
+        languages: formLanguages(template.languages), // WS7 T2
+        folderId: template.folderId,
+      }}
       initialIsActive={template.isActive}
       folders={folders.map((f) => ({ id: f.id, name: f.name }))}
       attachedConsents={attachedConsents}
       allConsentDocuments={consentDocuments.map((d) => ({ id: d.id, name: d.name }))}
-      // Project to what SendFormModal's prop type requires; never ship full patient rows to the client.
-      patients={patients.map(({ id, name }) => ({ id, name }))}
     />
   )
 }

@@ -35,8 +35,8 @@ HIMS covers the day-to-day running of a clinic or hospital in one place:
   intake forms and consent documents.
 - **Patient portal**: patients see their forms, medications, appointments and
   messages, with their own sign-in.
-- **Governance**: role-based access on every page and route, mandatory MFA,
-  and a full audit trail.
+- **Governance**: role-based access on every page and route, MFA required
+  for staff (offered and recommended for patients), and a full audit trail.
 
 ### Pre-screening
 
@@ -231,8 +231,9 @@ expectations:
   clinical evidence.
 - **Accountability**: every staff and patient-portal read/write is recorded
   in an audit log that admins can review (`/audit-log`).
-- **Authentication**: TOTP MFA for staff and patients (the demo-only
-  `DISABLE_STAFF_MFA` toggle must never be set for a real client); signed
+- **Authentication**: TOTP MFA is required for staff (the demo-only
+  `DISABLE_STAFF_MFA` toggle must never be set for a real client); for
+  patients it is offered and recommended, and OTP sign-in stays available; signed
   session cookies; rate-limited login that fails closed.
 - **Protection of identifiers**: government ID numbers are encrypted at rest
   with AES-256-GCM (`IDENTITY_ENCRYPTION_KEY`); passwords are scrypt-hashed;
@@ -245,8 +246,15 @@ expectations:
   privacy flow exist, but the seeded text is a **draft, not reviewed by legal
   counsel**. Replace it before real patients rely on it.
 
-Not provided today: ABDM/ABHA integration, a data-principal erasure or
-data-export workflow, retention schedules, breach-notification tooling, and
+Data-principal requests: admins log access, correction, erasure and grievance
+requests under **Data requests** (due 30 days after receipt, with a fulfilment
+checklist). An access request can be answered with an export bundle (the
+chart's FHIR Bundle plus a manifest), downloaded through an audited route. An
+erasure deletes the chart only when nothing must be kept; otherwise it archives
+the chart and removes its contact details, and financial and medico-legal
+records are never deleted. The retention periods are code defaults shown on
+that page, **pending legal review**. Still not provided: ABDM/ABHA
+integration, breach-notification tooling, a patient-facing request form, and
 any third-party audit or certification. Plan for those separately.
 
 
@@ -278,8 +286,10 @@ any third-party audit or certification. Plan for those separately.
   returns only a payer id).
 - Request bodies are validated against a strict Zod allowlist on every
   write route — no mass-assignment from raw JSON.
-- TOTP-based multi-factor authentication is mandatory for every staff and
-  patient-portal account (`src/lib/mfa.ts`).
+- TOTP-based multi-factor authentication is required for every staff
+  account. Patient-portal accounts are offered it and recommended to turn it
+  on (the portal shows a reminder until they do); a one-time code by SMS (OTP
+  sign-in) remains available (`src/lib/mfa.ts`).
 - Login is rate-limited per IP and, for the patient portal, also on an
   IP-independent global bucket keyed on the normalized login identifier
   (`src/lib/rate-limit.ts`). The rate limiters (and the OTP/MFA attempt

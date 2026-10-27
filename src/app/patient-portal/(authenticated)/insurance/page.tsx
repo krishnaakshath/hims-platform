@@ -1,11 +1,15 @@
-// Wave J (P1-20): read-only insurance policies (SP7) and ABHA status for the signed-in
-// patient. Changes go through the front desk; the portal never edits either.
+// Wave J (P1-20): insurance policies (SP7) and ABHA status for the signed-in patient.
+// WS7 T9 (spec D15): the patient may send a policy or their ABHA ("Add a policy" / "Add my ABHA");
+// it waits for the front desk, which approves it into the record or rejects it with a reason.
+// The portal never edits a policy or the chart directly.
 import { ShieldCheck, IdCard } from 'lucide-react'
 import { requirePatientSessionOrRedirect } from '@/lib/patient-session'
 import { getPortalAbhaStatus, listPortalPolicies } from '@/lib/queries/patient-portal-records'
 import { logPatientPortalAction } from '@/lib/patient-portal-audit'
 import { formatPaise } from '@/lib/format'
-import { formatIsoDate } from '@/lib/india-time'
+import { formatIsoDate, formatIstDate } from '@/lib/india-time'
+import { listPortalSubmissionsForPatient } from '@/lib/queries/portal-submissions'
+import { SelfServiceForms } from '@/components/portal/SelfServiceForms'
 
 const SECTION = 'rounded-xl border border-primary/10 bg-card/80 p-5 shadow-sm backdrop-blur-sm'
 const HEADING = 'mb-3 border-l-2 border-primary/40 pl-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
@@ -25,7 +29,8 @@ function Detail({ label, value }: { label: string; value: string | null }) {
 
 export default async function PatientPortalInsurancePage() {
   const session = await requirePatientSessionOrRedirect()
-  const [policies, abha] = await Promise.all([listPortalPolicies(session.patientId), getPortalAbhaStatus(session.patientId)])
+  const [policies, abha, submissions] = await Promise.all([listPortalPolicies(session.patientId), getPortalAbhaStatus(session.patientId), listPortalSubmissionsForPatient(session.patientId)])
+  const pendingKinds = [...new Set(submissions.filter((s) => s.status === 'pending').map((s) => s.kind))]
   await logPatientPortalAction('viewed patient portal insurance', session.patientId)
   const hasAbha = Boolean(abha?.abhaNumberMasked || abha?.abhaAddress)
 
@@ -36,7 +41,7 @@ export default async function PatientPortalInsurancePage() {
       <section className={SECTION} aria-labelledby="policies-heading">
         <h2 id="policies-heading" className={HEADING}>Insurance policies</h2>
         {policies.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No insurance policy on file. Bring your policy card to the front desk to add one.</p>
+          <p className="text-sm text-muted-foreground">No insurance policy on file. Use “Add a policy” below, or bring your policy card to the front desk.</p>
         ) : (
           <ul className="space-y-3">
             {policies.map((p) => (
@@ -79,12 +84,20 @@ export default async function PatientPortalInsurancePage() {
             </dl>
           ) : (
             <p className="text-sm text-muted-foreground">
-              {abha?.unavailableReason ? ABHA_UNAVAILABLE_LABEL[abha.unavailableReason] : 'No ABHA linked to your hospital record.'} Ask at the front desk to link one.
+              {abha?.unavailableReason ? ABHA_UNAVAILABLE_LABEL[abha.unavailableReason] : 'No ABHA linked to your hospital record.'} Use “Add my ABHA” below, or ask at the front desk.
             </p>
           )}
         </div>
       </section>
-      <p className="text-xs text-muted-foreground">These details are read-only here. To change them, please contact the front desk.</p>
+      <section className={SECTION} aria-labelledby="self-service-heading">
+        <h2 id="self-service-heading" className={HEADING}>Add a policy or your ABHA</h2>
+        <p className="mb-3 text-sm text-muted-foreground">Send your details here and the front desk will check them before they are added to your hospital record.</p>
+        <SelfServiceForms
+          pendingKinds={pendingKinds}
+          submissions={submissions.map((s) => ({ id: s.id, kind: s.kind, status: s.status, summary: s.summary, submittedOn: formatIstDate(s.submittedAt), rejectReason: s.rejectReason }))}
+        />
+      </section>
+      <p className="text-xs text-muted-foreground">To change a policy or ABHA already on your record, please contact the front desk.</p>
     </div>
   )
 }

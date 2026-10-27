@@ -5,6 +5,8 @@ import { numeric } from 'drizzle-orm/pg-core' // WS4 T8
 // SP4
 import type { ProcedureCodeRef, ChargeViolation, RuleOverride } from '../lib/billing/charge-rules'
 import type { InvoiceSnapshot } from '../lib/billing/gst'
+import type { FormQuestion } from '../lib/forms/question-model' // WS7 T1
+import type { HospitalAudienceFilters } from '../lib/broadcasts/audience' // WS7 T10
 // SP7
 import type { ClaimSnapshot, CodedEntry, EstimateLine, PreauthSnapshot } from '../lib/rcm/snapshot'
 // SP8
@@ -154,7 +156,11 @@ export const patients = pgTable('patients', {
   allergyStatus: text('allergy_status', { enum: ['unknown', 'none_known', 'recorded'] }).default('unknown').notNull(), // WS1 T1
   referralSource: text('referral_source', { enum: ['self', 'doctor', 'hospital', 'camp', 'insurer', 'online', 'other'] }), // WS6 T8
   referralNote: text('referral_note'), // WS6 T8
+  archivedAt: timestamp('archived_at'), // WS8 T13: archived chart (NULL = active); hidden from every list
+  archivedByName: text('archived_by_name'), // WS8 T13
+  archiveReason: text('archive_reason'), // WS8 T13
 }, (t) => [
+  index('patients_active_uhid_idx').on(t.uhid).where(sql`${t.archivedAt} IS NULL`), // WS8 T13
   // SP8
   check('patients_abha_verification_complete', sql`(${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerificationSource} IS NULL) AND (${t.abhaVerifiedAt} IS NULL) = (${t.abhaVerifiedVia} IS NULL)`),
   check('patients_abha_verification_source_valid', sql`${t.abhaVerificationSource} IS NULL OR ${t.abhaVerificationSource} IN ('abdm', 'abdm_sandbox_mock')`),
@@ -289,7 +295,11 @@ export const auditLog = pgTable('audit_log', {
   patientId: text('patient_id'),
   timestamp: timestamp('timestamp').defaultNow().notNull(),
   details: text('details'),
-})
+}, (t) => [ // WS8 T12: keyset pagination and filters (scripts/migrations/2026-10-26-ws8-audit-log-indexes.sql)
+  index('audit_log_timestamp_id_idx').on(t.timestamp, t.id), // WS8 T12
+  index('audit_log_patient_timestamp_idx').on(t.patientId, t.timestamp), // WS8 T12
+  index('audit_log_role_timestamp_idx').on(t.role, t.timestamp), // WS8 T12
+]) // WS8 T12
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -411,6 +421,7 @@ export const consentDocuments = pgTable('consent_documents', {
   name: text('name').notNull(),
   bodyText: text('body_text').notNull(),
   legalReviewStatus: legalReviewStatusEnum('legal_review_status').default('draft').notNull(),
+  translations: jsonb('translations').$type<Partial<Record<'hi' | 'kn', { name?: string; bodyText?: string }>>>().default({}).notNull(), // WS7 T1
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
@@ -428,27 +439,14 @@ export const formTemplates = pgTable('form_templates', {
   // case, shown as its own card.
   folderId: integer('folder_id').references(() => formTemplateFolders.id),
   diagnosisTag: text('diagnosis_tag').notNull(),
-  questions: jsonb('questions').$type<{
-    id: string
-    label: string
-    type: 'text' | 'textarea' | 'date' | 'select' | 'checkbox'
-    options?: string[]
-    optionScores?: (number | null)[] // NEW -- same length/order as options when present; a select question with no optionScores is simply unscored
-    hipaaSensitive: boolean
-    required: boolean
-    autofillField?: 'name' | 'dob' | 'email' | 'phone' | null
-    // Tags a question as self-reporting something checkable against the
-    // patient's actual chart -- e.g. "Currently taking antidepressants?"
-    // against medicationEpisodes. Optional; most questions (free-text
-    // symptom descriptions, consent checkboxes) have nothing to compare
-    // against and simply omit this.
-    compareToChart?: { type: 'medication_active'; medicationClass: string } | null
-  }[]>().notNull(),
+  // WS7 T1: widened to the shared question model v2 (src/lib/forms/question-model.ts); stored v1 questions are a subset.
+  questions: jsonb('questions').$type<FormQuestion[]>().notNull(), // WS7 T1
   scoringRule: jsonb('scoring_rule').$type<{
     questionIds: string[]
     bands: { min: number; max: number; label: string }[]
   } | null>(),
   isActive: boolean('is_active').default(true).notNull(),
+  languages: text('languages').array().default(sql`'{en}'::text[]`).notNull(), // WS7 T1: languages the patient may pick; 'en' always offered
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
@@ -462,7 +460,10 @@ export const formSubmissions = pgTable('form_submissions', {
   answers: jsonb('answers').$type<Record<string, string>>().default({}),
   accessToken: text('access_token').unique(),
   tokenExpiresAt: timestamp('token_expires_at'),
-})
+  language: text('language'), // WS7 T3: the FormLang the patient last saved in; null = not recorded (English)
+}, (t) => [
+  check('form_submissions_language_valid', sql`${t.language} IS NULL OR ${t.language} IN ('en', 'hi', 'kn')`), // WS7 T3
+])
 
 // Which consent documents are attached to which template. UNIQUE on
 // (formTemplateId, consentDocumentId) as a real DB unique index -- attaching
@@ -540,6 +541,11 @@ export const broadcasts = pgTable('broadcasts', {
   recipientCount: integer('recipient_count').notNull(),
   sentBy: text('sent_by').notNull(),
   sentAt: timestamp('sent_at').defaultNow().notNull(),
+  filters: jsonb('filters').$type<HospitalAudienceFilters>(), // WS7 T10: audience filters as sent (null on pre-T10 rows)
+  templateKey: text('template_key'), // WS7 T10: 'broadcast_notice' for real sends; null on simulated history
+  sentCount: integer('sent_count').default(0).notNull(), // WS7 T10
+  skippedCount: integer('skipped_count').default(0).notNull(), // WS7 T10: opted out, no usable phone, or no channel reached
+  failedCount: integer('failed_count').default(0).notNull(), // WS7 T10: a channel failed or no provider is configured
 })
 
 export const reviews = pgTable('reviews', {
@@ -760,7 +766,10 @@ export const appointments = pgTable('appointments', {
   status: appointmentStatusEnum('status').default('scheduled').notNull(),
   notes: text('notes'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-})
+  visitMode: text('visit_mode', { enum: ['in_person', 'video'] }).default('in_person').notNull(), // WS7 T6 (scripts/migrations/2026-10-26-ws7-visit-mode.sql)
+}, (t) => [
+  check('appointments_visit_mode_valid', sql`${t.visitMode} IN ('in_person', 'video')`), // WS7 T6
+])
 
 export const telemedicineSessionStatusEnum = pgEnum('telemedicine_session_status', [
   'scheduled', 'waiting', 'in_progress', 'completed', 'failed',
@@ -813,7 +822,9 @@ export const bookingRequests = pgTable('booking_requests', {
   requestKind: text('request_kind', { enum: ['new', 'reschedule', 'cancel'] }).default('new').notNull(),
   appointmentId: integer('appointment_id').references(() => appointments.id),
   // end Wave J
+  requestedVisitMode: text('requested_visit_mode', { enum: ['in_person', 'video'] }), // WS7 T6: NULL = not stated
 }, (t) => [
+  check('booking_requests_requested_visit_mode_valid', sql`${t.requestedVisitMode} IS NULL OR ${t.requestedVisitMode} IN ('in_person', 'video')`), // WS7 T6
   // Wave J
   check('booking_requests_request_kind_valid', sql`${t.requestKind} IN ('new', 'reschedule', 'cancel')`),
   check('booking_requests_kind_shape', sql`(${t.requestKind} = 'new' AND ${t.appointmentId} IS NULL) OR (${t.requestKind} <> 'new' AND ${t.appointmentId} IS NOT NULL AND ${t.patientId} IS NOT NULL)`),
@@ -2820,8 +2831,12 @@ export const paymentRequests = pgTable('payment_requests', {
   createdByUserId: integer('created_by_user_id').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at'),
+  source: text('source').default('staff').notNull(), // WS7 T8: 'staff' (cash desk) or 'portal' (patient Pay now)
+  reportedUtr: text('reported_utr'), // WS7 T8: the UTR the patient says they paid with; unverified, never posts a receipt, never audited
+  reportedAt: timestamp('reported_at'), // WS7 T8
 }, (t) => [
   check('payment_requests_amount_positive', sql`${t.amountPaise} > 0`),
+  check('payment_requests_source_valid', sql`${t.source} IN ('staff', 'portal')`), // WS7 T8
   check('payment_requests_status_valid', sql`${t.status} IN ('pending', 'confirmed', 'cancelled')`),
   check('payment_requests_confirmed_has_utr', sql`${t.status} <> 'confirmed' OR (${t.utr} IS NOT NULL AND ${t.paymentId} IS NOT NULL)`),
   uniqueIndex('payment_requests_utr_unique').on(t.utr).where(sql`${t.utr} IS NOT NULL`),
@@ -3425,3 +3440,75 @@ export const labCriticalAlerts = pgTable('lab_critical_alerts', {
 ])
 export type LabCriticalAlertRow = typeof labCriticalAlerts.$inferSelect
 // end WS4 T12
+// WS7 T9
+// A patient's self-service policy or ABHA from the portal (spec D15). It waits here as 'pending'
+// until the front desk approves it (the real policy via createPolicy, or the ABHA recorded on the
+// chart as not verified with ABDM) or rejects it with a reason the patient sees. One pending row
+// per patient and kind. `payload` holds the patient's typed fields; it never reaches audit or logs.
+// Migration: scripts/migrations/2026-10-26-ws7-portal-submissions.sql.
+export type PortalSubmissionPolicyPayload = { insurerName: string; policyNumber: string; validFrom: string; validTo: string; sumInsuredPaise?: number }
+export type PortalSubmissionAbhaPayload = { abhaNumber: string; abhaAddress?: string }
+export const portalSubmissions = pgTable('portal_submissions', {
+  id: serial('id').primaryKey(),
+  patientId: text('patient_id').notNull().references(() => patients.id),
+  kind: text('kind', { enum: ['policy', 'abha'] }).notNull(),
+  payload: jsonb('payload').$type<PortalSubmissionPolicyPayload | PortalSubmissionAbhaPayload>().notNull(),
+  documentId: integer('document_id').references(() => documents.id, { onDelete: 'set null' }), // 2026-10-26-ws7-submission-doc-fk.sql
+  status: text('status', { enum: ['pending', 'approved', 'rejected'] }).default('pending').notNull(),
+  submittedAt: timestamp('submitted_at').defaultNow().notNull(),
+  reviewedByName: text('reviewed_by_name'),
+  reviewedAt: timestamp('reviewed_at'),
+  rejectReason: text('reject_reason'),
+}, (t) => [
+  uniqueIndex('portal_submissions_one_pending_per_kind').on(t.patientId, t.kind).where(sql`status = 'pending'`),
+  index('portal_submissions_status_idx').on(t.status, t.submittedAt),
+  check('portal_submissions_kind_valid', sql`${t.kind} IN ('policy', 'abha')`),
+  check('portal_submissions_status_valid', sql`${t.status} IN ('pending', 'approved', 'rejected')`),
+  check('portal_submissions_reviewed', sql`(${t.status} = 'pending') = (${t.reviewedAt} IS NULL)`),
+  check('portal_submissions_reject_reason', sql`(${t.status} = 'rejected') = (${t.rejectReason} IS NOT NULL) AND (${t.rejectReason} IS NULL OR char_length(${t.rejectReason}) BETWEEN 5 AND 300)`),
+])
+export type PortalSubmissionRow = typeof portalSubmissions.$inferSelect
+// end WS7 T9
+// WS8 T14
+// The DPDP data-principal request register (spec D18). One row per access, correction, erasure or
+// grievance request, due 30 days after receipt. `patient_id` becomes NULL when an erasure deletes
+// the chart (deletePatient clears it in the same transaction), so the register entry survives the
+// chart. `export_blob_url` is the private-store URL of the prepared export bundle; it never leaves
+// the server. `note` and `decision_note` are staff free text; they never reach the audit log.
+// Migration: scripts/migrations/2026-10-26-ws8-data-principal-requests.sql.
+export const DATA_PRINCIPAL_REQUEST_KINDS = ['access', 'correction', 'erasure', 'grievance'] as const
+export const DATA_PRINCIPAL_REQUEST_VIA = ['email', 'portal_message', 'letter', 'in_person'] as const
+export const DATA_PRINCIPAL_REQUEST_STATUSES = ['received', 'in_progress', 'completed', 'rejected'] as const
+export const DATA_PRINCIPAL_CHECKLIST_KEYS = ['identity_verified', 'scope_confirmed', 'export_prepared', 'export_delivered', 'erasure_reviewed', 'response_sent'] as const
+export type DataPrincipalChecklistKey = (typeof DATA_PRINCIPAL_CHECKLIST_KEYS)[number]
+export type DataPrincipalChecklist = Partial<Record<DataPrincipalChecklistKey, boolean>>
+export const dataPrincipalRequests = pgTable('data_principal_requests', {
+  id: serial('id').primaryKey(),
+  reference: text('reference').notNull().unique(),
+  patientId: text('patient_id').references(() => patients.id),
+  kind: text('kind', { enum: DATA_PRINCIPAL_REQUEST_KINDS }).notNull(),
+  receivedVia: text('received_via', { enum: DATA_PRINCIPAL_REQUEST_VIA }).notNull(),
+  receivedAt: date('received_at').notNull(),
+  dueBy: date('due_by').notNull(),
+  status: text('status', { enum: DATA_PRINCIPAL_REQUEST_STATUSES }).default('received').notNull(),
+  checklist: jsonb('checklist').$type<DataPrincipalChecklist>().default({}).notNull(),
+  exportBlobUrl: text('export_blob_url'),
+  note: text('note'),
+  decisionNote: text('decision_note'),
+  handledByName: text('handled_by_name'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  closedAt: timestamp('closed_at'),
+}, (t) => [
+  index('data_principal_requests_patient_idx').on(t.patientId),
+  index('data_principal_requests_open_due_idx').on(t.dueBy).where(sql`closed_at IS NULL`),
+  check('data_principal_requests_reference_format', sql`${t.reference} ~ '^DPR-[0-9]{4}-[0-9]{6,}$'`),
+  check('data_principal_requests_kind_valid', sql`${t.kind} IN ('access', 'correction', 'erasure', 'grievance')`),
+  check('data_principal_requests_via_valid', sql`${t.receivedVia} IN ('email', 'portal_message', 'letter', 'in_person')`),
+  check('data_principal_requests_status_valid', sql`${t.status} IN ('received', 'in_progress', 'completed', 'rejected')`),
+  check('data_principal_requests_closed', sql`(${t.status} IN ('completed', 'rejected')) = (${t.closedAt} IS NOT NULL)`),
+  check('data_principal_requests_due_after_receipt', sql`${t.dueBy} >= ${t.receivedAt}`),
+  check('data_principal_requests_checklist_object', sql`jsonb_typeof(${t.checklist}) = 'object'`),
+])
+export type DataPrincipalRequestRow = typeof dataPrincipalRequests.$inferSelect
+// end WS8 T14
+

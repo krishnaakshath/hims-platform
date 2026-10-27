@@ -7,6 +7,7 @@ import { getPharmacyKpis } from '@/lib/queries/hospital-kpis' // Wave E
 import { MEDICATION_PRICE_ROLES } from '@/lib/role-policy' // WS2 T8
 import { todayIsoIn } from '@/lib/india-time' // WS5 T4
 import type { StockFilter } from '@/components/dashboards/PharmacyDashboard' // WS5 T4
+import { loadNeedsAttention } from '@/lib/queries/needs-attention' // WS8 T15
 
 const STOCK_FILTERS: readonly StockFilter[] = ['out', 'low', 'expiring', 'expired'] // WS5 T4
 
@@ -18,7 +19,12 @@ export default async function PharmacyPage({ searchParams }: { searchParams?: Pr
   const stock = (await searchParams)?.stock
   const stockFilter = STOCK_FILTERS.find((f) => f === stock) ?? null
   const today = todayIsoIn() // WS5 T4: one IST date for the expiry fields, the KPIs and the "Expires in" labels
-  const [medications, prescribedSummary, kpis] = await Promise.all([listMedicationsWithInventory(today), listActiveMedicationEpisodeSummary(), getPharmacyKpis(today)])
+  const [medications, prescribedSummary, kpis, attention] = await Promise.all([
+    listMedicationsWithInventory(today),
+    listActiveMedicationEpisodeSummary(),
+    getPharmacyKpis(today),
+    session.role === 'pharmacy' ? loadNeedsAttention(session.role, today) : Promise.resolve([]),
+  ])
   await logAudit(session, 'viewed pharmacy dashboard', null)
 
   return (
@@ -34,6 +40,7 @@ export default async function PharmacyPage({ searchParams }: { searchParams?: Pr
       canUseCounter={['admin', 'pharmacy'].includes(session.role)}
       canEditPrice={MEDICATION_PRICE_ROLES.includes(session.role)} // WS2 T8: MRP column editor
       today={today}
+      attention={attention} // WS8 T15
     />
   )
 }

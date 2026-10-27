@@ -3,11 +3,11 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const TABS = [
-  { href: '/documents', label: 'Documents' },
-  { href: '/documents/fax-history', label: 'Fax History (Demo)' },
+  { href: '/documents', label: 'Document inbox' },
+  { href: '/documents/fax-history', label: 'Fax log (demo)' },
 ]
 
-// Fax History is admin/crc only (its page redirects everyone else), so the
+// The fax log is admin/crc only (its page redirects everyone else), so the
 // tab is hidden for pi and frontdesk rather than left as a dead link.
 export function DocumentsTabs({ showFaxHistory = true }: { showFaxHistory?: boolean }) {
   const pathname = usePathname()

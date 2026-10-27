@@ -8,6 +8,8 @@ vi.mock('@/lib/queries/doctor-assignments', () => ({
 // Wave B P1-25: unread patient messages and pending booking requests.
 vi.mock('@/lib/queries/messages', () => ({ getUnreadCountForProvider: vi.fn(async () => 5) }))
 vi.mock('@/lib/queries/booking-requests', () => ({ countPendingBookingRequests: vi.fn(async () => 6) }))
+// WS7 T9: portal self-service submissions waiting for review (admin, frontdesk, rcm).
+vi.mock('@/lib/queries/portal-submissions', () => ({ countPendingPortalSubmissions: vi.fn(async () => 8) }))
 // Wave E P1-25: the work-queue badges reuse the dashboards' own KPI loaders, so a
 // badge always equals the tile on the page it points to.
 vi.mock('@/lib/queries/hospital-kpis', () => ({
@@ -50,7 +52,7 @@ describe('getNavBadges', () => {
 
   it('frontdesk gets the unacknowledged-decline count on /front-desk/assignments', async () => {
     declinesMock.mockResolvedValue(3)
-    expect(await getNavBadges({ role: 'frontdesk', name: 'Taylor Nguyen', userId: null })).toEqual({ '/front-desk/assignments': 3, '/front-desk/follow-ups': 5, '/booking-requests': 6 })
+    expect(await getNavBadges({ role: 'frontdesk', name: 'Taylor Nguyen', userId: null })).toEqual({ '/front-desk/assignments': 3, '/front-desk/follow-ups': 5, '/booking-requests': 6, '/front-desk/portal-submissions': 8 })
   })
 
   describe('fails safe to {} (no badge, never a false number)', () => {
@@ -79,13 +81,13 @@ describe('getNavBadges', () => {
 
   // Wave B P1-25: only hrefs the role's nav shows, from existing count queries.
   it.each([
-    ['admin', { '/front-desk/assignments': 3, '/front-desk/follow-ups': 5, '/messages': 5, '/booking-requests': 6 }],
+    ['admin', { '/front-desk/assignments': 3, '/front-desk/follow-ups': 5, '/messages': 5, '/booking-requests': 6, '/front-desk/portal-submissions': 8 }],
     ['crc', { '/front-desk/assignments': 3, '/front-desk/follow-ups': 5, '/messages': 5, '/booking-requests': 6 }],
     // Wave E P1-25
     ['pharmacy', { '/messages': 5, '/pharmacy': 2, '/pharmacy/billing': 7 }],
     ['labs', { '/labs': 7 }],
     ['coder', { '/coding': 11 }],
-    ['rcm', { '/rcm/claims': 5, '/rcm/preauths': 2 }],
+    ['rcm', { '/rcm/claims': 5, '/rcm/preauths': 2, '/front-desk/portal-submissions': 8 }],
   ] as const)('%s gets exactly its nav badges', async (role, expected) => {
     declinesMock.mockResolvedValue(3)
     expect(await getNavBadges({ role, name: 'Someone', userId: null })).toEqual(expected)
@@ -96,7 +98,7 @@ describe('getNavBadges', () => {
       resolveMock.mockResolvedValue(null)
       expect(await loadNavBadges({ role: 'pi', name: 'Dr. Nobody Matchington', userId: null })).toEqual({ badges: { '/doctor': null, '/labs': null, '/messages': 5, '/booking-requests': 6 }, degraded: false })
       declinesMock.mockResolvedValue(1)
-      expect(await loadNavBadges({ role: 'frontdesk', name: 'Taylor Nguyen', userId: null })).toEqual({ badges: { '/front-desk/assignments': 1, '/front-desk/follow-ups': 5, '/booking-requests': 6 }, degraded: false })
+      expect(await loadNavBadges({ role: 'frontdesk', name: 'Taylor Nguyen', userId: null })).toEqual({ badges: { '/front-desk/assignments': 1, '/front-desk/follow-ups': 5, '/booking-requests': 6, '/front-desk/portal-submissions': 8 }, degraded: false })
       expect(await loadNavBadges({ role: 'billing', name: 'Bill Ing', userId: null })).toEqual({ badges: { '/billing/charges': 9, '/billing/invoices': 4 }, degraded: false })
     })
     it('degraded: true with no keys when a query throws', async () => {

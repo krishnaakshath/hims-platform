@@ -51,6 +51,9 @@ const PORTAL_PAGES: PortalPageCase[] = [
   { route: '/patient-portal/documents/invoices/[id]', load: () => import('@/app/patient-portal/documents/invoices/[id]/page'), props: idProps, document: true },
   { route: '/patient-portal/documents/receipts/[id]', load: () => import('@/app/patient-portal/documents/receipts/[id]/page'), props: idProps, document: true },
   { route: '/patient-portal/documents/discharge/[admissionId]', load: () => import('@/app/patient-portal/documents/discharge/[admissionId]/page'), props: { params: Promise.resolve({ admissionId: '1' }) }, document: true },
+  // WS7 T3
+  { route: '/patient-portal/forms', load: () => import('@/app/patient-portal/(authenticated)/forms/page') },
+  { route: '/patient-portal/documents/forms/[submissionId]', load: () => import('@/app/patient-portal/documents/forms/[submissionId]/page'), props: { params: Promise.resolve({ submissionId: '1' }), searchParams: Promise.resolve({}) }, document: true },
 ]
 
 async function run(c: PortalPageCase) {

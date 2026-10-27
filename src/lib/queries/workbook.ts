@@ -4,6 +4,7 @@ import { patients, diagnoses, medicationEpisodes } from '@/db/schema'
 import { getOrSetCache, workbookListCacheKey } from '@/lib/cache'
 import { publicPatientColumns } from '@/lib/queries/patient-columns'
 import { liveDiagnosis } from '@/lib/queries/diagnoses' // SP6
+import { notArchived } from '@/lib/queries/patient-archive' // WS8 T13
 
 // One row per patient, covering the columns of the source IPMG
 // pre-screening workbook (Symbiosys_IPMG_Prescreening_Proposal.pdf) --
@@ -59,7 +60,7 @@ export function calculateAge(dob: string): number {
 export async function listWorkbookRows(): Promise<WorkbookRow[]> {
   return getOrSetCache(workbookListCacheKey(), 30, async () => {
     const db = getDb()
-    const allPatients = await db.select(publicPatientColumns).from(patients).orderBy(patients.id)
+    const allPatients = await db.select(publicPatientColumns).from(patients).where(notArchived()).orderBy(patients.id) // WS8 T13
     const allDx = await db.select().from(diagnoses).where(liveDiagnosis) // SP6: voided rows hidden
     const allMeds = await db.select().from(medicationEpisodes)
 

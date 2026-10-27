@@ -24,8 +24,9 @@ async function appt(pid: string, iso: string) {
   const startsAt = new Date(iso)
   return (await getDb().insert(appointments).values({ patientId: pid, providerId, startsAt, endsAt: new Date(startsAt.getTime() + 1800_000), visitReason: 'Review' }).returning({ id: appointments.id }))[0].id
 }
-async function portalRequest(kind: 'new' | 'reschedule' | 'cancel', appointmentId: number | null, pid = A) {
+async function portalRequest(kind: 'new' | 'reschedule' | 'cancel', appointmentId: number | null, pid = A, requestedVisitMode: 'in_person' | 'video' | null = null) {
   return (await getDb().insert(bookingRequests).values({
+    requestedVisitMode, // WS7 T7
     requesterName: pid, requesterDob: '1980-01-01', preferredDateRangeStart: '2099-08-01', preferredDateRangeEnd: '2099-08-05', reason: 'r', patientId: pid, requestKind: kind, appointmentId,
   }).returning({ id: bookingRequests.id }))[0].id
 }
@@ -95,5 +96,34 @@ describe('confirming a portal reschedule or booking request', () => {
     const res = await confirmRoute(req({ patientId: B, providerId, startsAt: '2099-08-12T10:00:00+05:30', endsAt: '2099-08-12T10:30:00+05:30', visitReason: 'Review' }) as never, params(id))
     expect(res.status).toBe(400)
     expect(await getDb().select().from(appointments).where(eq(appointments.patientId, B))).toHaveLength(0)
+  })
+})
+
+// WS7 T7 (spec D20): the visit mode the patient asked for carries onto the booked appointment.
+describe('confirming a portal request keeps its visit mode', () => {
+  const modeOf = async (id: number) => (await getDb().select({ m: appointments.visitMode }).from(appointments).where(eq(appointments.id, id)))[0].m
+  const slot = (day: string) => ({ patientId: A, providerId, startsAt: `${day}T11:00:00+05:30`, endsAt: `${day}T11:30:00+05:30`, visitReason: 'Review' })
+
+  it('a video request confirmed by staff books a video appointment', async () => {
+    const id = await portalRequest('new', null, A, 'video')
+    const res = await confirmRoute(req(slot('2099-08-15')) as never, params(id))
+    expect(res.status).toBe(200)
+    expect(await modeOf((await res.json()).appointmentId)).toBe('video')
+  })
+
+  it('a request with no stated mode books in person', async () => {
+    const id = await portalRequest('new', null)
+    const res = await confirmRoute(req(slot('2099-08-16')) as never, params(id))
+    expect(res.status).toBe(200)
+    expect(await modeOf((await res.json()).appointmentId)).toBe('in_person')
+  })
+
+  it('a reschedule with no stated mode keeps the mode of the appointment it moves', async () => {
+    const startsAt = new Date('2099-08-17T04:00:00Z')
+    const [old] = await getDb().insert(appointments).values({ patientId: A, providerId, startsAt, endsAt: new Date(startsAt.getTime() + 1800_000), visitReason: 'Review', visitMode: 'video' }).returning({ id: appointments.id })
+    const id = await portalRequest('reschedule', old.id)
+    const res = await confirmRoute(req(slot('2099-08-18')) as never, params(id))
+    expect(res.status).toBe(200)
+    expect(await modeOf((await res.json()).appointmentId)).toBe('video')
   })
 })

@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 const row = (over: Partial<BookingRequestRow>): BookingRequestRow => ({
   id: 5, requesterName: 'Asha Rao', requesterDob: '1980-01-01', requesterEmail: null, requesterPhone: null, preferredProviderId: null,
   preferredDateRangeStart: '2026-11-01', preferredDateRangeEnd: '2026-11-05', reason: 'Knee pain', status: 'pending', submittedAt: new Date('2026-10-08T05:00:00Z'),
-  reviewedByName: null, reviewedAt: null, declineReason: null, resultingAppointmentId: null, patientId: null, requestKind: 'new', appointmentId: null, ...over,
+  reviewedByName: null, reviewedAt: null, declineReason: null, resultingAppointmentId: null, patientId: null, requestKind: 'new', appointmentId: null, requestedVisitMode: null /* WS7 T6 */, ...over,
 })
 
 afterEach(() => { vi.unstubAllGlobals(); refresh.mockClear() })
@@ -23,6 +23,16 @@ describe('BookingRequestsQueue portal requests', () => {
     render(<BookingRequestsQueue canResolve providers={[]} requests={[row({ id: 1 }), row({ id: 2, patientId: 'RD-1', requestKind: 'reschedule', appointmentId: 77 })]} />)
     expect(screen.getByText('Portal · Reschedule of appointment #77')).toBeInTheDocument()
     expect(screen.getAllByText(/^Portal ·/)).toHaveLength(1)
+  })
+
+  // WS7 T7: staff see when the patient asked for a video consultation.
+  it('marks a request for a video consultation; in person and unstated show nothing', () => {
+    render(<BookingRequestsQueue canResolve providers={[]} requests={[
+      row({ id: 1, patientId: 'RD-1', requestedVisitMode: 'video' }),
+      row({ id: 2, patientId: 'RD-2', requestedVisitMode: 'in_person' }),
+      row({ id: 3 }),
+    ]} />)
+    expect(screen.getAllByText('Video consultation requested')).toHaveLength(1)
   })
 
   it('confirms a cancellation with an empty body after a second click', async () => {

@@ -82,6 +82,9 @@ export function makePatientRow(overrides: Partial<PatientRow> = {}): PatientRow 
     // WS6 T8
     referralSource: null,
     referralNote: null,
+    archivedAt: null, // WS8 T13
+    archivedByName: null,
+    archiveReason: null,
     ...overrides,
   }
 }

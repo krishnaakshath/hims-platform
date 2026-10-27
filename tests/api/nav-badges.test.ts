@@ -10,6 +10,8 @@ vi.mock('@/lib/queries/doctor-assignments', () => ({
 // Wave B P1-25: unread patient messages and pending booking requests.
 vi.mock('@/lib/queries/messages', () => ({ getUnreadCountForProvider: vi.fn(async () => 5) }))
 vi.mock('@/lib/queries/booking-requests', () => ({ countPendingBookingRequests: vi.fn(async () => 6) }))
+// WS7 T9: portal self-service submissions waiting for review (admin, frontdesk, rcm).
+vi.mock('@/lib/queries/portal-submissions', () => ({ countPendingPortalSubmissions: vi.fn(async () => 8) }))
 // Wave E P1-25: role work-queue badges (KPI loaders, coding backlog, collector route).
 vi.mock('@/lib/queries/hospital-kpis', () => ({
   getFollowUpBuckets: vi.fn(async () => ({ due: 1, overdue: 1, upcoming: 0, scheduled: 0, missed: 0, capped: false })),
@@ -59,7 +61,7 @@ describe('GET /api/nav-badges', () => {
     sessionMock.mockResolvedValueOnce({ role: 'frontdesk', name: 'Taylor Nguyen', userId: null })
     declinesMock.mockResolvedValue(2)
     const res = await GET()
-    expect(await res.json()).toEqual({ badges: { '/front-desk/assignments': 2, '/front-desk/follow-ups': 2, '/booking-requests': 6 }, degraded: false })
+    expect(await res.json()).toEqual({ badges: { '/front-desk/assignments': 2, '/front-desk/follow-ups': 2, '/booking-requests': 6, '/front-desk/portal-submissions': 8 }, degraded: false })
   })
 
   it('returns billing\'s own queues (Wave E), running no clinical query', async () => {

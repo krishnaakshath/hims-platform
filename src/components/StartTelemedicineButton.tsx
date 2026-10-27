@@ -3,8 +3,15 @@ import { sendJson } from '@/lib/client-fetch'
 import { useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import type { TelemedicineSessionStatus } from '@/lib/queries/telemedicine-sessions'
 
-export function StartTelemedicineButton({ appointmentId }: { appointmentId: number }) {
+// WS7 T6: `initialSession` is the appointment's existing session as the server
+// knows it, so after a reload a live call still offers "Rejoin (session active)"
+// instead of a start button that would only 409.
+export function StartTelemedicineButton({ appointmentId, initialSession = null }: {
+  appointmentId: number
+  initialSession?: { sessionId: number; status: TelemedicineSessionStatus } | null
+}) {
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [session, setSession] = useState<{ id: number; joinLink: string } | null>(null)
@@ -73,6 +80,26 @@ export function StartTelemedicineButton({ appointmentId }: { appointmentId: numb
           <Link href={`/telemedicine/${session.id}`} className="text-xs font-medium text-primary hover:underline">Join call</Link>
         </div>
         {copyFailed && <p className="text-xs text-destructive">Couldn&apos;t copy automatically — select and copy the link above.</p>}
+      </div>
+    )
+  }
+
+  if (initialSession) {
+    if (initialSession.status === 'completed') return <span className="text-xs text-muted-foreground">Video visit ended</span>
+    if (initialSession.status === 'failed') return <span className="text-xs text-muted-foreground">Video call failed</span>
+    const live = initialSession.status === 'waiting' || initialSession.status === 'in_progress'
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <div className="flex items-center gap-2">
+          <Link href={`/telemedicine/${initialSession.sessionId}`} className="text-xs font-medium text-primary hover:underline">
+            {live ? 'Rejoin (session active)' : 'Join call'}
+          </Link>
+          {/* The create route answers an existing session with its join link (409 recovery). */}
+          <Button type="button" size="xs" variant="outline" onClick={start} disabled={starting}>
+            {starting ? 'Loading…' : 'Patient link'}
+          </Button>
+        </div>
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
     )
   }
